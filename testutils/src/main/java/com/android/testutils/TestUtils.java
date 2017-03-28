@@ -18,18 +18,29 @@ package com.android.testutils;
 
 import static org.junit.Assert.assertTrue;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.utils.FileUtils;
 import com.google.common.io.Files;
-
-import junit.framework.TestCase;
-
 import java.io.File;
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import junit.framework.TestCase;
 
 /**
  * Utility methods to deal with loading the test data.
  */
 public class TestUtils {
+    /**
+     * Default timeout for the {@link #eventually(Runnable)} check.
+     */
+    private static final Duration DEFAULT_EVENTUALLY_TIMEOUT = Duration.ofSeconds(10);
+
+    /**
+     * Time to wait between checks to obtain the value of an eventually supplier.
+     */
+    private static final long EVENTUALLY_CHECK_CYCLE_TIME_MS = 10;
 
     /**
      * returns a File for the subfolder of the test resource data.
@@ -112,40 +123,165 @@ public class TestUtils {
     }
 
     /**
-     * Returns the SDK directory as built from the Android source tree.
+     * Returns the root of the entire Android Studio codebase.
      *
-     * @return the SDK directory
+     * From this path, you should be able to access any file in the workspace via its full path,
+     * e.g.
+     *
+     * new File(TestUtils.getWorkspaceRoot(), "tools/adt/idea/android/testSrc");
+     * new File(TestUtils.getWorkspaceRoot(), "prebuilts/studio/jdk");
+     *
+     * If this method is called by code run via IntelliJ / Gradle, it will simply walk its
+     * ancestor tree looking for the WORKSPACE file at its root; if called from Bazel, it will
+     * simply return the runfiles directory (which should be a mirror of the WORKSPACE root except
+     * only populated with explicitly declared dependencies).
+     *
+     * Instead of calling this directly, prefer calling {@link #getWorkspaceFile(String)} as it
+     * is more resilient to cross-platform testing.
+     *
+     * @throws IllegalStateException if the current directory of the test is not a subdirectory of
+     * the workspace directory when this method is called. This shouldn't happen if the test is run
+     * by Bazel or run by IntelliJ with default configuration settings (where the working directory
+     * is initialized to the module root).
      */
     @NonNull
-    public static File getSdkDir() {
-        String androidHome = System.getenv("ANDROID_HOME");
-        if (androidHome != null) {
-            File f = new File(androidHome);
-            if (f.isDirectory()) {
-                return f;
+    public static File getWorkspaceRoot() {
+        // If we are using Bazel (which defines the following env vars), simply use the sandboxed
+        // root they provide us.
+        String workspace = System.getenv("TEST_WORKSPACE");
+        String workspaceParent = System.getenv("TEST_SRCDIR");
+        if (workspace != null && workspaceParent != null) {
+            return new File(workspaceParent, workspace);
+        }
+
+        // If here, we're using a non-Bazel build system. At this point, assume our working
+        // directory is located underneath our codebase's root folder, so keep navigating up until
+        // we find it.
+        File pwd = new File("");
+        File currDir = pwd;
+        while (!new File(currDir, "WORKSPACE").exists()) {
+            currDir = currDir.getAbsoluteFile().getParentFile();
+
+            if (currDir == null) {
+                throw new IllegalStateException(
+                        "Could not find WORKSPACE root. Is the original working directory a " +
+                                "subdirectory of the Android Studio codebase?\n\n" +
+                                "pwd = " + pwd.getAbsolutePath());
             }
         }
 
-        throw new IllegalStateException("SDK directory not defined with ANDROID_HOME");
+        return currDir;
     }
 
     /**
-     * Sleeps the current thread for enough time to ensure that we exceed filesystem timestamp
-     * resolution. This method is usually called in tests when it is necessary to ensure filesystem
-     * writes are detected through timestamp modification.
+     * Given a full path to a file from the base of the current workspace, return the file.
+     *
+     * e.g.
+     * TestUtils.getWorkspaceFile("tools/adt/idea/android/testSrc");
+     * TestUtils.getWorkspaceFile("prebuilts/studio/jdk");
+     *
+     * This method guarantees the file exists, throwing an exception if not found, so tests can
+     * safely use the file immediately after receiving it.
+     *
+     * In order to have the same method call work on both Windows and non-Windows machines, if the
+     * current OS is Windows and the target path is found with a common windows extension on it,
+     * then it will automatically be returned, e.g. "/path/to/binary" -> "/path/to/binary.exe".
+     *
+     * @throws IllegalArgumentException if the path results in a file that's not found.
+     */
+    @NonNull
+    public static File getWorkspaceFile(@NonNull String path) {
+        File f = new File(getWorkspaceRoot(), path);
+
+        if (!f.exists() && OsType.getHostOs() == OsType.WINDOWS) {
+            // This file may be a binary with a .exe extension
+            // TODO: Confirm this works on Windows
+            f = new File(f.getPath() + ".exe");
+        }
+
+        if (!f.exists()) {
+            throw new IllegalArgumentException("File \"" + path + "\" not found.");
+        }
+
+        return f;
+    }
+
+    /**
+     * Returns a file at {@code path} relative to the root for {@link #getLatestAndroidPlatform}.
+     *
+     * @throws IllegalStateException if the current OS is not supported.
+     * @throws IllegalArgumentException if the path results in a file not found.
+     */
+    @NonNull
+    public static File getPlatformFile(String path) {
+        String latestAndroidPlatform = getLatestAndroidPlatform();
+        File file =
+                FileUtils.join(getSdk(), SdkConstants.FD_PLATFORMS, latestAndroidPlatform, path);
+        if (!file.exists()) {
+            throw new IllegalArgumentException(
+                    "File \"" + path + "\" not found in platform " + latestAndroidPlatform);
+        }
+        return file;
+    }
+
+    /**
+     * Return the SDK directory.
+     *
+     * @throws IllegalStateException if the current OS is not supported.
+     * @throws IllegalArgumentException if the path results in a file not found.
+     *
+     * @return a valid File object pointing at the SDK directory.
+     */
+    @NonNull
+    public static File getSdk() {
+        OsType osType = OsType.getHostOs();
+        if (osType == OsType.UNKNOWN) {
+            throw new IllegalStateException(
+                    "SDK test not supported on unknown platform: " + OsType.getOsName());
+        }
+
+        String hostDir = osType.getFolderName();
+        return getWorkspaceFile("prebuilts/studio/sdk/" + hostDir);
+    }
+
+    @NonNull
+    public static String getLatestAndroidPlatform() {
+        return "android-25";
+    }
+
+    /**
+     * Sleeps the current thread for enough time to ensure that the local file system had enough
+     * time to notice a "tick". This method is usually called in tests when it is necessary to
+     * ensure filesystem writes are detected through timestamp modification.
      *
      * @throws InterruptedException waiting interrupted
+     * @throws IOException issues creating a temporary file
      */
-    public static void waitFilesystemTime() throws InterruptedException {
-        /*
-         * How much time to wait until we are sure that the file system will update the last
-         * modified timestamp of a file. This is usually related to the accuracy of last timestamps.
-         * In modern windows systems 100ms be more than enough (NTFS has 100us accuracy --
-         * see https://msdn.microsoft.com/en-us/library/windows/desktop/ms724290(v=vs.85).aspx).
-         * In linux it will depend on the filesystem. ext4 has 1ns accuracy (if inodes are 256 byte
-         * or larger), but ext3 has 1 second.
-         */
-        Thread.sleep(2000);
+    public static void waitForFileSystemTick() throws InterruptedException, IOException {
+        waitForFileSystemTick(getFreshTimestamp());
+    }
+
+    /**
+     * Sleeps the current thread for enough time to ensure that the local file system had enough
+     * time to notice a "tick". This method is usually called in tests when it is necessary to
+     * ensure filesystem writes are detected through timestamp modification.
+     *
+     * @param currentTimestamp last timestamp read from disk
+     * @throws InterruptedException waiting interrupted
+     * @throws IOException issues creating a temporary file
+     */
+    public static void waitForFileSystemTick(long currentTimestamp)
+            throws InterruptedException, IOException {
+        while (getFreshTimestamp() <= currentTimestamp) {
+            Thread.sleep(100);
+        }
+    }
+
+    private static long getFreshTimestamp() throws IOException {
+        File notUsed = File.createTempFile(TestUtils.class.getName(), "waitForFileSystemTick");
+        long freshTimestamp = notUsed.lastModified();
+        FileUtils.delete(notUsed);
+        return freshTimestamp;
     }
 
     @NonNull
@@ -235,4 +371,47 @@ public class TestUtils {
         return sb.toString();
     }
 
+    /**
+     * Asserts that a runnable will eventually not throw an assertion exception. Equivalent to
+     * {@link #eventually(Runnable, Duration)}, but using a default timeout
+     *
+     * @param runnable a description of the failure, if the condition never becomes {@code true}
+     */
+    public static void eventually(@NonNull Runnable runnable) {
+        eventually(runnable, DEFAULT_EVENTUALLY_TIMEOUT);
+    }
+
+    /**
+     * Asserts that a runnable will eventually not throw {@link AssertionError} before
+     * {@code timeoutMs} milliseconds have ellapsed
+     *
+     * @param runnable a description of the failure, if the condition never becomes {@code true}
+     * @param duration the timeout for the predicate to become true
+     */
+    public static void eventually(@NonNull Runnable runnable, Duration duration) {
+        AssertionError lastError = null;
+
+        Instant timeoutTime = Instant.now().plus(duration);
+        while (Instant.now().isBefore(timeoutTime)) {
+            try {
+                runnable.run();
+                return;
+            } catch (AssertionError e) {
+                /*
+                 * It is OK to throw this. Save for later.
+                 */
+                lastError = e;
+            }
+
+            try {
+                Thread.sleep(EVENTUALLY_CHECK_CYCLE_TIME_MS);
+            } catch (InterruptedException e) {
+                throw new AssertionError(e);
+            }
+        }
+
+        throw new AssertionError(
+                "Timed out waiting for runnable not to throw; last error was:",
+                lastError);
+    }
 }

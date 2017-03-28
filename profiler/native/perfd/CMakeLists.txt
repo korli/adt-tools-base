@@ -1,13 +1,25 @@
 add_executable(perfd
+               daemon.cc
                perfa_service.cc
                perfd.cc
                profiler_service.cc)
 
 target_link_libraries(perfd
                       profiler_cpu
+                      profiler_event
                       profiler_memory
-                      ProfilerProtos)
+                      profiler_network
+                      profiler_energy
+                      profiler_protos
+                      profiler_utils)
+
+set_linker_script(perfd perfd.exports perfd.cc)
 
 # Add perfd profiler components
-
+add_subdirectory(cpu)
+add_subdirectory(energy)
+add_subdirectory(event)
 add_subdirectory(memory)
+add_subdirectory(network)
+
+install_executable(perfd)

@@ -16,16 +16,25 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.ANDROID_VIEW_VIEW;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.tools.lint.detector.api.*;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.*;
-
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.Detector;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import java.util.List;
 import java.util.ListIterator;
-
-import static com.android.SdkConstants.ANDROID_VIEW_VIEW;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
 /**
  * Checks that views that override View#onTouchEvent also implement View#performClick
@@ -34,7 +43,7 @@ import static com.android.SdkConstants.ANDROID_VIEW_VIEW;
 public class ClickableViewAccessibilityDetector extends Detector implements Detector.ClassScanner {
 
     public static final Issue ISSUE = Issue.create(
-            "ClickableViewAccessibility", //$NON-NLS-1$
+            "ClickableViewAccessibility",
             "Accessibility in Custom Views",
             "If a `View` that overrides `onTouchEvent` or uses an `OnTouchListener` does not also "
                     + "implement `performClick` and call it when clicks are detected, the `View` "
@@ -49,25 +58,19 @@ public class ClickableViewAccessibilityDetector extends Detector implements Dete
                     ClickableViewAccessibilityDetector.class,
                     Scope.CLASS_FILE_SCOPE));
 
-    private static final String ON_TOUCH_EVENT = "onTouchEvent"; //$NON-NLS-1$
-    private static final String ON_TOUCH_EVENT_SIG = "(Landroid/view/MotionEvent;)Z"; //$NON-NLS-1$
-    private static final String PERFORM_CLICK = "performClick"; //$NON-NLS-1$
-    private static final String PERFORM_CLICK_SIG = "()Z"; //$NON-NLS-1$
-    private static final String SET_ON_TOUCH_LISTENER = "setOnTouchListener"; //$NON-NLS-1$
-    private static final String SET_ON_TOUCH_LISTENER_SIG = "(Landroid/view/View$OnTouchListener;)V"; //$NON-NLS-1$
-    private static final String ON_TOUCH = "onTouch"; //$NON-NLS-1$
-    private static final String ON_TOUCH_SIG = "(Landroid/view/View;Landroid/view/MotionEvent;)Z"; //$NON-NLS-1$
-    private static final String ON_TOUCH_LISTENER = "android/view/View$OnTouchListener";  //$NON-NLS-1$
+    private static final String ON_TOUCH_EVENT = "onTouchEvent";
+    private static final String ON_TOUCH_EVENT_SIG = "(Landroid/view/MotionEvent;)Z";
+    private static final String PERFORM_CLICK = "performClick";
+    private static final String PERFORM_CLICK_SIG = "()Z";
+    private static final String SET_ON_TOUCH_LISTENER = "setOnTouchListener";
+    private static final String SET_ON_TOUCH_LISTENER_SIG = "(Landroid/view/View$OnTouchListener;)V";
+    private static final String ON_TOUCH = "onTouch";
+    private static final String ON_TOUCH_SIG = "(Landroid/view/View;Landroid/view/MotionEvent;)Z";
+    private static final String ON_TOUCH_LISTENER = "android/view/View$OnTouchListener";
 
 
     /** Constructs a new {@link ClickableViewAccessibilityDetector} */
     public ClickableViewAccessibilityDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     // ---- Implements ClassScanner ----

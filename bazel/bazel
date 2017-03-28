@@ -1,0 +1,43 @@
+#!/usr/bin/python
+
+"""Runs the bazel executable for the platform, passing args along."""
+
+import os
+import subprocess
+import sys
+
+
+def main():
+  workspace = find_workspace(os.getcwd())
+  if not workspace:
+    sys.exit('Must run %s within a workspace.' % os.path.basename(sys.argv[0]))
+  if sys.platform.startswith('linux'):
+    platform = 'linux'
+    jdk_subdir = 'linux'
+  elif sys.platform == 'darwin':
+    platform = 'mac'
+    jdk_subdir = os.path.join('mac', 'Contents', 'Home')
+  else:
+    sys.exit('Platform %s is not yet supported.' % sys.platform)
+
+  bazel = os.path.join(
+      workspace, 'tools', 'base', 'bazel', 'prebuilts', platform, 'bazel-real')
+  env = {
+      'CC': '/usr/bin/gcc',
+      'JAVA_HOME': os.path.join(
+          workspace, 'prebuilts', 'studio', 'jdk', jdk_subdir),
+      'TERM': os.environ.get('TERM') or '',
+  }
+  sys.exit(subprocess.call([bazel] + sys.argv[1:], env=env))
+
+
+def find_workspace(path):
+  if os.path.isfile(os.path.join(path, 'WORKSPACE')):
+    return path
+  else:
+    parent = os.path.dirname(path)
+    return None if parent == path else find_workspace(parent)
+
+
+if __name__ == '__main__':
+  main()

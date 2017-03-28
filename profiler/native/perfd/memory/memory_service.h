@@ -13,32 +13,73 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef PROFILER_PERFD_MEMORY_MEMORY_SERVICE_H_
-#define PROFILER_PERFD_MEMORY_MEMORY_SERVICE_H_
+#ifndef PERFD_MEMORY_MEMORY_SERVICE_H_
+#define PERFD_MEMORY_MEMORY_SERVICE_H_
 
 #include <grpc++/grpc++.h>
+#include <unordered_map>
 
-#include "memory_data_cache.h"
+#include "memory_collector.h"
 #include "proto/memory.grpc.pb.h"
 #include "utils/clock.h"
 
 namespace profiler {
 
-class MemoryServiceImpl final : public ::profiler::proto::MemoryService::Service {
-public:
-  MemoryServiceImpl() = default;
+class MemoryServiceImpl final
+    : public ::profiler::proto::MemoryService::Service {
+ public:
+  MemoryServiceImpl(const Clock& clock,
+                    std::unordered_map<int32_t, MemoryCollector>* collectors)
+      : clock_(clock), collectors_(*collectors) {}
   virtual ~MemoryServiceImpl() = default;
 
-  virtual ::grpc::Status GetData(
+  ::grpc::Status StartMonitoringApp(
       ::grpc::ServerContext* context,
-      const ::profiler::proto::MemoryRequest* request,
-      ::profiler::proto::MemoryData* response);
+      const profiler::proto::MemoryStartRequest* request,
+      ::profiler::proto::MemoryStartResponse* response) override;
 
-private:
-  MemoryDataCache memory_data_cache_;
-  SteadyClock clock_;
+  ::grpc::Status StopMonitoringApp(
+      ::grpc::ServerContext* context,
+      const profiler::proto::MemoryStopRequest* request,
+      ::profiler::proto::MemoryStopResponse* response) override;
+
+  ::grpc::Status GetData(::grpc::ServerContext* context,
+                         const ::profiler::proto::MemoryRequest* request,
+                         ::profiler::proto::MemoryData* response) override;
+
+  ::grpc::Status TriggerHeapDump(
+      ::grpc::ServerContext* context,
+      const ::profiler::proto::TriggerHeapDumpRequest* request,
+      ::profiler::proto::TriggerHeapDumpResponse* response) override;
+
+  ::grpc::Status GetHeapDump(
+      ::grpc::ServerContext* context,
+      const ::profiler::proto::HeapDumpDataRequest* request,
+      ::profiler::proto::DumpDataResponse* response) override;
+
+  ::grpc::Status ListHeapDumpInfos(
+      ::grpc::ServerContext* context,
+      const ::profiler::proto::ListDumpInfosRequest* request,
+      ::profiler::proto::ListHeapDumpInfosResponse* response) override;
+
+  ::grpc::Status TrackAllocations(
+      ::grpc::ServerContext* context,
+      const ::profiler::proto::TrackAllocationsRequest* request,
+      ::profiler::proto::TrackAllocationsResponse* response) override;
+
+  ::grpc::Status ListAllocationContexts(
+      ::grpc::ServerContext* context,
+      const ::profiler::proto::AllocationContextsRequest* request,
+      ::profiler::proto::AllocationContextsResponse* response)
+      override;
+
+ private:
+  MemoryCollector* GetCollector(int32_t app_id);
+
+  const Clock& clock_;
+  std::unordered_map<int32_t, MemoryCollector>&
+      collectors_;  // maps pid to MemoryCollector
 };
+}  // namespace profiler
 
-}
-
-#endif // PROFILER_PERFD_MEMORY_MEMORY_SERVICE_H_
+#endif  // PERFD_MEMORY_MEMORY_SERVICE_H_

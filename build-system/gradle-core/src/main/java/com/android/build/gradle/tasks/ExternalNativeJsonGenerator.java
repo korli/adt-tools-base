@@ -20,6 +20,7 @@ import static com.android.SdkConstants.CURRENT_PLATFORM;
 import static com.android.SdkConstants.PLATFORM_WINDOWS;
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.external.gson.NativeBuildConfigValue;
@@ -37,13 +38,16 @@ import com.android.builder.model.ApiVersion;
 import com.android.builder.model.SyncIssue;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessInfoBuilder;
+import com.android.repository.api.ConsoleProgressIndicator;
+import com.android.repository.api.LocalPackage;
+import com.android.repository.api.ProgressIndicator;
+import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
@@ -51,7 +55,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-
 import org.gradle.api.GradleException;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.tasks.Input;
@@ -71,7 +74,7 @@ public abstract class ExternalNativeJsonGenerator {
     @NonNull
     private final List<Abi> abis;
     @NonNull
-    private final AndroidBuilder androidBuilder;
+    protected final AndroidBuilder androidBuilder;
     @NonNull
     private final File makefile;
     @NonNull
@@ -266,10 +269,7 @@ public abstract class ExternalNativeJsonGenerator {
                     }
 
                     diagnostic("executing %s %s", getNativeBuildSystem().getName(), processBuilder);
-                    String buildOutput = ExternalNativeBuildTaskUtils
-                            .executeBuildProcessAndLogError(
-                                    androidBuilder,
-                                    processBuilder.createProcess());
+                    String buildOutput = executeProcess(processBuilder);
                     diagnostic("done executing %s", getNativeBuildSystem().getName());
 
                     // Write the captured process output to a file for diagnostic purposes.
@@ -335,6 +335,13 @@ public abstract class ExternalNativeJsonGenerator {
             @NonNull String abi, int abiPlatformVersion, @NonNull File outputJson);
 
     /**
+     * Execute the JSON generation process. Return the combination of STDIO and STDERR from running
+     * the process.
+     */
+    abstract String executeProcess(ProcessInfoBuilder processBuilder)
+            throws ProcessException, IOException;
+
+    /**
      * @return the native build system that is used to generate the JSON.
      */
     @NonNull
@@ -350,7 +357,7 @@ public abstract class ExternalNativeJsonGenerator {
      * Log low level diagnostic information.
      */
     void diagnostic(String format, Object... args) {
-        androidBuilder.getLogger().info(
+        androidBuilder.getLogger().verbose(
                 "External native generate JSON " + variantName + ": " + format, args);
     }
 
@@ -527,12 +534,12 @@ public abstract class ExternalNativeJsonGenerator {
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
             @NonNull VariantScope scope) {
-        checkNotNull(sdkHandler.getSdkFolder());
+        checkNotNull(sdkHandler.getSdkFolder(), "No Android SDK folder found");
         File ndkFolder =  sdkHandler.getNdkFolder();
         if (ndkFolder == null || !ndkFolder.isDirectory()) {
             throw new InvalidUserDataException(String.format(
                     "NDK not configured. %s\n" +
-                            "Download it with SDK manager.)",
+                            "Download it with SDK manager.",
                     ndkFolder== null ? "" : ndkFolder));
         }
         final BaseVariantData<? extends BaseVariantOutputData> variantData =
@@ -587,13 +594,14 @@ public abstract class ExternalNativeJsonGenerator {
                 CoreExternalNativeNdkBuildOptions options =
                         variantConfig.getExternalNativeBuildOptions()
                                 .getExternalNativeNdkBuildOptions();
-                checkNotNull(options);
+                checkNotNull(options, "NdkBuild options not found");
                 return new NdkBuildExternalNativeJsonGenerator(
                         ndkHandler,
                         minSdkVersionApiLevel,
                         variantData.getName(),
                         validAbis,
                         androidBuilder,
+                        projectDir,
                         sdkHandler.getSdkFolder(),
                         sdkHandler.getNdkFolder(),
                         soFolder,
@@ -610,7 +618,15 @@ public abstract class ExternalNativeJsonGenerator {
                 CoreExternalNativeCmakeOptions options =
                         variantConfig.getExternalNativeBuildOptions()
                                 .getExternalNativeCmakeOptions();
-                checkNotNull(options);
+                checkNotNull(options, "CMake options not found");
+                // Install Cmake if it's not there.
+                ProgressIndicator progress = new ConsoleProgressIndicator();
+                AndroidSdkHandler sdk = AndroidSdkHandler.getInstance(sdkHandler.getSdkFolder());
+                LocalPackage cmakePackage =
+                        sdk.getLatestLocalPackageForPrefix(SdkConstants.FD_CMAKE, true, progress);
+                if (cmakePackage == null) {
+                    sdkHandler.installCMake();
+                }
                 return new CmakeExternalNativeJsonGenerator(
                         sdkHandler.getSdkFolder(),
                         ndkHandler,

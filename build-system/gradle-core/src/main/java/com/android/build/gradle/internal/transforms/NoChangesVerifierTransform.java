@@ -28,9 +28,6 @@ import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
-import com.android.build.gradle.internal.scope.InstantRunVariantScope;
-import com.android.build.gradle.internal.scope.TransformVariantScope;
-import com.android.build.gradle.internal.scope.VariantScope;
 import com.google.common.collect.ImmutableSet;
 
 import java.io.IOException;
@@ -103,7 +100,7 @@ public class NoChangesVerifierTransform extends Transform {
         // treated as Java resources in the plugin)
         if (!transformInvocation.isIncremental()
                 || hasChangedInputs(transformInvocation.getReferencedInputs())) {
-            buildContext.setVerifierResult(failureStatus);
+            buildContext.setVerifierStatus(failureStatus);
         }
     }
 

@@ -19,10 +19,11 @@
 
 namespace profiler {
 
-uint64_t SteadyClock::GetCurrentTime() const {
+int64_t SteadyClock::GetCurrentTime() const {
   auto now = std::chrono::steady_clock::now();
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
-    now.time_since_epoch()).count();
+             now.time_since_epoch())
+      .count();
 }
 
-} // namespace profiler
+}  // namespace profiler

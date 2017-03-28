@@ -24,7 +24,6 @@ import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.BaseVariantOutputData;
 import com.google.common.base.CharMatcher;
-import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 
 import org.gradle.api.Action;
@@ -62,14 +61,11 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
 
     private File exportClassListTo;
 
-    private boolean printMachineReadableErrors;
-
     private File dataBindingClassOutput;
 
     @TaskAction
     public void exportInfo(IncrementalTaskInputs inputs) {
-        xmlProcessor.writeInfoClass(getSdkDir(), getXmlOutFolder(), getExportClassListTo(),
-                getLogger().isDebugEnabled(), isPrintMachineReadableErrors());
+        xmlProcessor.writeEmptyInfoClass();
         Scope.assertNoError();
     }
 
@@ -119,15 +115,6 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
         this.exportClassListTo = exportClassListTo;
     }
 
-    @Input
-    public boolean isPrintMachineReadableErrors() {
-        return printMachineReadableErrors;
-    }
-
-    public void setPrintMachineReadableErrors(boolean printMachineReadableErrors) {
-        this.printMachineReadableErrors = printMachineReadableErrors;
-    }
-
     @OutputDirectory
     public File getOutput() {
         return dataBindingClassOutput;
@@ -141,11 +128,8 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
 
         private final VariantScope variantScope;
 
-        private final boolean printMachineReadableErrors;
-
-        public ConfigAction(VariantScope variantScope, boolean printMachineReadableErrors) {
+        public ConfigAction(VariantScope variantScope) {
             this.variantScope = variantScope;
-            this.printMachineReadableErrors = printMachineReadableErrors;
         }
 
         @NonNull
@@ -168,11 +152,9 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
             task.setSdkDir(variantScope.getGlobalScope().getSdkHandler().getSdkFolder());
             task.setXmlOutFolder(variantScope.getLayoutInfoOutputForDataBinding());
 
-            ConventionMappingHelper.map(task, "compilerClasspath",
-                    (Callable<FileCollection>) variantScope::getJavaClasspath);
+            ConventionMappingHelper.map(task, "compilerClasspath", variantScope::getJavaClasspath);
             ConventionMappingHelper.map(task, "compilerSources",
-                    (Callable<Iterable<ConfigurableFileTree>>) () ->
-                            variantData.getJavaSources().stream()
+                    () -> variantData.getJavaSources().stream()
                                     .filter(
                                             input -> !variantScope.getClassOutputForDataBinding()
                                                     .equals(input.getDir()))
@@ -180,7 +162,6 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
 
             task.setExportClassListTo(variantData.getType().isExportDataBindingClassList() ?
                     variantScope.getGeneratedClassListOutputFileForDataBinding() : null);
-            task.setPrintMachineReadableErrors(printMachineReadableErrors);
             task.setDataBindingClassOutput(variantScope.getClassOutputForDataBinding());
         }
     }

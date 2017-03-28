@@ -108,11 +108,6 @@ public class CommandLineParserTest extends TestCase {
         super.setUp();
     }
 
-    @Override
-    protected void tearDown() throws Exception {
-        super.tearDown();
-    }
-
     public void testPrintHelpAndExit() {
         MockCommandLineProcessor c = new MockCommandLineProcessor(mLog);
         assertFalse(c.wasExitCalled());

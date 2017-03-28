@@ -18,15 +18,16 @@ package com.android.builder.profile;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats.GradleBuildProfileSpan.ExecutionType;
-
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan;
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan.ExecutionType;
+import com.google.wireless.android.sdk.stats.GradleTransformExecution;
+import java.io.IOException;
 import java.util.concurrent.Callable;
 
 /**
- * A {@link AndroidStudioStats.GradleBuildProfileSpan} recorder for a block execution.
+ * A {@link GradleBuildProfileSpan} recorder for a block execution.
  *
- * A block is some code that produces a result and may throw exceptions.
+ * <p>A block is some code that produces a result and may throw exceptions.
  */
 public interface Recorder {
 
@@ -38,7 +39,7 @@ public interface Recorder {
      *
      * @param <T> the type of result produced by executing this block of code.
      */
-    abstract class Block<T> implements Callable<T> {
+    interface Block<T> extends Callable<T> {
 
         /**
          * Notification that an exception was raised during the {@link #call()} method invocation.
@@ -48,74 +49,70 @@ public interface Recorder {
          *
          * @param e the exception raised during the {@link #call()} execution.
          */
-        public void handleException(@NonNull Exception e) {
-            // by default we rethrow as a runtime exception, subclasses should override for more
-            // precise handling.
+        default void handleException(@NonNull Exception e) {
+            // by default we rethrow as a runtime exception, implementations should override for
+            // more precise handling.
             throw e instanceof RuntimeException ? (RuntimeException) e : new RuntimeException(e);
         }
     }
 
-    Block<Void> EMPTY_BLOCK = new Block<Void>() {
-        @Override
-        public Void call() throws Exception {
-            return null;
-        }
-    };
+    interface VoidBlock {
+        void call() throws IOException;
+    }
 
     /**
      * Records the time elapsed while executing a {@link Block} and saves the resulting {@link
-     * AndroidStudioStats.GradleBuildProfileSpan} to {@link ProcessRecorder}.
-     *  @param <T>           the type of the returned value from the block.
-     * @param executionType the task type, so aggregation can be performed.
-     * @param project       the project that contains this span.
-     * @param variant       the variant that contains this span.
-     * @param block         the block of code to execution and measure.
-     * @return the value returned from the block (including null) or null if the block execution
-     * raised an exception which was subsequently swallowed by {@link Block#handleException(Exception)}
-     */
-    @Nullable
-    <T> T record(
-            @NonNull ExecutionType executionType,
-            @NonNull String project,
-            @Nullable String variant,
-            @NonNull Block<T> block);
-
-    /**
-     * Records the time elapsed while executing a {@link Block} and saves the resulting {@link
-     * AndroidStudioStats.GradleBuildProfileSpan} to {@link ProcessRecorder}.
-     *  @param <T>           the type of the returned value from the block.
-     * @param executionType the task type, so aggregation can be performed.
-     * @param project       the project that contains this span.
-     * @param variant       the variant that contains this span.
-     * @param block         the block of code to execution and measure.
-     * @return the value returned from the block (including null) or null if the block execution
-     * raised an exception which was subsequently swallowed by {@link Block#handleException(Exception)}
-     */
-    @Nullable
-    <T> T record(
-            @NonNull ExecutionType executionType,
-            @Nullable AndroidStudioStats.GradleTransformExecution transform,
-            @NonNull String project,
-            @Nullable String variant,
-            @NonNull Block<T> block);
-
-    /**
-     * Allocate a new recordId that can be used to create an
-     * {@link AndroidStudioStats.GradleBuildProfileSpan}.
-     * This method is useful when the code span to measure cannot be expressed
-     * as a {@link Block} and therefore cannot directly use the
-     * {@link #record(ExecutionType, String, String, Block)} method.
+     * GradleBuildProfileSpan} to {@link ProcessProfileWriter}.
      *
-     * @return the unique record id for this process.
+     * @param <T> the type of the returned value from the block.
+     * @param executionType the task type, so aggregation can be performed.
+     * @param projectPath the full path of the project that contains this span. (e.g. ":a:b")
+     * @param variant the variant that contains this span.
+     * @param block the block of code to execution and measure.
+     * @return the value returned from the block (including null) or null if the block execution
+     *     raised an exception which was subsequently swallowed by {@link
+     *     Block#handleException(Exception)}
      */
-    long allocationRecordId();
+    @Nullable
+    <T> T record(
+            @NonNull ExecutionType executionType,
+            @NonNull String projectPath,
+            @Nullable String variant,
+            @NonNull Block<T> block);
 
     /**
-     * Closes an execution span measurement using the allocated record id obtained from
-     * {@link #allocationRecordId()} method.
+     * Records the time elapsed while executing a {@link VoidBlock} and saves the resulting {@link
+     * GradleBuildProfileSpan} to {@link ProcessRecorder}.
+     *
+     * @param executionType the task type, so aggregation can be performed.
+     * @param projectPath the full path of the project that contains this span. (e.g. ":a:b")
+     * @param variant the variant that contains this span.
+     * @param block the block of code to execution and measure.
      */
-    void closeRecord(
-            @NonNull String project,
+    void record(
+            @NonNull ExecutionType executionType,
+            @NonNull String projectPath,
             @Nullable String variant,
-            @NonNull AndroidStudioStats.GradleBuildProfileSpan.Builder executionRecord);
+            @NonNull VoidBlock block);
+
+    /**
+     * Records the time elapsed while executing a {@link Block} and saves the resulting {@link
+     * GradleBuildProfileSpan} to {@link ProcessProfileWriter}.
+     *
+     * @param <T> the type of the returned value from the block.
+     * @param executionType the task type, so aggregation can be performed.
+     * @param projectPath the full path of the project that contains this span. (e.g. ":a:b")
+     * @param variant the variant that contains this span.
+     * @param block the block of code to execution and measure.
+     * @return the value returned from the block (including null) or null if the block execution
+     *     raised an exception which was subsequently swallowed by {@link
+     *     Block#handleException(Exception)}
+     */
+    @Nullable
+    <T> T record(
+            @NonNull ExecutionType executionType,
+            @Nullable GradleTransformExecution transform,
+            @NonNull String projectPath,
+            @Nullable String variant,
+            @NonNull Block<T> block);
 }

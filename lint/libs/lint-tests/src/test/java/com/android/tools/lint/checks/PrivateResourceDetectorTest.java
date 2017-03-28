@@ -18,52 +18,112 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.FN_PUBLIC_TXT;
 import static com.android.SdkConstants.FN_RESOURCE_TEXT;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidLibrary;
-import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Dependencies;
-import com.android.builder.model.MavenCoordinates;
-import com.android.builder.model.Variant;
-import com.android.ide.common.repository.GradleCoordinate;
 import com.android.testutils.TestUtils;
+import com.android.tools.lint.checks.infrastructure.TestLintTask;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Project;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-
-import org.mockito.stubbing.OngoingStubbing;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
 
 @SuppressWarnings("javadoc")
 public class PrivateResourceDetectorTest extends AbstractCheckTest {
+
     @Override
     protected Detector getDetector() {
         return new PrivateResourceDetector();
     }
 
+    private static TestLintTask.GradleMockModifier mockModifier = (project, variant) -> {
+        // Null out the resolved coordinates in the result to simulate the
+        // observed failure in issue 226240
+        //noinspection ConstantConditions
+        Dependencies dependencies = variant.getMainArtifact().getDependencies();
+        AndroidLibrary library = dependencies.getLibraries().iterator().next();
+
+        final File tempDir = TestUtils.createTempDirDeletedOnExit();
+
+        try {
+            String allResources = ""
+                    + "int string my_private_string 0x7f040000\n"
+                    + "int string my_public_string 0x7f040001\n"
+                    + "int layout my_private_layout 0x7f040002\n"
+                    + "int id title 0x7f040003\n"
+                    + "int style Theme_AppCompat_DayNight 0x7f070004";
+
+            File rFile = new File(tempDir, FN_RESOURCE_TEXT);
+            Files.write(allResources, rFile, Charsets.UTF_8);
+
+            String publicResources = ""
+                    + ""
+                    + "string my_public_string\n"
+                    + "style Theme.AppCompat.DayNight\n";
+
+            File publicTxtFile = new File(tempDir, FN_PUBLIC_TXT);
+            Files.write(publicResources, publicTxtFile, Charsets.UTF_8);
+            when(library.getPublicResources()).thenReturn(publicTxtFile);
+            when(library.getSymbolFile()).thenReturn(rFile);
+        } catch (IOException ioe) {
+            fail(ioe.getMessage());
+        }
+    };
+
+    @SuppressWarnings("ClassNameDiffersFromFileName")  // Sample code
+    private static final TestFile cls = java("src/main/java/test/pkg/Private.java", ""
+            + "package test.pkg;\n"
+            + "public class Private {\n"
+            + "    void test() {\n"
+            + "        int x = R.string.my_private_string; // ERROR\n"
+            + "        int y = R.string.my_public_string; // OK\n"
+            + "    }\n"
+            + "}\n");
+
+    private static final TestFile strings = xml("res/values/strings.xml", ""
+            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            + "<resources xmlns:tools=\"http://schemas.android.com/tools\">\n"
+            + "\n"
+            + "    <string tools:override=\"true\" name=\"my_private_string\">String 1</string>\n"
+            + "    <string name=\"my_public_string\">String 2</string>\n"
+            + "\n"
+            + "</resources>\n");
+
+    private final TestFile gradle
+            = gradle(""
+            + "apply plugin: 'com.android.application'\n"
+            + "\n"
+            + "dependencies {\n"
+            + "    compile 'com.android.tools:test-library:1.0.0'\n"
+            + "}\n");
+
+    @SuppressWarnings("ClassNameDiffersFromFileName")  // Sample code
+    private static TestFile rClass = java("src/main/java/test/pkg/R.java", ""
+            + "package test.pkg;\n"
+            + "public final class R {\n"
+            + "    public static final class string {\n"
+            + "        public static final int my_private_string = 0x7f0a0000;\n"
+            + "        public static final int my_public_string = 0x7f0a0001;\n"
+            + "    }\n"
+            + "}\n");
+
     @Override
     protected boolean allowCompilationErrors() {
         // Some of these unit tests are still relying on source code that references
         // unresolved symbols etc.
-        return true;
+        return false;
     }
 
     public void testPrivateInXml() throws Exception {
-        assertEquals(""
+        String expected = ""
                 + "res/layout/private.xml:11: Warning: The resource @string/my_private_string is marked as private in com.android.tools:test-library [PrivateResource]\n"
                 + "            android:text=\"@string/my_private_string\" />\n"
                 + "                          ~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
-                lintProject(xml("res/layout/private.xml", ""
+                + "0 errors, 1 warnings\n";
+        lint().files(
+                xml("res/layout/private.xml", ""
                         + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                         + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
                         + "              android:id=\"@+id/newlinear\"\n"
@@ -80,28 +140,70 @@ public class PrivateResourceDetectorTest extends AbstractCheckTest {
                         + "            android:layout_width=\"wrap_content\"\n"
                         + "            android:layout_height=\"wrap_content\"\n"
                         + "            android:text=\"@string/my_public_string\" />\n"
-                        + "</LinearLayout>\n")));
+                        + "</LinearLayout>\n"),
+                gradle)
+                .modifyGradleMocks(mockModifier)
+                .run()
+                .expect(expected);
     }
 
     @SuppressWarnings("ClassNameDiffersFromFileName")
     public void testPrivateInJava() throws Exception {
-        assertEquals(""
-                + "src/test/pkg/Private.java:3: Warning: The resource @string/my_private_string is marked as private in com.android.tools:test-library [PrivateResource]\n"
+        String expected = ""
+                + "src/main/java/Private.java:3: Warning: The resource @string/my_private_string is marked as private in com.android.tools:test-library [PrivateResource]\n"
                 + "        int x = R.string.my_private_string; // ERROR\n"
                 + "                ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
-                lintProject(java("src/test/pkg/Private.java", ""
+                + "0 errors, 1 warnings\n";
+
+        //noinspection all // Sample code
+        lint().files(
+                java("src/main/java/Private.java", ""
                         + "public class Private {\n"
                         + "    void test() {\n"
                         + "        int x = R.string.my_private_string; // ERROR\n"
                         + "        int y = R.string.my_public_string; // OK\n"
-                        + "        int y = android.R.string.my_private_string; // OK (not in project namespace)\n"
+                        + "        int z = android.R.string.my_private_string; // OK (not in project namespace)\n"
                         + "    }\n"
-                        + "}\n")));
+                        + "    public static final class R {\n"
+                        + "        public static final class string {\n"
+                        + "            public static final int my_private_string = 0x7f0a0000;\n"
+                        + "            public static final int my_public_string = 0x7f0a0001;\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}\n"),
+                gradle)
+                .modifyGradleMocks(mockModifier)
+                .allowCompilationErrors()
+                .run()
+                .expect(expected);
+    }
+
+    public void testStyle() throws Exception {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=221560
+        lint().files(
+                xml("res/layout/private2.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<merge xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "\n"
+                        + "    <View\n"
+                        + "        android:layout_width=\"match_parent\"\n"
+                        + "        android:layout_height=\"match_parent\"\n"
+                        + "        android:theme=\"@style/Theme.AppCompat.DayNight\" />\n"
+                        + "\n"
+                        + "    <View\n"
+                        + "        android:layout_width=\"match_parent\"\n"
+                        + "        android:layout_height=\"match_parent\"\n"
+                        + "        android:theme=\"@style/Theme_AppCompat_DayNight\" />\n"
+                        + "\n"
+                        + "</merge>\n"),
+                gradle)
+                .modifyGradleMocks(mockModifier)
+                .run()
+                .expectClean();
     }
 
     public void testOverride() throws Exception {
-        assertEquals(""
+        String expected = ""
                 + "res/layout/my_private_layout.xml: Warning: Overriding @layout/my_private_layout which is marked as private in com.android.tools:test-library. If deliberate, use tools:override=\"true\", otherwise pick a different name. [PrivateResource]\n"
                 + "res/values/strings.xml:5: Warning: Overriding @string/my_private_string which is marked as private in com.android.tools:test-library. If deliberate, use tools:override=\"true\", otherwise pick a different name. [PrivateResource]\n"
                 + "    <string name=\"my_private_string\">String 1</string>\n"
@@ -112,8 +214,10 @@ public class PrivateResourceDetectorTest extends AbstractCheckTest {
                 + "res/values/strings.xml:12: Warning: Overriding @string/my_private_string which is marked as private in com.android.tools:test-library. If deliberate, use tools:override=\"true\", otherwise pick a different name. [PrivateResource]\n"
                 + "    <string tools:override=\"false\" name=\"my_private_string\">String 2</string>\n"
                 + "                                         ~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 4 warnings\n",
-                lintProject(xml("res/values/strings.xml", ""
+                + "0 errors, 4 warnings\n";
+
+        lint().files(
+                xml("res/values/strings.xml", ""
                         + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                         + "<resources xmlns:tools=\"http://schemas.android.com/tools\">\n"
                         + "\n"
@@ -129,129 +233,86 @@ public class PrivateResourceDetectorTest extends AbstractCheckTest {
                         + "    <string tools:override=\"true\" name=\"my_private_string\">String 2</string>\n"
                         + "\n"
                         + "</resources>\n"),
-                        xml("res/layout/my_private_layout.xml", "<LinearLayout/>"),
-                        xml("res/layout/my_public_layout.xml", "<LinearLayout/>")));
+                xml("res/layout/my_private_layout.xml", "<LinearLayout/>"),
+                xml("res/layout/my_public_layout.xml", "<LinearLayout/>"),
+                gradle(""
+                        + "apply plugin: 'com.android.application'\n"
+                        + "\n"
+                        + "dependencies {\n"
+                        + "    compile 'com.android.tools:test-library:1.0.0'\n"
+                        + "}\n"))
+                .modifyGradleMocks(mockModifier)
+                .run()
+                .expect(expected);
     }
 
     @SuppressWarnings("ClassNameDiffersFromFileName")
     public void testIds() throws Exception {
         // Regression test for https://code.google.com/p/android/issues/detail?id=183851
-        assertEquals("No warnings.",
-                lintProject(
-                        xml("res/layout/private.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "              android:id=\"@+id/title\"\n"
-                                + "              android:orientation=\"vertical\"\n"
-                                + "              android:layout_width=\"match_parent\"\n"
-                                + "              android:layout_height=\"match_parent\"/>\n"),
-                        java("src/test/pkg/Private.java", ""
-                                + "public class Private {\n"
-                                + "    void test() {\n"
-                                + "        int x = R.id.title; // ERROR\n"
-                                + "    }\n"
-                                + "}\n")));
+        //noinspection all // Sample code
+        lint().files(
+                xml("res/layout/private.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "              android:id=\"@+id/title\"\n"
+                        + "              android:orientation=\"vertical\"\n"
+                        + "              android:layout_width=\"match_parent\"\n"
+                        + "              android:layout_height=\"match_parent\"/>\n"),
+                java("src/main/java/test/pkg/Private.java", ""
+                        + "package test.pkg;\n"
+                        + "public class Private {\n"
+                        + "    void test() {\n"
+                        + "        int x = R.id.title; // ERROR\n"
+                        + "    }\n"
+                        + "    public static final class R {\n"
+                        + "        public static final class id {\n"
+                        + "            public static final int title = 0x7f0a0000;\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}\n"),
+                gradle(""
+                        + "apply plugin: 'com.android.application'\n"
+                        + "\n"
+                        + "dependencies {\n"
+                        + "    compile 'com.android.tools:test-library:1.0.0'\n"
+                        + "}\n"))
+                .modifyGradleMocks(mockModifier)
+                .run()
+                .expectClean();
     }
 
-    @Override
-    protected TestLintClient createClient() {
-        return new TestLintClient() {
-            @NonNull
-            @Override
-            protected Project createProject(@NonNull File dir, @NonNull File referenceDir) {
-                return new Project(this, dir, referenceDir) {
-                    @Override
-                    public boolean isGradleProject() {
-                        return true;
-                    }
-
-                    @Nullable
-                    @Override
-                    public AndroidProject getGradleProjectModel() {
-                        // First version which supported private resources; this does not
-                        // need to track later versions we release
-                        return createMockProject("1.3.0-alpha2", 3);
-                    }
-
-                    @Nullable
-                    @Override
-                    public Variant getCurrentVariant() {
-                        try {
-                            AndroidLibrary library = createMockLibrary(
-                                    "com.android.tools:test-library:1.0.0",
-                                    ""
-                                            + "int string my_private_string 0x7f040000\n"
-                                            + "int string my_public_string 0x7f040001\n"
-                                            + "int layout my_private_layout 0x7f040002\n"
-                                            + "int id title 0x7f040003\n",
-                                    ""
-                                            + ""
-                                            + "string my_public_string\n",
-                                    Collections.<AndroidLibrary>emptyList()
-                            );
-                            AndroidArtifact artifact = createMockArtifact(
-                                    Collections.singletonList(library));
-
-                            Variant variant = mock(Variant.class);
-                            when(variant.getMainArtifact()).thenReturn(artifact);
-                            return variant;
-                        } catch (Exception e) {
-                            fail(e.toString());
-                            return null;
-                        }
-                    }
-                };
-            }
-        };
+    public void testAllowLocalOverrides() {
+        // Regression test for
+        //   https://code.google.com/p/android/issues/detail?id=207152
+        // Allow referencing private resources from Java, if
+        //   (1) you are not directly referencing the foreign R class, and
+        //   (2) you have a local definition of the same resource. (In that case
+        //       you also need to mark that local resource as a deliberate override,
+        //       but if not you'll get a warning in the XML file where the override is
+        //       defined.)
+        lint().files(
+                manifest().pkg("test.pkg"),
+                rClass,
+                cls,
+                strings,
+                gradle)
+                .modifyGradleMocks(mockModifier)
+                .run()
+                .expectClean();
     }
 
-    public static AndroidProject createMockProject(String modelVersion, int apiVersion) {
-        AndroidProject project = mock(AndroidProject.class);
-        when(project.getApiVersion()).thenReturn(apiVersion);
-        when(project.getModelVersion()).thenReturn(modelVersion);
-
-        return project;
-    }
-
-    public static AndroidArtifact createMockArtifact(List<AndroidLibrary> libraries) {
-        Dependencies dependencies = mock(Dependencies.class);
-        when(dependencies.getLibraries()).thenReturn(libraries);
-
-        AndroidArtifact artifact = mock(AndroidArtifact.class);
-        when(artifact.getDependencies()).thenReturn(dependencies);
-        when(artifact.getCompileDependencies()).thenReturn(dependencies);
-
-        return artifact;
-    }
-
-    public static AndroidLibrary createMockLibrary(String name,
-            String allResources, String publicResources,
-            List<AndroidLibrary> dependencies)
-            throws IOException {
-        final File tempDir = TestUtils.createTempDirDeletedOnExit();
-
-        Files.write(allResources, new File(tempDir, FN_RESOURCE_TEXT), Charsets.UTF_8);
-        File publicTxtFile = new File(tempDir, FN_PUBLIC_TXT);
-        if (publicResources != null) {
-            Files.write(publicResources, publicTxtFile, Charsets.UTF_8);
-        }
-        AndroidLibrary library = mock(AndroidLibrary.class);
-        when(library.getPublicResources()).thenReturn(publicTxtFile);
-        GradleCoordinate c = GradleCoordinate.parseCoordinateString(name);
-        assertNotNull(c);
-        MavenCoordinates coordinates = mock(MavenCoordinates.class);
-        when(coordinates.getGroupId()).thenReturn(c.getGroupId());
-        when(coordinates.getArtifactId()).thenReturn(c.getArtifactId());
-        when(coordinates.getVersion()).thenReturn(c.getRevision());
-        when(library.getResolvedCoordinates()).thenReturn(coordinates);
-        when(library.getBundle()).thenReturn(new File("intermediates" + File.separator +
-                "exploded-aar" + File.separator + name));
-
-        // Work around wildcard capture
-        //when(library.getLibraryDependencies()).thenReturn(dependencies);
-        List libraryDependencies = library.getLibraryDependencies();
-        OngoingStubbing<List> setter = when(libraryDependencies);
-        setter.thenReturn(dependencies);
-        return library;
+    public void testAllowLocalOverridesWithResourceRepository() {
+        // Regression test for
+        //   https://code.google.com/p/android/issues/detail?id=207152
+        lint().files(
+                manifest().pkg("test.pkg"),
+                rClass,
+                cls,
+                strings,
+                gradle)
+                .modifyGradleMocks(mockModifier)
+                .supportResourceRepository(true)
+                .run()
+                .expectClean();
     }
 }

@@ -33,7 +33,6 @@ import com.android.ide.common.process.JavaProcessInfo;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.process.ProcessResult;
-import com.android.repository.Revision;
 import com.android.utils.ILogger;
 import com.android.utils.SdkUtils;
 import com.google.common.base.Joiner;
@@ -119,7 +118,6 @@ public class DexByteCodeConverter {
             boolean multidex,
             @Nullable File mainDexList,
             @NonNull DexOptions dexOptions,
-            boolean optimize,
             @NonNull ProcessOutputHandler processOutputHandler)
             throws IOException, InterruptedException, ProcessException {checkNotNull(inputs, "inputs cannot be null.");
         checkNotNull(outDexFolder, "outDexFolder cannot be null.");
@@ -138,7 +136,6 @@ public class DexByteCodeConverter {
         DexProcessBuilder builder = new DexProcessBuilder(outDexFolder);
 
         builder.setVerbose(mVerboseExec)
-                .setNoOptimize(!optimize)
                 .setMultiDex(multidex)
                 .setMainDexList(mainDexList)
                 .addInputs(verifiedInputs.build());
@@ -153,7 +150,11 @@ public class DexByteCodeConverter {
             throws ProcessException, IOException, InterruptedException {
         initDexExecutorService(dexOptions);
 
-        if (shouldDexInProcess(dexOptions, mTargetInfo.getBuildTools().getRevision())) {
+        if (dexOptions.getAdditionalParameters().contains("--no-optimize")) {
+            mLogger.warning(DefaultDexOptions.OPTIMIZE_WARNING);
+        }
+
+        if (shouldDexInProcess(dexOptions)) {
             dexInProcess(builder, dexOptions, processOutputHandler);
         } else {
             dexOutOfProcess(builder, dexOptions, processOutputHandler);
@@ -166,13 +167,13 @@ public class DexByteCodeConverter {
             @NonNull final ProcessOutputHandler outputHandler)
             throws IOException, ProcessException {
         final String submission = Joiner.on(',').join(builder.getInputs());
-        mLogger.info("Dexing in-process : %s", submission);
+        mLogger.verbose("Dexing in-process : %1$s", submission);
         try {
             sDexExecutorService.submit(() -> {
                 Stopwatch stopwatch = Stopwatch.createStarted();
                 ProcessResult result = DexWrapper.run(builder, dexOptions, outputHandler);
                 result.assertNormalExitValue();
-                mLogger.info("Dexing %s took %s.", submission, stopwatch.toString());
+                mLogger.verbose("Dexing %1$s took %2$s.", submission, stopwatch.toString());
                 return null;
             }).get();
         } catch (Exception e) {
@@ -186,7 +187,7 @@ public class DexByteCodeConverter {
             @NonNull final ProcessOutputHandler processOutputHandler)
             throws ProcessException, InterruptedException {
         final String submission = Joiner.on(',').join(builder.getInputs());
-        mLogger.info("Dexing out-of-process : %s", submission);
+        mLogger.verbose("Dexing out-of-process : %1$s", submission);
         try {
             Callable<Void> task = () -> {
                 JavaProcessInfo javaProcessInfo =
@@ -205,7 +206,7 @@ public class DexByteCodeConverter {
             } else {
                 sDexExecutorService.submit(task).get();
             }
-            mLogger.info("Dexing %s took %s.", submission, stopwatch.toString());
+            mLogger.verbose("Dexing %1$s took %2$s.", submission, stopwatch.toString());
         } catch (Exception e) {
             throw new ProcessException(e);
         }
@@ -218,8 +219,8 @@ public class DexByteCodeConverter {
                 if (dexOptions.getMaxProcessCount() != null) {
                     DEX_PROCESS_COUNT.set(dexOptions.getMaxProcessCount());
                 }
-                mLogger.info(
-                        "Allocated dexExecutorService of size %d.",
+                mLogger.verbose(
+                        "Allocated dexExecutorService of size %1$d.",
                         DEX_PROCESS_COUNT.get());
                 sDexExecutorService = Executors.newFixedThreadPool(DEX_PROCESS_COUNT.get());
             } else {
@@ -244,20 +245,11 @@ public class DexByteCodeConverter {
      */
     @VisibleForTesting
     synchronized boolean shouldDexInProcess(
-            @NonNull DexOptions dexOptions,
-            @NonNull Revision buildToolsVersion) {
+            @NonNull DexOptions dexOptions) {
         if (mIsDexInProcess != null) {
             return mIsDexInProcess;
         }
         if (!dexOptions.getDexInProcess()) {
-            mIsDexInProcess = false;
-            return false;
-        }
-        if (buildToolsVersion.compareTo(DexProcessBuilder.FIXED_DX_MERGER) < 0) {
-            // We substitute Dex > 23.0.2 with the local implementation.
-            mLogger.warning("Running dex in-process requires build tools %1$s.\n"
-                            + "For faster builds update this project to use the latest build tools.",
-                    DexProcessBuilder.FIXED_DX_MERGER.toShortString());
             mIsDexInProcess = false;
             return false;
         }
@@ -317,7 +309,7 @@ public class DexByteCodeConverter {
      * Returns the heap size that was specified by the -Xmx value from the user, or an approximated
      * value if the -Xmx value was not set or was set improperly.
      */
-    static long getUserDefinedHeapSize() {
+    public static long getUserDefinedHeapSize() {
         for (String arg : ManagementFactory.getRuntimeMXBean().getInputArguments()) {
             if (arg.startsWith("-Xmx")) {
                 Optional<Long> heapSize = parseSizeToBytes(arg.substring("-Xmx".length()));

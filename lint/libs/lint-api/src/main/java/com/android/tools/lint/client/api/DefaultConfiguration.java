@@ -31,19 +31,13 @@ import com.android.utils.XmlUtils;
 import com.google.common.annotations.Beta;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Splitter;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXParseException;
-
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.Writer;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -55,6 +49,13 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.stream.Collectors;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXParseException;
 
 /**
  * Default implementation of a {@link Configuration} which reads and writes
@@ -65,52 +66,55 @@ import java.util.regex.PatternSyntaxException;
  */
 @Beta
 public class DefaultConfiguration extends Configuration {
-    private final LintClient mClient;
+
+    private final LintClient client;
     /** Default name of the configuration file */
-    public static final String CONFIG_FILE_NAME = "lint.xml"; //$NON-NLS-1$
+    public static final String CONFIG_FILE_NAME = "lint.xml";
 
     // Lint XML File
-    @NonNull
-    private static final String TAG_ISSUE = "issue"; //$NON-NLS-1$
-    @NonNull
-    private static final String ATTR_ID = "id"; //$NON-NLS-1$
-    @NonNull
-    private static final String ATTR_SEVERITY = "severity"; //$NON-NLS-1$
-    @NonNull
-    private static final String ATTR_PATH = "path"; //$NON-NLS-1$
-    @NonNull
-    private static final String ATTR_REGEXP = "regexp"; //$NON-NLS-1$
-    @NonNull
-    private static final String TAG_IGNORE = "ignore"; //$NON-NLS-1$
-    @NonNull
-    private static final String VALUE_ALL = "all"; //$NON-NLS-1$
 
-    private final Configuration mParent;
-    private final Project mProject;
-    private final File mConfigFile;
-    private boolean mBulkEditing;
+    /** The root tag in a configuration file */
+    public static final String TAG_LINT = "lint";
+
+    private static final String TAG_ISSUE = "issue";
+    private static final String ATTR_ID = "id";
+    private static final String ATTR_SEVERITY = "severity";
+    private static final String ATTR_PATH = "path";
+    private static final String ATTR_REGEXP = "regexp";
+    private static final String TAG_IGNORE = "ignore";
+    public static final String VALUE_ALL = "all";
+    private static final String ATTR_BASELINE = "baseline";
+
+    private static final String RES_PATH_START = "res/";
+    private static final int RES_PATH_START_LEN = RES_PATH_START.length();
+
+    private final Configuration parent;
+    private final Project project;
+    private final File configFile;
+    private boolean bulkEditing;
+    private File baselineFile;
 
     /** Map from id to list of project-relative paths for suppressed warnings */
-    private Map<String, List<String>> mSuppressed;
+    private Map<String, List<String>> suppressed;
 
     /** Map from id to regular expressions. */
     @Nullable
-    private Map<String, List<Pattern>> mRegexps;
+    private Map<String, List<Pattern>> regexps;
 
     /**
      * Map from id to custom {@link Severity} override
      */
-    private Map<String, Severity> mSeverity;
+    protected Map<String, Severity> severity;
 
     protected DefaultConfiguration(
             @NonNull LintClient client,
             @Nullable Project project,
             @Nullable Configuration parent,
             @NonNull File configFile) {
-        mClient = client;
-        mProject = project;
-        mParent = parent;
-        mConfigFile = configFile;
+        this.client = client;
+        this.project = project;
+        this.parent = parent;
+        this.configFile = configFile;
     }
 
     protected DefaultConfiguration(
@@ -141,13 +145,13 @@ public class DefaultConfiguration extends Configuration {
      * file, not affiliated with a project. This is used for global
      * configurations.
      *
-     * @param client the client to report errors to etc
+     * @param client   the client to report errors to etc
      * @param lintFile the lint file containing the configuration
      * @return a new configuration
      */
     @NonNull
     public static DefaultConfiguration create(@NonNull LintClient client, @NonNull File lintFile) {
-        return new DefaultConfiguration(client, null /*project*/, null /*parent*/, lintFile);
+        return new DefaultConfiguration(client, null, null, lintFile);
     }
 
     @Override
@@ -159,9 +163,9 @@ public class DefaultConfiguration extends Configuration {
         ensureInitialized();
 
         String id = issue.getId();
-        List<String> paths = mSuppressed.get(id);
+        List<String> paths = suppressed.get(id);
         if (paths == null) {
-            paths = mSuppressed.get(VALUE_ALL);
+            paths = suppressed.get(VALUE_ALL);
         }
         if (paths != null && location != null) {
             File file = location.getFile();
@@ -175,12 +179,38 @@ public class DefaultConfiguration extends Configuration {
                     return true;
                 }
             }
+            // A project can have multiple resources folders. The code before this
+            // only checks for paths relative to project root (which doesn't work for paths such as
+            // res/layout/foo.xml defined in lint.xml - when using gradle where the
+            // resource directory points to src/main/res)
+            // Here we check if any of the suppressed paths are relative to the resource folders
+            // of a project.
+            Set<Path> suppressedPathSet = paths.stream()
+              .filter(p -> p.startsWith(RES_PATH_START))
+              .map(p -> Paths.get(p.substring(RES_PATH_START_LEN)))
+              .collect(Collectors.toSet());
+
+            if (!suppressedPathSet.isEmpty()) {
+                Path toCheck = file.toPath();
+                // Is it relative to any of the resource folders?
+                for (File resDir : context.getProject().getResourceFolders()) {
+                    Path path = resDir.toPath();
+                    Path relative = path.relativize(toCheck);
+                    if (suppressedPathSet.contains(relative)) {
+                        return true;
+                    }
+                    // Allow suppress the relativePath if it is a prefix
+                    if (suppressedPathSet.stream().anyMatch(relative::startsWith)) {
+                        return true;
+                    }
+                }
+            }
         }
 
-        if (mRegexps != null) {
-            List<Pattern> regexps = mRegexps.get(id);
+        if (regexps != null) {
+            List<Pattern> regexps = this.regexps.get(id);
             if (regexps == null) {
-                regexps = mRegexps.get(VALUE_ALL);
+                regexps = this.regexps.get(VALUE_ALL);
             }
             if (regexps != null && location != null) {
                 // Check message
@@ -216,7 +246,7 @@ public class DefaultConfiguration extends Configuration {
             }
         }
 
-        return mParent != null && mParent.isIgnored(context, issue, location, message);
+        return parent != null && parent.isIgnored(context, issue, location, message);
     }
 
     @NonNull
@@ -233,24 +263,24 @@ public class DefaultConfiguration extends Configuration {
     public Severity getSeverity(@NonNull Issue issue) {
         ensureInitialized();
 
-        Severity severity = mSeverity.get(issue.getId());
+        Severity severity = this.severity.get(issue.getId());
         if (severity == null) {
-            severity = mSeverity.get(VALUE_ALL);
+            severity = this.severity.get(VALUE_ALL);
         }
 
         if (severity != null) {
             return severity;
         }
 
-        if (mParent != null) {
-            return mParent.getSeverity(issue);
+        if (parent != null) {
+            return parent.getSeverity(issue);
         }
 
         return getDefaultSeverity(issue);
     }
 
     private void ensureInitialized() {
-        if (mSuppressed == null) {
+        if (suppressed == null) {
             readConfig();
         }
     }
@@ -264,23 +294,31 @@ public class DefaultConfiguration extends Configuration {
             @Override @NonNull public List<Issue> getIssues() {
                 return Collections.emptyList();
             }
-        }, mClient);
-        mClient.report(new Context(driver, mProject, mProject, mConfigFile),
+        }, client);
+        client.report(new Context(driver, project, project, configFile),
                 IssueRegistry.LINT_ERROR,
-                mProject.getConfiguration(driver).getSeverity(IssueRegistry.LINT_ERROR),
-                Location.create(mConfigFile), message, TextFormat.RAW);
+                project.getConfiguration(driver).getSeverity(IssueRegistry.LINT_ERROR),
+                Location.create(configFile), message, TextFormat.RAW);
     }
 
     private void readConfig() {
-        mSuppressed = new HashMap<String, List<String>>();
-        mSeverity = new HashMap<String, Severity>();
+        suppressed = new HashMap<>();
+        severity = new HashMap<>();
 
-        if (!mConfigFile.exists()) {
+        if (!configFile.exists()) {
             return;
         }
 
         try {
-            Document document = XmlUtils.parseUtfXmlFile(mConfigFile, false);
+            // TODO: Switch to a pull parser!
+            Document document = XmlUtils.parseUtfXmlFile(configFile, false);
+            String baseline = document.getDocumentElement().getAttribute(ATTR_BASELINE);
+            if (!baseline.isEmpty()) {
+                baselineFile = new File(baseline.replace('/', File.separatorChar));
+                if (!baselineFile.isAbsolute()) {
+                    baselineFile = new File(project.getDir(), baselineFile.getPath());
+                }
+            }
             NodeList issues = document.getElementsByTagName(TAG_ISSUE);
             Splitter splitter = Splitter.on(',').trimResults().omitEmptyStrings();
             for (int i = 0, count = issues.getLength(); i < count; i++) {
@@ -304,7 +342,7 @@ public class DefaultConfiguration extends Configuration {
                         for (Severity severity : Severity.values()) {
                             if (value.equalsIgnoreCase(severity.name())) {
                                 for (String id : ids) {
-                                    mSeverity.put(id, severity);
+                                    this.severity.put(id, severity);
                                 }
                                 break;
                             }
@@ -344,10 +382,10 @@ public class DefaultConfiguration extends Configuration {
                                     addRegexp(idList, ids, n, regexp, false);
                                 } else {
                                     for (String id : ids) {
-                                        List<String> paths = mSuppressed.get(id);
+                                        List<String> paths = suppressed.get(id);
                                         if (paths == null) {
-                                            paths = new ArrayList<String>(n / 2 + 1);
-                                            mSuppressed.put(id, paths);
+                                            paths = new ArrayList<>(n / 2 + 1);
+                                            suppressed.put(id, paths);
                                         }
                                         paths.add(path);
                                     }
@@ -360,7 +398,7 @@ public class DefaultConfiguration extends Configuration {
         } catch (SAXParseException e) {
             formatError(e.getMessage());
         } catch (Exception e) {
-            mClient.log(e, null);
+            client.log(e, null);
         }
     }
 
@@ -412,15 +450,15 @@ public class DefaultConfiguration extends Configuration {
     private void addRegexp(@NonNull String idList, @NonNull Iterable<String> ids, int n,
             @NonNull String regexp, boolean silent) {
         try {
-            if (mRegexps == null) {
-                mRegexps = new HashMap<String, List<Pattern>>();
+            if (regexps == null) {
+                regexps = new HashMap<>();
             }
             Pattern pattern = Pattern.compile(regexp);
             for (String id : ids) {
-                List<Pattern> paths = mRegexps.get(id);
+                List<Pattern> paths = regexps.get(id);
                 if (paths == null) {
-                    paths = new ArrayList<Pattern>(n / 2 + 1);
-                    mRegexps.put(id, paths);
+                    paths = new ArrayList<>(n / 2 + 1);
+                    regexps.put(id, paths);
                 }
                 paths.add(pattern);
             }
@@ -436,41 +474,50 @@ public class DefaultConfiguration extends Configuration {
         try {
             // Write the contents to a new file first such that we don't clobber the
             // existing file if some I/O error occurs.
-            File file = new File(mConfigFile.getParentFile(),
-                    mConfigFile.getName() + ".new"); //$NON-NLS-1$
+            File file = new File(configFile.getParentFile(),
+                    configFile.getName() + ".new");
 
             Writer writer = new BufferedWriter(new FileWriter(file));
             writer.write(
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +     //$NON-NLS-1$
-                    "<lint>\n");                                         //$NON-NLS-1$
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                    "<");
+            writer.write(TAG_LINT);
 
-            if (!mSuppressed.isEmpty() || !mSeverity.isEmpty()) {
+            if (baselineFile != null) {
+                writer.write(" baseline=\"");
+                String path = project != null ?
+                        project.getRelativePath(baselineFile) : baselineFile.getPath();
+                writeAttribute(writer, ATTR_BASELINE, path.replace('\\', '/'));
+            }
+            writer.write(">\n");
+
+            if (!suppressed.isEmpty() || !severity.isEmpty()) {
                 // Process the maps in a stable sorted order such that if the
                 // files are checked into version control with the project,
                 // there are no random diffs just because hashing algorithms
                 // differ:
-                Set<String> idSet = new HashSet<String>();
-                for (String id : mSuppressed.keySet()) {
+                Set<String> idSet = new HashSet<>();
+                for (String id : suppressed.keySet()) {
                     idSet.add(id);
                 }
-                for (String id : mSeverity.keySet()) {
+                for (String id : severity.keySet()) {
                     idSet.add(id);
                 }
-                List<String> ids = new ArrayList<String>(idSet);
+                List<String> ids = new ArrayList<>(idSet);
                 Collections.sort(ids);
 
                 for (String id : ids) {
-                    writer.write("    <");                               //$NON-NLS-1$
+                    writer.write("    <");
                     writer.write(TAG_ISSUE);
                     writeAttribute(writer, ATTR_ID, id);
-                    Severity severity = mSeverity.get(id);
+                    Severity severity = this.severity.get(id);
                     if (severity != null) {
                         writeAttribute(writer, ATTR_SEVERITY,
                                 severity.name().toLowerCase(Locale.US));
                     }
 
-                    List<Pattern> regexps = mRegexps != null ? mRegexps.get(id) : null;
-                    List<String> paths = mSuppressed.get(id);
+                    List<Pattern> regexps = this.regexps != null ? this.regexps.get(id) : null;
+                    List<String> paths = suppressed.get(id);
                     if (paths != null && !paths.isEmpty()
                             || regexps != null && !regexps.isEmpty()) {
                         writer.write('>');
@@ -479,49 +526,49 @@ public class DefaultConfiguration extends Configuration {
                         // by ignore(...)
                         if (paths != null) {
                             for (String path : paths) {
-                                writer.write("        <");                   //$NON-NLS-1$
+                                writer.write("        <");
                                 writer.write(TAG_IGNORE);
                                 writeAttribute(writer, ATTR_PATH, path.replace('\\', '/'));
-                                writer.write(" />\n");                       //$NON-NLS-1$
+                                writer.write(" />\n");
                             }
                         }
                         if (regexps != null) {
                             for (Pattern regexp : regexps) {
-                                writer.write("        <");                   //$NON-NLS-1$
+                                writer.write("        <");
                                 writer.write(TAG_IGNORE);
                                 writeAttribute(writer, ATTR_REGEXP, regexp.pattern());
-                                writer.write(" />\n");                       //$NON-NLS-1$
+                                writer.write(" />\n");
                             }
                         }
-                        writer.write("    </");                          //$NON-NLS-1$
+                        writer.write("    </");
                         writer.write(TAG_ISSUE);
                         writer.write('>');
                         writer.write('\n');
                     } else {
-                        writer.write(" />\n");                           //$NON-NLS-1$
+                        writer.write(" />\n");
                     }
                 }
             }
 
-            writer.write("</lint>");                                     //$NON-NLS-1$
+            writer.write("</lint>\n");
             writer.close();
 
             // Move file into place: move current version to lint.xml~ (removing the old ~ file
             // if it exists), then move the new version to lint.xml.
-            File oldFile = new File(mConfigFile.getParentFile(),
-                    mConfigFile.getName() + '~'); //$NON-NLS-1$
+            File oldFile = new File(configFile.getParentFile(),
+                    configFile.getName() + '~');
             if (oldFile.exists()) {
                 oldFile.delete();
             }
-            if (mConfigFile.exists()) {
-                mConfigFile.renameTo(oldFile);
+            if (configFile.exists()) {
+                configFile.renameTo(oldFile);
             }
-            boolean ok = file.renameTo(mConfigFile);
+            boolean ok = file.renameTo(configFile);
             if (ok && oldFile.exists()) {
                 oldFile.delete();
             }
         } catch (Exception e) {
-            mClient.log(e, null);
+            client.log(e, null);
         }
     }
 
@@ -548,28 +595,23 @@ public class DefaultConfiguration extends Configuration {
         }
     }
 
-    /**
-     * Marks the given issue and file combination as being ignored.
-     *
-     * @param issue the issue to be ignored in the given file
-     * @param file the file to ignore the issue in
-     */
+    @Override
     public void ignore(@NonNull Issue issue, @NonNull File file) {
         ensureInitialized();
 
-        String path = mProject != null ? mProject.getRelativePath(file) : file.getPath();
+        String path = project != null ? project.getRelativePath(file) : file.getPath();
 
-        List<String> paths = mSuppressed.get(issue.getId());
+        List<String> paths = suppressed.get(issue.getId());
         if (paths == null) {
-            paths = new ArrayList<String>();
-            mSuppressed.put(issue.getId(), paths);
+            paths = new ArrayList<>();
+            suppressed.put(issue.getId(), paths);
         }
         paths.add(path);
 
         // Keep paths sorted alphabetically; makes XML output stable
         Collections.sort(paths);
 
-        if (!mBulkEditing) {
+        if (!bulkEditing) {
             writeConfig();
         }
     }
@@ -580,29 +622,45 @@ public class DefaultConfiguration extends Configuration {
 
         String id = issue.getId();
         if (severity == null) {
-            mSeverity.remove(id);
+            this.severity.remove(id);
         } else {
-            mSeverity.put(id, severity);
+            this.severity.put(id, severity);
         }
 
-        if (!mBulkEditing) {
+        if (!bulkEditing) {
             writeConfig();
         }
     }
 
     @Override
     public void startBulkEditing() {
-        mBulkEditing = true;
+        bulkEditing = true;
     }
 
     @Override
     public void finishBulkEditing() {
-        mBulkEditing = false;
+        bulkEditing = false;
         writeConfig();
     }
 
     @VisibleForTesting
     File getConfigFile() {
-        return mConfigFile;
+        return configFile;
+    }
+
+    @Override
+    @Nullable
+    public File getBaselineFile() {
+        if (baselineFile != null) {
+            if (project != null && !baselineFile.isAbsolute()) {
+                return new File(project.getDir(), baselineFile.getPath());
+            }
+        }
+        return baselineFile;
+    }
+
+    @Override
+    public void setBaselineFile(@Nullable File baselineFile) {
+        this.baselineFile = baselineFile;
     }
 }

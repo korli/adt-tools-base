@@ -23,10 +23,12 @@ import static com.android.utils.StringHelper.capitalize;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.annotations.VisibleForTesting;
 import com.android.build.api.transform.QualifiedContent;
 import com.android.build.api.transform.QualifiedContent.ContentType;
 import com.android.build.api.transform.QualifiedContent.Scope;
 import com.android.build.api.transform.Transform;
+import com.android.build.gradle.internal.InternalScope;
 import com.android.build.gradle.internal.TaskFactory;
 import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.AndroidTaskRegistry;
@@ -35,22 +37,22 @@ import com.android.build.gradle.tasks.JackPreDexTransform;
 import com.android.builder.core.ErrorReporter;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.SyncIssue;
+import com.android.builder.profile.Recorder;
 import com.android.utils.FileUtils;
 import com.android.utils.StringHelper;
+import com.google.common.base.CaseFormat;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
+import java.io.File;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
-
-import java.io.File;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 
 /**
  * Manages the transforms for a variant.
@@ -75,12 +77,19 @@ public class TransformManager extends FilterableStreamCollection {
     public static final Set<ContentType> CONTENT_DEX = ImmutableSet.of(
             ExtendedContentType.DEX);
     public static final Set<ContentType> CONTENT_JACK = ImmutableSet.of(JACK);
+    public static final Set<ContentType> DATA_BINDING_ARTIFACT = ImmutableSet.of(
+            ExtendedContentType.DATA_BINDING, CLASSES);
     public static final Set<Scope> SCOPE_FULL_PROJECT = Sets.immutableEnumSet(
             Scope.PROJECT,
             Scope.PROJECT_LOCAL_DEPS,
             Scope.SUB_PROJECTS,
             Scope.SUB_PROJECTS_LOCAL_DEPS,
             Scope.EXTERNAL_LIBRARIES);
+    public static final Set<QualifiedContent.ScopeType> SCOPE_FULL_INSTANT_RUN_PROJECT =
+            new ImmutableSet.Builder<QualifiedContent.ScopeType>()
+                    .addAll(SCOPE_FULL_PROJECT)
+                    .add(InternalScope.MAIN_SPLIT)
+                    .build();
     public static final Set<Scope> SCOPE_FULL_LIBRARY = Sets.immutableEnumSet(
             Scope.PROJECT,
             Scope.PROJECT_LOCAL_DEPS);
@@ -107,12 +116,15 @@ public class TransformManager extends FilterableStreamCollection {
     private final List<TransformStream> streams = Lists.newArrayList();
     @NonNull
     private final List<Transform> transforms = Lists.newArrayList();
+    @NonNull private final Recorder recorder;
 
     public TransformManager(
             @NonNull AndroidTaskRegistry taskRegistry,
-            @NonNull ErrorReporter errorReporter) {
+            @NonNull ErrorReporter errorReporter,
+            @NonNull Recorder recorder) {
         this.taskRegistry = taskRegistry;
         this.errorReporter = errorReporter;
+        this.recorder = recorder;
         this.logger = Logging.getLogger(TransformManager.class);
 
     }
@@ -139,10 +151,11 @@ public class TransformManager extends FilterableStreamCollection {
      * @param scope the current scope
      * @param transform the transform to add
      * @param <T> the type of the transform
-     * @return the AndroidTask for the given transform task or null if it cannot be created.
+     * @return {@code Optional<AndroidTask<Transform>>} containing the AndroidTask if it was able to
+     *     create it
      */
-    @Nullable
-    public <T extends Transform> AndroidTask<TransformTask> addTransform(
+    @NonNull
+    public <T extends Transform> Optional<AndroidTask<TransformTask>> addTransform(
             @NonNull TaskFactory taskFactory,
             @NonNull TransformVariantScope scope,
             @NonNull T transform) {
@@ -163,10 +176,11 @@ public class TransformManager extends FilterableStreamCollection {
      * @param transform the transform to add
      * @param callback a callback that is run when the task is actually configured
      * @param <T> the type of the transform
-     * @return the AndroidTask for the given transform task or null if it cannot be created.
+     * @return {@code Optional<AndroidTask<Transform>>} containing the AndroidTask for the given
+     *     transform task if it was able to create it
      */
-    @Nullable
-    public <T extends Transform> AndroidTask<TransformTask> addTransform(
+    @NonNull
+    public <T extends Transform> Optional<AndroidTask<TransformTask>> addTransform(
             @NonNull TaskFactory taskFactory,
             @NonNull TransformVariantScope scope,
             @NonNull T transform,
@@ -175,7 +189,7 @@ public class TransformManager extends FilterableStreamCollection {
         if (!validateTransform(transform)) {
             // validate either throws an exception, or records the problem during sync
             // so it's safe to just return null here.
-            return null;
+            return Optional.empty();
         }
 
         List<TransformStream> inputStreams = Lists.newArrayList();
@@ -202,7 +216,7 @@ public class TransformManager extends FilterableStreamCollection {
                             transform.getName(), scope.getFullVariantName(),
                             transform.getScopes(), transform.getReferencedScopes(),
                             transform.getInputTypes()));
-            return null;
+            return Optional.empty();
         }
 
         //noinspection PointlessBooleanExpression
@@ -224,16 +238,18 @@ public class TransformManager extends FilterableStreamCollection {
         transforms.add(transform);
 
         // create the task...
-        AndroidTask<TransformTask> task = taskRegistry.create(
-                taskFactory,
-                new TransformTask.ConfigAction<>(
-                        scope.getFullVariantName(),
-                        taskName,
-                        transform,
-                        inputStreams,
-                        referencedStreams,
-                        outputStream,
-                        callback));
+        AndroidTask<TransformTask> task =
+                taskRegistry.create(
+                        taskFactory,
+                        new TransformTask.ConfigAction<>(
+                                scope.getFullVariantName(),
+                                taskName,
+                                transform,
+                                inputStreams,
+                                referencedStreams,
+                                outputStream,
+                                recorder,
+                                callback));
 
         for (TransformStream s : inputStreams) {
             task.dependsOn(taskFactory, s.getDependencies());
@@ -242,7 +258,7 @@ public class TransformManager extends FilterableStreamCollection {
             task.dependsOn(taskFactory, s.getDependencies());
         }
 
-        return task;
+        return Optional.ofNullable(task);
     }
 
     @Override
@@ -251,20 +267,23 @@ public class TransformManager extends FilterableStreamCollection {
         return streams;
     }
 
+    @VisibleForTesting
     @NonNull
-    private static String getTaskNamePrefix(@NonNull Transform transform) {
+    static String getTaskNamePrefix(@NonNull Transform transform) {
         StringBuilder sb = new StringBuilder(100);
         sb.append("transform");
 
-        Iterator<ContentType> iterator = transform.getInputTypes().iterator();
-        // there's always at least one
-        sb.append(capitalize(iterator.next().name().toLowerCase(Locale.getDefault())));
-        while (iterator.hasNext()) {
-            sb.append("And").append(capitalize(
-                    iterator.next().name().toLowerCase(Locale.getDefault())));
-        }
-
-        sb.append("With").append(capitalize(transform.getName())).append("For");
+        sb.append(
+                transform.getInputTypes()
+                        .stream()
+                        .map(inputType ->
+                                CaseFormat.UPPER_UNDERSCORE.to(
+                                        CaseFormat.UPPER_CAMEL, inputType.name()))
+                        .sorted() // Keep the order stable.
+                        .collect(Collectors.joining("And")))
+                .append("With")
+                .append(capitalize(transform.getName()))
+                .append("For");
 
         return sb.toString();
     }
@@ -292,7 +311,7 @@ public class TransformManager extends FilterableStreamCollection {
             @NonNull String taskName,
             @NonNull File buildDir) {
 
-        Set<Scope> requestedScopes = transform.getScopes();
+        Set<? super Scope> requestedScopes = transform.getScopes();
         if (requestedScopes.isEmpty()) {
             // this is a no-op transform.
             return null;
@@ -310,11 +329,11 @@ public class TransformManager extends FilterableStreamCollection {
             // sure that the content of the stream is usable (for instance when a stream
             // may contain two scopes, these scopes could be combined or not, impacting consumption)
             Set<ContentType> availableTypes = stream.getContentTypes();
-            Set<Scope> availableScopes = stream.getScopes();
+            Set<? super Scope> availableScopes = stream.getScopes();
 
             Set<ContentType> commonTypes = Sets.intersection(requestedTypes,
                     availableTypes);
-            Set<Scope> commonScopes = Sets.intersection(requestedScopes, availableScopes);
+            Set<? super Scope> commonScopes = Sets.intersection(requestedScopes, availableScopes);
             if (!commonTypes.isEmpty() && !commonScopes.isEmpty()) {
 
                 // check if we need to make another stream from this one with less scopes/types.
@@ -325,7 +344,7 @@ public class TransformManager extends FilterableStreamCollection {
                     // now we'll have a second stream, that's left for consumption later on.
                     // compute remaining scopes/types.
                     Sets.SetView<ContentType> remainingTypes = Sets.difference(availableTypes, commonTypes);
-                    Sets.SetView<Scope> remainingScopes = Sets.difference(availableScopes, commonScopes);
+                    Sets.SetView<? super Scope> remainingScopes = Sets.difference(availableScopes, commonScopes);
 
                     oldStreams.add(stream.makeRestrictedCopy(
                             remainingTypes.isEmpty() ? availableTypes : remainingTypes.immutableCopy(),
@@ -370,7 +389,7 @@ public class TransformManager extends FilterableStreamCollection {
 
     @NonNull
     private List<TransformStream> grabReferencedStreams(@NonNull Transform transform) {
-        Set<Scope> requestedScopes = transform.getReferencedScopes();
+        Set<? super Scope> requestedScopes = transform.getReferencedScopes();
         if (requestedScopes.isEmpty()) {
             return ImmutableList.of();
         }
@@ -385,11 +404,11 @@ public class TransformManager extends FilterableStreamCollection {
             // usable (for instance when a stream
             // may contain two scopes, these scopes could be combined or not, impacting consumption)
             Set<ContentType> availableTypes = stream.getContentTypes();
-            Set<Scope> availableScopes = stream.getScopes();
+            Set<? super Scope> availableScopes = stream.getScopes();
 
             Set<ContentType> commonTypes = Sets.intersection(requestedTypes,
                     availableTypes);
-            Set<Scope> commonScopes = Sets.intersection(requestedScopes, availableScopes);
+            Set<? super Scope> commonScopes = Sets.intersection(requestedScopes, availableScopes);
 
             if (!commonTypes.isEmpty() && !commonScopes.isEmpty()) {
                 streamMatches.add(stream);
@@ -407,7 +426,7 @@ public class TransformManager extends FilterableStreamCollection {
         }
 
         // check some scopes are not consumed.
-        Set<Scope> scopes = transform.getScopes();
+        Set<? super Scope> scopes = transform.getScopes();
         // Allow Jack transform to consume provided classes as the .jack files are needed.
         if (scopes.contains(Scope.PROVIDED_ONLY) && !isJackRuntimeLib(transform)) {
             errorReporter.handleSyncError(null, SyncIssue.TYPE_GENERIC,

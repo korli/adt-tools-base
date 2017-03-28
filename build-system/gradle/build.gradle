@@ -1,16 +1,20 @@
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
 apply plugin: 'groovy'
 apply plugin: 'clone-artifacts'
 apply plugin: 'idea'
-apply plugin: 'jacoco'
+apply plugin: 'jacoco-tools-base'
 apply plugin: 'license-report'
 
 dependencies {
     compile project(':base:gradle-core')
     compile gradleApi()
 
-    testCompile 'junit:junit:4.12'
-    testCompile 'com.google.truth:truth:0.28'
     testCompile project(':base:project-test-lib')
+    testCompile project(':base:testutils')
+    testCompile libs.junit
+    testCompile libs.truth
 }
 
 group = 'com.android.tools.build'
@@ -24,40 +28,17 @@ apply from: "$rootDir/buildSrc/base/publish.gradle"
 apply from: "$rootDir/buildSrc/base/bintray.gradle"
 
 jar.manifest.attributes("Plugin-Version": version)
-jar.manifest.attributes("Inception-Date":"${Calendar.getInstance().get(Calendar.YEAR)}:" +
-        "${Calendar.getInstance().get(Calendar.MONTH)}:${Calendar.getInstance().get(Calendar.DATE)}")
+jar.manifest.attributes("Inception-Date": DateTimeFormatter.ISO_LOCAL_DATE.format(LocalDate.now()));
 
+def generated = new File("${project.buildDir}/generated/resources")
+sourceSets.main.resources.srcDir generated
 
-def generated = new File("${project.buildDir}/generated/java")
-sourceSets {
-    main {
-        java {
-            srcDir generated
-        }
-    }
+task copyVersionProperties(type: Copy) {
+    from project.file("$rootDir/buildSrc/base/version.properties")
+    into project.file("$generated/com/android/build/gradle/internal")
 }
 
-def pluginVersion = rootProject.ext.buildVersion;
-def componentPluginVersion = rootProject.ext.experimentalVersion;
-task generateVersionConstantsJava {
-    inputs.property("pluginVersion", pluginVersion)
-    inputs.property("componentPluginVersion", componentPluginVersion)
-    ext.versionFile = new File(generated, "com/android/build/gradle/internal/Version.java")
-    outputs.file(versionFile)
-}
-generateVersionConstantsJava << {
-    versionFile.parentFile.mkdirs()
-    versionFile.text = """
-package com.android.build.gradle.internal;
-
-public final class Version {
-    private Version() {}
-    public static final String ANDROID_GRADLE_PLUGIN_VERSION = "$pluginVersion";
-    public static final String ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION = "$componentPluginVersion";
-}
-"""
-}
-tasks.compileJava.dependsOn generateVersionConstantsJava
+tasks.compileJava.dependsOn copyVersionProperties
 
 test {
     environment("CUSTOM_REPO", rootProject.file("../out/repo"))
@@ -69,23 +50,22 @@ test {
     maxParallelForks = Runtime.runtime.availableProcessors() / 2
 }
 
-groovydoc {
+javadoc {
     exclude     "**/internal/**"
-    includePrivate false
 
-    docTitle "Gradle Plugin for Android"
-    header ""
-    footer "Copyright (C) 2012 The Android Open Source Project"
-    overview ""
+    options.docTitle "Gradle Plugin for Android"
+    options.header ""
+    options.footer "Copyright (C) 2012 The Android Open Source Project"
 }
 
-task javadocJar(type: Jar, dependsOn:groovydoc) {
+task javadocJar(type: Jar, dependsOn:javadoc) {
     classifier  'javadoc'
-    from        groovydoc.destinationDir
+    from        javadoc.destinationDir
+
 }
 
 // Only package JavaDoc if using --init-script=buildSrc/base/release.gradle
-if (project.has("release")) {
+if (project.hasProperty("release")) {
   artifacts {
     archives javadocJar
   }

@@ -32,6 +32,7 @@ import org.junit.experimental.categories.Category
 
 import static com.android.builder.core.VariantType.ANDROID_TEST
 import static com.android.builder.model.AndroidProject.ARTIFACT_ANDROID_TEST
+import static org.junit.Assert.assertEquals
 import static org.junit.Assert.assertFalse
 import static org.junit.Assert.assertNotNull
 
@@ -49,7 +50,7 @@ class MigratedTest {
 
     @BeforeClass
     static void setUp() {
-        model = project.executeAndReturnModel("clean", "assembleDebug")
+        model = project.executeAndReturnModel("clean", "assembleDebug").getOnlyModel()
     }
 
     @AfterClass
@@ -63,6 +64,7 @@ class MigratedTest {
         File projectDir = project.getTestDir()
 
         assertFalse("Library Project", model.isLibrary())
+        assertEquals("Project Type", AndroidProject.PROJECT_TYPE_APP, model.getProjectType())
 
         ProductFlavorContainer defaultConfig = model.getDefaultConfig()
 
@@ -79,7 +81,6 @@ class MigratedTest {
 
         SourceProviderContainer testSourceProviderContainer = ModelHelper.getSourceProviderContainer(
                 defaultConfig.getExtraSourceProviders(), ARTIFACT_ANDROID_TEST)
-        assertNotNull("InstrumentTest source Providers null-check", testSourceProviderContainer)
 
         new SourceProviderHelper(model.getName(), projectDir,
                 ANDROID_TEST.prefix, testSourceProviderContainer.getSourceProvider())

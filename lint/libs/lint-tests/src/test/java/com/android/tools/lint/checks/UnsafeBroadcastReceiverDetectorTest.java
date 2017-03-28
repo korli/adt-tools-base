@@ -18,29 +18,23 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_NAME;
-import static com.android.tools.lint.checks.UnsafeBroadcastReceiverDetector.PROTECTED_BROADCASTS;
 
 import com.android.annotations.Nullable;
-import com.android.testutils.TestUtils;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.utils.XmlUtils;
 import com.google.common.base.Charsets;
-import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
+import java.io.File;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
 
 @SuppressWarnings({"javadoc", "ClassNameDiffersFromFileName", "StatementWithEmptyBody",
         "MethodMayBeStatic"})
@@ -52,19 +46,11 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
 
     public void testBroken() throws Exception {
         assertEquals(""
-                + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares "
-                + "an intent-filter for a protected broadcast action string, which can only be "
-                + "sent by the system, not third-party applications. However, the receiver's "
-                + "onReceive method does not appear to call getAction to ensure that the "
-                + "received Intent's action string matches the expected value, potentially "
-                + "making it possible for another actor to send a spoofed intent with no "
-                + "action string or a different action string and cause undesired "
-                + "behavior. [UnsafeProtectedBroadcastReceiver]\n"
+                + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares an intent-filter for a protected broadcast action string, which can only be sent by the system, not third-party applications. However, the receiver's onReceive method does not appear to call getAction to ensure that the received Intent's action string matches the expected value, potentially making it possible for another actor to send a spoofed intent with no action string or a different action string and cause undesired behavior. [UnsafeProtectedBroadcastReceiver]\n"
                 + "    public void onReceive(Context context, Intent intent) {\n"
                 + "                ~~~~~~~~~\n"
                 + "0 errors, 1 warnings\n",
             lintProject(
-                    copy("res/values/strings.xml"),
                     xml("AndroidManifest.xml", ""
                             + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                             + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
@@ -114,16 +100,12 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
     }
 
     public void testBroken2() throws Exception {
-        assertEquals(
-                "AndroidManifest.xml:12: Warning: BroadcastReceivers that declare an " +
-                "intent-filter for SMS_DELIVER or SMS_RECEIVED must ensure that the caller has " +
-                "the BROADCAST_SMS permission, otherwise it is possible for malicious actors to " +
-                "spoof intents. [UnprotectedSMSBroadcastReceiver]\n" +
-                "        <receiver\n" +
-                "        ^\n" +
-                "0 errors, 1 warnings\n",
+        assertEquals(""
+                + "AndroidManifest.xml:12: Warning: BroadcastReceivers that declare an intent-filter for SMS_DELIVER or SMS_RECEIVED must ensure that the caller has the BROADCAST_SMS permission, otherwise it is possible for malicious actors to spoof intents. [UnprotectedSMSBroadcastReceiver]\n"
+                + "        <receiver\n"
+                + "        ^\n"
+                + "0 errors, 1 warnings\n",
             lintProject(
-                    copy("res/values/strings.xml"),
                     xml("AndroidManifest.xml", ""
                             + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                             + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
@@ -152,21 +134,11 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
 
     public void testReferencesIntentVariable() throws Exception {
         assertEquals(""
-                + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares "
-                + "an intent-filter for a protected broadcast action string, which can only be "
-                + "sent by the system, not third-party applications. However, the receiver's "
-                + "onReceive method does not appear to call getAction to ensure that the "
-                + "received Intent's action string matches the expected value, potentially "
-                + "making it possible for another actor to send a spoofed intent with no action "
-                + "string or a different action string and cause undesired behavior. In this "
-                + "case, it is possible that the onReceive method passed the received Intent "
-                + "to another method that checked the action string. If so, this finding can "
-                + "safely be ignored. [UnsafeProtectedBroadcastReceiver]\n"
+                + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares an intent-filter for a protected broadcast action string, which can only be sent by the system, not third-party applications. However, the receiver's onReceive method does not appear to call getAction to ensure that the received Intent's action string matches the expected value, potentially making it possible for another actor to send a spoofed intent with no action string or a different action string and cause undesired behavior. In this case, it is possible that the onReceive method passed the received Intent to another method that checked the action string. If so, this finding can safely be ignored. [UnsafeProtectedBroadcastReceiver]\n"
                 + "    public void onReceive(Context context, Intent intent) {\n"
                 + "                ~~~~~~~~~\n"
                 + "0 errors, 1 warnings\n",
                 lintProject(
-                        copy("res/values/strings.xml"),
                         xml("AndroidManifest.xml", ""
                                 + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
@@ -290,23 +262,15 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
         if (expected == null) {
             return;
         }
-        List<String> actual = Arrays.asList(PROTECTED_BROADCASTS);
-        if (!expected.equals(actual)) {
-            System.out.println("Correct list of broadcasts:");
-            for (String name : expected) {
-                System.out.println("            \"" + name + "\",");
-            }
-            fail("List of protected broadcast names has changed:\n" +
-                    // Make the diff show what it take to bring the actual results into the
-                    // expected results
-                    TestUtils.getDiff(Joiner.on('\n').join(actual),
-                            Joiner.on('\n').join(expected)));
+        System.out.println("Current list of broadcasts:");
+        for (String name : expected) {
+            System.out.println("            case \"" + name + "\":");
         }
     }
 
     @Nullable
     private static List<String> getProtectedBroadcasts() throws IOException {
-        String top = System.getenv("ANDROID_BUILD_TOP");   //$NON-NLS-1$
+        String top = System.getenv("ANDROID_BUILD_TOP");
 
         // TODO: We should ship this file with the SDK!
         File file = new File(top, "frameworks/base/core/res/AndroidManifest.xml");

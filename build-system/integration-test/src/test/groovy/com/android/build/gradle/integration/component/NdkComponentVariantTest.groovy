@@ -17,18 +17,21 @@
 package com.android.build.gradle.integration.component
 
 import com.android.build.gradle.integration.common.category.DeviceTests
+import com.android.build.gradle.integration.common.fixture.Adb
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp
 import com.android.build.gradle.integration.common.utils.DeviceHelper
 import com.android.builder.core.BuilderConstants
+import com.android.builder.model.AndroidProject
 import groovy.transform.CompileStatic
 import org.junit.AfterClass
 import org.junit.BeforeClass
 import org.junit.ClassRule
+import org.junit.Rule
 import org.junit.Test
 import org.junit.experimental.categories.Category
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 import static com.google.common.truth.Truth.assertThat
 
 /**
@@ -42,6 +45,9 @@ class NdkComponentVariantTest {
             .fromTestApp(new HelloWorldJniApp())
             .useExperimentalGradleVersion(true)
             .create()
+
+    @Rule
+    public Adb adb = new Adb();
 
     @BeforeClass
     public static void setUp() {
@@ -146,6 +152,7 @@ model {
     @Test
     @Category(DeviceTests.class)
     public void connectedAndroidTest() {
+        adb.exclusiveAccess();
         if (GradleTestProject.DEVICE_PROVIDER_NAME.equals(BuilderConstants.CONNECTED)) {
             Collection<String> abis = DeviceHelper.getDeviceAbis()
             if (abis.contains("x86")) {
@@ -156,5 +163,16 @@ model {
         } else {
             project.execute(GradleTestProject.DEVICE_PROVIDER_NAME + "X86DebugAndroidTest")
         }
+    }
+
+    // http://b.android.com/233421
+    @Test
+    void testBuildWithSpecificAbi() {
+        project.executor()
+                .withProperty(AndroidProject.PROPERTY_BUILD_ABI, "x86")
+                .run("assembleDebug")
+
+        File apk = project.getApk("x86", "debug")
+        assertThatZip(apk).contains("lib/x86/libhello-jni.so")
     }
 }

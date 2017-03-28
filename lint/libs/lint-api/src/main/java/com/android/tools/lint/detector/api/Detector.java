@@ -24,15 +24,32 @@ import com.android.tools.lint.client.api.JavaParser.ResolvedClass;
 import com.android.tools.lint.client.api.JavaParser.ResolvedMethod;
 import com.android.tools.lint.client.api.LintDriver;
 import com.google.common.annotations.Beta;
-import com.intellij.psi.*;
-import lombok.ast.*;
-import org.objectweb.asm.tree.*;
+import com.intellij.psi.JavaElementVisitor;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiTypeParameter;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import lombok.ast.AstVisitor;
+import lombok.ast.ClassDeclaration;
+import lombok.ast.ConstructorInvocation;
+import lombok.ast.MethodInvocation;
+import lombok.ast.Node;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
-
-import java.io.File;
-import java.util.*;
 
 /**
  * A detector is able to find a particular problem (or a set of related problems).
@@ -228,8 +245,9 @@ public abstract class Detector {
 
         /**
          * Returns a list of fully qualified names for super classes that this
-         * detector cares about. If not null, this detector will *only* be called
-         * if the current class is a subclass of one of the specified superclasses.
+         * detector cares about. If not null, this detector will be called if
+         * the current class is a subclass of one of the specified
+         * superclasses.
          *
          * @return a list of fully qualified names
          */
@@ -406,7 +424,7 @@ public abstract class Detector {
     public interface JavaPsiScanner  {
         /**
          * Create a parse tree visitor to process the parse tree. All
-         * {@link JavaScanner} detectors must provide a visitor, unless they
+         * {@link JavaPsiScanner} detectors must provide a visitor, unless they
          * either return true from {@link #appliesToResourceRefs()} or return
          * non null from {@link #getApplicableMethodNames()}.
          * <p>
@@ -852,7 +870,7 @@ public abstract class Detector {
          * invoked on all elements or all attributes
          */
         @NonNull
-        List<String> ALL = new ArrayList<String>(0); // NOT Collections.EMPTY!
+        List<String> ALL = new ArrayList<>(0); // NOT Collections.EMPTY!
         // We want to distinguish this from just an *empty* list returned by the caller!
     }
 
@@ -898,7 +916,7 @@ public abstract class Detector {
      * @param file the file in the context to check
      * @return true if this detector applies to the given context and file
      */
-    @Deprecated // Slated for removal in lint 2.0
+    @Deprecated // Slated for removal in lint 2.0 - this method isn't used
     public boolean appliesTo(@NonNull Context context, @NonNull File file) {
         return false;
     }
@@ -1110,11 +1128,6 @@ public abstract class Detector {
     }
 
     // ---- Dummy implementations to make implementing an OtherFileScanner easier: ----
-
-    @SuppressWarnings({"UnusedParameters", "unused"})
-    public boolean appliesToFolder(@NonNull Scope scope, @Nullable ResourceFolderType folderType) {
-        return false;
-    }
 
     @NonNull
     public EnumSet<Scope> getApplicableFiles() {

@@ -40,6 +40,7 @@ import com.android.annotations.Nullable;
 import com.android.builder.model.AndroidLibrary;
 import com.android.builder.model.MavenCoordinates;
 import com.android.ide.common.repository.ResourceVisibilityLookup;
+import com.android.ide.common.res2.AbstractResourceRepository;
 import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
@@ -57,18 +58,21 @@ import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.google.common.collect.Lists;
 import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiElement;
-
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiReferenceExpression;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
-import java.io.File;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
 
 /**
  * Check which looks for access of private resources.
@@ -87,7 +91,7 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
 
     /** The main issue discovered by this detector */
     public static final Issue ISSUE = Issue.create(
-            "PrivateResource", //$NON-NLS-1$
+            "PrivateResource",
             "Using private resources",
 
             "Private resources should not be referenced; the may not be present everywhere, and " +
@@ -99,6 +103,9 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
             3,
             Severity.WARNING,
             IMPLEMENTATION);
+
+    /** List of resource URLs overriding private resources locally */
+    private List<String> overriding;
 
     /** Constructs a new detector */
     public PrivateResourceDetector() {
@@ -119,6 +126,35 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
             Project project = context.getProject();
             if (project.getGradleProjectModel() != null && project.getCurrentVariant() != null) {
                 if (isPrivate(context, resourceType, name)) {
+                    // See if it's a local package reference
+                    boolean foreignPackage = false;
+                    if (node instanceof PsiReferenceExpression) {
+                        PsiElement resolved = ((PsiReferenceExpression)node).resolve();
+                        if (resolved instanceof PsiField) {
+                            PsiPackage pkg = context.getEvaluator().getPackage(resolved);
+                            if (pkg != null) {
+                                String pkgName = pkg.getQualifiedName();
+                                if (!(pkgName.equals(context.getProject().getPackage())
+                                    || pkgName.equals(context.getMainProject().getPackage()))) {
+                                    foreignPackage = true;
+                                }
+                            }
+                        }
+                    }
+
+                    // See if this is resource we're overriding locally
+                    if (!foreignPackage) {
+                        AbstractResourceRepository repository =
+                          context.getClient().getResourceRepository(context.getMainProject(), true, false);
+                        if (repository != null && repository.hasResourceItem(resourceType, name)) {
+                            return;
+                        }
+
+                        if (overriding != null && overriding.contains(resourceType + ":" + name)) {
+                            return;
+                        }
+                    }
+
                     String message = createUsageErrorMessage(context, resourceType, name);
                     context.report(ISSUE, node, context.getLocation(node), message);
                 }
@@ -172,18 +208,24 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
                         if (type == null || type.isEmpty()) {
                             type = RESOURCE_CLZ_ID;
                         }
-                    } else if (type.equals("declare-styleable")) {   //$NON-NLS-1$
+                    } else if (type.equals("declare-styleable")) {
                         type = RESOURCE_CLR_STYLEABLE;
-                    } else if (type.contains("array")) {             //$NON-NLS-1$
+                    } else if (type.contains("array")) {
                         // <string-array> etc
                         type = RESOURCE_CLZ_ARRAY;
                     }
                     ResourceType t = ResourceType.getEnum(type);
-                    if (t != null && isPrivate(context, t, name) &&
-                            !VALUE_TRUE.equals(item.getAttributeNS(TOOLS_URI, ATTR_OVERRIDE))) {
-                        String message = createOverrideErrorMessage(context, t, name);
-                        Location location = context.getValueLocation(nameAttribute);
-                        context.report(ISSUE, nameAttribute, location, message);
+                    if (t != null && isPrivate(context, t, name)) {
+                        if (overriding == null) {
+                            overriding = Lists.newArrayList();
+                        }
+                        overriding.add(type + ":" + name);
+
+                        if (!VALUE_TRUE.equals(item.getAttributeNS(TOOLS_URI, ATTR_OVERRIDE))) {
+                            String message = createOverrideErrorMessage(context, t, name);
+                            Location location = context.getValueLocation(nameAttribute);
+                            context.report(ISSUE, nameAttribute, location, message);
+                        }
                     }
                 }
             }

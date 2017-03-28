@@ -19,11 +19,6 @@ package com.android.tools.lint.checks;
 import com.android.annotations.NonNull;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.Scope;
-
-import junit.framework.TestCase;
-
-import org.jetbrains.annotations.NotNull;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -35,6 +30,7 @@ import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import junit.framework.TestCase;
 
 public class BuiltinIssueRegistryTest extends TestCase {
     public void testNoListResize() {
@@ -63,7 +59,7 @@ public class BuiltinIssueRegistryTest extends TestCase {
 
     public void testUnique() {
         // Check that ids are unique
-        Set<String> ids = new HashSet<String>();
+        Set<String> ids = new HashSet<>();
         for (Issue issue : new BuiltinIssueRegistry().getIssues()) {
             String id = issue.getId();
             assertTrue("Duplicate id " + id, !ids.contains(id));
@@ -113,7 +109,7 @@ public class BuiltinIssueRegistryTest extends TestCase {
                 // the field would have been initialized and other threads could
                 // skip the whole locked region.
                 return new ArrayList<Issue>() {
-                    @NotNull
+                    @NonNull
                     @Override
                     public Iterator<Issue> iterator() {
                         try {

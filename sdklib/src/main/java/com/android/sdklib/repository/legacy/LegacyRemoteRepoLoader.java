@@ -18,6 +18,7 @@ package com.android.sdklib.repository.legacy;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
+import com.android.prefs.AndroidLocation;
 import com.android.repository.Revision;
 import com.android.repository.api.Channel;
 import com.android.repository.api.ConsoleProgressIndicator;
@@ -56,7 +57,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 
@@ -84,11 +84,13 @@ public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
 
     /**
      * Gets or creates a {@link DownloadCache} using the settings from our {@link
-     * SettingsController}.
+     * SettingsController} and {@link AndroidLocation}.
      */
-    private DownloadCache getDownloadCache() {
+    private DownloadCache getDownloadCache(@NonNull SettingsController settings) {
         if (mDownloadCache == null) {
-            mDownloadCache = new DownloadCache(DownloadCache.Strategy.FRESH_CACHE);
+            mDownloadCache =
+                    DownloadCache.inUserHome(
+                            FileOpUtils.create(), DownloadCache.Strategy.FRESH_CACHE, settings);
         }
         return mDownloadCache;
     }
@@ -113,7 +115,7 @@ public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
             }
             if (legacySource != null) {
                 legacySource
-                        .load(getDownloadCache(), new TaskMonitorProgressIndicatorAdapter(progress),
+                        .load(getDownloadCache(settings), new TaskMonitorProgressIndicatorAdapter(progress),
                                 settings.getForceHttp());
                 if (legacySource.getFetchError() != null) {
                     progress.logInfo(legacySource.getFetchError());
@@ -214,7 +216,7 @@ public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
         @NonNull
         @Override
         public CommonFactory createFactory() {
-            return (CommonFactory) AndroidSdkHandler.getCommonModule().createLatestFactory();
+            return RepoManager.getCommonModule().createLatestFactory();
         }
 
         @NonNull
@@ -269,8 +271,7 @@ public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
             for (com.android.sdklib.repository.legacy.remote.internal.archives.Archive archive : mWrapped
                     .getArchives()) {
                 if (archive.isCompatible()) {
-                    CommonFactory f = (CommonFactory) RepoManager.getCommonModule()
-                            .createLatestFactory();
+                    CommonFactory f = RepoManager.getCommonModule().createLatestFactory();
                     Archive arch = f.createArchiveType();
                     Archive.CompleteType complete = f.createCompleteType();
                     complete.setChecksum(archive.getChecksum());

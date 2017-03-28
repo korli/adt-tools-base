@@ -27,7 +27,7 @@ import com.android.build.gradle.internal.pipeline.TransformTask;
 import com.android.build.gradle.internal.tasks.CheckManifest;
 import com.android.build.gradle.internal.tasks.GenerateApkDataTask;
 import com.android.build.gradle.internal.tasks.PrepareDependenciesTask;
-import com.android.build.gradle.internal.tasks.databinding.DataBindingExportBuildInfoTask;
+import com.android.build.gradle.internal.tasks.ResolveDependenciesTask;
 import com.android.build.gradle.internal.tasks.databinding.DataBindingProcessLayoutsTask;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.BaseVariantOutputData;
@@ -41,17 +41,17 @@ import com.android.build.gradle.tasks.MergeSourceSetFolders;
 import com.android.build.gradle.tasks.ProcessAndroidResources;
 import com.android.build.gradle.tasks.RenderscriptCompile;
 import com.android.build.gradle.tasks.ShaderCompile;
+import com.android.builder.dependency.level2.AtomDependency;
+import com.android.builder.model.AndroidAtom;
 import com.android.builder.model.ApiVersion;
-
+import java.io.File;
+import java.util.Collection;
+import java.util.List;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Task;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.Sync;
 import org.gradle.api.tasks.compile.JavaCompile;
-
-import java.io.File;
-import java.util.Collection;
-import java.util.List;
 
 /**
  * A scope containing data for a specific variant.
@@ -103,9 +103,11 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     @NonNull
     File getDexOutputFolder();
 
+    @NonNull
+    File getDexOutputFolder(@NonNull AtomDependency androidAtom);
+
     @Nullable
     BaseVariantData getTestedVariantData();
-
 
     @NonNull
     File getInstantRunSplitApkOutputFolder();
@@ -117,10 +119,10 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getJavaOutputDir();
 
     @NonNull
-    Iterable<File> getJavaOutputs();
+    File getJavaOutputDir(@NonNull AtomDependency androidAtom);
 
     @NonNull
-    File getJavaDependencyCache();
+    Iterable<File> getJavaOutputs();
 
     @NonNull
     File getPreDexOutputDir();
@@ -166,6 +168,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getResourceBlameLogDir();
 
     @NonNull
+    File getResourceBlameLogDir(@NonNull AtomDependency androidAtom);
+
+    @NonNull
     File getMergeAssetsOutputDir();
 
     @NonNull
@@ -200,6 +205,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
 
     @NonNull
     File getRClassSourceOutputDir();
+
+    @NonNull
+    File getRClassSourceOutputDir(@NonNull AtomDependency atomDependency);
 
     @NonNull
     File getAidlSourceOutputDir();
@@ -247,7 +255,13 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getLayoutFolderOutputForDataBinding();
 
     @NonNull
+    File getBuildFolderForDataBindingCompiler();
+
+    @NonNull
     File getGeneratedClassListOutputFileForDataBinding();
+
+    @NonNull
+    File getBundleFolderForDataBinding();
 
     @NonNull
     File getProguardOutputFolder();
@@ -270,6 +284,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     List<File> getPackageSplitAbiOutputFiles();
 
     @NonNull
+    File getPackageAtom(@NonNull AtomDependency androidAtom);
+
+    @NonNull
     File getAaptFriendlyManifestOutputFile();
 
     @NonNull
@@ -288,7 +305,13 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getBaseBundleDir();
 
     @NonNull
+    File getOutputBundleFile();
+
+    @NonNull
     File getAnnotationProcessorOutputDir();
+
+    @NonNull
+    File getMainJarOutputDir();
 
     AndroidTask<DefaultTask> getAssembleTask();
 
@@ -301,6 +324,11 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     AndroidTask<PrepareDependenciesTask> getPrepareDependenciesTask();
 
     void setPrepareDependenciesTask(AndroidTask<PrepareDependenciesTask> prepareDependenciesTask);
+
+    @Nullable
+    AndroidTask<ResolveDependenciesTask> getResolveDependenciesTask();
+
+    void setResolveDependenciesTask(AndroidTask<ResolveDependenciesTask> resolveDependenciesTask);
 
     AndroidTask<ProcessAndroidResources> getGenerateRClassTask();
 
@@ -358,16 +386,15 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     void setGenerateResValuesTask(AndroidTask<GenerateResValues> generateResValuesTask);
 
     @Nullable
-    AndroidTask<DataBindingExportBuildInfoTask> getDataBindingExportInfoTask();
-
-    void setDataBindingExportInfoTask(
-            @Nullable AndroidTask<DataBindingExportBuildInfoTask> dataBindingExportInfoTask);
-
-    @Nullable
     AndroidTask<DataBindingProcessLayoutsTask> getDataBindingProcessLayoutsTask();
 
     void setDataBindingProcessLayoutsTask(
             @Nullable AndroidTask<DataBindingProcessLayoutsTask> dataBindingProcessLayoutsTask);
+
+    void setDataBindingMergeArtifactsTask(
+            @Nullable AndroidTask<TransformTask> mergeArtifactsTask);
+
+    AndroidTask<TransformTask> getDataBindingMergeArtifactsTask();
 
     AndroidTask<Sync> getProcessJavaResourcesTask();
 

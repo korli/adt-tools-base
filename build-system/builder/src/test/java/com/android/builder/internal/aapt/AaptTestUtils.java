@@ -19,19 +19,20 @@ package com.android.builder.internal.aapt;
 import static org.junit.Assert.assertTrue;
 
 import com.android.annotations.NonNull;
-import com.android.testutils.TestUtils;
+import com.android.testutils.TestResources;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
+import com.google.common.base.Strings;
 import com.google.common.io.Files;
-
-import org.junit.rules.TemporaryFolder;
-
+import com.google.common.io.Resources;
 import java.io.File;
+import org.junit.rules.TemporaryFolder;
 
 /**
  * Utility files for Aapt tests.
  */
 public class AaptTestUtils {
+
     /**
      * Obtains a PNG for testing.
      *
@@ -43,10 +44,27 @@ public class AaptTestUtils {
     public static File getTestPng(@NonNull TemporaryFolder temporaryFolder) throws Exception {
         File drawables = new File(temporaryFolder.getRoot(), "drawable");
         FileUtils.mkdirs(drawables);
-        File png = new File(TestUtils.getRoot("aapt"), "lena.png");
-        assertTrue(png.isFile());
         File dstPng = new File(drawables, "lena.png");
-        Files.copy(png, dstPng);
+        Resources.asByteSource(Resources.getResource("testData/aapt/lena.png"))
+                .copyTo(Files.asByteSink(dstPng));
+        return dstPng;
+    }
+
+    /**
+     * Obtains a PNG with a long filename for testing
+     *
+     * @param temporaryFolder the temporary folder where temporery files should be places
+     * @return a file with a PNG with a long filename in a {@code drawables} folder
+     * @throws Exception failed to create the PNG
+     */
+    @NonNull
+    public static File getTestPngWithLongFileName(@NonNull TemporaryFolder temporaryFolder)
+            throws Exception {
+        File drawables = new File(temporaryFolder.getRoot(), "drawable");
+        FileUtils.mkdirs(drawables);
+        File dstPng = new File(drawables, Strings.repeat("a", 230) + ".png");
+        Resources.asByteSource(Resources.getResource("testData/aapt/lena.png"))
+                .copyTo(Files.asByteSink(dstPng));
         return dstPng;
     }
 
@@ -72,9 +90,7 @@ public class AaptTestUtils {
      */
     @NonNull
     public static File getNonCrunchableTestPng() {
-        File png = new File(TestUtils.getRoot("aapt"), "png-that-is-bigger-if-crunched.png");
-        assertTrue(png.isFile());
-        return png;
+        return TestResources.getFile("/testData/aapt/png-that-is-bigger-if-crunched.png");
     }
 
     /**
@@ -84,9 +100,7 @@ public class AaptTestUtils {
      */
     @NonNull
     public static File getCrunchableTestPng() {
-        File png = new File(TestUtils.getRoot("aapt"), "lorem-lena.png");
-        assertTrue(png.isFile());
-        return png;
+        return TestResources.getFile("/testData/aapt/lorem-lena.png");
     }
 
     /**
@@ -96,9 +110,7 @@ public class AaptTestUtils {
      */
     @NonNull
     public static File getNinePatchTestPng() {
-        File png = new File(TestUtils.getRoot("aapt"), "9patch.9.png");
-        assertTrue(png.isFile());
-        return png;
+        return TestResources.getFile("/testData/aapt/9patch.9.png");
     }
 
     /**

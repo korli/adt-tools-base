@@ -37,19 +37,16 @@ import com.android.tools.lint.detector.api.LayoutDetector;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.collect.Sets;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Element;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
 
 /**
  * Detector which finds unlabeled text fields
@@ -57,7 +54,7 @@ import java.util.Set;
 public class LabelForDetector extends LayoutDetector {
     /** The main issue discovered by this detector */
     public static final Issue ISSUE = Issue.create(
-            "LabelFor", //$NON-NLS-1$
+            "LabelFor",
             "Missing `labelFor` attribute",
 
             "Text fields should be labelled with a `labelFor` attribute, " +
@@ -77,12 +74,6 @@ public class LabelForDetector extends LayoutDetector {
 
     /** Constructs a new {@link LabelForDetector} */
     public LabelForDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     @Override
@@ -130,7 +121,7 @@ public class LabelForDetector extends LayoutDetector {
                                 "`labelFor` attribute";
                     } else {
                         message = String.format("No label views point to this text field with " +
-                                "an `android:labelFor=\"@+id/%1$s\"` attribute", id);
+                                "an `android:labelFor=\"%1$s\"` attribute", id);
                     }
                     xmlContext.report(ISSUE, element, location, message);
                 }
@@ -164,7 +155,7 @@ public class LabelForDetector extends LayoutDetector {
         }
 
         if (mTextFields == null) {
-            mTextFields = new ArrayList<Element>();
+            mTextFields = new ArrayList<>();
         }
         mTextFields.add(element);
     }

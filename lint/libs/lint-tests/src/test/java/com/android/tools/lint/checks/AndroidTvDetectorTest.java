@@ -17,6 +17,7 @@
 package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.FN_ANDROID_MANIFEST_XML;
+import static com.android.tools.lint.checks.AndroidTvDetector.IMPLIED_TOUCHSCREEN_HARDWARE;
 import static com.android.tools.lint.checks.AndroidTvDetector.MISSING_BANNER;
 import static com.android.tools.lint.checks.AndroidTvDetector.MISSING_LEANBACK_LAUNCHER;
 import static com.android.tools.lint.checks.AndroidTvDetector.MISSING_LEANBACK_SUPPORT;
@@ -28,7 +29,6 @@ import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.Project;
-
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -36,7 +36,7 @@ import java.util.Set;
 @SuppressWarnings("javadoc")
 public class AndroidTvDetectorTest extends AbstractCheckTest {
 
-    private Set<Issue> mEnabled = new HashSet<Issue>();
+    private Set<Issue> mEnabled = new HashSet<>();
 
     @Override
     protected Detector getDetector() {
@@ -44,13 +44,8 @@ public class AndroidTvDetectorTest extends AbstractCheckTest {
     }
 
     @Override
-    protected TestConfiguration getConfiguration(LintClient client, Project project) {
-        return new TestConfiguration(client, project, null) {
-            @Override
-            public boolean isEnabled(@NonNull Issue issue) {
-                return super.isEnabled(issue) && mEnabled.contains(issue);
-            }
-        };
+    protected boolean isEnabled(Issue issue) {
+        return super.isEnabled(issue) && mEnabled.contains(issue);
     }
 
     public void testInvalidNoLeanbackActivity() throws Exception {
@@ -85,6 +80,7 @@ public class AndroidTvDetectorTest extends AbstractCheckTest {
                 + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
                 + "          xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "    <uses-feature android:name=\"android.software.leanback\"/>\n"
                 + "    <application>\n"
                 + "        <activity android:name=\"com.example.android.TvActivity\">\n"
                 + "            <intent-filter>\n"
@@ -92,6 +88,29 @@ public class AndroidTvDetectorTest extends AbstractCheckTest {
                 + "                <category android:name=\"android.intent.category.LEANBACK_LAUNCHER\" />\n"
                 + "            </intent-filter>\n"
                 + "        </activity>\n"
+                + "    </application>\n"
+                + "</manifest>\n"));
+        assertEquals(expected, result);
+    }
+
+    public void testValidLeanbackActivityAlias() throws Exception {
+        mEnabled = Collections.singleton(MISSING_LEANBACK_LAUNCHER);
+        String expected = "No warnings.";
+        String result = lintProject(xml(FN_ANDROID_MANIFEST_XML, ""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "          xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "    <uses-feature android:name=\"android.software.leanback\"/>\n"
+                + "    <application>\n"
+                + "        <activity android:name=\".ui.TvActivity\" />\n"
+                + "        <activity-alias "
+                + "            android:name=\".TvActivity\"\n"
+                + "            android:targetActivity=\".ui.TvActivity\">\n"
+                + "            <intent-filter>\n"
+                + "                <action android:name=\"android.intent.action.MAIN\" />\n"
+                + "                <category android:name=\"android.intent.category.LEANBACK_LAUNCHER\" />\n"
+                + "            </intent-filter>\n"
+                + "        </activity-alias>\n"
                 + "    </application>\n"
                 + "</manifest>\n"));
         assertEquals(expected, result);
@@ -156,9 +175,41 @@ public class AndroidTvDetectorTest extends AbstractCheckTest {
                 + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
                 + "          xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "    <uses-feature android:name=\"android.software.leanback\"/>\n"
                 + "    <uses-feature\n"
                 + "        android:name=\"android.hardware.touchscreen\"\n"
                 + "        android:required=\"false\" />\n"
+                + "</manifest>\n"));
+        assertEquals(expected, result);
+    }
+
+    public void testMissingUsesFeatureTouchScreen() throws Exception {
+        mEnabled = Collections.singleton(IMPLIED_TOUCHSCREEN_HARDWARE);
+        String expected = "AndroidManifest.xml:2: Error: Hardware feature android.hardware.touchscreen not explicitly marked as optional  [ImpliedTouchscreenHardware]\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "^\n"
+                + "1 errors, 0 warnings\n";
+        String result = lintProject(xml(FN_ANDROID_MANIFEST_XML, ""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "          xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "    <uses-feature android:name=\"android.software.leanback\"/>\n"
+                + "    <uses-feature android:name=\"android.hardware.telephony\"/>\n"
+                + "</manifest>\n"));
+        assertEquals(expected, result);
+    }
+
+    public void testValidUsesFeatureTouchScreen() throws Exception {
+        mEnabled = Collections.singleton(UNSUPPORTED_TV_HARDWARE);
+        String expected = "No warnings.";
+        String result = lintProject(xml(FN_ANDROID_MANIFEST_XML, ""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "          xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "    <uses-feature android:name=\"android.software.leanback\"/>\n"
+                + "    <uses-feature\n"
+                + "            android:name=\"android.hardware.touchscreen\"\n"
+                + "            android:required=\"false\"/>\n"
                 + "</manifest>\n"));
         assertEquals(expected, result);
     }
@@ -224,10 +275,10 @@ public class AndroidTvDetectorTest extends AbstractCheckTest {
 
     public void testBannerMissingInApplicationTag() throws Exception {
         mEnabled = Collections.singleton(MISSING_BANNER);
-        String expected = "AndroidManifest.xml:5: Warning: Expecting android:banner with the <application> tag or each Leanback launcher activity. [MissingTvBanner]\n"
+        String expected = "AndroidManifest.xml:5: Error: Expecting android:banner with the <application> tag or each Leanback launcher activity. [MissingTvBanner]\n"
                 + "    <application>\n"
                 + "    ^\n"
-                + "0 errors, 1 warnings\n";
+                + "1 errors, 0 warnings\n";
         String result = lintProject(xml(FN_ANDROID_MANIFEST_XML, ""
                 + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"

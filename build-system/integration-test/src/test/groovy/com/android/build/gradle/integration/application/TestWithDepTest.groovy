@@ -16,22 +16,24 @@
 
 package com.android.build.gradle.integration.application
 
+import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
+import com.android.build.gradle.integration.common.utils.LibraryGraphHelper
 import com.android.build.gradle.integration.common.utils.ModelHelper
 import com.android.builder.model.AndroidArtifact
 import com.android.builder.model.AndroidProject
-import com.android.builder.model.Dependencies
 import com.android.builder.model.Variant
+import com.android.builder.model.level2.DependencyGraphs
 import groovy.transform.CompileStatic
 import org.junit.AfterClass
 import org.junit.BeforeClass
 import org.junit.ClassRule
 import org.junit.Test
 
+import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.JAVA
 import static com.android.builder.core.BuilderConstants.DEBUG
 import static com.android.builder.model.AndroidProject.ARTIFACT_ANDROID_TEST
 import static org.junit.Assert.assertEquals
-import static org.junit.Assert.assertNotNull
 
 /**
  * Assemble tests for testWithDep that loads the model but doesn't build.
@@ -43,7 +45,7 @@ class TestWithDepTest {
             .fromTestProject("testWithDep")
             .create()
 
-    static public AndroidProject model
+    static public ModelContainer<AndroidProject> model
 
     @BeforeClass
     static void setUp() {
@@ -58,15 +60,15 @@ class TestWithDepTest {
 
     @Test
     void "check there is a dep on the test variant"() throws Exception {
-        Collection<Variant> variants = model.getVariants()
+        LibraryGraphHelper helper = new LibraryGraphHelper(model)
+        Collection<Variant> variants = model.getOnlyModel().getVariants()
         Variant debugVariant = ModelHelper.getVariant(variants, DEBUG)
 
         Collection<AndroidArtifact> extraAndroidArtifact = debugVariant.getExtraAndroidArtifacts()
         AndroidArtifact testArtifact = ModelHelper.getAndroidArtifact(extraAndroidArtifact,
                 ARTIFACT_ANDROID_TEST)
-        assertNotNull(testArtifact)
 
-        Dependencies testDependencies = testArtifact.getCompileDependencies()
-        assertEquals(1, testDependencies.getJavaLibraries().size())
+        DependencyGraphs graph = testArtifact.getDependencyGraphs();
+        assertEquals(1, helper.on(graph).withType(JAVA).asList().size())
     }
 }

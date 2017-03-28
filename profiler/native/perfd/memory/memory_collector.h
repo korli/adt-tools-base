@@ -16,34 +16,52 @@
 #ifndef MEMORY_COLLECTOR_H_
 #define MEMORY_COLLECTOR_H_
 
+#include "memory_cache.h"
+#include "memory_levels_sampler.h"
 #include "proto/memory.grpc.pb.h"
+#include "utils/clock.h"
 
 #include <atomic>
+#include <string>
 #include <thread>
-
-#define MS_TO_US 1000
 
 namespace profiler {
 
 class MemoryCollector {
-public:
-  MemoryCollector(int pid) : pid_(pid) {}
+ private:
+  static constexpr int64_t kSleepNs = Clock::ms_to_ns(250);
+  static const int64_t kSecondsToBuffer = 5;
+  static constexpr int64_t kSamplesCount =
+      1 + Clock::s_to_ms(kSecondsToBuffer) / Clock::ns_to_ms(kSleepNs);
+
+ public:
+  MemoryCollector(int32_t pid, const Clock& clock)
+      : memory_cache_(clock, kSamplesCount), clock_(clock), pid_(pid) {}
   ~MemoryCollector();
 
-  void StartCollector();
-  void StopCollector();
-  void CreateSamplers();
+  void Start();
+  void Stop();
+  bool TriggerHeapDump();
+  void GetHeapDumpData(int32_t dump_id,
+                       proto::DumpDataResponse* response);
+  void TrackAllocations(bool enabled,
+                        proto::TrackAllocationsResponse* response);
+  MemoryCache* memory_cache() { return &memory_cache_; }
 
-private:
-  static const int kSleepUs = 300 * MS_TO_US;
-
+ private:
+  MemoryCache memory_cache_;
+  MemoryLevelsSampler memory_levels_sampler_;
+  const Clock& clock_;
   std::thread server_thread_;
-  std::atomic_bool is_running_;
-  int pid_;
+  std::thread heap_dump_thread_;
+  std::atomic_bool is_running_{false};
+  std::atomic_bool is_heap_dump_running_{false};
+  int32_t pid_;
 
   void CollectorMain();
-}; // MemoryCollector
+  void HeapDumpMain(const std::string& file_path);
+};  // MemoryCollector
 
-} // namespace profiler
+}  // namespace profiler
 
-#endif // MEMORY_COLLECTOR_H_
+#endif  // MEMORY_COLLECTOR_H_

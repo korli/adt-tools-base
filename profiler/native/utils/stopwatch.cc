@@ -17,20 +17,16 @@
 
 namespace profiler {
 
-Stopwatch::Stopwatch()
-    : Stopwatch(std::make_shared<SteadyClock>()) {
-}
+Stopwatch::Stopwatch() : Stopwatch(std::make_shared<SteadyClock>()) {}
 
-Stopwatch::Stopwatch(std::shared_ptr<Clock> clock) : clock_(clock) {
+Stopwatch::Stopwatch(const std::shared_ptr<Clock>& clock) : clock_(clock) {
   Start();
 }
 
-void Stopwatch::Start() {
-  start_time_ = clock_->GetCurrentTime();
-}
+void Stopwatch::Start() { start_time_ = clock_->GetCurrentTime(); }
 
-uint64_t Stopwatch::GetElapsed() const {
+int64_t Stopwatch::GetElapsed() const {
   return clock_->GetCurrentTime() - start_time_;
 }
 
-} // profiler
+}  // namespace profiler

@@ -22,7 +22,7 @@ apply from: "../commonLocalRepo.gradle"
 
 model {
     android {
-        compileSdkVersion = 23
+        compileSdkVersion = rootProject.latestCompileSdk
         buildToolsVersion = rootProject.buildToolsVersion
     }
 
@@ -30,4 +30,8 @@ model {
         enabled = true
         addDefaultAdapters = false
     }
+}
+
+dependencies {
+    compile "com.android.support:support-v4:${rootProject.supportLibVersion}"
 }

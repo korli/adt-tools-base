@@ -1,5 +1,5 @@
 apply plugin: 'java'
-apply plugin: 'jacoco'
+apply plugin: 'jacoco-tools-base'
 apply plugin: 'sdk-java-lib'
 
 group = 'com.android.tools.lint'
@@ -8,7 +8,7 @@ version = rootProject.ext.baseVersion
 
 dependencies {
     compile project(':base:lint-checks')
-    compile 'org.eclipse.jdt.core.compiler:ecj:4.5.1'
+    compile 'org.eclipse.jdt.core.compiler:ecj:4.6.1'
 }
 
 sourceSets {
@@ -20,15 +20,37 @@ test {
     maxParallelForks = Runtime.runtime.availableProcessors() / 2
 }
 
-sdk {
-    linux {
-        item('etc/lint') { executable true }
+task lintStartScripts(type: CreateStartScripts) {
+    classpath = project.getTasks().getAt(JavaPlugin.JAR_TASK_NAME).getOutputs().getFiles().plus(
+            project.getConfigurations().getByName("runtime"))
+    outputDir new File(project.getBuildDir(), "scripts")
+
+    description "Creates OS specific scripts to start the lint CLI"
+    mainClassName = 'com.android.tools.lint.Main'
+    applicationName = 'lint'
+    defaultJvmOpts = ["-Xmx1024m", "-Dcom.android.tools.lint.bindir=MY_APP_HOME"]
+
+    doLast {
+        unixScript.text = unixScript.text.replace('MY_APP_HOME', '\$APP_HOME')
+        windowsScript.text = windowsScript.text.replace('MY_APP_HOME', '%~dp0\\..')
     }
-    mac {
-        item('etc/lint') { executable true }
+}
+
+
+sdk {
+    common(mac, linux) {
+        item(new File(lintStartScripts.outputDir, "lint")) {
+            into "bin"
+            notice null
+            builtBy 'lintStartScripts'
+        }
     }
     windows {
-        item 'etc/lint.bat'
+        item(new File(lintStartScripts.outputDir, "lint.bat")) {
+            into "bin"
+            notice null
+            builtBy 'lintStartScripts'
+        }
     }
 }
 

@@ -28,38 +28,32 @@ import com.android.build.api.transform.Transform;
 import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
-import com.android.build.gradle.internal.incremental.InstantRunBuildMode;
-import com.android.build.gradle.internal.scope.InstantRunVariantScope;
-import com.android.builder.model.OptionalCompilationStep;
 import com.android.build.gradle.internal.LoggerWrapper;
-import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunVerifier;
 import com.android.build.gradle.internal.incremental.InstantRunVerifier.ClassBytesJarEntryProvider;
+import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.build.gradle.internal.pipeline.TransformManager;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats.GradleBuildProfileSpan.ExecutionType;
+import com.android.build.gradle.internal.scope.InstantRunVariantScope;
+import com.android.builder.model.OptionalCompilationStep;
 import com.android.builder.profile.Recorder;
-import com.android.builder.profile.ThreadRecorder;
 import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
-import org.gradle.api.logging.Logging;
-
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan.ExecutionType;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import org.gradle.api.logging.Logging;
 
 /**
  * No-op transform that verifies that changes between 2 versions of the same class are supported
@@ -80,6 +74,7 @@ public class InstantRunVerifierTransform extends Transform {
 
     private final InstantRunVariantScope variantScope;
     private final File outputDir;
+    private final Recorder recorder;
 
     /**
      * Object that encapsulates the result of the verification process.
@@ -104,9 +99,11 @@ public class InstantRunVerifierTransform extends Transform {
         }
     }
 
-    public InstantRunVerifierTransform(InstantRunVariantScope variantScope) {
+    public InstantRunVerifierTransform(
+            @NonNull InstantRunVariantScope variantScope, @NonNull Recorder recorder) {
         this.variantScope = variantScope;
         this.outputDir = variantScope.getIncrementalVerifierDir();
+        this.recorder = recorder;
     }
 
     @Override
@@ -135,11 +132,7 @@ public class InstantRunVerifierTransform extends Transform {
             FileUtils.mkdirs(outputDir);
         }
 
-        Optional<InstantRunVerifierStatus> currentVerifierStatus =
-                variantScope.getInstantRunBuildContext().getVerifierResult();
-
-        InstantRunVerifierStatus resultSoFar =
-                currentVerifierStatus.orElse(InstantRunVerifierStatus.COMPATIBLE);
+        InstantRunVerifierStatus resultSoFar = InstantRunVerifierStatus.COMPATIBLE;
         for (TransformInput transformInput : inputs) {
             resultSoFar = processFolderInputs(resultSoFar, isIncremental, transformInput);
             resultSoFar = processJarInputs(resultSoFar, transformInput);
@@ -148,7 +141,7 @@ public class InstantRunVerifierTransform extends Transform {
         // if we are being asked to produce the RESTART artifacts, there is no need to set the
         // verifier result, however the transform needed to run to backup the .class files.
         if (!variantScope.getGlobalScope().isActive(OptionalCompilationStep.RESTART_ONLY)) {
-            variantScope.getInstantRunBuildContext().setVerifierResult(resultSoFar);
+            variantScope.getInstantRunBuildContext().setVerifierStatus(resultSoFar);
         }
     }
 
@@ -333,17 +326,12 @@ public class InstantRunVerifierTransform extends Transform {
         if (!name.endsWith(SdkConstants.DOT_CLASS)) {
             return InstantRunVerifierStatus.COMPATIBLE;
         }
-        InstantRunVerifierStatus status = ThreadRecorder.get().record(
-                ExecutionType.TASK_FILE_VERIFICATION,
-                variantScope.getGlobalScope().getProject().getPath(),
-                variantScope.getFullVariantName(),
-                new Recorder.Block<InstantRunVerifierStatus>() {
-                    @Override
-                    @NonNull
-                    public InstantRunVerifierStatus call() throws Exception {
-                        return InstantRunVerifier.run(originalClass, updatedClass);
-                    }
-                });
+        InstantRunVerifierStatus status =
+                recorder.record(
+                        ExecutionType.TASK_FILE_VERIFICATION,
+                        variantScope.getGlobalScope().getProject().getPath(),
+                        variantScope.getFullVariantName(),
+                        () -> InstantRunVerifier.run(originalClass, updatedClass, LOGGER));
         // TODO: re-add approximation of target.
         if (status == null) {
             LOGGER.warning("No verifier result provided for %1$s", name);

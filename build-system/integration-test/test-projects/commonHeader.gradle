@@ -27,16 +27,8 @@ Boolean getBooleanValue(String environmentVariable, String projectProperty) {
 }
 
 ext {
-    buildToolsVersion = [System.env.CUSTOM_BUILDTOOLS, project.properties["CUSTOM_BUILDTOOLS"], '23.0.2'].find()
-    latestCompileSdk = [System.env.COMPILE_SDK, project.properties["CUSTOM_COMPILE_SDK"], 23].find() as int
-    // Uncomment to build with N preview
-    //buildToolsVersion = [System.env.CUSTOM_BUILDTOOLS, project.properties["CUSTOM_BUILDTOOLS"], '24.0.0 rc3'].find()
-    //latestCompileSdk = [System.env.COMPILE_SDK, project.properties["CUSTOM_COMPILE_SDK"], 'android-N'].find()
-
-    // Last SDK that contained java 6 bytecode.
-    java6BasedSdk = 19
-    // Some of our tests use deprecated RenderScript APIs. TODO: upgrade.
-    oldSdkForRenderscript = 15
+    buildToolsVersion = [System.env.CUSTOM_BUILDTOOLS, project.properties["CUSTOM_BUILDTOOLS"], '25.0.0'].find()
+    latestCompileSdk = [System.env.CUSTOM_COMPILE_SDK, project.properties["CUSTOM_COMPILE_SDK"], 24].find() as int
 
     useJack = getBooleanValue("CUSTOM_JACK", "com.android.build.gradle.integratonTest.useJack")
     jackInProcess = getBooleanValue("USE_JACK_API", "com.android.build.gradle.integratonTest.jackInProcess")

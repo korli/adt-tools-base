@@ -23,6 +23,7 @@ import static com.android.SdkConstants.TAG_USES_PERMISSION;
 import static com.android.tools.lint.detector.api.TextFormat.RAW;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_REQUIRED;
 import static com.android.xml.AndroidManifest.NODE_ACTIVITY;
+import static com.android.xml.AndroidManifest.NODE_ACTIVITY_ALIAS;
 import static com.android.xml.AndroidManifest.NODE_APPLICATION;
 import static com.android.xml.AndroidManifest.NODE_CATEGORY;
 import static com.android.xml.AndroidManifest.NODE_INTENT;
@@ -40,28 +41,21 @@ import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.TextFormat;
 import com.android.tools.lint.detector.api.XmlContext;
-import com.google.common.base.Predicate;
 import com.google.common.collect.Collections2;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 
 /**
  * Detects various issues for Android TV.
@@ -74,7 +68,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
     /** Using hardware unsupported by TV */
     public static final Issue UNSUPPORTED_TV_HARDWARE = Issue.create(
-            "UnsupportedTvHardware", //$NON-NLS-1$
+            "UnsupportedTvHardware",
             "Unsupported TV Hardware Feature",
             "The <uses-feature> element should not require this unsupported TV hardware feature. " +
             "Any uses-feature not explicitly marked with required=\"false\" is necessary on the " +
@@ -87,9 +81,23 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
             IMPLEMENTATION).addMoreInfo(
             "https://developer.android.com/training/tv/start/hardware.html#unsupported-features");
 
+    public static final Issue IMPLIED_TOUCHSCREEN_HARDWARE = Issue.create(
+            "ImpliedTouchscreenHardware",
+            "Hardware feature touchscreen not explicitly marked as optional",
+            "Apps require the `android.hardware.touchscreen` feature by default. If you want " +
+            "your app to be available on TV, you must also explicitly declare that a touchscreen " +
+            "is not required as follows:\n" +
+            "`<uses-feature android:name=\"android.hardware.touchscreen\" " +
+            "android:required=\"false\"/>`",
+            Category.CORRECTNESS,
+            6,
+            Severity.ERROR,
+            IMPLEMENTATION).addMoreInfo(
+            "https://developer.android.com/guide/topics/manifest/uses-feature-element.html");
+
     /** Missing leanback launcher intent filter */
     public static final Issue MISSING_LEANBACK_LAUNCHER = Issue.create(
-            "MissingLeanbackLauncher", //$NON-NLS-1$
+            "MissingLeanbackLauncher",
             "Missing Leanback Launcher Intent Filter.",
             "An application intended to run on TV devices must declare a launcher activity " +
             "for TV in its manifest using a `android.intent.category.LEANBACK_LAUNCHER` " +
@@ -102,7 +110,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
     /** Missing leanback support */
     public static final Issue MISSING_LEANBACK_SUPPORT = Issue.create(
-            "MissingLeanbackSupport", //$NON-NLS-1$
+            "MissingLeanbackSupport",
             "Missing Leanback Support.",
             "The manifest should declare the use of the Leanback user interface required " +
             "by Android TV.\n" +
@@ -118,7 +126,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
     /** Permission implies required hardware unsupported by TV */
     public static final Issue PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE = Issue.create(
-            "PermissionImpliesUnsupportedHardware", //$NON-NLS-1$
+            "PermissionImpliesUnsupportedHardware",
             "Permission Implies Unsupported Hardware",
 
             "The <uses-permission> element should not require a permission that implies an " +
@@ -134,89 +142,57 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
     /** Missing banner attibute */
     public static final Issue MISSING_BANNER = Issue.create(
-            "MissingTvBanner", //$NON-NLS-1$
+            "MissingTvBanner",
             "TV Missing Banner",
             "A TV application must provide a home screen banner for each localization if it " +
             "includes a Leanback launcher intent filter. The banner is the app launch point that " +
             "appears on the home screen in the apps and games rows.",
             Category.CORRECTNESS,
-            5,
-            Severity.WARNING,
+            7,
+            Severity.ERROR,
             IMPLEMENTATION)
             .addMoreInfo("http://developer.android.com/training/tv/start/start.html#banner");
 
     public static final String SOFTWARE_FEATURE_LEANBACK =
-            "android.software.leanback"; //$NON-NLS-1$
+            "android.software.leanback";
+
+    public static final String HARDWARE_FEATURE_TOUCHSCREEN =
+            "android.hardware.touchscreen";
 
     private static final String LEANBACK_LIB_ARTIFACT =
-            "com.android.support:leanback-v17"; //$NON-NLS-1$
+            "com.android.support:leanback-v17";
 
     private static final String CATEGORY_LEANBACK_LAUNCHER =
-            "android.intent.category.LEANBACK_LAUNCHER"; //$NON-NLS-1$
+            "android.intent.category.LEANBACK_LAUNCHER";
 
-    private static final String HARDWARE_FEATURE_CAMERA = "android.hardware.camera"; //$NON-NLS-1$
+    private static final String HARDWARE_FEATURE_CAMERA = "android.hardware.camera";
 
     private static final String HARDWARE_FEATURE_LOCATION_GPS =
-            "android.hardware.location.gps"; //$NON-NLS-1$
+            "android.hardware.location.gps";
 
-    private static final String ANDROID_HARDWARE_TELEPHONY =
-            "android.hardware.telephony"; //$NON-NLS-1$
+    private static final String HARDWARE_FEATURE_TELEPHONY =
+            "android.hardware.telephony";
 
-    private static final String ANDROID_HARDWARE_BLUETOOTH =
-            "android.hardware.bluetooth"; //$NON-NLS-1$
+    private static final String HARDWARE_FEATURE_BLUETOOTH =
+            "android.hardware.bluetooth";
 
-    private static final String ATTR_BANNER = "banner"; //$NON-NLS-1$
+    private static final String ATTR_BANNER = "banner";
 
-    private static final String ANDROID_HARDWARE_MICROPHONE =
-            "android.hardware.microphone"; //$NON-NLS-1$
+    private static final String HARDWARE_FEATURE_MICROPHONE =
+            "android.hardware.microphone";
 
     // https://developer.android.com/training/tv/start/hardware.html
-    private static final Set<String> UNSUPPORTED_HARDWARE_FEATURES =
-            ImmutableSet.<String>builder()
-                    .add("android.hardware.touchscreen") //$NON-NLS-1$
-                    .add("android.hardware.faketouch") //$NON-NLS-1$
-                    .add(ANDROID_HARDWARE_TELEPHONY)
-                    .add(HARDWARE_FEATURE_CAMERA)
-                    .add(ANDROID_HARDWARE_BLUETOOTH)
-                    .add("android.hardware.nfc") //$NON-NLS-1$
-                    .add(HARDWARE_FEATURE_LOCATION_GPS) //$NON-NLS-1$
-                    .add(ANDROID_HARDWARE_MICROPHONE) //$NON-NLS-1$
-                    .add("android.hardware.sensors") //$NON-NLS-1$
-                    .build();
-
-    private static final Map<String, String> PERMISSIONS_TO_IMPLIED_UNSUPPORTED_HARDWARE =
-            ImmutableMap.<String, String>builder()
-                    .put("android.permission.BLUETOOTH", //$NON-NLS-1$
-                            ANDROID_HARDWARE_BLUETOOTH)
-                    .put("android.permission.BLUETOOTH_ADMIN", //$NON-NLS-1$
-                            ANDROID_HARDWARE_BLUETOOTH)
-                    .put("android.permission.CAMERA", //$NON-NLS-1$
-                            HARDWARE_FEATURE_CAMERA)
-                    .put("android.permission.RECORD_AUDIO", //$NON-NLS-1$
-                            ANDROID_HARDWARE_MICROPHONE)
-                    .put("android.permission.ACCESS_FINE_LOCATION", //$NON-NLS-1$
-                            HARDWARE_FEATURE_LOCATION_GPS)
-                    .put("android.permission.CALL_PHONE", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.CALL_PRIVILEGED", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.PROCESS_OUTGOING_CALLS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.READ_SMS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.RECEIVE_SMS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.RECEIVE_MMS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.RECEIVE_WAP_PUSH", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.SEND_SMS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.WRITE_APN_SETTINGS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .put("android.permission.WRITE_SMS", //$NON-NLS-1$
-                            ANDROID_HARDWARE_TELEPHONY)
-                    .build();
+    private static final String[] UNSUPPORTED_HARDWARE_FEATURES = new String[]{
+            HARDWARE_FEATURE_TOUCHSCREEN,
+            "android.hardware.faketouch",
+            HARDWARE_FEATURE_TELEPHONY,
+            HARDWARE_FEATURE_CAMERA,
+            HARDWARE_FEATURE_BLUETOOTH,
+            "android.hardware.nfc",
+            HARDWARE_FEATURE_LOCATION_GPS,
+            HARDWARE_FEATURE_MICROPHONE,
+            "android.hardware.sensors"
+    };
 
     /**
      * If you change number of parameters or order, update
@@ -255,17 +231,12 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
     /** Set containing unsupported TV uses-features elements without required="false" */
     private Set<String> mUnsupportedTvUsesFeatures;
 
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
-    }
-
     @Override
     public Collection<String> getApplicableElements() {
         return Arrays.asList(
                 NODE_APPLICATION,
                 NODE_ACTIVITY,
+                NODE_ACTIVITY_ALIAS,
                 NODE_USES_FEATURE,
                 NODE_USES_PERMISSION
         );
@@ -350,23 +321,31 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
                 }
             }
 
+            // touchscreen is a special implied hardware that is enabled by default
+            // unless specifically marked with required="false"
+            if (!mAllUnsupportedTvUsesFeatures.contains(HARDWARE_FEATURE_TOUCHSCREEN)
+                    && xmlContext.isEnabled(IMPLIED_TOUCHSCREEN_HARDWARE)) {
+                Element manifestElement = xmlContext.document.getDocumentElement();
+                xmlContext.report(IMPLIED_TOUCHSCREEN_HARDWARE, manifestElement,
+                        xmlContext.getLocation(manifestElement),
+                        "Hardware feature `android.hardware.touchscreen` not explicitly marked "
+                                + "as optional ");
+            }
+
             // Report permissions implying unsupported hardware
             if (!mUnsupportedHardwareImpliedPermissions.isEmpty()
                     && xmlContext.isEnabled(PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE)) {
 
                 Collection<String> filteredPermissions = Collections2.filter(
                         mUnsupportedHardwareImpliedPermissions,
-                        new Predicate<String>() {
-                            @Override
-                            public boolean apply(String input) {
-                                // Filter out all permissions that already have their
-                                // corresponding implied hardware declared in
-                                // the AndroidManifest.xml
-                                String usesFeature =
-                                        PERMISSIONS_TO_IMPLIED_UNSUPPORTED_HARDWARE.get(input);
-                                return usesFeature != null
-                                        && !mAllUnsupportedTvUsesFeatures.contains(usesFeature);
-                            }
+                        input -> {
+                            // Filter out all permissions that already have their
+                            // corresponding implied hardware declared in
+                            // the AndroidManifest.xml
+                            String usesFeature = input != null
+                                    ? getImpliedUnsupportedHardware(input) : null;
+                            return usesFeature != null
+                                    && !mAllUnsupportedTvUsesFeatures.contains(usesFeature);
                         });
 
                 List<Element> permissionsWithoutUsesFeatures =
@@ -374,8 +353,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
                 for (Element permissionElement : permissionsWithoutUsesFeatures) {
                     String name = permissionElement.getAttributeNS(ANDROID_URI, ATTR_NAME);
-                    String unsupportedHardwareName =
-                            PERMISSIONS_TO_IMPLIED_UNSUPPORTED_HARDWARE.get(name);
+                    String unsupportedHardwareName = getImpliedUnsupportedHardware(name);
 
                     if (unsupportedHardwareName != null) {
                         String message = String.format(
@@ -389,13 +367,51 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
         }
     }
 
-    private static List<Element> findPermissionElements(Collection<String> permissions,
+    @Nullable
+    private static String getImpliedUnsupportedHardware(@NonNull String permission) {
+        switch (permission) {
+            case "android.permission.BLUETOOTH":
+                return HARDWARE_FEATURE_BLUETOOTH;
+            case "android.permission.BLUETOOTH_ADMIN":
+                return HARDWARE_FEATURE_BLUETOOTH;
+            case "android.permission.CAMERA":
+                return HARDWARE_FEATURE_CAMERA;
+            case "android.permission.RECORD_AUDIO":
+                return HARDWARE_FEATURE_MICROPHONE;
+            case "android.permission.ACCESS_FINE_LOCATION":
+                return HARDWARE_FEATURE_LOCATION_GPS;
+            case "android.permission.CALL_PHONE":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.CALL_PRIVILEGED":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.PROCESS_OUTGOING_CALLS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.READ_SMS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.RECEIVE_SMS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.RECEIVE_MMS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.RECEIVE_WAP_PUSH":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.SEND_SMS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.WRITE_APN_SETTINGS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            case "android.permission.WRITE_SMS":
+                return HARDWARE_FEATURE_TELEPHONY;
+            default:
+                return null;
+        }
+    }
+
+    static List<Element> findPermissionElements(Collection<String> permissions,
             Document document) {
         Node manifestElement = document.getDocumentElement();
         if (manifestElement == null) {
             return Collections.emptyList();
         }
-        List<Element> nodes = new ArrayList<Element>(permissions.size());
+        List<Element> nodes = new ArrayList<>(permissions.size());
         for (Element child : LintUtils.getChildren(manifestElement)) {
             if (TAG_USES_PERMISSION.equals(child.getTagName())
                     && permissions.contains(child.getAttributeNS(ANDROID_URI, ATTR_NAME))) {
@@ -416,13 +432,13 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
      * @param document The document/root node to use for iterating.
      * @return A list of all <code>&lt;uses-feature&gt;</code> elements that match the featureNames.
      */
-    private static List<Element> findUsesFeatureElements(@NonNull Set<String> featureNames,
+    static List<Element> findUsesFeatureElements(@NonNull Set<String> featureNames,
             @NonNull Document document) {
         Node manifestElement = document.getDocumentElement();
         if (manifestElement == null) {
             return Collections.emptyList();
         }
-        List<Element> nodes = new ArrayList<Element>(featureNames.size());
+        List<Element> nodes = new ArrayList<>(featureNames.size());
         for (Element child : LintUtils.getChildren(manifestElement)) {
             if (TAG_USES_FEATURE.equals(child.getTagName())
                     && featureNames.contains(child.getAttributeNS(ANDROID_URI, ATTR_NAME))) {
@@ -469,7 +485,9 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
             if (!mHasLeanbackSupport && hasLeanbackSupport(element)) {
                 mHasLeanbackSupport = true;
             }
-        } else if (NODE_ACTIVITY.equals(elementName) && hasLeanbackIntentFilter(element)) {
+        } else if ((NODE_ACTIVITY.equals(elementName)
+                || NODE_ACTIVITY_ALIAS.equals(elementName))
+                && hasLeanbackIntentFilter(element)) {
             mHasLeanbackLauncherActivity = true;
             // Since this activity has a leanback launcher intent filter,
             // Make sure it has a home screen banner
@@ -480,7 +498,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
             // Store all <uses-permission> tags that imply unsupported hardware)
             String permissionName = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
-            if (PERMISSIONS_TO_IMPLIED_UNSUPPORTED_HARDWARE.containsKey(permissionName)) {
+            if (getImpliedUnsupportedHardware(permissionName) != null) {
                 mUnsupportedHardwareImpliedPermissions.add(permissionName);
             }
         }
@@ -501,7 +519,6 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
     }
 
     private static boolean hasLeanbackIntentFilter(@NonNull Node activityNode) {
-        assert NODE_ACTIVITY.equals(activityNode.getNodeName()) : activityNode.getNodeName();
         // Visit every intent filter
         for (Element activityChild : LintUtils.getChildren(activityNode)) {
             if (NODE_INTENT.equals(activityChild.getNodeName())) {

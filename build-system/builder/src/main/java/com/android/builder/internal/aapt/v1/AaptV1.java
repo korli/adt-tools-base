@@ -31,8 +31,8 @@ import com.android.ide.common.internal.PngException;
 import com.android.ide.common.process.ProcessExecutor;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.ide.common.process.ProcessOutputHandler;
+import com.android.ide.common.res2.QueueableResourceCompiler;
 import com.android.repository.Revision;
-import com.android.resources.Density;
 import com.android.resources.ResourceFolderType;
 import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
@@ -46,12 +46,12 @@ import com.google.common.io.Files;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -61,14 +61,14 @@ import java.util.concurrent.TimeUnit;
  * Implementation of an interface to the original {@code aapt}. This implementation relies on
  * process execution of {@code aapt}.
  */
-public class AaptV1 extends AbstractProcessExecutionAapt {
+public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableResourceCompiler {
 
     /**
      * What mode should PNG be processed?
      */
     public enum PngProcessMode {
         /**
-         * All PNGs should be crunched and 9-patch processed.
+         * All PNGs should be crunched and resources processed.
          */
         ALL {
             @Override
@@ -78,22 +78,12 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
         },
 
         /**
-         * PNGs should not be crunched, but 9-patch processed.
+         * PNGs should not be crunched, but other resources processed.
          */
-        NINE_PATCH_ONLY {
+        NO_CRUNCH {
             @Override
             public boolean shouldProcess(@NonNull File file) {
                 return file.getName().endsWith(SdkConstants.DOT_9PNG);
-            }
-        },
-
-        /**
-         * PNGs should not be crunched and 9-patch should not be processed.
-         */
-        NONE {
-            @Override
-            public boolean shouldProcess(@NonNull File file) {
-                return false;
             }
         };
 
@@ -116,7 +106,7 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
      * {@link QueuedCruncher} can be used.
      */
     @VisibleForTesting
-    static final Revision VERSION_FOR_SERVER_AAPT = new Revision(22, 0, 0);
+    public static final Revision VERSION_FOR_SERVER_AAPT = new Revision(22, 0, 1);
 
     /**
      * Build tools.
@@ -172,15 +162,11 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
                 new LinkedBlockingQueue<>());
         mProcessMode = processMode;
 
-        if (buildToolInfo.getRevision().compareTo(VERSION_FOR_SERVER_AAPT) >= 0) {
-            mCruncher =
-                    QueuedCruncher.Builder.INSTANCE.newCruncher(
-                            getAaptExecutablePath(),
-                            logger,
-                            cruncherProcesses);
-        } else {
-            mCruncher = null;
-        }
+        mCruncher =
+                QueuedCruncher.Builder.INSTANCE.newCruncher(
+                        getAaptExecutablePath(),
+                        logger,
+                        cruncherProcesses);
     }
 
     @Override
@@ -212,7 +198,7 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
 
         File manifestFile = config.getManifestFile();
         Preconditions.checkNotNull(manifestFile);
-        builder.addArgs("-M", manifestFile.getAbsolutePath());
+        builder.addArgs("-M", FileUtils.toExportableSystemDependentPath(manifestFile));
 
         if (config.getResourceDir() != null) {
             builder.addArgs("-S", config.getResourceDir().getAbsolutePath());
@@ -221,22 +207,25 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
         // outputs
         if (config.getSourceOutputDir() != null) {
             builder.addArgs("-m");
-            builder.addArgs("-J", config.getSourceOutputDir().getAbsolutePath());
+            builder.addArgs(
+                    "-J", FileUtils.toExportableSystemDependentPath(config.getSourceOutputDir()));
         }
 
         if (config.getResourceOutputApk() != null) {
             builder.addArgs("-F", config.getResourceOutputApk().getAbsolutePath());
         }
 
-        if (config.getProguardOutputFile()!= null) {
-            builder.addArgs("-G", config.getProguardOutputFile().getAbsolutePath());
+        if (config.getProguardOutputFile() != null) {
+            builder.addArgs(
+                    "-G",
+                    FileUtils.toExportableSystemDependentPath(config.getProguardOutputFile()));
         }
 
         if (config.getMainDexListProguardOutputFile() != null) {
-            Preconditions.checkState(
-                    mBuildToolInfo.getRevision().compareTo(VERSION_FOR_MAIN_DEX_LIST) >= 0,
-                    "AAPT<%s cannot compute the main dex list", VERSION_FOR_MAIN_DEX_LIST);
-            builder.addArgs("-D", config.getMainDexListProguardOutputFile().getAbsolutePath());
+            builder.addArgs(
+                    "-D",
+                    FileUtils.toExportableSystemDependentPath(
+                            config.getMainDexListProguardOutputFile()));
         }
 
         if (config.getSplits() != null) {
@@ -260,12 +249,17 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
         }
 
         if (config.isPseudoLocalize()) {
-            Preconditions.checkState(mBuildToolInfo.getRevision().getMajor() >= 21);
             builder.addArgs("--pseudo-localize");
         }
 
-        // library specific options
+        // bundle specific options
+        boolean generateFinalIds = true;
         if (config.getVariantType() == VariantType.LIBRARY) {
+            generateFinalIds = false;
+        } else if (config.getVariantType() == VariantType.ATOM && config.getBaseFeature() != null) {
+            generateFinalIds = false;
+        }
+        if (!generateFinalIds) {
             builder.addArgs("--non-constant-id");
         }
 
@@ -278,7 +272,6 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
         }
 
         if (config.getOptions().getFailOnMissingConfigEntry()) {
-            Preconditions.checkState(mBuildToolInfo.getRevision().getMajor() > 20);
             builder.addArgs("--error-on-missing-config-entry");
         }
 
@@ -304,52 +297,34 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
         List<String> resourceConfigs = new ArrayList<>();
         resourceConfigs.addAll(config.getResourceConfigs());
 
-        if (mBuildToolInfo.getRevision().getMajor() < 21 && config.getPreferredDensity() != null) {
-            resourceConfigs.add(config.getPreferredDensity());
-
-            /*
-             * when adding a density filter, also always add the nodpi option.
-             */
-            resourceConfigs.add(Density.NODPI.getResourceValue());
-        }
-
-
         /*
          * Split the density and language resource configs, since starting in 21, the
          * density resource configs should be passed with --preferred-density to ensure packaging
          * of scalable resources when no resource for the preferred density is present.
          */
         Collection<String> otherResourceConfigs;
-        String preferredDensity = null;
-        if (mBuildToolInfo.getRevision().getMajor() >= 21) {
-            Collection<String> densityResourceConfigs = Lists.newArrayList(
-                    AaptUtils.getDensityResConfigs(resourceConfigs));
-            otherResourceConfigs = Lists.newArrayList(AaptUtils.getNonDensityResConfigs(
-                    resourceConfigs));
-            preferredDensity = config.getPreferredDensity();
+        Collection<String> densityResourceConfigs = Lists.newArrayList(
+                AaptUtils.getDensityResConfigs(resourceConfigs));
+        otherResourceConfigs = Lists.newArrayList(AaptUtils.getNonDensityResConfigs(
+                resourceConfigs));
+        String preferredDensity = config.getPreferredDensity();
 
-            if (preferredDensity != null && !densityResourceConfigs.isEmpty()) {
-                throw new AaptException(
-                        String.format("When using splits in tools 21 and above, "
-                                        + "resConfigs should not contain any densities. Right now, it "
-                                        + "contains \"%1$s\"\nSuggestion: remove these from resConfigs "
-                                        + "from build.gradle",
-                                Joiner.on("\",\"").join(densityResourceConfigs)));
-            }
+        if (preferredDensity != null && !densityResourceConfigs.isEmpty()) {
+            throw new AaptException(
+                    String.format("When using splits, "
+                                    + "resConfigs should not contain any densities. Right now, it "
+                                    + "contains \"%1$s\"\nSuggestion: remove these from resConfigs "
+                                    + "from build.gradle",
+                            Joiner.on("\",\"").join(densityResourceConfigs)));
+        }
 
-            if (densityResourceConfigs.size() > 1) {
-                throw new AaptException("Cannot filter assets for multiple densities using "
-                        + "SDK build tools 21 or later. Consider using apk splits instead.");
-            }
+        if (densityResourceConfigs.size() > 1) {
+            throw new AaptException("Cannot filter assets for multiple densities using "
+                    + "SDK build tools 21 or later. Consider using apk splits instead.");
+        }
 
-            if (preferredDensity == null && densityResourceConfigs.size() == 1) {
-                preferredDensity = Iterables.getOnlyElement(densityResourceConfigs);
-            }
-        } else {
-            /*
-             * Before build tools v21, everything is passed with -c option.
-             */
-            otherResourceConfigs = resourceConfigs;
+        if (preferredDensity == null && densityResourceConfigs.size() == 1) {
+            preferredDensity = Iterables.getOnlyElement(densityResourceConfigs);
         }
 
         if (!otherResourceConfigs.isEmpty()) {
@@ -363,25 +338,48 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
 
         if (config.getSymbolOutputDir() != null && (config.getVariantType() == VariantType.LIBRARY
                 || !config.getLibraries().isEmpty())) {
-            builder.addArgs("--output-text-symbols",
-                    config.getSymbolOutputDir().getAbsolutePath());
+            builder.addArgs(
+                    "--output-text-symbols",
+                    FileUtils.toExportableSystemDependentPath(config.getSymbolOutputDir()));
         }
 
         // All the vector XML files that are outside of an "-anydpi-v21" directory were left there
         // intentionally, for the support library to consume. Leave them alone.
-        if (mBuildToolInfo.getRevision().getMajor() >= 23) {
-            builder.addArgs("--no-version-vectors");
+        builder.addArgs("--no-version-vectors");
+
+        // Add the feature-split configuration if needed.
+        if (config.getBaseFeature() != null) {
+            builder.addArgs("--feature-of", config.getBaseFeature().getAbsolutePath());
+            // --feature-after requires --feature-of to be set so these are only parsed if base
+            // feature was set.
+            for (File previousFeature : config.getPreviousFeatures()) {
+                builder.addArgs("--feature-after", previousFeature.getAbsolutePath());
+            }
         }
 
         return builder;
+    }
+
+    int key;
+
+    @Override
+    public void start() {
+        if (mCruncher != null) {
+            key = mCruncher.start();
+        }
+    }
+
+    @Override
+    public void end() throws InterruptedException {
+        if (mCruncher != null && key != -1) {
+            mCruncher.end(key);
+        }
     }
 
     @NonNull
     @Override
     public ListenableFuture<File> compile(@NonNull File file, @NonNull File output)
             throws AaptException {
-        ListenableFuture<File> compilationFuture;
-
         /*
          * Do not compile raw resources.
          */
@@ -394,76 +392,77 @@ public class AaptV1 extends AbstractProcessExecutionAapt {
             /*
              * Revert to old-style crunching.
              */
-            compilationFuture = super.compile(file, output);
-        } else {
-            Preconditions.checkArgument(file.isFile(), "!file.isFile()");
-            Preconditions.checkArgument(output.isDirectory(), "!output.isDirectory()");
+            return super.compile(file, output);
+        }
+        Preconditions.checkArgument(file.isFile(), "!file.isFile()");
+        Preconditions.checkArgument(output.isDirectory(), "!output.isDirectory()");
 
-            SettableFuture<File> future = SettableFuture.create();
-            compilationFuture = future;
+        SettableFuture<File> actualResult = SettableFuture.create();
 
-            if (!mProcessMode.shouldProcess(file)) {
-                future.set(null);
-            } else {
-                File outputFile = compileOutputFor(file, output);
+        if (!mProcessMode.shouldProcess(file)) {
+            actualResult.set(null);
+            return actualResult;
+        }
+        File outputFile = compileOutputFor(file, output);
 
-                try {
-                    Files.createParentDirs(outputFile);
-                } catch (IOException e) {
-                    throw new AaptException(e, String.format(
-                            "Failed to create parent directories for file '%s'",
-                            output.getAbsolutePath()));
-                }
-
-                int key = mCruncher.start();
-                try {
-                    mCruncher.crunchPng(key, file, outputFile);
-                } catch (PngException e) {
-                    throw new AaptException(e, String.format(
-                            "Failed to crunch file '%s' into '%s'",
-                            file.getAbsolutePath(),
-                            outputFile.getAbsolutePath()));
-                }
-
-                mWaitExecutor.execute(() -> {
-                    try {
-                        mCruncher.end(key);
-                        future.set(outputFile);
-                    } catch (Exception e) {
-                        future.setException(e);
-                    }
-                });
-            }
+        try {
+            Files.createParentDirs(outputFile);
+        } catch (IOException e) {
+            throw new AaptException(e, String.format(
+                    "Failed to create parent directories for file '%s'",
+                    output.getAbsolutePath()));
         }
 
-        /*
-         * When the compilationFuture is complete, check if the generated file is not bigger than
-         * the original file. If the original file is smaller, copy the original file over the
-         * generated file.
-         *
-         * However, this doesn't work with 9-patch because those need to be processed.
-         *
-         * Return a new future after this verification is done.
-         */
-        if (file.getName().endsWith(SdkConstants.DOT_9PNG)) {
-            return compilationFuture;
+        ListenableFuture<File> futureResult;
+        try {
+            futureResult = mCruncher.crunchPng(key, file, outputFile);
+        } catch (PngException e) {
+            throw new AaptException(e, String.format(
+                    "Failed to crunch file '%s' into '%s'",
+                    file.getAbsolutePath(),
+                    outputFile.getAbsolutePath()));
         }
+        futureResult.addListener(() -> {
 
-        return Futures.transform(compilationFuture, (File result) -> {
-            SettableFuture<File> returnFuture = SettableFuture.create();
-
+            File result;
             try {
-                if (result != null && file.length() < result.length()) {
-                    Files.copy(file, result);
-                }
-
-                returnFuture.set(result);
-            } catch (Exception e) {
-                returnFuture.setException(e);
+                result = futureResult.get();
+            } catch (InterruptedException e) {
+                Thread.interrupted();
+                actualResult.setException(e);
+                return;
+            } catch (ExecutionException e) {
+                actualResult.setException(e);
+                return;
             }
 
-            return returnFuture;
-        });
+            /*
+             * When the compilationFuture is complete, check if the generated file is not bigger than
+             * the original file. If the original file is smaller, copy the original file over the
+             * generated file.
+             *
+             * However, this doesn't work with 9-patch because those need to be processed.
+             *
+             * Return a new future after this verification is done.
+             */
+            if (file.getName().endsWith(SdkConstants.DOT_9PNG)) {
+                actualResult.set(result);
+                return;
+            }
+
+            if (result != null && file.length() < result.length()) {
+                try {
+                    Files.copy(file, result);
+                } catch (IOException e) {
+                    actualResult.setException(e);
+                    return;
+                }
+            }
+
+            actualResult.set(result);
+
+        }, mWaitExecutor);
+        return actualResult;
     }
 
     @Nullable

@@ -31,7 +31,7 @@ import org.junit.Rule
 import org.junit.Test
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 /**
  * Assemble tests for packagingOptions.
  *
@@ -164,7 +164,8 @@ dependencies {
 """
         project.execute("clean", "assembleDebug")
 
-        assertThatZip(project.getApk("debug")).containsFileWithContent("conflict.txt", "foofoo")
+        assertThatZip(project.getApk("debug"))
+                .containsFileWithContent("conflict.txt", "foo\nfoo")
     }
 
     @Test
@@ -214,7 +215,7 @@ android{
         project.execute("clean", "assembleDebug")
         // files should be merged
         assertThatZip(project.getApk("debug")).
-                containsFileWithContent("conflict.txt", "fooproject-foo")
+                containsFileWithContent("conflict.txt", "foo\nproject-foo")
     }
 
     @Test

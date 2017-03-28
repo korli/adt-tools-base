@@ -15,7 +15,9 @@
  */
 
 package com.android.build.gradle.integration.application
+
 import com.android.build.gradle.integration.common.category.DeviceTests
+import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.truth.TruthHelper
 import com.android.build.gradle.integration.common.utils.ModelHelper
@@ -29,21 +31,16 @@ import com.android.builder.model.ProductFlavorContainer
 import com.android.builder.model.SourceProviderContainer
 import com.android.builder.model.Variant
 import groovy.transform.CompileStatic
-import org.junit.After
-import org.junit.AfterClass
-import org.junit.Before
-import org.junit.BeforeClass
-import org.junit.ClassRule
 import org.junit.Rule
 import org.junit.Test
 import org.junit.experimental.categories.Category
 
 import static com.android.builder.core.VariantType.ANDROID_TEST
 import static com.android.builder.model.AndroidProject.ARTIFACT_ANDROID_TEST
+import static com.google.common.truth.Truth.assertThat
 import static org.junit.Assert.assertEquals
 import static org.junit.Assert.assertFalse
 import static org.junit.Assert.assertNotNull
-import static com.google.common.truth.Truth.assertThat;
 
 /**
  * Assemble tests for flavors.
@@ -54,15 +51,15 @@ class FlavorsTest {
     public GradleTestProject project = GradleTestProject.builder()
             .fromTestProject("flavors")
             .create()
-    AndroidProject model
 
     @Test
     void "check flavors show up in model"() throws Exception {
-        model = project.executeAndReturnModel("clean", "assembleDebug")
+        AndroidProject model = project.executeAndReturnModel("clean", "assembleDebug").getOnlyModel()
 
         File projectDir = project.getTestDir()
 
         assertFalse("Library Project", model.isLibrary())
+        assertEquals("Project Type", AndroidProject.PROJECT_TYPE_APP, model.getProjectType())
 
         assertThat(model.getFlavorDimensions()).containsExactly("group1", "group2")
 
@@ -74,7 +71,6 @@ class FlavorsTest {
 
         SourceProviderContainer testSourceProviderContainer = ModelHelper.getSourceProviderContainer(
                 defaultConfig.getExtraSourceProviders(), ARTIFACT_ANDROID_TEST)
-        assertNotNull("InstrumentTest source Providers null-check", testSourceProviderContainer)
 
         new SourceProviderHelper(model.getName(), projectDir,
                 ANDROID_TEST.prefix, testSourceProviderContainer.getSourceProvider())
@@ -103,7 +99,7 @@ class FlavorsTest {
 
     @Test
     public void "compound source sets are in the model"() throws Exception {
-        model = project.executeAndReturnModel("clean", "assembleDebug")
+        AndroidProject model = project.executeAndReturnModel("clean", "assembleDebug").getOnlyModel()
 
         for (variant in model.variants) {
             assert variant.extraJavaArtifacts.every { it.multiFlavorSourceProvider != null }

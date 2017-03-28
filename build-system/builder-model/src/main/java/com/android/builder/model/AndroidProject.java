@@ -29,15 +29,31 @@ import java.util.Collection;
 public interface AndroidProject {
     //  Injectable properties to use with -P
     // Sent by Studio 1.0 ONLY
-    String PROPERTY_BUILD_MODEL_ONLY =  "android.injected.build.model.only";
+    String PROPERTY_BUILD_MODEL_ONLY = "android.injected.build.model.only";
     // Sent by Studio 1.1+
-    String PROPERTY_BUILD_MODEL_ONLY_ADVANCED =  "android.injected.build.model.only.advanced";
-    // Sent by Studio 2.2+. The value of the prop is a monotonically increasing integer.
+    String PROPERTY_BUILD_MODEL_ONLY_ADVANCED = "android.injected.build.model.only.advanced";
+    // Sent by Studio 2.4+. The value of the prop is a monotonically increasing integer.
     // see MODEL_LEVEL_* constants
-    String PROPERTY_BUILD_MODEL_ONLY_VERSIONED =  "android.injected.build.model.only.versioned";
+    String PROPERTY_BUILD_MODEL_ONLY_VERSIONED = "android.injected.build.model.only.versioned";
+    // Sent by Studio 2.4+. Additional model feature trigger on a case by case basis
+    // Value is simply true to enable.
+    String PROPERTY_BUILD_MODEL_FEATURE_FULL_DEPENDENCIES = "android.injected.build.model.feature.full.dependencies";
+
+    // Sent by Studio 2.2+
+    // This property will enable compatibility checks between Android Studio and the Android
+    // Gradle plugin.
+    // A use case for this property is that by restricting which versions of Studio are compatible
+    // with the plugin, we could safely remove deprecated methods in the builder-model interfaces.
+    String PROPERTY_STUDIO_VERSION = "android.injected.studio.version";
 
     // Sent in when external native projects models requires a refresh.
     String PROPERTY_REFRESH_EXTERNAL_NATIVE_MODEL = "android.injected.refresh.external.native.model";
+
+    // Sent by Studio 2.2+
+    // This property is sent when a run or debug is invoked.  APK built with this property should
+    // be marked with android:testOnly="true" in the AndroidManifest.xml such that it will be
+    // rejected by the Play store.
+    String PROPERTY_TEST_ONLY = "android.injected.testOnly";
 
     // Sent by Studio 1.5+
 
@@ -58,6 +74,8 @@ public interface AndroidProject {
     String PROPERTY_SIGNING_KEY_ALIAS = "android.injected.signing.key.alias";
     String PROPERTY_SIGNING_KEY_PASSWORD = "android.injected.signing.key.password";
     String PROPERTY_SIGNING_STORE_TYPE = "android.injected.signing.store.type";
+    String PROPERTY_SIGNING_V1_ENABLED = "android.injected.signing.v1-enabled";
+    String PROPERTY_SIGNING_V2_ENABLED = "android.injected.signing.v2-enabled";
 
     String PROPERTY_SIGNING_COLDSWAP_MODE = "android.injected.coldswap.mode";
 
@@ -96,10 +114,16 @@ public interface AndroidProject {
     int GENERATION_ORIGINAL = 1;
     int GENERATION_COMPONENT = 2;
 
-    int MODEL_LEVEL_0_ORIGNAL = 0 ; // studio 1.0, no support for SyncIssue
+    int MODEL_LEVEL_0_ORIGINAL = 0 ; // studio 1.0, no support for SyncIssue
     int MODEL_LEVEL_1_SYNC_ISSUE = 1; // studio 1.1+, with SyncIssue
-    int MODEL_LEVEL_2_DEP_GRAPH = 2; // studio 2.2+, with full dep graph
-    int MODEL_LEVEL_LATEST = MODEL_LEVEL_2_DEP_GRAPH;
+    int MODEL_LEVEL_2_DONT_USE = 2; // Don't use this. Go level 1 to level 3 when ready.
+    int MODEL_LEVEL_LATEST = MODEL_LEVEL_2_DONT_USE;
+
+    int PROJECT_TYPE_APP = 0;
+    int PROJECT_TYPE_LIBRARY = 1;
+    int PROJECT_TYPE_TEST = 2;
+    int PROJECT_TYPE_ATOM = 3;
+    int PROJECT_TYPE_INSTANTAPP = 4;
 
     /**
      * Returns the model version. This is a string in the format X.Y.Z
@@ -135,8 +159,18 @@ public interface AndroidProject {
     /**
      * Returns whether this is a library.
      * @return true for a library module.
+     * @deprecated use {@link #getProjectType()} instead.
      */
+    @Deprecated
     boolean isLibrary();
+
+    /**
+     * Returns the type of project: Android application, library, Atom or IAPK.
+     *
+     * @return the type of project.
+     * @since 2.3
+     */
+    int getProjectType();
 
     /**
      * Returns the {@link ProductFlavorContainer} for the 'main' default config.

@@ -20,10 +20,17 @@ apply plugin: 'com.android.application'
 apply from: "../commonLocalRepo.gradle"
 
 android {
-    compileSdkVersion 23
+    compileSdkVersion rootProject.latestCompileSdk
     buildToolsVersion = rootProject.buildToolsVersion
     dataBinding {
         enabled = true
         addDefaultAdapters = true
     }
+    lintOptions {
+        disable 'IconLauncherFormat'
+    }
+}
+
+dependencies {
+     compile "com.android.support:support-v4:${rootProject.supportLibVersion}"
 }

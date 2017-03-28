@@ -23,18 +23,17 @@ import static com.android.SdkConstants.FN_APK_CLASSES_N_DEX;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.builder.files.FileModificationType;
 import com.android.builder.files.RelativeFile;
-import com.android.builder.packaging.ApkCreator;
-import com.android.builder.packaging.ApkCreatorFactory;
+import com.android.apkzlib.zfile.ApkCreator;
+import com.android.apkzlib.zfile.ApkCreatorFactory;
 import com.android.builder.packaging.DuplicateFileException;
 import com.android.builder.packaging.PackagerException;
 import com.android.builder.packaging.ZipAbortException;
 import com.android.builder.packaging.ZipEntryFilter;
 import com.android.builder.signing.SignedJarApkCreatorFactory;
+import com.android.ide.common.res2.FileStatus;
 import com.android.utils.ILogger;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Closer;
 
@@ -49,6 +48,7 @@ import java.net.URL;
 import java.net.URLConnection;
 import java.util.HashMap;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 
@@ -297,9 +297,9 @@ public final class OldPackager implements Closeable {
      * @throws PackagerException failed to update the package
      */
     public void updateResource(@NonNull RelativeFile file,
-            @NonNull FileModificationType modificationType) throws PackagerException {
-        if (modificationType == FileModificationType.NEW
-                || modificationType == FileModificationType.CHANGED) {
+            @NonNull FileStatus modificationType) throws PackagerException {
+        if (modificationType == FileStatus.NEW
+                || modificationType == FileStatus.CHANGED) {
             doAddFile(file.getFile(), file.getOsIndependentRelativePath());
         } else {
             throw new UnsupportedOperationException("Cannot remove a file from archive.");
@@ -319,12 +319,12 @@ public final class OldPackager implements Closeable {
      * @throws PackagerException failed to update the package
      */
     public void updateResourceArchive(@NonNull File file,
-            @NonNull FileModificationType modificationType,
+            @NonNull FileStatus modificationType,
             @NonNull final Predicate<String> isIgnored) throws PackagerException {
         Preconditions.checkNotNull(mApkCreator, "mApkCreator == null");
 
-        if (modificationType == FileModificationType.NEW
-                || modificationType == FileModificationType.CHANGED) {
+        if (modificationType == FileStatus.NEW
+                || modificationType == FileStatus.CHANGED) {
             try {
                 Closer closer = Closer.create();
                 try {
@@ -341,10 +341,10 @@ public final class OldPackager implements Closeable {
                             throw new RuntimeException(e);
                         }
 
-                        return isIgnored.apply(input);
+                        return isIgnored.test(input);
                     };
 
-                    mApkCreator.writeZip(file, null, newIsIgnored::apply);
+                    mApkCreator.writeZip(file, null, newIsIgnored);
                 } catch (Throwable t) {
                     throw closer.rethrow(t, ZipAbortException.class);
                 } finally {

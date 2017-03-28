@@ -16,7 +16,7 @@
 
 package com.android.manifmerger;
 
-import com.android.sdklib.mock.MockLog;
+import com.android.testutils.MockLog;
 import com.google.common.base.Strings;
 
 import junit.framework.TestCase;
@@ -244,7 +244,7 @@ public class ToolsInstructionsCleanerTest extends TestCase {
                 + "    package=\"com.example.lib3\">\n"
                 + "\n"
                 + "    <application android:label=\"@string/lib_name\">\n"
-                + "        <activity android:name=\"activityOne\" tools:ignore=\"value\"/>\n"
+                + "        <activity android:name=\"activityOne\" tools:targetApi=\"true\" tools:ignore=\"value\"/>\n"
                 + "    </application>\n"
                 + "\n"
                 + "</manifest>";

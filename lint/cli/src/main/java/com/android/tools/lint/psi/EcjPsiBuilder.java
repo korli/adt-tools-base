@@ -52,7 +52,8 @@ import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.tree.IElementType;
-
+import java.lang.reflect.Modifier;
+import java.util.List;
 import org.eclipse.jdt.core.compiler.CharOperation;
 import org.eclipse.jdt.internal.compiler.ast.ASTNode;
 import org.eclipse.jdt.internal.compiler.ast.AbstractMethodDeclaration;
@@ -132,9 +133,6 @@ import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.ExtraCompilerModifiers;
 import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
 
-import java.lang.reflect.Modifier;
-import java.util.List;
-
 @SuppressWarnings({"Duplicates", "MethodMayBeStatic"})
 public class EcjPsiBuilder {
 
@@ -147,7 +145,7 @@ public class EcjPsiBuilder {
     private static boolean sAddWhitespaceNodes = false;
     private static boolean sAddParentheses = false;
 
-    private static final char[] PACKAGE_INFO = "package-info".toCharArray();
+    static final char[] PACKAGE_INFO = "package-info".toCharArray();
 
     @NonNull
     private final EcjPsiManager mManager;
@@ -514,29 +512,59 @@ public class EcjPsiBuilder {
         return modifierList;
     }
 
+    /** Like toModifierList but skips javadoc content from offsets */
+    private EcjPsiModifierList toModifierList(@NonNull EcjPsiSourceElement parent,
+            @NonNull FieldDeclaration node) {
+        EcjPsiModifierList modifierList = toModifierList(parent, node.modifiers, node.annotations);
+        int start = node.modifiersSourceStart > 0 ? node.modifiersSourceStart
+                : node.declarationSourceStart;
+        int end = start;
+        if (node.javadoc != null) {
+            start = Math.max(start, node.javadoc.sourceEnd+1);
+            end = Math.max(end, start);
+        }
+        if (node.annotations != null && node.annotations.length > 0) {
+            // TypeDeclaration range *includes* modifier keywords and annotations
+            Annotation last = node.annotations[node.annotations.length - 1];
+            end = Math.max(end, last.declarationSourceEnd + 1);
+        }
+        modifierList.setRange(start, end);
+        return modifierList;
+    }
+
     private EcjPsiModifierList toModifierList(@NonNull EcjPsiSourceElement parent,
             int modifiers, Annotation[] annotations) {
         int flags = 0;
-        if ((modifiers & ClassFileConstants.AccStatic) != 0) {
-            flags |= Modifier.STATIC;
-        }
-        if ((modifiers & ClassFileConstants.AccFinal) != 0) {
-            flags |= Modifier.FINAL;
-        }
-        if ((modifiers & ClassFileConstants.AccAbstract) != 0) {
-            flags |= Modifier.ABSTRACT;
-        }
-        if ((modifiers & ClassFileConstants.AccPrivate) != 0) {
-            flags |= Modifier.PRIVATE;
+
+        if ((modifiers & ClassFileConstants.AccPublic) != 0) {
+            flags |= Modifier.PUBLIC;
         }
         if ((modifiers & ClassFileConstants.AccProtected) != 0) {
             flags |= Modifier.PROTECTED;
         }
-        if ((modifiers & ClassFileConstants.AccPublic) != 0) {
-            flags |= Modifier.PUBLIC;
+        if ((modifiers & ClassFileConstants.AccPrivate) != 0) {
+            flags |= Modifier.PRIVATE;
+        }
+        if ((modifiers & ClassFileConstants.AccStatic) != 0) {
+            flags |= Modifier.STATIC;
+        }
+        if ((modifiers & ClassFileConstants.AccAbstract) != 0) {
+            flags |= Modifier.ABSTRACT;
+        }
+        if ((modifiers & ClassFileConstants.AccFinal) != 0) {
+            flags |= Modifier.FINAL;
+        }
+        if ((modifiers & ClassFileConstants.AccNative) != 0) {
+            flags |= Modifier.NATIVE;
         }
         if ((modifiers & ClassFileConstants.AccSynchronized) != 0) {
             flags |= Modifier.SYNCHRONIZED;
+        }
+        if ((modifiers & ClassFileConstants.AccStrictfp) != 0) {
+            flags |= Modifier.STRICT;
+        }
+        if ((modifiers & ClassFileConstants.AccTransient) != 0) {
+            flags |= Modifier.TRANSIENT;
         }
         if ((modifiers & ClassFileConstants.AccVolatile) != 0) {
             flags |= Modifier.VOLATILE;
@@ -919,8 +947,14 @@ public class EcjPsiBuilder {
                 //noinspection CastConflictsWithInstanceof
                 AnnotationMethodDeclaration amd = (AnnotationMethodDeclaration) method;
                 if (amd.defaultValue != null) {
-                    PsiExpression defaultValue = toExpression(psiMethod, amd.defaultValue);
-                    ((EcjPsiAnnotationMethod) psiMethod).setValue(defaultValue);
+                    if (amd.defaultValue instanceof Annotation) {
+                        EcjPsiAnnotation annotation = toAnnotation(psiMethod,
+                                (Annotation) amd.defaultValue);
+                        ((EcjPsiAnnotationMethod) psiMethod).setValue(annotation);
+                    } else {
+                        PsiExpression defaultValue = toExpression(psiMethod, amd.defaultValue);
+                        ((EcjPsiAnnotationMethod) psiMethod).setValue(defaultValue);
+                    }
                 }
             }
         } else {
@@ -973,6 +1007,8 @@ public class EcjPsiBuilder {
             return toArrayInitializerExpression(parent, (ArrayInitializer) expression);
         } else if (expression instanceof ArrayAllocationExpression) {
             return toArrayAllocationExpression(parent, ((ArrayAllocationExpression) expression));
+        } else if (expression instanceof TypeReference) {
+            return toTypeElement(parent, (TypeReference) expression);
         } else {
             throw new IllegalArgumentException(expression.getClass().getName());
         }
@@ -1658,7 +1694,12 @@ public class EcjPsiBuilder {
         EcjPsiTypeElement element = new EcjPsiTypeElement(mManager, reference);
         parent.adoptChild(element);
 
-        if (reference.resolvedType instanceof ReferenceBinding) {
+        if (reference instanceof UnionTypeReference) {
+            UnionTypeReference unionTypeReference = (UnionTypeReference) reference;
+            for (TypeReference t : unionTypeReference.typeReferences) {
+                toTypeElement(element, t);
+            }
+        } else if (reference.resolvedType instanceof ReferenceBinding) {
             EcjPsiJavaCodeReferenceElement nameElement = toTypeReference(
                     element, reference);
             element.setReferenceElement(nameElement);

@@ -26,16 +26,20 @@ import static com.android.SdkConstants.FN_ANNOTATIONS_JAR;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.ide.common.repository.GradleCoordinate;
 import com.android.ide.common.repository.SdkMavenRepository;
 import com.android.repository.Revision;
 import com.android.repository.api.Downloader;
 import com.android.repository.api.Installer;
+import com.android.repository.api.License;
+import com.android.repository.api.LocalPackage;
 import com.android.repository.api.ProgressIndicator;
 import com.android.repository.api.RemotePackage;
 import com.android.repository.api.RepoManager;
 import com.android.repository.api.SettingsController;
 import com.android.repository.api.UpdatablePackage;
+import com.android.repository.io.FileOp;
 import com.android.repository.io.FileOpUtils;
 import com.android.repository.util.InstallerUtil;
 import com.android.sdklib.AndroidTargetHash;
@@ -79,13 +83,16 @@ public class DefaultSdkLoader implements SdkLoader {
     private AndroidSdkHandler mSdkHandler;
     private SdkInfo mSdkInfo;
     private final ImmutableList<File> mRepositories;
+    private final  FileOp mFileOp = FileOpUtils.create();
 
     public static synchronized SdkLoader getLoader(
             @NonNull File sdkLocation) {
         if (sLoader == null) {
             sLoader = new DefaultSdkLoader(sdkLocation);
         } else if (!sdkLocation.equals(sLoader.mSdkLocation)) {
-            throw new IllegalStateException("Already created an SDK Loader with different SDK Path");
+            throw new IllegalStateException(String.format(
+                    "%s already created using %s; cannot also use %s",
+                    DefaultSdkLoader.class.getSimpleName(), sLoader.mSdkLocation, sdkLocation));
         }
 
         return sLoader;
@@ -131,8 +138,9 @@ public class DefaultSdkLoader implements SdkLoader {
             if (target == null || buildToolInfo == null) {
                 Map<RemotePackage, InstallResultType> installResults = new HashMap<>();
                 RepoManager repoManager = mSdkHandler.getSdkManager(progress);
+                checkNeedsCacheReset(repoManager, sdkLibData);
                 repoManager.loadSynchronously(
-                        sdkLibData.getCacheExpirationPeriod(), progress, downloader, settings);
+                        RepoManager.DEFAULT_EXPIRATION_PERIOD_MS, progress, downloader, settings);
 
                 if (buildToolInfo == null) {
                     installResults.putAll(
@@ -168,6 +176,17 @@ public class DefaultSdkLoader implements SdkLoader {
         }
 
         return new TargetInfo(target, buildToolInfo);
+    }
+
+    /**
+     * Checks whether the {@link RepoManager} needs to have its local and remote packages cache
+     * reset and invalidates them if they do.
+     */
+    private void checkNeedsCacheReset(RepoManager repoManager, SdkLibData sdkLibData) {
+        if (sdkLibData.needsCacheReset()) {
+            repoManager.markInvalid();
+            sdkLibData.setNeedsCacheReset(false);
+        }
     }
 
     /**
@@ -286,7 +305,7 @@ public class DefaultSdkLoader implements SdkLoader {
      * results for each packages it tries to install.
      *
      * @param requestPackages the packages we want to install.
-     *  @param repoManager used for interacting with repository packages.
+     * @param repoManager used for interacting with repository packages.
      * @param downloader used to download packages.
      * @param progress a progress logger for messages.
      * @return a {@code Map} of all the packages we tried to install and the install result.
@@ -307,17 +326,20 @@ public class DefaultSdkLoader implements SdkLoader {
 
         Map<RemotePackage, InstallResultType> installResults = new HashMap<>();
         for (RemotePackage p : remotePackages) {
+            progress.logVerbose(
+                    "Checking the license for package "
+                            + p.getDisplayName()
+                            + " in "
+                            + repoManager.getLocalPath()
+                            + File.separator
+                            + License.LICENSE_DIR);
             if (p.getLicense() != null
                     && !p.getLicense()
                             .checkAccepted(repoManager.getLocalPath(), mSdkHandler.getFileOp())) {
-                progress.setText(
-                        "The license for package "
-                                + p.getDisplayName()
-                                + " was not accepted. "
-                                + "Please install this package through Android Studio SDK "
-                                + "Manager.");
+                progress.logWarning("License for package " + p.getDisplayName() + " not accepted.");
                 installResults.put(p, InstallResultType.LICENSE_FAIL);
             } else {
+                progress.logVerbose("License for package " + p.getDisplayName() + " accepted.");
                 Installer installer =
                         SdkInstallerUtil.findBestInstallerFactory(p, mSdkHandler)
                                 .createInstaller(
@@ -389,9 +411,9 @@ public class DefaultSdkLoader implements SdkLoader {
         Map<RemotePackage, InstallResultType> installResults = new HashMap<>();
         ProgressIndicator progress = getNewDownloadProgress();
         RepoManager repoManager = mSdkHandler.getSdkManager(progress);
-
+        checkNeedsCacheReset(repoManager, sdkLibData);
         repoManager.loadSynchronously(
-                sdkLibData.getCacheExpirationPeriod(),
+                RepoManager.DEFAULT_EXPIRATION_PERIOD_MS,
                 new LoggerProgressIndicatorWrapper(logger),
                 sdkLibData.getDownloader(),
                 sdkLibData.getSettings());
@@ -422,23 +444,6 @@ public class DefaultSdkLoader implements SdkLoader {
         // we resort to installing/updating the old big repositories.
         if (artifactPackages.size() != repositoryPaths.size()
                 || installResults.values().contains(InstallResultType.INSTALL_FAIL)) {
-            // Check if there is a Google Repository dependency. If not, we don't install/update
-            // the Google repository. If there is one, we update both repositories, since
-            // the (maven) packages in the Google repo have dependencies (declared in *.pom files)
-            // on packages from the Android repo.
-            boolean googleRepositoryRequired = false;
-
-            for (String repoPath : repositoryPaths) {
-                GradleCoordinate coordinate = SdkMavenRepository.getCoordinateFromSdkPath(repoPath);
-                if (coordinate != null) {
-                    String group = coordinate.getGroupId();
-                    if (group != null
-                            && group.startsWith(SdkConstants.GOOGLE_SUPPORT_ARTIFACT_PREFIX)) {
-                        googleRepositoryRequired = true;
-                    }
-                }
-            }
-
             UpdatablePackage googleRepositoryPackage =
                     repoManager
                             .getPackages()
@@ -452,25 +457,38 @@ public class DefaultSdkLoader implements SdkLoader {
                             .getConsolidatedPkgs()
                             .get(SdkMavenRepository.ANDROID.getPackageId());
 
-            if (googleRepositoryRequired && (!googleRepositoryPackage.hasLocal()
-                    || googleRepositoryPackage.isUpdate())) {
-                installResults.putAll(
-                        installRemotePackages(
-                                ImmutableList.of(googleRepositoryPackage.getRemote()),
-                                repoManager,
-                                sdkLibData.getDownloader(),
-                                progress));
-
-                if (installResults.get(googleRepositoryPackage.getRemote())
-                        .equals(InstallResultType.SUCCESS)) {
-                    File googleRepo = SdkMavenRepository.GOOGLE
-                            .getRepositoryLocation(mSdkLocation, true, FileOpUtils.create());
+            // Check if there is a Google Repository dependency. If not, we don't install/update
+            // the Google repository. If there is one, we update both repositories, since
+            // the (maven) packages in the Google repo have dependencies (declared in *.pom files)
+            // on packages from the Android repo.
+            if (isInGoogleRepository(repositoryPaths)) {
+                // If a Google package is already there and there is no update, it means we've
+                // already done this step, but the list of repositories wasn't updated, so just add
+                // the repo again.
+                if (googleRepositoryPackage.hasLocal() && !googleRepositoryPackage.isUpdate()) {
+                    File googleRepo = getMavenRepoAsFile(SdkMavenRepository.GOOGLE);
                     repositoriesBuilder.add(googleRepo);
+                } else {
+                    installResults.putAll(
+                            installRemotePackages(
+                                    ImmutableList.of(googleRepositoryPackage.getRemote()),
+                                    repoManager,
+                                    sdkLibData.getDownloader(),
+                                    progress));
+
+                    if (installResults.get(googleRepositoryPackage.getRemote())
+                            .equals(InstallResultType.SUCCESS)) {
+                        File googleRepo = getMavenRepoAsFile(SdkMavenRepository.GOOGLE);
+                        repositoriesBuilder.add(googleRepo);
+                    }
                 }
             }
 
-            if (!androidRepositoryPackage.hasLocal()
-                    || androidRepositoryPackage.isUpdate()) {
+            // The same as above.
+            if (androidRepositoryPackage.hasLocal() && !androidRepositoryPackage.isUpdate()) {
+                File androidRepo = getMavenRepoAsFile(SdkMavenRepository.ANDROID);
+                repositoriesBuilder.add(androidRepo);
+            } else {
                 installResults.putAll(
                         installRemotePackages(
                                 ImmutableList.of(androidRepositoryPackage.getRemote()),
@@ -481,9 +499,7 @@ public class DefaultSdkLoader implements SdkLoader {
                 if (installResults
                         .get(androidRepositoryPackage.getRemote())
                         .equals(InstallResultType.SUCCESS)) {
-                    File androidRepo =
-                            SdkMavenRepository.ANDROID.getRepositoryLocation(
-                                    mSdkLocation, true, FileOpUtils.create());
+                    File androidRepo = getMavenRepoAsFile(SdkMavenRepository.ANDROID);
                     repositoriesBuilder.add(androidRepo);
                 }
             }
@@ -491,6 +507,69 @@ public class DefaultSdkLoader implements SdkLoader {
         }
 
         return repositoriesBuilder.build();
+    }
+
+    private File getMavenRepoAsFile(SdkMavenRepository mavenRepository) {
+        return mavenRepository.getRepositoryLocation(mSdkLocation, true, mFileOp);
+    }
+
+    private static boolean isInGoogleRepository(List<String> repoPaths) {
+        for (String repoPath : repoPaths) {
+            GradleCoordinate coordinate = SdkMavenRepository.getCoordinateFromSdkPath(repoPath);
+            if (coordinate != null) {
+                String group = coordinate.getGroupId();
+                if (group != null &&
+                        (group.startsWith(SdkConstants.GOOGLE_SUPPORT_ARTIFACT_PREFIX) ||
+                                group.startsWith(SdkConstants.FIREBASE_ARTIFACT_PREFIX))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Override
+    @Nullable
+    public File installSdkTool(@NonNull SdkLibData sdkLibData, @NonNull String packageId) {
+        ProgressIndicator progress =
+                new LoggerProgressIndicatorWrapper(new StdLogger(StdLogger.Level.WARNING));
+        RepoManager repoManager = mSdkHandler.getSdkManager(progress);
+        repoManager.loadSynchronously(0, progress, null, null);
+        LocalPackage localSdkToolPackage =
+                mSdkHandler.getLatestLocalPackageForPrefix(packageId, true, progress);
+        if (localSdkToolPackage == null) {
+            if (!sdkLibData.useSdkDownload()) {
+                // If we are offline and we haven't found a local package for the SDK Tool
+                // return null.
+                return null;
+            }
+            checkNeedsCacheReset(repoManager, sdkLibData);
+            repoManager.loadSynchronously(
+                    RepoManager.DEFAULT_EXPIRATION_PERIOD_MS,
+                    progress,
+                    sdkLibData.getDownloader(),
+                    sdkLibData.getSettings());
+
+            RemotePackage sdkToolPackage =
+                    mSdkHandler.getLatestRemotePackageForPrefix(packageId, true, progress);
+            if (sdkToolPackage == null) {
+                // If we haven't found the SDK Tool package remotely or locally return null.
+                return null;
+            } else {
+                Map<RemotePackage, InstallResultType> installResults =
+                        installRemotePackages(
+                                ImmutableList.of(sdkToolPackage),
+                                repoManager,
+                                sdkLibData.getDownloader(),
+                                getNewDownloadProgress());
+
+                checkResults(installResults);
+                repoManager.loadSynchronously(0, progress, null, null);
+                localSdkToolPackage =
+                        mSdkHandler.getLatestLocalPackageForPrefix(packageId, true, progress);
+            }
+        }
+        return localSdkToolPackage.getLocation();
     }
 
     /**

@@ -29,7 +29,6 @@ import com.android.ddmlib.ShellCommandUnresponsiveException;
 import com.android.ddmlib.SyncException;
 import com.android.ddmlib.TimeoutException;
 import com.android.utils.ILogger;
-import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
@@ -137,12 +136,10 @@ public class ConnectedDevice extends DeviceConnector {
             iDevice.installPackages(splitApkFiles, true /*reinstall*/,
                     ImmutableList.copyOf(options), timeoutInMs, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
-            List<String> apkFileNames = Lists.transform(splitApkFiles, new Function<File, String>() {
-                @Override
-                public String apply(@Nullable File input) {
-                    return input != null ? input.getAbsolutePath() : null;
-                }
-            });
+            List<String> apkFileNames =
+                    Lists.transform(
+                            splitApkFiles,
+                            input -> input != null ? input.getAbsolutePath() : null);
             logger.error(e, "Unable to install " + Joiner.on(',').join(apkFileNames));
             throw new DeviceException(e);
         }
@@ -258,7 +255,7 @@ public class ConnectedDevice extends DeviceConnector {
             densityValue = getNullableProperty(IDevice.PROP_DEVICE_EMULATOR_DENSITY);
         }
         if (densityValue == null) {
-            mLogger.info("Unable to get density for device %1$s", getName());
+            mLogger.verbose("Unable to get density for device %1$s", getName());
             return -1;
         }
         try {

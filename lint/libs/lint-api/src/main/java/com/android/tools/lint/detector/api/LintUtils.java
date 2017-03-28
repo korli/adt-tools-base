@@ -16,6 +16,44 @@
 
 package com.android.tools.lint.detector.api;
 
+import static com.android.SdkConstants.ANDROID_MANIFEST_XML;
+import static com.android.SdkConstants.ANDROID_PREFIX;
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.ATTR_LOCALE;
+import static com.android.SdkConstants.BIN_FOLDER;
+import static com.android.SdkConstants.DOT_GIF;
+import static com.android.SdkConstants.DOT_JPEG;
+import static com.android.SdkConstants.DOT_JPG;
+import static com.android.SdkConstants.DOT_PNG;
+import static com.android.SdkConstants.DOT_WEBP;
+import static com.android.SdkConstants.DOT_XML;
+import static com.android.SdkConstants.FN_BUILD_GRADLE;
+import static com.android.SdkConstants.ID_PREFIX;
+import static com.android.SdkConstants.NEW_ID_PREFIX;
+import static com.android.SdkConstants.TOOLS_URI;
+import static com.android.SdkConstants.UTF_8;
+import static com.android.ide.common.resources.configuration.FolderConfiguration.QUALIFIER_SPLITTER;
+import static com.android.ide.common.resources.configuration.LocaleQualifier.BCP_47_PREFIX;
+import static com.android.sdklib.SdkVersionInfo.camelCaseToUnderlines;
+import static com.android.sdklib.SdkVersionInfo.underlinesToCamelCase;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_CHAR;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_CHARACTER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_INT;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_INTEGER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG_WRAPPER;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT;
+import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
+
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.AndroidProject;
@@ -39,31 +77,46 @@ import com.android.tools.lint.client.api.LintClient;
 import com.android.utils.PositionXmlParser;
 import com.android.utils.SdkUtils;
 import com.google.common.annotations.Beta;
+import com.google.common.base.Charsets;
 import com.google.common.base.Objects;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.intellij.psi.*;
-import lombok.ast.ImportDeclaration;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.*;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.PsiCallExpression;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiImportStatement;
+import com.intellij.psi.PsiLiteral;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiParenthesizedExpression;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiWhiteSpace;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.util.*;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.Queue;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-
-import static com.android.SdkConstants.*;
-import static com.android.ide.common.resources.configuration.FolderConfiguration.QUALIFIER_SPLITTER;
-import static com.android.ide.common.resources.configuration.LocaleQualifier.BCP_47_PREFIX;
-import static com.android.tools.lint.client.api.JavaParser.*;
+import lombok.ast.ImportDeclaration;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 
 /**
@@ -76,6 +129,45 @@ import static com.android.tools.lint.client.api.JavaParser.*;
 public class LintUtils {
     // Utility class, do not instantiate
     private LintUtils() {
+    }
+
+    /** Returns the internal method name */
+    @NonNull
+    public static String getInternalMethodName(@NonNull PsiMethod method) {
+        if (method.isConstructor()) {
+            return SdkConstants.CONSTRUCTOR_NAME;
+        }
+        else {
+            return method.getName();
+        }
+    }
+
+    @Nullable
+    public static PsiElement getCallName(@NonNull PsiCallExpression expression) {
+        PsiElement firstChild = expression.getFirstChild();
+        while (firstChild != null) {
+            if (firstChild instanceof PsiWhiteSpace) {
+                firstChild = firstChild.getNextSibling();
+            } else if (firstChild instanceof PsiParenthesizedExpression) {
+                firstChild = ((PsiParenthesizedExpression)firstChild).getExpression();
+            } else {
+                break;
+            }
+        }
+        if (firstChild != null) {
+            PsiElement lastChild = firstChild.getLastChild();
+            while (lastChild != null) {
+                if (lastChild instanceof PsiWhiteSpace) {
+                    lastChild = lastChild.getPrevSibling();
+                } else if (lastChild instanceof PsiParenthesizedExpression) {
+                    lastChild = ((PsiParenthesizedExpression)lastChild).getExpression();
+                } else {
+                    break;
+                }
+            }
+            return lastChild;
+        }
+        return null;
     }
 
     /**
@@ -92,7 +184,7 @@ public class LintUtils {
 
         for (int i = 0, n = strings.size(); i < n; i++) {
             if (sb.length() > 0) {
-                sb.append(", "); //$NON-NLS-1$
+                sb.append(", ");
             }
             sb.append(strings.get(i));
 
@@ -191,6 +283,42 @@ public class LintUtils {
     }
 
     /**
+     * Returns a description of counts for errors and warnings, such as
+     * "5 errors and 2 warnings" or "3 errors" or "2 warnings"
+     *
+     * @param errorCount   the count of errors
+     * @param warningCount the count of warnings
+     * @param comma        if true, use a comma to separate messages, otherwise "and"
+     * @return a description string
+     */
+    @NonNull
+    public static String describeCounts(int errorCount, int warningCount, boolean comma) {
+        if (errorCount == 0 && warningCount == 0) {
+            return "No errors or warnings";
+        }
+        String errors = pluralize(errorCount, "error");
+        String warnings = pluralize(warningCount, "warning");
+        if (errorCount == 0) {
+            return String.format("%1$d %2$s", warningCount, warnings);
+        } else if (warningCount == 0) {
+            return String.format("%1$d %2$s", errorCount, errors);
+        } else {
+            String conjunction = comma ? "," : " and";
+            return String.format("%1$d %2$s%3$s %4$d %5$s",
+                    errorCount, errors, conjunction, warningCount, warnings);
+        }
+    }
+
+    // PRIVATE because it only works for limited scenarios
+    @NonNull
+    private static String pluralize(int count, @NonNull String one) {
+        if (count == 1) {
+            return one;
+        }
+        return one + "s";
+    }
+
+    /**
      * Returns the children elements of the given node
      *
      * @param node the parent node
@@ -199,7 +327,7 @@ public class LintUtils {
     @NonNull
     public static List<Element> getChildren(@NonNull Node node) {
         NodeList childNodes = node.getChildNodes();
-        List<Element> children = new ArrayList<Element>(childNodes.getLength());
+        List<Element> children = new ArrayList<>(childNodes.getLength());
         for (int i = 0, n = childNodes.getLength(); i < n; i++) {
             Node child = childNodes.item(i);
             if (child.getNodeType() == Node.ELEMENT_NODE) {
@@ -438,7 +566,7 @@ public class LintUtils {
             return Splitter.on(';').omitEmptyStrings().trimResults().split(path);
         }
 
-        List<String> combined = new ArrayList<String>();
+        List<String> combined = new ArrayList<>();
         Iterables.addAll(combined, Splitter.on(':').omitEmptyStrings().trimResults().split(path));
         for (int i = 0, n = combined.size(); i < n; i++) {
             String p = combined.get(i);
@@ -451,7 +579,6 @@ public class LintUtils {
                 combined.set(i, p + ':' + combined.get(i+1));
                 combined.remove(i+1);
                 n--;
-                continue;
             }
         }
 
@@ -520,29 +647,32 @@ public class LintUtils {
         return null;
     }
 
-    private static final String UTF_16 = "UTF_16";               //$NON-NLS-1$
-    private static final String UTF_16LE = "UTF_16LE";           //$NON-NLS-1$
+    private static final String UTF_16 = "UTF_16";
+    private static final String UTF_16LE = "UTF_16LE";
 
     /**
      * Returns the encoded String for the given file. This is usually the
      * same as {@code Files.toString(file, Charsets.UTF8}, but if there's a UTF byte order mark
      * (for UTF8, UTF_16 or UTF_16LE), use that instead.
      *
-     * @param client the client to use for I/O operations
-     * @param file the file to read from
+     * @param client       the client to use for I/O operations
+     * @param file         the file to read from
+     * @param createString If true, create a {@link String} instead of a general {@link
+     *                     CharSequence}
      * @return the string
      * @throws IOException if the file cannot be read properly
      */
     @NonNull
-    public static String getEncodedString(
+    public static CharSequence getEncodedString(
             @NonNull LintClient client,
-            @NonNull File file) throws IOException {
+            @NonNull File file,
+            boolean createString) throws IOException {
         byte[] bytes = client.readBytes(file);
         if (endsWith(file.getName(), DOT_XML)) {
             return PositionXmlParser.getXmlString(bytes);
         }
 
-        return getEncodedString(bytes);
+        return getEncodedString(bytes, createString);
     }
 
     /**
@@ -554,11 +684,13 @@ public class LintUtils {
      * could be a {@code encoding=} attribute in the prologue. For those files,
      * use {@link PositionXmlParser#getXmlString(byte[])} instead.
      *
-     * @param data the byte array to construct the string from
+     * @param data         the byte array to construct the string from
+     * @param createString If true, create a {@link String} instead of a general {@link
+     *                     CharSequence}
      * @return the string
      */
     @NonNull
-    public static String getEncodedString(@Nullable byte[] data) {
+    public static CharSequence getEncodedString(@Nullable byte[] data, boolean createString) {
         if (data == null) {
             return "";
         }
@@ -582,13 +714,13 @@ public class LintUtils {
             } else if (data[0] == (byte)0x0 && data[1] == (byte)0x0
                     && data[2] == (byte)0xfe && data[3] == (byte)0xff) {
                 // UTF-32, big-endian
-                defaultCharset = charset = "UTF_32";    //$NON-NLS-1$
+                defaultCharset = charset = "UTF_32";
                 offset += 4;
             } else if (data[0] == (byte)0xff && data[1] == (byte)0xfe
                     && data[2] == (byte)0x0 && data[3] == (byte)0x0) {
                 // UTF-32, little-endian. We must check for this *before* looking for
                 // UTF_16LE since UTF_32LE has the same prefix!
-                defaultCharset = charset = "UTF_32LE";  //$NON-NLS-1$
+                defaultCharset = charset = "UTF_32LE";
                 offset += 4;
             } else if (data[0] == (byte)0xff && data[1] == (byte)0xfe) {
                 //  UTF-16, little-endian
@@ -617,7 +749,29 @@ public class LintUtils {
             charset = seenOddZero ? UTF_16LE : seenEvenZero ? UTF_16 : UTF_8;
         }
 
-        String text = null;
+        if (!createString) {
+            // Attempt to create a CharSequence backed by our own lint implementation
+            // where we can feed the char array back into ECJ without a separate copy
+            // (which the String class insists on)
+
+            if (UTF_8.equals(charset)) {
+                ByteBuffer bytes = ByteBuffer.wrap(data, offset, length);
+                try {
+                    CharBuffer decode = Charsets.UTF_8.newDecoder().decode(bytes);
+                    decode.compact();
+                    int size = decode.position();
+                    assert size <= decode.limit();
+
+                    char[] array = decode.array();
+                    return CharSequences.createSequence(array, 0, size);
+                } catch (CharacterCodingException ignore) {
+                    // Fall back to encoding handling below
+                }
+            }
+        }
+
+
+        CharSequence text = null;
         try {
             text = new String(data, offset, length, charset);
         } catch (UnsupportedEncodingException e) {
@@ -899,7 +1053,7 @@ public class LintUtils {
 
         List<ResourceValue> result = null;
 
-        Queue<ResourceValue> queue = new ArrayDeque<ResourceValue>();
+        Queue<ResourceValue> queue = new ArrayDeque<>();
         queue.add(new ResourceValue(style.type, style.name, false));
         Set<String> seen = Sets.newHashSet();
         int count = 0;
@@ -973,7 +1127,7 @@ public class LintUtils {
 
         List<StyleResourceValue> result = null;
 
-        Queue<ResourceValue> queue = new ArrayDeque<ResourceValue>();
+        Queue<ResourceValue> queue = new ArrayDeque<>();
         queue.add(new ResourceValue(style.type, style.name, false));
         Set<String> seen = Sets.newHashSet();
         int count = 0;
@@ -1071,9 +1225,43 @@ public class LintUtils {
 
     /** Computes a suggested name given a resource prefix and resource name */
     public static String computeResourceName(@NonNull String prefix, @NonNull String name) {
+        return computeResourceName(prefix, name, null);
+    }
+
+    /** Computes a suggested name given a resource prefix and resource name */
+    public static String computeResourceName(@NonNull String prefix, @NonNull String name,
+            @Nullable ResourceFolderType folderType) {
         if (prefix.isEmpty()) {
             return name;
-        } else if (name.isEmpty()) {
+        }
+
+        // Regardless of the prefix, if creating a file based resource such as a layout,
+        // the name must be lower-case only
+        if (folderType != null && folderType != ResourceFolderType.VALUES) {
+            name = name.toLowerCase(Locale.ROOT);
+            String underlined = camelCaseToUnderlines(prefix);
+            if (!prefix.equals(underlined)) {
+                if (!underlined.endsWith("_")) {
+                    underlined = underlined + "_";
+                }
+                prefix = underlined;
+            }
+        }
+
+        // If prefix is "myPrefix" and then name is "MyStyle", we should construct MyPrefixMyStyle
+        if (!name.isEmpty() && Character.isUpperCase(name.charAt(0))) {
+            if (prefix.indexOf('_') != -1) {
+                prefix = underlinesToCamelCase(prefix);
+            }
+            prefix = Character.toUpperCase(prefix.charAt(0)) + prefix.substring(1);
+            // and if the prefix is myPrefix_ we should still construct MyPrefixMyStyle, not
+            // MyPrefix_MyStyle
+            if (prefix.endsWith("_")) {
+                prefix = prefix.substring(0, prefix.length() - 1);
+            }
+        }
+
+        if (name.isEmpty()) {
             return prefix;
         } else if (prefix.endsWith("_")) {
             return prefix + name;
@@ -1081,7 +1269,6 @@ public class LintUtils {
             return prefix + Character.toUpperCase(name.charAt(0)) + name.substring(1);
         }
     }
-
 
     /**
      * Convert an {@link com.android.builder.model.ApiVersion} to a {@link
@@ -1263,7 +1450,7 @@ public class LintUtils {
         if (locale == null) {
             return assumeForBase;
         } else {
-            return "en".equals(locale.getLanguage());  //$NON-NLS-1$
+            return "en".equals(locale.getLanguage());
         }
     }
 

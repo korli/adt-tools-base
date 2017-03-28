@@ -33,7 +33,14 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
-import org.w3c.dom.*;
+
+import java.util.Locale;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.w3c.dom.Text;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -121,8 +128,8 @@ public class XmlElement extends OrphanXmlElement {
                     } catch (IllegalArgumentException e) {
                         try {
                             // is this another tool's operation type that we do not care about.
-                            OtherOperationType.valueOf(instruction);
-                            break;
+                            OtherOperationType.valueOf(instruction.toLowerCase(Locale.ROOT));
+                            continue;
                         } catch (IllegalArgumentException e1) {
 
                             String errorMessage =
@@ -268,7 +275,7 @@ public class XmlElement extends OrphanXmlElement {
             return;
 
         }
-        mergingReport.getLogger().info("Merging " + getId()
+        mergingReport.getLogger().verbose("Merging " + getId()
                 + " with lower " + lowerPriorityNode.printPosition());
 
         // workaround for 0.12 release and overlay treatment of manifest entries. This will

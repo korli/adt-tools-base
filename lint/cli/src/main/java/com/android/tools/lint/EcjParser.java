@@ -16,11 +16,11 @@
 
 package com.android.tools.lint;
 
+import static com.android.SdkConstants.DOT_JAVA;
 import static com.android.SdkConstants.INT_DEF_ANNOTATION;
 import static com.android.SdkConstants.STRING_DEF_ANNOTATION;
 import static com.android.SdkConstants.UTF_8;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
@@ -30,20 +30,49 @@ import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.ClassContext;
 import com.android.tools.lint.detector.api.DefaultPosition;
 import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.psi.EcjPsiBuilder;
 import com.android.tools.lint.psi.EcjPsiJavaEvaluator;
+import com.android.tools.lint.psi.EcjPsiJavaFile;
 import com.android.tools.lint.psi.EcjPsiManager;
-import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
 import com.google.common.collect.MapMaker;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiJavaFile;
-
+import java.io.File;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.nio.CharBuffer;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.MissingResourceException;
+import java.util.ResourceBundle;
+import java.util.Set;
+import lombok.ast.Catch;
+import lombok.ast.Identifier;
+import lombok.ast.MethodDeclaration;
+import lombok.ast.Node;
+import lombok.ast.Position;
+import lombok.ast.StrictListAccessor;
+import lombok.ast.Try;
+import lombok.ast.VariableDeclaration;
+import lombok.ast.VariableDefinition;
+import lombok.ast.VariableDefinitionEntry;
+import lombok.ast.ecj.EcjTreeConverter;
 import org.eclipse.jdt.core.compiler.CategorizedProblem;
 import org.eclipse.jdt.core.compiler.IProblem;
 import org.eclipse.jdt.internal.compiler.CompilationResult;
@@ -85,6 +114,7 @@ import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.ast.UnionTypeReference;
 import org.eclipse.jdt.internal.compiler.batch.FileSystem;
+import org.eclipse.jdt.internal.compiler.batch.Main;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
 import org.eclipse.jdt.internal.compiler.env.INameEnvironment;
@@ -96,6 +126,7 @@ import org.eclipse.jdt.internal.compiler.impl.Constant;
 import org.eclipse.jdt.internal.compiler.impl.DoubleConstant;
 import org.eclipse.jdt.internal.compiler.impl.FloatConstant;
 import org.eclipse.jdt.internal.compiler.impl.IntConstant;
+import org.eclipse.jdt.internal.compiler.impl.IrritantSet;
 import org.eclipse.jdt.internal.compiler.impl.LongConstant;
 import org.eclipse.jdt.internal.compiler.impl.ShortConstant;
 import org.eclipse.jdt.internal.compiler.impl.StringConstant;
@@ -119,31 +150,10 @@ import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
 import org.eclipse.jdt.internal.compiler.lookup.VariableBinding;
 import org.eclipse.jdt.internal.compiler.parser.Parser;
 import org.eclipse.jdt.internal.compiler.problem.AbortCompilation;
+import org.eclipse.jdt.internal.compiler.problem.DefaultProblem;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblemFactory;
 import org.eclipse.jdt.internal.compiler.problem.ProblemReporter;
-
-import java.io.File;
-import java.lang.reflect.Modifier;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-
-import lombok.ast.Catch;
-import lombok.ast.Identifier;
-import lombok.ast.MethodDeclaration;
-import lombok.ast.Node;
-import lombok.ast.Position;
-import lombok.ast.StrictListAccessor;
-import lombok.ast.Try;
-import lombok.ast.VariableDeclaration;
-import lombok.ast.VariableDefinition;
-import lombok.ast.VariableDefinitionEntry;
-import lombok.ast.ecj.EcjTreeConverter;
+import org.eclipse.jdt.internal.compiler.problem.ProblemSeverities;
 
 /**
  * Java parser which uses ECJ for parsing and type attribution
@@ -151,10 +161,27 @@ import lombok.ast.ecj.EcjTreeConverter;
 // Currently ships with deprecated API support
 @SuppressWarnings({"deprecation", "UnusedParameters"})
 public class EcjParser extends JavaParser {
+    /** Whether parser errors should be dumped to stdout */
     private static final boolean DEBUG_DUMP_PARSE_ERRORS = false;
 
+    /** Whether we can skip computing ECJ error messages (not a constant) */
+    public static boolean skipComputingEcjErrors = !DEBUG_DUMP_PARSE_ERRORS;
+
     /**
-     * Whether we're going to keep the ECJ compiler mLookupEnvironment around between
+     * Whether library sources should be parsed (instead of the compiled
+     * output be included on the classpath instead
+     */
+    private static final boolean PARSE_LIBRARY_SOURCES = true;
+
+    static {
+        if (Boolean.getBoolean("lint.check-ecj-version")) {
+            // Are we using the expected ECJ version?
+            checkEcjVersion();
+        }
+    }
+
+    /**
+     * Whether we're going to keep the ECJ compiler lookupEnvironment around between
      * the parse phase and disposal. The lookup environment is important for type attribution.
      * We should be able to inline this field to true, but making it optional now to allow
      * people to revert this behavior in the field immediately if there's an unexpected
@@ -162,31 +189,87 @@ public class EcjParser extends JavaParser {
      */
     private static final boolean KEEP_LOOKUP_ENVIRONMENT = !Boolean.getBoolean("lint.reset.ecj");
 
-    private final LintClient mClient;
-    private final Project mProject;
-    private Map<File, EcjSourceFile> mSourceUnits;
-    @Deprecated private Map<String, TypeDeclaration> mTypeUnits;
-    private Parser mParser;
-    protected EcjResult mEcjResult;
-    private EcjPsiJavaEvaluator mResolver;
+    private final LintClient client;
+    private final Project project;
+    private Map<File, EcjSourceFile> sourceUnits;
+    @Deprecated private Map<String, TypeDeclaration> typeUnits;
+    private Parser parser;
+    protected EcjResult ecjResult;
+    private EcjPsiJavaEvaluator resolver;
 
     public EcjParser(@NonNull LintCliClient client, @Nullable Project project) {
-        mClient = client;
-        mProject = project;
-        mParser = getParser();
+        this.client = client;
+        this.project = project;
+        parser = getParser();
+    }
+
+    private static void checkEcjVersion() {
+        Locale locale = Locale.getDefault();
+        try {
+            ResourceBundle bundle = Main.ResourceBundleFactory.getBundle(locale);
+            String v = bundle.getString("compiler.version");
+            if (!v.startsWith("v2016")) {
+                System.err.println(""
+                        + "WARNING: Using the wrong version of the Eclipse compiler (" + v + ")\n"
+                        + "\n"
+                        + "this typically means that your project is using some custom Gradle\n"
+                        + "plugin which pulls in an older version of the ECJ library, and Gradle\n"
+                        + "placed it on the classpath earlier than the one needed by lint\n"
+                        + "(v20160829-0950, 3.12.1)).");
+            }
+        } catch(MissingResourceException ignore) {
+        }
     }
 
     @NonNull
     @Override
     public EcjPsiJavaEvaluator getEvaluator() {
-        return mResolver;
+        return resolver;
+    }
+
+    @Nullable
+    @Override
+    public File getFile(@NonNull PsiFile file) {
+        if (file instanceof EcjPsiJavaFile) {
+            EcjPsiJavaFile javaFile = (EcjPsiJavaFile) file;
+            return javaFile.getIoFile();
+        }
+
+        return null;
+    }
+
+    @NonNull
+    @Override
+    public CharSequence getFileContents(@NonNull PsiFile file) {
+        if (file instanceof EcjPsiJavaFile) {
+            EcjPsiJavaFile javaFile = (EcjPsiJavaFile) file;
+            return CharBuffer.wrap(javaFile.getFileContents());
+        }
+
+        return super.getFileContents(file);
     }
 
     /**
      * Create the default compiler options
      */
     public static CompilerOptions createCompilerOptions() {
-        CompilerOptions options = new CompilerOptions();
+        CompilerOptions options = new CompilerOptions() {
+            @Override
+            public int getSeverity(int irritant) {
+                // Turn off all warnings
+                return ProblemSeverities.Ignore;
+            }
+
+            @Override
+            public String getSeverityString(int irritant) {
+                return IGNORE;
+            }
+
+            @Override
+            public boolean isAnyEnabled(IrritantSet irritants) {
+                return false;
+            }
+        };
 
         // Always using JDK 7 rather than basing it on project metadata since we
         // don't do compilation error validation in lint (we leave that to the IDE's
@@ -233,44 +316,61 @@ public class EcjParser extends JavaParser {
     }
 
     private Parser getParser() {
-        if (mParser == null) {
+        if (parser == null) {
             CompilerOptions options = createCompilerOptions();
             ProblemReporter problemReporter = new ProblemReporter(
                     DefaultErrorHandlingPolicies.exitOnFirstError(),
                     options,
-                    new DefaultProblemFactory());
-            mParser = new Parser(problemReporter,
+                    new EcjProblemFactory());
+            parser = new Parser(problemReporter,
                     options.parseLiteralExpressionsAsConstants);
-            mParser.javadocParser.checkDocComment = false;
+            parser.javadocParser.checkDocComment = false;
         }
-        return mParser;
+        return parser;
     }
 
     @Override
-    public void prepareJavaParse(@NonNull final List<JavaContext> contexts) {
-        if (mProject == null || contexts.isEmpty()) {
-            return;
+    public boolean prepareJavaParse(@NonNull final List<JavaContext> contexts) {
+        if (project == null || contexts.isEmpty()) {
+            return true;
         }
 
         List<EcjSourceFile> sources = Lists.newArrayListWithExpectedSize(contexts.size());
-        mSourceUnits = Maps.newHashMapWithExpectedSize(sources.size());
+        sourceUnits = Maps.newHashMapWithExpectedSize(sources.size());
         for (JavaContext context : contexts) {
-            String contents = context.getContents();
+            CharSequence contents = context.getContents();
             if (contents == null) {
                 continue;
             }
             File file = context.file;
-            EcjSourceFile unit = new EcjSourceFile(contents, file);
+            EcjSourceFile unit = EcjSourceFile.create(contents, file);
             sources.add(unit);
-            mSourceUnits.put(file, unit);
+            sourceUnits.put(file, unit);
         }
+
+        if (PARSE_LIBRARY_SOURCES) {
+            for (Project libraryProject : project.getAllLibraries()) {
+                List<File> javaSourceFolders = libraryProject.getJavaSourceFolders();
+                if (!javaSourceFolders.isEmpty()) {
+                    for (File folder : javaSourceFolders) {
+                        // Skip R folders; they're part of the merged output
+                        File parentFile = folder.getParentFile();
+                        if (parentFile == null || !parentFile.getName().equals("r")) {
+                            gatherJavaFiles(sources, folder);
+                        }
+                    }
+                }
+
+            }
+        }
+
         List<String> classPath = computeClassPath(contexts);
         try {
-            mEcjResult = parse(createCompilerOptions(), sources, classPath, mClient);
-            mResolver = new EcjPsiJavaEvaluator(mEcjResult.mPsiManager);
+            ecjResult = parse(createCompilerOptions(), sources, classPath, client);
+            resolver = new EcjPsiJavaEvaluator(ecjResult.psiManager);
 
             if (DEBUG_DUMP_PARSE_ERRORS) {
-                for (CompilationUnitDeclaration unit : mEcjResult.getCompilationUnits()) {
+                for (CompilationUnitDeclaration unit : ecjResult.getCompilationUnits()) {
                     // so maybe I don't need my map!!
                     CategorizedProblem[] problems = unit.compilationResult()
                             .getAllProblems();
@@ -279,64 +379,121 @@ public class EcjParser extends JavaParser {
                             if (problem == null || !problem.isError()) {
                                 continue;
                             }
-                            System.out.println(
-                                    new String(problem.getOriginatingFileName()) + ":"
-                                    + (problem.isError() ? "Error" : "Warning") + ": "
-                                    + problem.getSourceLineNumber() + ": " + problem.getMessage());
+                            System.out.println(describeError(problem.isError(), problem.getID(),
+                                    problem.getOriginatingFileName(), problem.getSourceLineNumber(),
+                                    problem.getMessage()));
                         }
                     }
                 }
             }
+
+            return !ecjResult.hasErrors();
         } catch (Throwable t) {
-            mClient.log(t, "ECJ compiler crashed");
+            client.log(t, "ECJ compiler crashed");
+            return false;
+        }
+    }
+
+    @NonNull
+    private static String describeError(boolean isError, int id, char[] fileName, int sourceLineNumber,
+            String message) {
+        if (DEBUG_DUMP_PARSE_ERRORS) {
+            String idDescription = null;
+            try {
+                // Try to look up id from IProblem class constants
+                for (Field field : IProblem.class.getDeclaredFields()) {
+                    if ((field.getModifiers() & Modifier.STATIC) != 0
+                            && id == field.getInt(null)) {
+                        idDescription = field.getName();
+                        break;
+                    }
+                }
+            } catch (Throwable ignore) {
+            }
+            if (idDescription == null) {
+                idDescription = Integer.toHexString(id);
+            }
+
+            return new String(fileName) + ":"
+                    + (isError ? "Error" : "Warning") + ": "
+                    + sourceLineNumber + ": " + message
+                    + " [" + idDescription + "]";
+        } else {
+            return "";
         }
     }
 
     /**
-     * A result from an ECJ compilation. In addition to the {@link #mSourceToUnit} it also
-     * returns the {@link #mNameEnvironment} and {@link #mLookupEnvironment} which are sometimes
+     * Add all .java files found in the given folder, and add it to the source maps as well
+     * as the result list
+     */
+    private void gatherJavaFiles(@NonNull List<EcjSourceFile> sources,  @NonNull File dir) {
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isFile() && file.getName().endsWith(DOT_JAVA)) {
+                    try {
+                        CharSequence contents = LintUtils.getEncodedString(client, file, false);
+                        EcjSourceFile unit = EcjSourceFile.create(contents, file);
+                        sources.add(unit);
+                        sourceUnits.put(file, unit);
+                    } catch (IOException e) {
+                        client.log(Severity.ERROR, e, "Couldn't read %1$s", file);
+                    }
+                } else if (file.isDirectory()) {
+                    gatherJavaFiles(sources, file);
+                }
+            }
+        }
+    }
+
+
+    /**
+     * A result from an ECJ compilation. In addition to the {@link #sourceToUnit} it also
+     * returns the {@link #nameEnvironment} and {@link #lookupEnvironment} which are sometimes
      * needed after parsing to perform for example type attribution. <b>NOTE</b>: Clients are
-     * expected to dispose of the {@link #mNameEnvironment} when done with the compilation units!
+     * expected to dispose of the {@link #nameEnvironment} when done with the compilation units!
      */
     public static class EcjResult {
-        @Nullable private final INameEnvironment mNameEnvironment;
-        @Nullable private final LookupEnvironment mLookupEnvironment;
-        @NonNull  private final Map<EcjSourceFile, CompilationUnitDeclaration> mSourceToUnit;
-        @Nullable private Map<ICompilationUnit, PsiJavaFile> mPsiMap;
-        @Nullable private Map<CompilationUnitDeclaration, EcjSourceFile> mUnitToSource;
+        @Nullable private final INameEnvironment nameEnvironment;
+        @Nullable private final LookupEnvironment lookupEnvironment;
+        @NonNull  private final Map<EcjSourceFile, CompilationUnitDeclaration> sourceToUnit;
+        @Nullable private Map<ICompilationUnit, PsiJavaFile> psiMap;
+        @Nullable private Map<CompilationUnitDeclaration, EcjSourceFile> unitToSource;
         @Nullable Map<Binding, CompilationUnitDeclaration> mBindingToUnit;
-        private EcjPsiManager mPsiManager;
+        private EcjPsiManager psiManager;
+        private final boolean hasErrors;
 
         public EcjResult(@Nullable INameEnvironment nameEnvironment,
                 @Nullable LookupEnvironment lookupEnvironment,
-                @NonNull Map<EcjSourceFile, CompilationUnitDeclaration> compilationUnits) {
-            mNameEnvironment = nameEnvironment;
-            mLookupEnvironment = lookupEnvironment;
-            mSourceToUnit = compilationUnits;
+                @NonNull Map<EcjSourceFile, CompilationUnitDeclaration> sourceToUnit,
+                boolean hasErrors) {
+            this.nameEnvironment = nameEnvironment;
+            this.lookupEnvironment = lookupEnvironment;
+            this.sourceToUnit = sourceToUnit;
+            this.hasErrors = hasErrors;
         }
 
         @Nullable
         public LookupEnvironment getLookupEnvironment() {
-            return mLookupEnvironment;
+            return lookupEnvironment;
         }
 
         public void setPsiManager(@NonNull EcjPsiManager psiManager) {
-            mPsiManager = psiManager;
+            this.psiManager = psiManager;
         }
 
         @Nullable
-        public PsiJavaFile findFile(
-                @NonNull EcjSourceFile sourceUnit,
-                @Nullable String source) {
-            if (mPsiMap != null) {
-                PsiJavaFile file = mPsiMap.get(sourceUnit);
+        public PsiJavaFile findFile(@NonNull EcjSourceFile sourceUnit) {
+            if (psiMap != null) {
+                PsiJavaFile file = psiMap.get(sourceUnit);
                 if (file != null) {
                     return file;
                 }
             } else {
                 // Using weak values to allow map to occasionally refresh
-                mPsiMap = new MapMaker()
-                        .initialCapacity(mSourceToUnit.size())
+                psiMap = new MapMaker()
+                        .initialCapacity(sourceToUnit.size())
                         .weakValues()
                         .concurrencyLevel(1)
                         .makeMap();
@@ -345,9 +502,9 @@ public class EcjParser extends JavaParser {
 
             CompilationUnitDeclaration unit = getCompilationUnit(sourceUnit);
             if (unit != null) {
-                PsiJavaFile file = EcjPsiBuilder.create(mPsiManager, unit, sourceUnit);
-                assert mPsiMap != null;
-                mPsiMap.put(sourceUnit, file);
+                PsiJavaFile file = EcjPsiBuilder.create(psiManager, unit, sourceUnit);
+                assert psiMap != null;
+                psiMap.put(sourceUnit, file);
                 return file;
             }
 
@@ -356,16 +513,16 @@ public class EcjParser extends JavaParser {
 
         @Nullable
         public PsiJavaFile findFileContaining(@Nullable ReferenceBinding declaringClass) {
-            if (mUnitToSource == null) {
-                int size = mSourceToUnit.size();
-                mUnitToSource = Maps.newHashMapWithExpectedSize(size);
+            if (unitToSource == null) {
+                int size = sourceToUnit.size();
+                unitToSource = Maps.newHashMapWithExpectedSize(size);
                 mBindingToUnit = Maps.newHashMapWithExpectedSize(size);
                 for (Map.Entry<EcjSourceFile, CompilationUnitDeclaration> entry
-                        : mSourceToUnit.entrySet()) {
+                        : sourceToUnit.entrySet()) {
                     CompilationUnitDeclaration unit = entry.getValue();
                     EcjSourceFile sourceUnit = entry.getKey();
                     //noinspection ConstantConditions
-                    mUnitToSource.put(unit, sourceUnit);
+                    unitToSource.put(unit, sourceUnit);
 
                     if (unit.types == null) {
                         // Usually not the case, but for really misconfigured projects with broken
@@ -384,9 +541,9 @@ public class EcjParser extends JavaParser {
             while (declaringClass != null) {
                 CompilationUnitDeclaration unit = mBindingToUnit.get(declaringClass);
                 if (unit != null) {
-                    EcjSourceFile sourceUnit = mUnitToSource.get(unit);
+                    EcjSourceFile sourceUnit = unitToSource.get(unit);
                     if (sourceUnit != null) {
-                        return findFile(sourceUnit, null);
+                        return findFile(sourceUnit);
                     }
                 }
                 declaringClass = declaringClass.enclosingType();
@@ -414,7 +571,7 @@ public class EcjParser extends JavaParser {
          */
         @NonNull
         public Collection<CompilationUnitDeclaration> getCompilationUnits() {
-            return mSourceToUnit.values();
+            return sourceToUnit.values();
         }
 
         /**
@@ -426,7 +583,7 @@ public class EcjParser extends JavaParser {
         @Nullable
         public CompilationUnitDeclaration getCompilationUnit(
                 @NonNull EcjSourceFile sourceUnit) {
-            return mSourceToUnit.get(sourceUnit);
+            return sourceToUnit.get(sourceUnit);
         }
 
         /**
@@ -436,7 +593,7 @@ public class EcjParser extends JavaParser {
          * @param sourceUnit the source unit
          */
         void removeCompilationUnit(@NonNull EcjSourceFile sourceUnit) {
-            mSourceToUnit.remove(sourceUnit);
+            sourceToUnit.remove(sourceUnit);
         }
 
         /**
@@ -444,15 +601,19 @@ public class EcjParser extends JavaParser {
          * the parser instance hangs around.
          */
         public void dispose() {
-            if (mNameEnvironment != null) {
-                mNameEnvironment.cleanup();
+            if (nameEnvironment != null) {
+                nameEnvironment.cleanup();
             }
 
-            if (mLookupEnvironment != null) {
-                mLookupEnvironment.reset();
+            if (lookupEnvironment != null) {
+                lookupEnvironment.reset();
             }
 
-            mSourceToUnit.clear();
+            sourceToUnit.clear();
+        }
+
+        public boolean hasErrors() {
+            return hasErrors;
         }
     }
 
@@ -470,14 +631,11 @@ public class EcjParser extends JavaParser {
                 classPath.toArray(new String[classPath.size()]), new String[0],
                 options.defaultEncoding);
         IErrorHandlingPolicy policy = DefaultErrorHandlingPolicies.proceedWithAllProblems();
-        IProblemFactory problemFactory = new DefaultProblemFactory(Locale.getDefault());
-        ICompilerRequestor requestor = new ICompilerRequestor() {
-            @Override
-            public void acceptResult(CompilationResult result) {
-                // Not used; we need the corresponding CompilationUnitDeclaration for the source
-                // units (the AST parsed from source) which we don't get access to here, so we
-                // instead subclass AST to get our hands on them.
-            }
+        EcjProblemFactory problemFactory = new EcjProblemFactory();
+        ICompilerRequestor requestor = result -> {
+            // Not used; we need the corresponding CompilationUnitDeclaration for the source
+            // units (the AST parsed from source) which we don't get access to here, so we
+            // instead subclass AST to get our hands on them.
         };
 
         NonGeneratingCompiler compiler = new NonGeneratingCompiler(environment, policy, options,
@@ -529,7 +687,8 @@ public class EcjParser extends JavaParser {
         }
 
         LookupEnvironment lookupEnvironment = compiler != null ? compiler.lookupEnvironment : null;
-        EcjResult ecjResult = new EcjResult(environment, lookupEnvironment, outputMap);
+        EcjResult ecjResult = new EcjResult(environment, lookupEnvironment, outputMap,
+                problemFactory == null || problemFactory.hasErrors());
         EcjPsiManager psiManager = new EcjPsiManager(client, ecjResult, options.sourceLevel);
         ecjResult.setPsiManager(psiManager);
         return ecjResult;
@@ -537,16 +696,16 @@ public class EcjParser extends JavaParser {
 
     @NonNull
     private List<String> computeClassPath(@NonNull List<JavaContext> contexts) {
-        assert mProject != null;
+        assert project != null;
         List<String> classPath = Lists.newArrayList();
 
-        IAndroidTarget compileTarget = mProject.getBuildTarget();
+        IAndroidTarget compileTarget = project.getBuildTarget();
         if (compileTarget != null) {
             String androidJar = compileTarget.getPath(IAndroidTarget.ANDROID_JAR);
             if (androidJar != null && new File(androidJar).exists()) {
                 classPath.add(androidJar);
             }
-        } else if (!mProject.isAndroidProject()) {
+        } else if (!project.isAndroidProject()) {
             // Gradle Java library? We don't have the correct classpath here.
             String bootClassPath = System.getProperty("sun.boot.class.path");
             if (bootClassPath != null) {
@@ -563,12 +722,16 @@ public class EcjParser extends JavaParser {
 
         Set<File> libraries = Sets.newHashSet();
         Set<String> names = Sets.newHashSet();
-        for (File library : mProject.getJavaLibraries(true)) {
+        for (File library : project.getJavaLibraries(true)) {
             libraries.add(library);
             names.add(getLibraryName(library));
         }
-        for (Project project : mProject.getAllLibraries()) {
-            for (File library : project.getJavaLibraries(true)) {
+        for (Project libraryProject : project.getAllLibraries()) {
+            if (!PARSE_LIBRARY_SOURCES) {
+                libraries.addAll(libraryProject.getJavaClassFolders());
+            }
+
+            for (File library : libraryProject.getJavaLibraries(true)) {
                 String name = getLibraryName(library);
                 // Avoid pulling in android-support-v4.jar from libraries etc
                 // since we're pointing to the local copies rather than the real
@@ -591,10 +754,18 @@ public class EcjParser extends JavaParser {
         EnumSet<Scope> scope = contexts.get(0).getScope();
         if (!scope.contains(Scope.ALL_JAVA_FILES)) {
             // May need other compiled classes too
-            for (File dir : mProject.getJavaClassFolders()) {
+            for (File dir : project.getJavaClassFolders()) {
                 if (dir.exists()) {
                     classPath.add(dir.getPath());
                 }
+            }
+        }
+
+        // Also include the test dependencies for now.
+        // Longer term split up compilation for each test set!
+        for (File dir : project.getTestLibraries()) {
+            if (dir.exists()) {
+                classPath.add(dir.getPath());
             }
         }
 
@@ -604,36 +775,40 @@ public class EcjParser extends JavaParser {
     @NonNull
     private static String getLibraryName(@NonNull File library) {
         String name = library.getName();
-        if (name.equals(SdkConstants.FN_CLASSES_JAR)) {
-            // For AAR artifacts they'll all clash with "classes.jar"; include more unique
-            // context
-            String path = library.getPath();
-            int index = path.indexOf("exploded-aar");
+        String path = library.getPath();
+        int index = path.indexOf("exploded-aar");
+        if (index != -1) {
+            return path.substring(index + 13);
+        } else {
+            index = path.indexOf("m2repository");
             if (index != -1) {
-                return path.substring(index);
-            } else {
-                index = path.indexOf("exploded-bundles");
-                if (index != -1) {
-                    return path.substring(index);
+                return path.substring(index + 13);
+            }
+            index = path.indexOf("output");
+            if (index > 1) {
+                int begin = path.lastIndexOf(File.separatorChar, index - 2);
+                if (begin != -1) {
+                    return path.substring(begin+1);
                 }
             }
-            File parent = library.getParentFile();
-            if (parent != null) {
-                return parent.getName() + File.separatorChar + name;
+            index = path.indexOf("build-cache");
+            if (index != -1) {
+                return path.substring(index);
             }
         }
+
         return name;
     }
 
     @Override
     public PsiJavaFile parseJavaToPsi(@NonNull JavaContext context) {
-        if (mSourceUnits != null && mEcjResult != null) {
-            EcjSourceFile sourceUnit = mSourceUnits.get(context.file);
+        if (sourceUnits != null && ecjResult != null) {
+            EcjSourceFile sourceUnit = sourceUnits.get(context.file);
             if (sourceUnit != null) {
                 try {
-                    return mEcjResult.findFile(sourceUnit, context.getContents());
+                    return ecjResult.findFile(sourceUnit);
                 } catch (Throwable t) {
-                    mClient.log(t, "Failed converting ECJ parse tree to PSI for file %1$s",
+                    client.log(t, "Failed converting ECJ parse tree to PSI for file %1$s",
                             context.file.getPath());
                     return null;
                 }
@@ -645,7 +820,7 @@ public class EcjParser extends JavaParser {
 
     @Override
     public Node parseJava(@NonNull JavaContext context) {
-        String code = context.getContents();
+        CharSequence code = context.getContents();
         if (code == null) {
             return null;
         }
@@ -653,7 +828,7 @@ public class EcjParser extends JavaParser {
         CompilationUnitDeclaration unit = getParsedUnit(context, code);
         try {
             EcjTreeConverter converter = new EcjTreeConverter();
-            converter.visit(code, unit);
+            converter.visit(code.toString(), unit);
             List<? extends Node> nodes = converter.getAll();
 
             if (nodes != null) {
@@ -668,7 +843,7 @@ public class EcjParser extends JavaParser {
 
             return null;
         } catch (Throwable t) {
-            mClient.log(t, "Failed converting ECJ parse tree to Lombok for file %1$s",
+            client.log(t, "Failed converting ECJ parse tree to Lombok for file %1$s",
                     context.file.getPath());
             return null;
         }
@@ -677,12 +852,12 @@ public class EcjParser extends JavaParser {
     @Nullable
     private CompilationUnitDeclaration getParsedUnit(
             @NonNull JavaContext context,
-            @NonNull String code) {
+            @NonNull CharSequence code) {
         EcjSourceFile sourceUnit = null;
-        if (mSourceUnits != null && mEcjResult != null) {
-            sourceUnit = mSourceUnits.get(context.file);
+        if (sourceUnits != null && ecjResult != null) {
+            sourceUnit = sourceUnits.get(context.file);
             if (sourceUnit != null) {
-                CompilationUnitDeclaration unit = mEcjResult.getCompilationUnit(sourceUnit);
+                CompilationUnitDeclaration unit = ecjResult.getCompilationUnit(sourceUnit);
                 if (unit != null) {
                     return unit;
                 }
@@ -690,7 +865,7 @@ public class EcjParser extends JavaParser {
         }
 
         if (sourceUnit == null) {
-            sourceUnit = new EcjSourceFile(code, context.file);
+            sourceUnit = EcjSourceFile.create(code, context.file);
         }
         try {
             CompilationResult compilationResult = new CompilationResult(sourceUnit, 0, 0, 0);
@@ -730,7 +905,7 @@ public class EcjParser extends JavaParser {
             int fromDelta,
             @NonNull Node to,
             int toDelta) {
-        String contents = context.getContents();
+        CharSequence contents = context.getContents();
         int start = Math.max(0, from.getPosition().getStart() + fromDelta);
         int end = Math.min(contents == null ? Integer.MAX_VALUE : contents.length(),
                 to.getPosition().getEnd() + toDelta);
@@ -760,6 +935,13 @@ public class EcjParser extends JavaParser {
         return super.getNameLocation(context, node);
     }
 
+    @Nullable
+    @Override
+    public PsiElement findElementAt(@NonNull JavaContext context, int offset) {
+        PsiJavaFile javaFile = context.getJavaFile();
+        return javaFile != null ? EcjPsiManager.findElementAt(javaFile, offset) : null;
+    }
+
     @NonNull
     @Override
     public
@@ -769,8 +951,8 @@ public class EcjParser extends JavaParser {
 
     @Override
     public void dispose(@NonNull JavaContext context, @NonNull PsiJavaFile compilationUnit) {
-        if (mSourceUnits != null) {
-            mSourceUnits.remove(context.file);
+        if (sourceUnits != null) {
+            sourceUnits.remove(context.file);
         }
 
         // We can't delete the AST since it's needed for type resolution etc
@@ -778,12 +960,12 @@ public class EcjParser extends JavaParser {
 
     @Override
     public void dispose(@NonNull JavaContext context, @NonNull Node compilationUnit) {
-        if (mSourceUnits != null) {
-            EcjSourceFile sourceUnit = mSourceUnits.get(context.file);
+        if (sourceUnits != null) {
+            EcjSourceFile sourceUnit = sourceUnits.get(context.file);
             if (sourceUnit != null) {
-                mSourceUnits.remove(context.file);
-                if (mEcjResult != null) {
-                    CompilationUnitDeclaration unit = mEcjResult.getCompilationUnit(sourceUnit);
+                sourceUnits.remove(context.file);
+                if (ecjResult != null) {
+                    CompilationUnitDeclaration unit = ecjResult.getCompilationUnit(sourceUnit);
                     if (unit != null) {
                         // See if this compilation unit defines any enum types; if so,
                         // keep those around for the type map (see #findAnnotationDeclaration())
@@ -804,7 +986,7 @@ public class EcjParser extends JavaParser {
                         // Compilation unit is not defining an annotation type at the top two
                         // levels: we can remove it now; findAnnotationDeclaration will not need
                         // to go looking for it
-                        mEcjResult.removeCompilationUnit(sourceUnit);
+                        ecjResult.removeCompilationUnit(sourceUnit);
                     }
                 }
             }
@@ -817,13 +999,33 @@ public class EcjParser extends JavaParser {
 
     @Override
     public void dispose() {
-        if (mEcjResult != null) {
-            mEcjResult.dispose();
-            mEcjResult = null;
+        if (ecjResult != null) {
+            ecjResult.dispose();
+            ecjResult = null;
         }
 
-        mSourceUnits = null;
-        mTypeUnits = null;
+        sourceUnits = null;
+        typeUnits = null;
+    }
+
+    /**
+     * <b>PARTIALLY</b> disposes the current ECJ result where we want to keep the ECJ
+     * compilation units, but get rid of the PSI cached data. This is used when we have
+     * legacy (Lombok) custom lint rules about to be run, where we want to re-use all the
+     * ECJ parse data, but we won't need the PSI data (which can be large) so clear it all
+     * first.
+     * <b>
+     * NOTE: This method is called via reflection.
+     */
+    @SuppressWarnings("unused") // Called via reflection from LintDriver
+    public void disposePsi() {
+        if (ecjResult != null) {
+            EcjPsiManager psiManager = ecjResult.psiManager;
+            if (psiManager != null) {
+                psiManager.clear();
+            }
+            ecjResult.psiMap = null;
+        }
     }
 
     @Nullable
@@ -1007,9 +1209,9 @@ public class EcjParser extends JavaParser {
     @Deprecated // Use new binding map instead
     private TypeDeclaration findTypeDeclaration(@NonNull String signature) {
         // Type: use binding instead
-        if (mTypeUnits == null) {
-            Collection<CompilationUnitDeclaration> units = mEcjResult.getCompilationUnits();
-            mTypeUnits = Maps.newHashMapWithExpectedSize(units.size());
+        if (typeUnits == null) {
+            Collection<CompilationUnitDeclaration> units = ecjResult.getCompilationUnits();
+            typeUnits = Maps.newHashMapWithExpectedSize(units.size());
             for (CompilationUnitDeclaration unit : units) {
                 if (unit.types != null) {
                     for (TypeDeclaration typeDeclaration : unit.types) {
@@ -1019,13 +1221,13 @@ public class EcjParser extends JavaParser {
             }
         }
 
-        return mTypeUnits.get(signature);
+        return typeUnits.get(signature);
     }
 
     @Deprecated
     private void addTypeDeclaration(TypeDeclaration typeDeclaration) {
         String type = new String(typeDeclaration.binding.readableName());
-        mTypeUnits.put(type, typeDeclaration);
+        typeUnits.put(type, typeDeclaration);
         // Recurse on member types
         if (typeDeclaration.memberTypes != null) {
             for (TypeDeclaration member : typeDeclaration.memberTypes) {
@@ -1108,13 +1310,6 @@ public class EcjParser extends JavaParser {
         return null;
     }
 
-    @Override
-    public void runReadAction(@NonNull Runnable runnable) {
-        // No lock needed for read access under ECJ, but we should consider
-        // having a debug mode where we enforce read access to help catch bugs
-        runnable.run();
-    }
-
     @Nullable
     @Override
     public ResolvedClass findClass(@NonNull JavaContext context,
@@ -1134,7 +1329,7 @@ public class EcjParser extends JavaParser {
             compoundName[i] = arrays.get(i);
         }
 
-        LookupEnvironment lookup = mEcjResult.mLookupEnvironment;
+        LookupEnvironment lookup = ecjResult.lookupEnvironment;
         if (lookup != null) {
             ReferenceBinding type = lookup.getType(compoundName);
             if (type != null && !(type instanceof ProblemReferenceBinding)) {
@@ -1257,8 +1452,8 @@ public class EcjParser extends JavaParser {
 
     /* Handle for creating positions cheaply and returning full fledged locations later */
     private static class LocationHandle implements Location.Handle {
-        private File mFile;
-        private Node mNode;
+        private final File mFile;
+        private final Node mNode;
         private Object mClientData;
 
         public LocationHandle(File file, Node node) {
@@ -1287,7 +1482,7 @@ public class EcjParser extends JavaParser {
 
     // Custom version of the compiler which skips code generation and records source units
     private static class NonGeneratingCompiler extends Compiler {
-        private Map<EcjSourceFile, CompilationUnitDeclaration> mUnits;
+        private final Map<EcjSourceFile, CompilationUnitDeclaration> mUnits;
         private CompilationUnitDeclaration mCurrentUnit;
 
         public NonGeneratingCompiler(INameEnvironment environment, IErrorHandlingPolicy policy,
@@ -1300,7 +1495,7 @@ public class EcjParser extends JavaParser {
 
         @Nullable
         CompilationUnitDeclaration getCurrentUnit() {
-            // Can't use mLookupEnvironment.unitBeingCompleted directly; it gets nulled out
+            // Can't use lookupEnvironment.unitBeingCompleted directly; it gets nulled out
             // as part of the exception catch handling in the compiler before this method
             // is called from lint -- therefore we stash a copy in our own mCurrentUnit field
             return mCurrentUnit;
@@ -1342,7 +1537,7 @@ public class EcjParser extends JavaParser {
         public void reset() {
             if (KEEP_LOOKUP_ENVIRONMENT) {
                 // Same as super.reset() in ECJ 4.4.2, but omits the following statement:
-                //  this.mLookupEnvironment.reset();
+                //  this.lookupEnvironment.reset();
                 // because we need the lookup environment to stick around even after the
                 // parse phase is done: at that point we're going to use the parse trees
                 // from java detectors which may need to resolve types
@@ -1354,6 +1549,92 @@ public class EcjParser extends JavaParser {
             } else {
                 super.reset();
             }
+        }
+    }
+
+    private static class EcjProblemFactory extends DefaultProblemFactory {
+        private boolean hasErrors;
+
+        public EcjProblemFactory() {
+            super(Locale.getDefault());
+        }
+
+        @Override
+        public CategorizedProblem createProblem(char[] originatingFileName, int problemId,
+                String[] problemArguments, String[] messageArguments, int severity,
+                int startPosition,
+                int endPosition, int lineNumber, int columnNumber) {
+            boolean isError = (severity & ProblemSeverities.Error) != 0;
+            if (problemId == IProblem.DuplicateTypes) {
+                // Don't treat duplicate classes as a symbol resolution bug
+                isError = false;
+            }
+
+            hasErrors |= isError;
+
+            if (DEBUG_DUMP_PARSE_ERRORS) {
+                if (isError) {
+                    String s = describeError(isError,
+                            problemId, originatingFileName, lineNumber,
+                            getLocalizedMessage(problemId, messageArguments));
+                    System.out.println(s);
+                }
+
+                return super.createProblem(originatingFileName, problemId, problemArguments,
+                        messageArguments, severity, startPosition, endPosition, lineNumber,
+                        columnNumber);
+            } else if (skipComputingEcjErrors) {
+                // Don't bother computing error message strings when we're not dumping error
+                // messages (they won't be shown anywhere)
+                return new DefaultProblem(originatingFileName, "<not computed>", problemId,
+                        problemArguments, severity, startPosition, endPosition, lineNumber,
+                        columnNumber);
+            } else {
+                return super.createProblem(originatingFileName, problemId, problemArguments,
+                        messageArguments, severity, startPosition, endPosition, lineNumber,
+                        columnNumber);
+            }
+        }
+
+        @Override
+        public CategorizedProblem createProblem(char[] originatingFileName, int problemId,
+                String[] problemArguments, int elaborationId, String[] messageArguments,
+                int severity,
+                int startPosition, int endPosition, int lineNumber, int columnNumber) {
+            boolean isError = (severity & ProblemSeverities.Error) != 0;
+            if (problemId == IProblem.DuplicateTypes) {
+                // Don't treat duplicate classes as a symbol resolution bug
+                isError = false;
+            }
+
+            hasErrors |= isError;
+
+            if (DEBUG_DUMP_PARSE_ERRORS) {
+                if (isError) {
+                    String s = describeError(isError,
+                            problemId, originatingFileName, lineNumber,
+                            getLocalizedMessage(problemId, messageArguments));
+                    System.out.println(s);
+                }
+
+                return super.createProblem(originatingFileName, problemId, problemArguments,
+                        elaborationId, messageArguments, severity, startPosition, endPosition,
+                        lineNumber, columnNumber);
+            } else if (skipComputingEcjErrors) {
+                // Don't bother computing error message strings when we're not dumping error
+                // messages (they won't be shown anywhere)
+                return new DefaultProblem(originatingFileName, "<not computed>", problemId,
+                        problemArguments, severity, startPosition, endPosition, lineNumber,
+                        columnNumber);
+            } else {
+                return super.createProblem(originatingFileName, problemId, problemArguments,
+                        elaborationId, messageArguments, severity, startPosition, endPosition,
+                        lineNumber, columnNumber);
+            }
+        }
+
+        public boolean hasErrors() {
+            return hasErrors;
         }
     }
 
@@ -1473,7 +1754,7 @@ public class EcjParser extends JavaParser {
     }
 
     private class EcjResolvedMethod extends ResolvedMethod {
-        private MethodBinding mBinding;
+        private final MethodBinding mBinding;
 
         private EcjResolvedMethod(MethodBinding binding) {
             mBinding = binding;
@@ -1544,7 +1825,7 @@ public class EcjParser extends JavaParser {
         @Override
         public Iterable<ResolvedAnnotation> getAnnotations() {
             List<ResolvedAnnotation> all = Lists.newArrayListWithExpectedSize(4);
-            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(mClient);
+            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(client);
 
             MethodBinding binding = this.mBinding;
             while (binding != null) {
@@ -1579,7 +1860,7 @@ public class EcjParser extends JavaParser {
         @Override
         public Iterable<ResolvedAnnotation> getParameterAnnotations(int index) {
             List<ResolvedAnnotation> all = Lists.newArrayListWithExpectedSize(4);
-            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(mClient);
+            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(client);
 
             MethodBinding binding = this.mBinding;
             while (binding != null) {
@@ -1891,7 +2172,7 @@ public class EcjParser extends JavaParser {
                         cls = cls.superclass();
                     }
 
-                    return result != null ? result : Collections.<ResolvedMethod>emptyList();
+                    return result != null ? result : Collections.emptyList();
                 } else {
                     MethodBinding[] methods =
                             name != null ? cls.getMethods(name.toCharArray()) : cls.methods();
@@ -1915,7 +2196,7 @@ public class EcjParser extends JavaParser {
         @Override
         public Iterable<ResolvedAnnotation> getAnnotations() {
             List<ResolvedAnnotation> all = Lists.newArrayListWithExpectedSize(2);
-            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(mClient);
+            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(client);
 
             if (mBinding instanceof ReferenceBinding) {
                 ReferenceBinding cls = (ReferenceBinding) mBinding;
@@ -1994,7 +2275,7 @@ public class EcjParser extends JavaParser {
                         cls = cls.superclass();
                     }
 
-                    return result != null ? result : Collections.<ResolvedField>emptyList();
+                    return result != null ? result : Collections.emptyList();
                 } else {
                     FieldBinding[] fields = cls.fields();
                     if (fields != null) {
@@ -2132,11 +2413,6 @@ public class EcjParser extends JavaParser {
         return name;
     }
 
-    // "package-info" as a char
-    private static final char[] PACKAGE_INFO_CHARS = new char[] {
-            'p', 'a', 'c', 'k', 'a', 'g', 'e', '-', 'i', 'n', 'f', 'o'
-    };
-
     private class EcjResolvedPackage extends ResolvedPackage {
         private final PackageBinding mBinding;
 
@@ -2163,7 +2439,7 @@ public class EcjParser extends JavaParser {
             AnnotationBinding[] annotations = mBinding.getAnnotations();
             int count = annotations.length;
             if (count == 0) {
-                Binding pkgInfo = mBinding.getTypeOrPackage(PACKAGE_INFO_CHARS);
+                Binding pkgInfo = mBinding.getTypeOrPackage(TypeConstants.PACKAGE_INFO_NAME);
                 if (pkgInfo != null) {
                     annotations = pkgInfo.getAnnotations();
                 }
@@ -2178,7 +2454,7 @@ public class EcjParser extends JavaParser {
             }
 
             // Merge external annotations
-            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(mClient);
+            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(client);
             Collection<ResolvedAnnotation> external = manager.getAnnotations(this);
             if (external != null) {
                 all.addAll(external);
@@ -2250,7 +2526,7 @@ public class EcjParser extends JavaParser {
     }
 
     private class EcjResolvedField extends ResolvedField {
-        private FieldBinding mBinding;
+        private final FieldBinding mBinding;
 
         private EcjResolvedField(FieldBinding binding) {
             mBinding = binding;
@@ -2303,7 +2579,7 @@ public class EcjParser extends JavaParser {
             }
 
             // Look for external annotations
-            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(mClient);
+            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(client);
             Collection<ResolvedAnnotation> external = manager.getAnnotations(this);
 
             return merge(compiled, external);
@@ -2380,7 +2656,7 @@ public class EcjParser extends JavaParser {
     }
 
     private class EcjResolvedVariable extends ResolvedVariable {
-        private VariableBinding mBinding;
+        private final VariableBinding mBinding;
 
         private EcjResolvedVariable(VariableBinding binding) {
             mBinding = binding;
@@ -2461,36 +2737,36 @@ public class EcjParser extends JavaParser {
     }
 
     private class EcjResolvedAnnotation extends ResolvedAnnotation {
-        private final AnnotationBinding mBinding;
-        private final String mName;
+        private final AnnotationBinding binding;
+        private final String name;
 
         private EcjResolvedAnnotation(@NonNull final AnnotationBinding binding) {
-            mBinding = binding;
-            mName = new String(mBinding.getAnnotationType().readableName());
+            this.binding = binding;
+            name = new String(this.binding.getAnnotationType().readableName());
         }
 
         @NonNull
         @Override
         public String getName() {
-            return mName;
+            return name;
         }
 
         @Override
         public boolean matches(@NonNull String name) {
-            return name.equals(mName);
+            return name.equals(this.name);
         }
 
         @NonNull
         @Override
         public TypeDescriptor getType() {
-            TypeDescriptor typeDescriptor = getTypeDescriptor(mBinding.getAnnotationType());
+            TypeDescriptor typeDescriptor = getTypeDescriptor(binding.getAnnotationType());
             assert typeDescriptor != null; // because mBinding.type is known not to be null
             return typeDescriptor;
         }
 
         @Override
         public ResolvedClass getClassType() {
-            ReferenceBinding annotationType = mBinding.getAnnotationType();
+            ReferenceBinding annotationType = binding.getAnnotationType();
             return new EcjResolvedClass(annotationType) {
                 @NonNull
                 @Override
@@ -2554,7 +2830,7 @@ public class EcjParser extends JavaParser {
         @NonNull
         @Override
         public List<Value> getValues() {
-            ElementValuePair[] pairs = mBinding.getElementValuePairs();
+            ElementValuePair[] pairs = binding.getElementValuePairs();
             if (pairs != null && pairs.length > 0) {
                 List<Value> values = Lists.newArrayListWithExpectedSize(pairs.length);
                 for (ElementValuePair pair : pairs) {
@@ -2568,7 +2844,7 @@ public class EcjParser extends JavaParser {
         @Nullable
         @Override
         public Object getValue(@NonNull String name) {
-            ElementValuePair[] pairs = mBinding.getElementValuePairs();
+            ElementValuePair[] pairs = binding.getElementValuePairs();
             if (pairs != null) {
                 for (ElementValuePair pair : pairs) {
                     if (sameChars(name, pair.getName())) {
@@ -2586,7 +2862,7 @@ public class EcjParser extends JavaParser {
 
         @Override
         public String getSignature() {
-            return mName;
+            return name;
         }
 
         @Override
@@ -2599,7 +2875,7 @@ public class EcjParser extends JavaParser {
         @Override
         public Iterable<ResolvedAnnotation> getAnnotations() {
             List<ResolvedAnnotation> compiled = null;
-            AnnotationBinding[] annotations = mBinding.getAnnotationType().getAnnotations();
+            AnnotationBinding[] annotations = binding.getAnnotationType().getAnnotations();
             int count = annotations.length;
             if (count > 0) {
                 compiled = Lists.newArrayListWithExpectedSize(count);
@@ -2611,7 +2887,7 @@ public class EcjParser extends JavaParser {
             }
 
             // Look for external annotations
-            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(mClient);
+            ExternalAnnotationRepository manager = ExternalAnnotationRepository.get(client);
             Collection<ResolvedAnnotation> external = manager.getAnnotations(this);
 
             return merge(compiled, external);
@@ -2705,7 +2981,7 @@ public class EcjParser extends JavaParser {
 
             EcjResolvedAnnotation that = (EcjResolvedAnnotation) o;
 
-            if (mBinding != null ? !mBinding.equals(that.mBinding) : that.mBinding != null) {
+            if (binding != null ? !binding.equals(that.binding) : that.binding != null) {
                 return false;
             }
 
@@ -2714,7 +2990,7 @@ public class EcjParser extends JavaParser {
 
         @Override
         public int hashCode() {
-            return mBinding != null ? mBinding.hashCode() : 0;
+            return binding != null ? binding.hashCode() : 0;
         }
     }
 

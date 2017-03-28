@@ -16,20 +16,21 @@
 #ifndef MEMORY_LEVELS_SAMPLER_H_
 #define MEMORY_LEVELS_SAMPLER_H_
 
-#include "proto/memory.pb.h"
 #include <string>
+#include "proto/memory.pb.h"
 
 namespace profiler {
 
 class MemoryLevelsSampler {
  public:
-  void GetProcessMemoryLevels(int pid);
+  void GetProcessMemoryLevels(int pid, proto::MemoryData_MemorySample* sample);
   void ParseMemoryLevels(const std::string& memory_info_string,
                          proto::MemoryData_MemorySample* sample);
+
  private:
   int ParseInt(char** delimited_string, const char* delimiter);
 };
 
 }  // namespace profiler
 
-#endif // MEMORY_LEVELS_SAMPLER_H_
+#endif  // MEMORY_LEVELS_SAMPLER_H_

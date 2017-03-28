@@ -30,7 +30,7 @@ import com.android.repository.testframework.FakeProgressIndicator;
 import com.android.repository.testframework.MockFileOp;
 import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.repository.AndroidSdkHandler;
-import com.android.sdklib.repository.legacy.LegacyLocalRepoLoader;
+import com.android.sdklib.repository.legacy.local.LocalSdk;
 import com.android.sdklib.repository.meta.DetailsTypes;
 import com.android.sdklib.repository.meta.SdkCommonFactory;
 import com.google.common.collect.ImmutableList;
@@ -61,12 +61,13 @@ public class LegacyLocalRepoTest extends TestCase {
                         "Pkg.LicenseRef=android-sdk-license\n" +
                         "Archive.Arch=ANY\n" +
                         "Pkg.SourceUrl=https\\://example.com/repository-8.xml");
-        mockFop.recordExistingFile("/sdk/tools/" + SdkConstants.androidCmdName(), "placeholder");
+        mockFop.recordExistingFile("/sdk/tools/" + LocalSdk.androidCmdName(), "placeholder");
         mockFop.recordExistingFile("/sdk/tools/" + SdkConstants.FN_EMULATOR, "placeholder");
 
         File root = new File("/sdk");
         FakeProgressIndicator progress = new FakeProgressIndicator();
-        RepoManager mgr = AndroidSdkHandler.getInstance(root).getSdkManager(progress);
+        RepoManager mgr =
+                new AndroidSdkHandler(root, null, mockFop).getSdkManager(progress);
         progress.assertNoErrorsOrWarnings();
 
         LocalRepoLoader sdk = new LocalRepoLoaderImpl(root, mgr,
@@ -94,11 +95,12 @@ public class LegacyLocalRepoTest extends TestCase {
 
         FakeProgressIndicator progress = new FakeProgressIndicator();
         File root = new File("/sdk");
-        RepoManager mgr = new AndroidSdkHandler(root, mockFop).getSdkManager(progress);
+        RepoManager mgr =
+                new AndroidSdkHandler(root, null, mockFop).getSdkManager(progress);
 
         progress.assertNoErrorsOrWarnings();
 
-        Collection<SchemaModule> extensions = ImmutableList
+        Collection<SchemaModule<?>> extensions = ImmutableList
                 .of(RepoManager.getCommonModule(), RepoManager.getGenericModule());
 
         // Now read the new package
@@ -123,14 +125,13 @@ public class LegacyLocalRepoTest extends TestCase {
 
         FakeProgressIndicator progress = new FakeProgressIndicator();
         File root = new File("/sdk");
-        AndroidSdkHandler sdkHandler = new AndroidSdkHandler(root, mockFop);
-        SdkCommonFactory factory = (SdkCommonFactory) AndroidSdkHandler.getCommonModule()
-                .createLatestFactory();
+        AndroidSdkHandler sdkHandler = new AndroidSdkHandler(root, null, mockFop);
+        SdkCommonFactory factory = AndroidSdkHandler.getCommonModule().createLatestFactory();
         RepoManager mgr = sdkHandler.getSdkManager(progress);
 
         progress.assertNoErrorsOrWarnings();
 
-        Collection<SchemaModule> extensions = ImmutableList
+        Collection<SchemaModule<?>> extensions = ImmutableList
                 .of(RepoManager.getCommonModule(), AndroidSdkHandler.getAddonModule());
 
         // Now read the new package

@@ -37,6 +37,8 @@ public class TestOptions {
     @Nullable
     private String reportDir;
 
+    private boolean animationsDisabled;
+
     /**
      * Options for controlling unit tests execution.
      *
@@ -84,6 +86,13 @@ public class TestOptions {
         this.reportDir = reportDir;
     }
 
+    /** Disables animations during instrumented tests. */
+    public boolean getAnimationsDisabled() { return animationsDisabled; }
+
+    public void setAnimationsDisabled(boolean animationsDisabled) {
+        this.animationsDisabled = animationsDisabled;
+    }
+
     /**
      * Options for controlling unit tests execution.
      */
@@ -95,7 +104,7 @@ public class TestOptions {
          * Whether unmocked methods from android.jar should throw exceptions or return default
          * values (i.e. zero or null).
          *
-         * <p>See <a href="http://tools.android.com/tech-docs/unit-testing-support">Unit testing support</a> for details.
+         * <p>See <a href="https://developer.android.com/studio/test/index.html">Test Your App</a> for details.
          *
          * @since 1.1
          */

@@ -42,19 +42,18 @@ import com.intellij.psi.PsiSubstitutor;
 import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.javadoc.PsiDocComment;
-
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
+import org.eclipse.jdt.internal.compiler.ast.TypeParameter;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
 import org.eclipse.jdt.internal.compiler.lookup.SourceTypeBinding;
 import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
-
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
+import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
 
 class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
 
@@ -87,6 +86,7 @@ class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
     private List<EcjPsiField> mFields;
 
     private PsiReferenceList mExtendsList;
+
     private PsiReferenceList mImplementsList;
 
     EcjPsiClass(@NonNull EcjPsiManager manager, @NonNull TypeDeclaration declaration,
@@ -145,6 +145,10 @@ class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
     @Override
     public String getQualifiedName() {
         return mQualifiedName;
+    }
+
+    private boolean isPlainClass() {
+        return TypeDeclaration.kind(mEcjModifiers) == TypeDeclaration.CLASS_DECL;
     }
 
     @Override
@@ -241,8 +245,18 @@ class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
     @Nullable
     @Override
     public PsiClass getSuperClass() {
-        if (mSuperClass == null && mSuperClassReference != null) {
-            mSuperClass = mManager.findClass(mSuperClassReference);
+        if (mSuperClass == null) {
+            if (mSuperClassReference != null) {
+                mSuperClass = mManager.findClass(mSuperClassReference);
+            } else if (isPlainClass()) {
+                mSuperClass = mManager.findClass(TypeConstants.JAVA_LANG_OBJECT);
+            } else if (isInterface()) {
+                mSuperClass = null;
+            } else if (isEnum()) {
+                mSuperClass = mManager.findClass(TypeConstants.JAVA_LANG_ENUM);
+            } else if (isAnnotationType()) {
+                mSuperClass = mManager.findClass(TypeConstants.JAVA_LANG_ANNOTATION_ANNOTATION);
+            }
         }
         return mSuperClass;
     }
@@ -274,11 +288,11 @@ class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
         PsiClass[] interfaces = getInterfaces();
         if (superClass == null) {
             return interfaces;
-        } else if (interfaces == null) {
+        } else if (interfaces == null || interfaces.length == 0) {
             return new PsiClass[] { superClass };
         } else {
             PsiClass[] result = new PsiClass[interfaces.length+1];
-            System.arraycopy(interfaces, 1, result, 0, interfaces.length);
+            System.arraycopy(interfaces, 0, result, 1, interfaces.length);
             result[0] = superClass;
             return result;
         }
@@ -607,12 +621,14 @@ class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
     }
 
     @Override
-    public boolean isInheritor(@NonNull PsiClass psiClass, boolean b) {
-        throw new UnimplementedLintPsiApiException();
+    public boolean isInheritor(@NonNull PsiClass baseClass, boolean checkDeep) {
+        String qualifiedName = baseClass.getQualifiedName();
+        return qualifiedName != null && new EcjPsiJavaEvaluator(mManager)
+                .inheritsFrom(this, qualifiedName, false);
     }
 
     @Override
-    public boolean isInheritorDeep(PsiClass psiClass, PsiClass psiClass1) {
+    public boolean isInheritorDeep(PsiClass baseClass, @Nullable PsiClass classToByPass) {
         throw new UnimplementedLintPsiApiException();
     }
 
@@ -653,15 +669,12 @@ class EcjPsiClass extends EcjPsiSourceElement implements PsiClass {
             return;
         }
         PsiElement[] children = getChildren();
-        Arrays.sort(children, new Comparator<PsiElement>() {
-            @Override
-            public int compare(PsiElement o1, PsiElement o2) {
-                int delta = o1.getTextRange().getStartOffset() - o2.getTextRange().getStartOffset();
-                if (delta == 0) {
-                    delta = o1.getTextRange().getEndOffset() - o2.getTextRange().getEndOffset();
-                }
-                return delta;
+        Arrays.sort(children, (o1, o2) -> {
+            int delta = o1.getTextRange().getStartOffset() - o2.getTextRange().getStartOffset();
+            if (delta == 0) {
+                delta = o1.getTextRange().getEndOffset() - o2.getTextRange().getEndOffset();
             }
+            return delta;
         });
         EcjPsiSourceElement last = null;
         for (PsiElement child : children) {

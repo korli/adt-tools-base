@@ -22,13 +22,13 @@ import com.android.repository.Revision;
 import com.android.repository.api.PackageOperation;
 import com.android.repository.api.ProgressIndicator;
 import com.android.repository.io.FileOp;
+import com.android.repository.io.FileOpUtils;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -44,6 +44,7 @@ import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlRootElement;
 import javax.xml.namespace.QName;
 
@@ -87,17 +88,36 @@ public class MavenInstallListener implements PackageOperation.StatusChangeListen
         }
         File metadataFile = new File(root, MAVEN_METADATA_FILE_NAME);
         if (metadata != null) {
-            return writeMetadata(metadata, metadataFile, progress,
-                    fileOp);
+            progress.logVerbose("Writing Maven metadata to " + metadataFile.getAbsolutePath());
+            return writeMetadata(metadata, metadataFile, progress, fileOp);
         }
         // We didn't find anything. Delete the metadata file as well.
-        return deleteMetadataFiles(metadataFile, fileOp);
+        progress.logVerbose("Deleting Maven metadata " + metadataFile.getAbsolutePath());
+        return deleteMetadataFiles(metadataFile, progress, fileOp);
     }
 
-    private static boolean deleteMetadataFiles(@NonNull File metadataFile, @NonNull FileOp fop) {
+    private static boolean deleteMetadataFiles(
+            @NonNull File metadataFile,
+            @NonNull ProgressIndicator progress,
+            @NonNull FileOp fop) {
+        if (!FileOpUtils.deleteIfExists(metadataFile, fop)) {
+            progress.logError("Failed to delete " + metadataFile.getAbsolutePath());
+            return false;
+        }
+
         File md5File = getMetadataHashFile(metadataFile, "MD5");
+        if (!FileOpUtils.deleteIfExists(md5File, fop)) {
+            progress.logError("Failed to delete " + md5File.getAbsolutePath());
+            return false;
+        }
+
         File sha1File = getMetadataHashFile(metadataFile, "SHA1");
-        return fop.delete(metadataFile) && fop.delete(md5File) && fop.delete(sha1File);
+        if (!FileOpUtils.deleteIfExists(sha1File, fop)) {
+            progress.logError("Failed to delete " + sha1File.getAbsolutePath());
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -145,9 +165,6 @@ public class MavenInstallListener implements PackageOperation.StatusChangeListen
         try {
             metadataOutFile = fop.newFileOutputStream(file);
             metadataOutFile.write(metadataOutBytes.toByteArray());
-        } catch (FileNotFoundException e) {
-            progress.logWarning("Failed to write metadata file.", e);
-            return false;
         } catch (IOException e) {
             progress.logWarning("Failed to write metadata file.", e);
             return false;
@@ -320,10 +337,13 @@ public class MavenInstallListener implements PackageOperation.StatusChangeListen
     @XmlRootElement(name = "project", namespace = "http://maven.apache.org/POM/4.0.0")
     private static class PackageInfo {
 
+        @XmlElement(namespace = "http://maven.apache.org/POM/4.0.0")
         public String artifactId;
 
+        @XmlElement(namespace = "http://maven.apache.org/POM/4.0.0")
         public String groupId;
 
+        @XmlElement(namespace = "http://maven.apache.org/POM/4.0.0")
         public String version;
     }
 }

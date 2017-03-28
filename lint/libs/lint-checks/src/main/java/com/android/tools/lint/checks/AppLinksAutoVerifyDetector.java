@@ -16,18 +16,42 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.ATTR_HOST;
+import static com.android.SdkConstants.ATTR_SCHEME;
+import static com.android.SdkConstants.MANIFEST_PLACEHOLDER_PREFIX;
+import static com.android.SdkConstants.MANIFEST_PLACEHOLDER_SUFFIX;
+import static com.android.SdkConstants.UTF_8;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_NAME;
+import static com.android.xml.AndroidManifest.NODE_ACTION;
+import static com.android.xml.AndroidManifest.NODE_CATEGORY;
+import static com.android.xml.AndroidManifest.NODE_DATA;
+import static com.android.xml.AndroidManifest.NODE_INTENT;
+
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.builder.model.Variant;
-import com.android.tools.lint.detector.api.*;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.Detector;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.gson.*;
-import org.w3c.dom.*;
-
-import java.io.*;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -37,9 +61,11 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-
-import static com.android.SdkConstants.*;
-import static com.android.xml.AndroidManifest.*;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Check if the App Link which needs auto verification is correctly set.
@@ -50,14 +76,14 @@ public class AppLinksAutoVerifyDetector extends Detector implements Detector.Xml
             AppLinksAutoVerifyDetector.class, Scope.MANIFEST_SCOPE);
 
     public static final Issue ISSUE_ERROR = Issue.create(
-            "AppLinksAutoVerifyError", //$NON-NLS-1$
+            "AppLinksAutoVerifyError",
             "App Links Auto Verification Failure",
             "Ensures that app links are correctly set and associated with website.",
             Category.CORRECTNESS, 5, Severity.ERROR, IMPLEMENTATION)
             .addMoreInfo("https://g.co/appindexing/applinks").setEnabledByDefault(false);
 
     public static final Issue ISSUE_WARNING = Issue.create(
-            "AppLinksAutoVerifyWarning", //$NON-NLS-1$
+            "AppLinksAutoVerifyWarning",
             "Potential App Links Auto Verification Failure",
             "Ensures that app links are correctly set and associated with website.",
             Category.CORRECTNESS, 5, Severity.WARNING, IMPLEMENTATION)

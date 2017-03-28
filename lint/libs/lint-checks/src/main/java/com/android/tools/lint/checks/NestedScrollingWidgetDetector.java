@@ -30,14 +30,11 @@ import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.LayoutDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
-
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-
 import java.util.Arrays;
 import java.util.Collection;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 
 /**
  * Checks whether a scroll view contains a nested scrolling widget
@@ -48,7 +45,7 @@ public class NestedScrollingWidgetDetector extends LayoutDetector {
 
     /** The main issue discovered by this detector */
     public static final Issue ISSUE = Issue.create(
-            "NestedScrolling", //$NON-NLS-1$
+            "NestedScrolling",
             "Nested scrolling widgets",
             // TODO: Better description!
             "A scrolling widget such as a `ScrollView` should not contain any nested " +
@@ -68,12 +65,6 @@ public class NestedScrollingWidgetDetector extends LayoutDetector {
     public void beforeCheckFile(@NonNull Context context) {
         mVisitingHorizontalScroll = 0;
         mVisitingVerticalScroll = 0;
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     @Override

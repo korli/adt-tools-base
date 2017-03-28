@@ -16,6 +16,8 @@
 
 package com.android.testutils;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import junit.framework.TestCase;
 import org.junit.Assert;
 
@@ -451,18 +453,19 @@ public class VirtualTimeSchedulerTest extends TestCase {
         Callable<Integer> job2 = createCallable(2, sideEffects);
         Callable<Integer> job3 = createCallable(3, sideEffects);
 
-        CountDownLatch cdl = new CountDownLatch(1);
+        CountDownLatch threadStartLatch = new CountDownLatch(1);
+        CountDownLatch threadEndLatch = new CountDownLatch(1);
         // Create a thread to move the scheduler forward as invokeAny blocks as it doesn't return a future.
         Thread t =
                 new Thread(
                         () -> {
                             try {
-                                Thread.sleep(100);
+                                threadStartLatch.await();
                             } catch (InterruptedException e) {
                                 Assert.fail();
                             }
                             virtualTimeScheduler.advanceBy(0);
-                            cdl.countDown();
+                            threadEndLatch.countDown();
                         });
         t.start();
         Collection<Callable<Integer>> jobs = new ArrayList<>();
@@ -470,11 +473,12 @@ public class VirtualTimeSchedulerTest extends TestCase {
         jobs.add(job2);
         jobs.add(job3);
         // invokeAny of the jobs, blocks until one job successfully returns.
-        Integer result = virtualTimeScheduler.invokeAny(jobs);
-        cdl.await();
+        Future<Integer> result = virtualTimeScheduler.invokeAnyAsFuture(jobs);
+        threadStartLatch.countDown();
+        threadEndLatch.await();
         Assert.assertEquals(1, virtualTimeScheduler.getActionsExecuted());
         Assert.assertEquals(0, virtualTimeScheduler.getActionsQueued());
-        Assert.assertEquals(1, (int) result);
+        Assert.assertEquals(1, (int) result.get());
 
         // Ensure the side effects ordered are as expected.
         Assert.assertArrayEquals(new Integer[] {1}, sideEffects.toArray(new Integer[] {}));
@@ -494,18 +498,19 @@ public class VirtualTimeSchedulerTest extends TestCase {
         Callable<Integer> job2 = createCallable(2, sideEffects);
         Callable<Integer> job3 = createCallable(3, sideEffects);
 
-        CountDownLatch cdl = new CountDownLatch(1);
+        CountDownLatch threadStartLatch = new CountDownLatch(1);
+        CountDownLatch threadEndLatch = new CountDownLatch(1);
         // Create a thread to move the scheduler forward as invokeAny blocks as it doesn't return a future.
         Thread t =
                 new Thread(
                         () -> {
                             try {
-                                Thread.sleep(100);
+                                threadStartLatch.await();
                             } catch (InterruptedException e) {
                                 Assert.fail();
                             }
                             virtualTimeScheduler.advanceBy(0);
-                            cdl.countDown();
+                            threadEndLatch.countDown();
                         });
         t.start();
         Collection<Callable<Integer>> jobs = new ArrayList<>();
@@ -513,11 +518,12 @@ public class VirtualTimeSchedulerTest extends TestCase {
         jobs.add(job2);
         jobs.add(job3);
         // invokeAny of the jobs, blocks until one job successfully returns.
-        Integer result = virtualTimeScheduler.invokeAny(jobs);
-        cdl.await();
+        Future<Integer> result = virtualTimeScheduler.invokeAnyAsFuture(jobs);
+        threadStartLatch.countDown();
+        threadEndLatch.await();
         Assert.assertEquals(1, virtualTimeScheduler.getActionsExecuted());
         Assert.assertEquals(0, virtualTimeScheduler.getActionsQueued());
-        Assert.assertEquals(2, (int) result);
+        Assert.assertEquals(2, (int) result.get());
 
         // Ensure the side effects ordered are as expected.
         Assert.assertArrayEquals(new Integer[] {1, 2}, sideEffects.toArray(new Integer[] {}));
@@ -677,8 +683,8 @@ public class VirtualTimeSchedulerTest extends TestCase {
         VirtualTimeFuture<Integer> vtf1 = (VirtualTimeFuture<Integer>) future1;
         Assert.assertTrue(future2 instanceof VirtualTimeFuture);
         VirtualTimeFuture<Integer> vtf2 = (VirtualTimeFuture<Integer>) future2;
-        Assert.assertEquals(0, vtf1.compareTo(vtf1));
-        Assert.assertEquals(-1, vtf1.compareTo(vtf2));
+        assertThat(vtf1).isEquivalentAccordingToCompareTo(vtf1);
+        assertThat(vtf1).isLessThan(vtf2);
 
         // Ensure the jobs result is as expected.
         Assert.assertEquals(3, (int) future1.get(1, TimeUnit.MINUTES));

@@ -75,7 +75,6 @@ public abstract class AbstractAapt implements Aapt {
      *     <li>The following fields are optional and some have defaults (these fields do <i>not</i>
      *     need to be defined):
      *     <ul>
-     *         <li>Assets dir (see {@link AaptPackageConfig#getAssetsDir()}};
      *         <li>Custom package for {@code R} (see
      *         {@link AaptPackageConfig#getCustomPackageForR()});
      *         <li>Libraries (see {@link AaptPackageConfig#getLibraries()}); if none is set, an
@@ -166,25 +165,6 @@ public abstract class AbstractAapt implements Aapt {
             //        + "only be defined if there are libraries.");
         }
 
-        if (packageConfig.isPseudoLocalize() && buildToolInfo.getRevision().getMajor() < 21) {
-            throw new AaptException("Pseudolocalization is only available since Build Tools "
-                    + "version 21.0.0, please upgrade or turn it off.");
-        }
-
-        if (packageConfig.getOptions().getFailOnMissingConfigEntry()
-                && buildToolInfo.getRevision().getMajor() < 21) {
-            throw new IllegalStateException("aaptOptions:failOnMissingConfigEntry cannot be used"
-                    + " with SDK Build Tools revision earlier than 21.0.0");
-        }
-
-        if (buildToolInfo.getRevision().getMajor() < 21
-                && packageConfig.getPreferredDensity() != null) {
-            logger.warning(String.format("Warning : Project is building density based "
-                    + "multiple APKs but using tools version %1$s, you should upgrade to "
-                    + "build-tools 21 or above to ensure proper packaging of resources.",
-                    buildToolInfo.getRevision().getMajor()));
-        }
-
         Collection<String> splits = packageConfig.getSplits();
         Collection<String> resourceConfigs = packageConfig.getResourceConfigs();
         if (splits != null && !splits.isEmpty() && !resourceConfigs.isEmpty()) {
@@ -234,6 +214,14 @@ public abstract class AbstractAapt implements Aapt {
                         Joiner.on(",").join(resConfigs),
                         Joiner.on("\",\"").join(splits)));
             }
+        }
+
+        /*
+         * A base feature needs to be set to add previous features.
+         */
+        if (!packageConfig.getPreviousFeatures().isEmpty()
+                && packageConfig.getBaseFeature() == null) {
+            throw new AaptException("Previous features set but no base feature set.");
         }
     }
 }

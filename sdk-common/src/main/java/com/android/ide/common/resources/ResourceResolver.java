@@ -16,18 +16,17 @@
 
 package com.android.ide.common.resources;
 
-import static com.android.SdkConstants.ANDROID_STYLE_RESOURCE_PREFIX;
-import static com.android.SdkConstants.PREFIX_ANDROID;
-import static com.android.SdkConstants.PREFIX_RESOURCE_REF;
-import static com.android.SdkConstants.REFERENCE_STYLE;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.ide.common.rendering.api.*;
+import com.android.ide.common.rendering.api.ArrayResourceValue;
+import com.android.ide.common.rendering.api.ItemResourceValue;
+import com.android.ide.common.rendering.api.LayoutLog;
+import com.android.ide.common.rendering.api.RenderResources;
+import com.android.ide.common.rendering.api.ResourceValue;
+import com.android.ide.common.rendering.api.StyleResourceValue;
 import com.android.resources.ResourceType;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
-import com.google.common.collect.Maps;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -38,6 +37,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static com.android.SdkConstants.*;
 
 public class ResourceResolver extends RenderResources {
     public static final String THEME_NAME = "Theme";
@@ -61,8 +62,8 @@ public class ResourceResolver extends RenderResources {
      */
     public static final int MAX_RESOURCE_INDIRECTION = 50;
 
-    private final Map<ResourceType, Map<String, ResourceValue>> mProjectResources;
-    private final Map<ResourceType, Map<String, ResourceValue>> mFrameworkResources;
+    private final Map<ResourceType, ResourceValueMap> mProjectResources;
+    private final Map<ResourceType, ResourceValueMap> mFrameworkResources;
     private final Map<StyleResourceValue, StyleResourceValue> mStyleInheritanceMap =
         new HashMap<StyleResourceValue, StyleResourceValue>();
     private StyleResourceValue mDefaultTheme;
@@ -70,21 +71,15 @@ public class ResourceResolver extends RenderResources {
     private final List<StyleResourceValue> mThemes;
     private FrameworkResourceIdProvider mFrameworkProvider;
     private LayoutLog mLogger;
-    private String mThemeName;
+    private final String mThemeName;
     private boolean mIsProjectTheme;
-    // AAPT flattens the names by converting '.', '-' and ':' to '_'. These maps undo the
-    // flattening. We prefer lazy initialization of these maps since they are not used in many
-    // applications.
-    @Nullable
-    private Map<String, String> mReverseFrameworkStyles;
-    @Nullable
-    private Map<String, String> mReverseProjectStyles;
+
     /** Contains the default parent for DeviceDefault styles (e.g. for API 18, "Holo") */
     private String mDeviceDefaultParent = null;
 
     private ResourceResolver(
-            Map<ResourceType, Map<String, ResourceValue>> projectResources,
-            Map<ResourceType, Map<String, ResourceValue>> frameworkResources,
+            Map<ResourceType, ResourceValueMap> projectResources,
+            Map<ResourceType, ResourceValueMap> frameworkResources,
             String themeName, boolean isProjectTheme) {
         mProjectResources = projectResources;
         mFrameworkResources = frameworkResources;
@@ -103,13 +98,36 @@ public class ResourceResolver extends RenderResources {
      * @return a new {@link ResourceResolver}
      */
     public static ResourceResolver create(
-            Map<ResourceType, Map<String, ResourceValue>> projectResources,
-            Map<ResourceType, Map<String, ResourceValue>> frameworkResources,
+            Map<ResourceType, ResourceValueMap> projectResources,
+            Map<ResourceType, ResourceValueMap> frameworkResources,
             String themeName, boolean isProjectTheme) {
 
         ResourceResolver resolver = new ResourceResolver(projectResources, frameworkResources,
                 themeName, isProjectTheme);
         resolver.computeStyleMaps();
+
+        return resolver;
+    }
+
+    /**
+     * Creates a new {@link ResourceResolver} copied from the given instance.
+     *
+     * @return a new {@link ResourceResolver} or null if the passed instance is null
+     */
+    @Nullable
+    public static ResourceResolver copy(@Nullable ResourceResolver original) {
+        if (original == null) {
+            return null;
+        }
+
+        ResourceResolver resolver = new ResourceResolver(
+          original.mProjectResources, original.mFrameworkResources,
+          original.mThemeName, original.mIsProjectTheme);
+        resolver.mFrameworkProvider = original.mFrameworkProvider;
+        resolver.mLogger = original.mLogger;
+        resolver.mDefaultTheme = original.mDefaultTheme;
+        resolver.mStyleInheritanceMap.putAll(original.mStyleInheritanceMap);
+        resolver.mThemes.addAll(original.mThemes);
 
         return resolver;
     }
@@ -150,7 +168,7 @@ public class ResourceResolver extends RenderResources {
      * styles when using a CompatibilityTarget
      */
     private void patchFrameworkStyleParent(String childStyleName, String parentName) {
-        Map<String, ResourceValue> map = mFrameworkResources.get(ResourceType.STYLE);
+        ResourceValueMap map = mFrameworkResources.get(ResourceType.STYLE);
         if (map != null) {
             StyleResourceValue from = (StyleResourceValue)map.get(childStyleName);
             StyleResourceValue to = (StyleResourceValue)map.get(parentName);
@@ -174,11 +192,11 @@ public class ResourceResolver extends RenderResources {
         return mIsProjectTheme;
     }
 
-    public Map<ResourceType, Map<String, ResourceValue>> getProjectResources() {
+    public Map<ResourceType, ResourceValueMap> getProjectResources() {
         return mProjectResources;
     }
 
-    public Map<ResourceType, Map<String, ResourceValue>> getFrameworkResources() {
+    public Map<ResourceType, ResourceValueMap> getFrameworkResources() {
         return mFrameworkResources;
     }
 
@@ -227,11 +245,11 @@ public class ResourceResolver extends RenderResources {
         ResourceValue theme;
 
         if (frameworkTheme) {
-            Map<String, ResourceValue> frameworkStyleMap = mFrameworkResources.get(
+            ResourceValueMap frameworkStyleMap = mFrameworkResources.get(
                     ResourceType.STYLE);
             theme = frameworkStyleMap.get(name);
         } else {
-            Map<String, ResourceValue> projectStyleMap = mProjectResources.get(ResourceType.STYLE);
+            ResourceValueMap projectStyleMap = mProjectResources.get(ResourceType.STYLE);
             theme = projectStyleMap.get(name);
         }
 
@@ -449,8 +467,13 @@ public class ResourceResolver extends RenderResources {
      * project resources
      */
     private ResourceValue findResValue(ResourceUrl resource, boolean forceFramework) {
+        if (resource.type == ResourceType.AAPT) {
+            // Aapt resources are synthetic references that do not need to be resolved.
+            return null;
+        }
+
         // map of ResourceValue for the given type
-        Map<String, ResourceValue> typeMap;
+        ResourceValueMap typeMap;
         ResourceType resType = resource.type;
         String resName = resource.name;
         boolean isFramework = forceFramework || resource.framework;
@@ -491,8 +514,8 @@ public class ResourceResolver extends RenderResources {
     }
 
     private ResourceValue getResource(ResourceType resourceType, String resourceName,
-            Map<ResourceType, Map<String, ResourceValue>> resourceRepository) {
-        Map<String, ResourceValue> typeMap = resourceRepository.get(resourceType);
+            Map<ResourceType, ResourceValueMap> resourceRepository) {
+        ResourceValueMap typeMap = resourceRepository.get(resourceType);
         if (typeMap != null) {
             ResourceValue item = typeMap.get(resourceName);
             if (item != null) {
@@ -509,8 +532,8 @@ public class ResourceResolver extends RenderResources {
      * Compute style information from the given list of style for the project and framework.
      */
     private void computeStyleMaps() {
-        Map<String, ResourceValue> projectStyleMap = mProjectResources.get(ResourceType.STYLE);
-        Map<String, ResourceValue> frameworkStyleMap = mFrameworkResources.get(ResourceType.STYLE);
+        ResourceValueMap projectStyleMap = mProjectResources.get(ResourceType.STYLE);
+        ResourceValueMap frameworkStyleMap = mFrameworkResources.get(ResourceType.STYLE);
 
         // first, get the theme
         ResourceValue theme = null;
@@ -554,8 +577,8 @@ public class ResourceResolver extends RenderResources {
      * @param inFrameworkStyleMap the map of framework styles.
      */
     private void computeStyleInheritance(Collection<ResourceValue> styles,
-            Map<String, ResourceValue> inProjectStyleMap,
-            Map<String, ResourceValue> inFrameworkStyleMap) {
+            ResourceValueMap inProjectStyleMap,
+            ResourceValueMap inFrameworkStyleMap) {
         // This method will recalculate the inheritance map so any modifications done by
         // setDeviceDefault will be lost. Set mDeviceDefaultParent to null so when setDeviceDefault
         // is called again, it knows that it needs to modify the inheritance map again.
@@ -608,7 +631,7 @@ public class ResourceResolver extends RenderResources {
     @Nullable
     public StyleResourceValue getStyle(@NonNull String styleName, boolean isFramework) {
         ResourceValue res;
-        Map<String, ResourceValue> styleMap;
+        ResourceValueMap styleMap;
 
         // First check if we can find the style directly.
         if (isFramework) {
@@ -617,75 +640,9 @@ public class ResourceResolver extends RenderResources {
             styleMap = mProjectResources.get(ResourceType.STYLE);
         }
         res = getStyleFromMap(styleMap, styleName);
-        if (res != null) {
-            // If the obtained resource is not StyleResourceValue, return null.
-            return res instanceof StyleResourceValue ? (StyleResourceValue) res : null;
-        }
 
-        // We cannot find the style directly. The style name may have been flattened by AAPT for use
-        // in the R class. Try and obtain the original name.
-        String xmlStyleName = getReverseStyleMap(isFramework)
-                .get(getNormalizedStyleName(styleName));
-        if (!styleName.equals(xmlStyleName)) {
-            res = getStyleFromMap(styleMap, xmlStyleName);
-        }
+        // If the obtained resource is not StyleResourceValue, return null.
         return res instanceof StyleResourceValue ? (StyleResourceValue) res : null;
-    }
-
-    @Override
-    @Nullable
-    public String getXmlName(@NonNull ResourceType type, @NonNull String name,
-            boolean isFramework) {
-        if (type != ResourceType.STYLE) {
-            // The method is currently implemented for styles only.
-            return null;
-        }
-        Map<String, String> reverseStyles;
-        reverseStyles = getReverseStyleMap(isFramework);
-        return reverseStyles.get(name);
-    }
-
-    /**
-     * Returns the reverse style map using the appropriate resources. It also initializes the map if
-     * it hasn't been initialized yet.
-     */
-    private Map<String, String> getReverseStyleMap(boolean isFramework) {
-        if (isFramework) {
-            // The reverse style map may need to be initialized.
-            if (mReverseFrameworkStyles == null) {
-                Map<String, ResourceValue> styleMap = mFrameworkResources.get(ResourceType.STYLE);
-                mReverseFrameworkStyles = createReverseStyleMap(styleMap.keySet());
-            }
-            return mReverseFrameworkStyles;
-        } else {
-            if (mReverseProjectStyles == null) {
-                Map<String, ResourceValue> styleMap = mProjectResources.get(ResourceType.STYLE);
-                mReverseProjectStyles = createReverseStyleMap(styleMap.keySet());
-            }
-            return mReverseProjectStyles;
-        }
-    }
-
-    /**
-     * Create a map from the normalized form of the style names in {@code styles} to the original
-     * style name.
-     *
-     * @see #getNormalizedStyleName(String)
-     */
-    private static Map<String, String> createReverseStyleMap(@NonNull Set<String> styles) {
-        Map<String, String> reverseStyles = Maps.newHashMapWithExpectedSize(styles.size());
-        for (String style : styles) {
-            reverseStyles.put(getNormalizedStyleName(style), style);
-        }
-        return reverseStyles;
-    }
-
-    /**
-     * Flatten the styleName like AAPT by replacing dots, dashes and colons with underscores.
-     */
-    @NonNull
-    private static String getNormalizedStyleName(@NonNull String styleName) {
-        return styleName.replace('.', '_').replace('-', '_').replace(':', '_');
     }
 
     /**
@@ -695,7 +652,7 @@ public class ResourceResolver extends RenderResources {
      * @return The {@link ResourceValue} found in the map.
      */
     @Nullable
-    private ResourceValue getStyleFromMap(@NonNull Map<String, ResourceValue> styleMap,
+    private ResourceValue getStyleFromMap(@NonNull ResourceValueMap styleMap,
             @NonNull String styleName) {
         ResourceValue res;
         res = styleMap.get(styleName);
@@ -724,8 +681,8 @@ public class ResourceResolver extends RenderResources {
      * @return The matching {@link StyleResourceValue} object or <code>null</code> if not found.
      */
     private StyleResourceValue getStyle(String parentName,
-            Map<String, ResourceValue> inProjectStyleMap,
-            Map<String, ResourceValue> inFrameworkStyleMap) {
+            ResourceValueMap inProjectStyleMap,
+            ResourceValueMap inFrameworkStyleMap) {
         boolean frameworkOnly = false;
 
         String name = parentName;
@@ -875,8 +832,8 @@ public class ResourceResolver extends RenderResources {
 
         private RecordingResourceResolver(
                 @NonNull List<ResourceValue> lookupChain,
-                @NonNull Map<ResourceType, Map<String, ResourceValue>> projectResources,
-                @NonNull Map<ResourceType, Map<String, ResourceValue>> frameworkResources,
+                @NonNull Map<ResourceType, ResourceValueMap> projectResources,
+                @NonNull Map<ResourceType, ResourceValueMap> frameworkResources,
                 @NonNull String themeName, boolean isProjectTheme) {
             super(projectResources, frameworkResources, themeName, isProjectTheme);
             mLookupChain = lookupChain;

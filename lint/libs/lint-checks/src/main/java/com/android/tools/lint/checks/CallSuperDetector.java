@@ -18,7 +18,6 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.CLASS_VIEW;
 import static com.android.SdkConstants.SUPPORT_ANNOTATIONS_PREFIX;
-import static com.android.tools.lint.checks.SupportAnnotationDetector.filterRelevantAnnotations;
 import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 
 import com.android.annotations.NonNull;
@@ -40,7 +39,6 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiReferenceExpression;
 import com.intellij.psi.PsiSuperExpression;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -48,9 +46,9 @@ import java.util.List;
  * Makes sure that methods call super when overriding methods.
  */
 public class CallSuperDetector extends Detector implements JavaPsiScanner {
-    private static final String CALL_SUPER_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "CallSuper"; //$NON-NLS-1$
-    private static final String ON_DETACHED_FROM_WINDOW = "onDetachedFromWindow";   //$NON-NLS-1$
-    private static final String ON_VISIBILITY_CHANGED = "onVisibilityChanged";      //$NON-NLS-1$
+    private static final String CALL_SUPER_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "CallSuper";
+    private static final String ON_DETACHED_FROM_WINDOW = "onDetachedFromWindow";
+    private static final String ON_VISIBILITY_CHANGED = "onVisibilityChanged";
 
     private static final Implementation IMPLEMENTATION = new Implementation(
             CallSuperDetector.class,
@@ -58,7 +56,7 @@ public class CallSuperDetector extends Detector implements JavaPsiScanner {
 
     /** Missing call to super */
     public static final Issue ISSUE = Issue.create(
-            "MissingSuperCall", //$NON-NLS-1$
+            "MissingSuperCall",
             "Missing Super Call",
 
             "Some methods, such as `View#onDetachedFromWindow`, require that you also " +
@@ -78,7 +76,7 @@ public class CallSuperDetector extends Detector implements JavaPsiScanner {
 
     @Override
     public List<Class<? extends PsiElement>> getApplicablePsiTypes() {
-        return Collections.<Class<? extends PsiElement>>singletonList(PsiMethod.class);
+        return Collections.singletonList(PsiMethod.class);
     }
 
     @Override
@@ -143,21 +141,14 @@ public class CallSuperDetector extends Detector implements JavaPsiScanner {
             return directSuper;
         }
 
-        // Look up annotations metadata
-        PsiMethod superMethod = directSuper;
-        while (superMethod != null) {
-            PsiAnnotation[] annotations = superMethod.getModifierList().getAnnotations();
-            annotations = filterRelevantAnnotations(evaluator, annotations);
-            for (PsiAnnotation annotation : annotations) {
-                String signature = annotation.getQualifiedName();
-                if (CALL_SUPER_ANNOTATION.equals(signature)) {
-                    return directSuper;
-                } else if (signature != null && signature.endsWith(".OverrideMustInvoke")) {
-                    // Handle findbugs annotation on the fly too
-                    return directSuper;
-                }
+        PsiAnnotation[] annotations = evaluator.getAllAnnotations(directSuper, true);
+        for (PsiAnnotation annotation : annotations) {
+            String signature = annotation.getQualifiedName();
+            if (CALL_SUPER_ANNOTATION.equals(signature) || signature != null
+                    && (signature.endsWith(".OverrideMustInvoke")
+                            || signature.endsWith(".OverridingMethodsMustInvokeSuper"))) {
+                return directSuper;
             }
-            superMethod = evaluator.getSuperMethod(superMethod);
         }
 
         return null;

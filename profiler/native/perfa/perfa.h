@@ -21,24 +21,47 @@
 
 #include <grpc++/grpc++.h>
 
+#include "proto/internal_energy.grpc.pb.h"
+#include "proto/internal_event.grpc.pb.h"
+#include "proto/internal_memory.grpc.pb.h"
+#include "proto/internal_network.grpc.pb.h"
 #include "proto/perfa_service.grpc.pb.h"
-
-// Function to create perfa after it have been loaded into the application
-// memory.
-extern "C" void InitializePerfa();
 
 namespace profiler {
 
 class Perfa {
  public:
-  Perfa(const char* address);
+  static void Initialize();
+  // Grab the singleton instance of Perfa. This will initialize the class if
+  // necessary, but consider calling |Initialize| on your own first.
+  static Perfa& Instance();
 
-  ~Perfa() = delete;  // TODO: Support destroying perfa.
+  bool WriteData(const proto::CommonData& data);
 
-  bool WriteData(const proto::ProfilerData& data);
+  const proto::InternalEnergyService::Stub& energy_stub() {
+    return *energy_stub_;
+  }
+
+  const proto::InternalEventService::Stub& event_stub() { return *event_stub_; }
+
+  const proto::InternalMemoryService::Stub& memory_stub() {
+    return *memory_stub_;
+  }
+
+  const proto::InternalNetworkService::Stub& network_stub() {
+    return *network_stub_;
+  }
 
  private:
+  // Use Perfa::Initialize to initialize
+  explicit Perfa(const char* address);
+  ~Perfa() = delete;  // TODO: Support destroying perfa.
+
   std::unique_ptr<proto::PerfaService::Stub> service_stub_;
+  std::unique_ptr<proto::InternalEnergyService::Stub> energy_stub_;
+  std::unique_ptr<proto::InternalEventService::Stub> event_stub_;
+  std::unique_ptr<proto::InternalMemoryService::Stub> memory_stub_;
+  std::unique_ptr<proto::InternalNetworkService::Stub> network_stub_;
 
   // TODO: Move this over to the StreamingRpcManager when it is ready
   std::thread control_thread_;
@@ -48,7 +71,7 @@ class Perfa {
 
   grpc::ClientContext data_context_;
   proto::DataStreamResponse data_response_;
-  std::unique_ptr<grpc::ClientWriter<proto::ProfilerData>> data_stream_;
+  std::unique_ptr<grpc::ClientWriter<proto::CommonData>> data_stream_;
 
   void RunControlThread();
 };

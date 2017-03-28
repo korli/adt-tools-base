@@ -27,37 +27,33 @@ import com.android.build.api.transform.JarInput;
 import com.android.build.api.transform.Status;
 import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
-import com.android.build.api.transform.TransformInvocation;
 import com.android.build.api.transform.TransformOutputProvider;
-import com.android.builder.model.OptionalCompilationStep;
-import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunVerifier;
+import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
+import com.android.build.gradle.internal.pipeline.TaskTestUtils;
 import com.android.build.gradle.internal.pipeline.TransformInvocationBuilder;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.builder.model.OptionalCompilationStep;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Files;
-
+import java.io.File;
+import java.io.IOException;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.Mockito;
 import org.mockito.runners.MockitoJUnitRunner;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 
 /**
  * Tests for the {@link InstantRunVerifierTransform}
@@ -93,7 +89,8 @@ public class InstantRunVerifierTransformTest {
         when(variantScope.getIncrementalVerifierDir()).thenReturn(backupDir);
         when(variantScope.getInstantRunBuildContext()).thenReturn(instantRunBuildContext);
         when(variantScope.getGlobalScope()).thenReturn(globalScope);
-        when(instantRunBuildContext.getVerifierResult()).thenReturn(Optional.empty());
+        when(instantRunBuildContext.getVerifierResult()).thenReturn(
+                InstantRunVerifierStatus.NO_CHANGES);
         when(globalScope.isActive(OptionalCompilationStep.RESTART_ONLY)).thenReturn(false);
     }
 
@@ -109,7 +106,7 @@ public class InstantRunVerifierTransformTest {
         assertTrue(inputClass.createNewFile());
 
         ImmutableList<TransformInput> transformInputs =
-                ImmutableList.<TransformInput>of(new TransformInput() {
+                ImmutableList.of(new TransformInput() {
             @NonNull
             @Override
             public Collection<JarInput> getJarInputs() {
@@ -119,7 +116,7 @@ public class InstantRunVerifierTransformTest {
             @NonNull
             @Override
             public Collection<DirectoryInput> getDirectoryInputs() {
-                return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                return ImmutableList.of(new DirectoryInputForTests() {
 
                     @NonNull
                     @Override
@@ -169,7 +166,7 @@ public class InstantRunVerifierTransformTest {
         assertTrue(lastIterationChangedFile.createNewFile());
 
         ImmutableList<TransformInput> transformInputs =
-                ImmutableList.<TransformInput>of(new TransformInput() {
+                ImmutableList.of(new TransformInput() {
                     @NonNull
                     @Override
                     public Collection<JarInput> getJarInputs() {
@@ -179,7 +176,7 @@ public class InstantRunVerifierTransformTest {
                     @NonNull
                     @Override
                     public Collection<DirectoryInput> getDirectoryInputs() {
-                        return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                        return ImmutableList.of(new DirectoryInputForTests() {
 
                             @NonNull
                             @Override
@@ -235,7 +232,7 @@ public class InstantRunVerifierTransformTest {
         final File deletedFile = new File(tmpDir, "com/foo/bar/DeletedFile.class");
 
         ImmutableList<TransformInput> transformInputs =
-                ImmutableList.<TransformInput>of(new TransformInput() {
+                ImmutableList.of(new TransformInput() {
                     @NonNull
                     @Override
                     public Collection<JarInput> getJarInputs() {
@@ -245,7 +242,7 @@ public class InstantRunVerifierTransformTest {
                     @NonNull
                     @Override
                     public Collection<DirectoryInput> getDirectoryInputs() {
-                        return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                        return ImmutableList.of(new DirectoryInputForTests() {
 
                             @NonNull
                             @Override
@@ -298,7 +295,7 @@ public class InstantRunVerifierTransformTest {
         }
 
         ImmutableList<TransformInput> transformInputs =
-                ImmutableList.<TransformInput>of(new TransformInput() {
+                ImmutableList.of(new TransformInput() {
                     @NonNull
                     @Override
                     public Collection<JarInput> getJarInputs() {
@@ -308,7 +305,7 @@ public class InstantRunVerifierTransformTest {
                     @NonNull
                     @Override
                     public Collection<DirectoryInput> getDirectoryInputs() {
-                        return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                        return ImmutableList.of(new DirectoryInputForTests() {
 
                             @NonNull
                             @Override
@@ -364,7 +361,7 @@ public class InstantRunVerifierTransformTest {
         }
 
         ImmutableList<TransformInput> transformInputs =
-                ImmutableList.<TransformInput>of(new TransformInput() {
+                ImmutableList.of(new TransformInput() {
                     @NonNull
                     @Override
                     public Collection<JarInput> getJarInputs() {
@@ -374,7 +371,7 @@ public class InstantRunVerifierTransformTest {
                     @NonNull
                     @Override
                     public Collection<DirectoryInput> getDirectoryInputs() {
-                        return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                        return ImmutableList.of(new DirectoryInputForTests() {
 
                             @NonNull
                             @Override
@@ -419,7 +416,7 @@ public class InstantRunVerifierTransformTest {
     public void testStatusAlreadySet()
             throws TransformException, InterruptedException, IOException {
         when(instantRunBuildContext.getVerifierResult()).thenReturn(
-                Optional.of(InstantRunVerifierStatus.DEPENDENCY_CHANGED));
+                InstantRunVerifierStatus.DEPENDENCY_CHANGED);
 
         final File inputDir = temporaryFolder.newFolder();
         final File inputFile = new File(inputDir, "com/foo/bar/InputFile.class");
@@ -459,20 +456,21 @@ public class InstantRunVerifierTransformTest {
                 .build());
 
         // check the verifier status is not reset.
-        assertThat(instantRunBuildContext.getVerifierResult().isPresent()).isTrue();
-        assertThat(instantRunBuildContext.getVerifierResult().get()).isEqualTo(
+        assertThat(instantRunBuildContext.getVerifierResult()).isEqualTo(
                 InstantRunVerifierStatus.DEPENDENCY_CHANGED);
     }
 
     private InstantRunVerifierTransform getTransform() {
 
-        return new InstantRunVerifierTransform(variantScope) {
+        return new InstantRunVerifierTransform(variantScope, new TaskTestUtils.FakeRecorder()) {
 
             @NonNull
             @Override
-            protected InstantRunVerifierStatus runVerifier(String name,
-                    @NonNull final InstantRunVerifier.ClassBytesProvider originalClass ,
-                    @NonNull final InstantRunVerifier.ClassBytesProvider updatedClass) throws IOException {
+            protected InstantRunVerifierStatus runVerifier(
+                    String name,
+                    @NonNull final InstantRunVerifier.ClassBytesProvider originalClass,
+                    @NonNull final InstantRunVerifier.ClassBytesProvider updatedClass)
+                    throws IOException {
 
                 recordedVerification.put(
                         ((InstantRunVerifier.ClassBytesFileProvider) originalClass).getFile(),
@@ -498,7 +496,7 @@ public class InstantRunVerifierTransformTest {
         @NonNull
         @Override
         public Set<ContentType> getContentTypes() {
-            return ImmutableSet.<ContentType>of(DefaultContentType.CLASSES);
+            return ImmutableSet.of(DefaultContentType.CLASSES);
         }
 
         @NonNull

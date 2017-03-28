@@ -16,6 +16,7 @@
       <w>aload</w>
       <w>androiddebugkey</w>
       <w>anim</w>
+      <w>antlr</w>
       <w>anydpi</w>
       <w>aosp</w>
       <w>apkbuilder</w>
@@ -37,6 +38,7 @@
       <w>badging</w>
       <w>basename</w>
       <w>basenames</w>
+      <w>bazel</w>
       <w>bicubic</w>
       <w>bilinear</w>
       <w>bindir</w>
@@ -63,6 +65,7 @@
       <w>clipart</w>
       <w>closeables</w>
       <w>codenames</w>
+      <w>coldswap</w>
       <w>combineaccessrules</w>
       <w>compat</w>
       <w>configurables</w>
@@ -110,6 +113,7 @@
       <w>fqcn</w>
       <w>framebuffer</w>
       <w>frameworkdir</w>
+      <w>freezeswap</w>
       <w>froyo</w>
       <w>fwvga</w>
       <w>gbdserver</w>
@@ -130,6 +134,7 @@
       <w>hdpi</w>
       <w>holo</w>
       <w>horiz</w>
+      <w>hotswap</w>
       <w>httpclient</w>
       <w>hvga</w>
       <w>iaload</w>

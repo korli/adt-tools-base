@@ -18,32 +18,29 @@ package com.android.builder.core;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.repository.Revision;
+import com.android.builder.model.ApiVersion;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Options for configuring Jack compilation.
  */
 public class JackProcessOptions {
 
-    public static final Revision JACK_MIN_REV = new Revision(24, 0, 0);
-
-    // Revision that Jack version Douarn is released.
-    public static final Revision DOUARN_REV = new Revision(24, 0, 0);
-
     // Class name of the code coverage plugin.
-    public static final String COVERAGE_PLUGIN_NAME =
-            "com.android.jack.coverage.CodeCoveragePlugin";
+    public static final String COVERAGE_PLUGIN_NAME = "com.android.jack.coverage.CodeCoverage";
 
-    private boolean mDebugLog = false;
-    private boolean mVerbose = false;
+    private boolean debugJackInternals = false;
+    private boolean verboseProcessing = false;
     private boolean mDebuggable = true;
     @NonNull
     private List<File> mClasspaths = ImmutableList.of();
@@ -62,7 +59,8 @@ public class JackProcessOptions {
     @Nullable
     private File mMappingFile = null;
     private boolean mMultiDex;
-    private int mMinSdkVersion;
+    @Nullable
+    private ApiVersion minSdkVersion;
     @NonNull
     private List<File> mResourceDirectories = ImmutableList.of();
     @NonNull
@@ -85,26 +83,35 @@ public class JackProcessOptions {
     private Map<String, String> mAnnotationProcessorOptions = ImmutableMap.of();
     @Nullable
     private File coverageMetadataFile = null;
-
+    @Nullable
+    private String mEncoding = null;
     @NonNull
     private Map<String, String> mAdditionalParameters = Maps.newHashMap();
+    @NonNull
+    private Set<String> mJackPluginNames = ImmutableSet.of();
+    @NonNull
+    private List<File> mJackPluginClassPath = ImmutableList.of();
+    private boolean useJill = false;
 
-    public boolean isDebugLog() {
-        return mDebugLog;
+    /** Generate debug logs of Jack internals. */
+    public boolean isDebugJackInternals() {
+        return debugJackInternals;
     }
 
-    public void setDebugLog(boolean debugLog) {
-        mDebugLog = debugLog;
+    public void setDebugJackInternals(boolean debugJackInternals) {
+        this.debugJackInternals = debugJackInternals;
     }
 
-    public boolean isVerbose() {
-        return mVerbose;
+    /** Generates verbose logs when processing user code or libraries. */
+    public boolean isVerboseProcessing() {
+        return verboseProcessing;
     }
 
-    public void setVerbose(boolean verbose) {
-        mVerbose = verbose;
+    public void setVerboseProcessing(boolean verboseCompilationOutput) {
+        this.verboseProcessing = verboseCompilationOutput;
     }
 
+    /** If the generated Jack output should contain debug information. */
     public boolean isDebuggable() {
         return mDebuggable;
     }
@@ -200,12 +207,14 @@ public class JackProcessOptions {
         mMultiDex = multiDex;
     }
 
-    public int getMinSdkVersion() {
-        return mMinSdkVersion;
+    @NonNull
+    public ApiVersion getMinSdkVersion() {
+        Preconditions.checkNotNull(minSdkVersion, "Min sdk version not set.");
+        return minSdkVersion;
     }
 
-    public void setMinSdkVersion(int minSdkVersion) {
-        mMinSdkVersion = minSdkVersion;
+    public void setMinSdkVersion(@NonNull ApiVersion minSdkVersion) {
+        this.minSdkVersion = minSdkVersion;
     }
 
     @NonNull
@@ -317,5 +326,53 @@ public class JackProcessOptions {
 
     public void setCoverageMetadataFile(@Nullable File coverageMetadataFile) {
         this.coverageMetadataFile = coverageMetadataFile;
+    }
+
+    @Nullable
+    public String getEncoding() {
+        return mEncoding;
+    }
+
+    public void setEncoding(@NonNull String encoding) {
+        mEncoding = encoding;
+    }
+
+    @NonNull
+    public Set<String> getJackPluginNames() {
+        return mJackPluginNames;
+    }
+
+    public void setJackPluginNames(@NonNull List<String> jackPluginNames) {
+        mJackPluginNames = ImmutableSet.copyOf(jackPluginNames);
+    }
+
+    public void addJackPluginName(@NonNull String jackPluginName) {
+        mJackPluginNames =
+                ImmutableSet.<String>builder().addAll(mJackPluginNames).add(jackPluginName).build();
+    }
+
+    @NonNull
+    public List<File> getJackPluginClassPath() {
+        return mJackPluginClassPath;
+    }
+
+    public void setJackPluginClassPath(@NonNull List<File> jackPluginClassPath) {
+        mJackPluginClassPath = ImmutableList.copyOf(jackPluginClassPath);
+    }
+
+    public void addJackPluginClassPath(@NonNull File jackPluginClassPath) {
+        mJackPluginClassPath =
+                ImmutableList.<File>builder()
+                        .addAll(mJackPluginClassPath)
+                        .add(jackPluginClassPath)
+                        .build();
+    }
+
+    public boolean getUseJill() {
+        return useJill;
+    }
+
+    public void setUseJill(boolean useJill) {
+        this.useJill = useJill;
     }
 }

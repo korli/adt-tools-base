@@ -3,13 +3,17 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/adt.iml" filepath="$PROJECT_DIR$/adt.iml" />
-      <module fileurl="file://$PROJECT_DIR$/../analytics-library/inspector/analytics-inspector.iml" filepath="$PROJECT_DIR$/../analytics-library/inspector/analytics-inspector.iml" group="analytics-library" />
-      <module fileurl="file://$PROJECT_DIR$/../analytics-library/protos/analytics-protos.iml" filepath="$PROJECT_DIR$/../analytics-library/protos/analytics-protos.iml" group="analytics-library" />
-      <module fileurl="file://$PROJECT_DIR$/../analytics-library/publisher/analytics-publisher.iml" filepath="$PROJECT_DIR$/../analytics-library/publisher/analytics-publisher.iml" group="analytics-library" />
-      <module fileurl="file://$PROJECT_DIR$/../analytics-library/shared/analytics-shared.iml" filepath="$PROJECT_DIR$/../analytics-library/shared/analytics-shared.iml" group="analytics-library" />
-      <module fileurl="file://$PROJECT_DIR$/../analytics-library/tracker/analytics-tracker.iml" filepath="$PROJECT_DIR$/../analytics-library/tracker/analytics-tracker.iml" group="analytics-library" />
+      <module fileurl="file://$PROJECT_DIR$/../analytics-library/inspector/analytics-inspector-base.iml" filepath="$PROJECT_DIR$/../analytics-library/inspector/analytics-inspector-base.iml" group="analytics-library" />
+      <module fileurl="file://$PROJECT_DIR$/../analytics-library/protos/analytics-protos-base.iml" filepath="$PROJECT_DIR$/../analytics-library/protos/analytics-protos-base.iml" group="analytics-library" />
+      <module fileurl="file://$PROJECT_DIR$/../analytics-library/publisher/analytics-publisher-base.iml" filepath="$PROJECT_DIR$/../analytics-library/publisher/analytics-publisher-base.iml" group="analytics-library" />
+      <module fileurl="file://$PROJECT_DIR$/../analytics-library/shared/analytics-shared-base.iml" filepath="$PROJECT_DIR$/../analytics-library/shared/analytics-shared-base.iml" group="analytics-library" />
+      <module fileurl="file://$PROJECT_DIR$/../analytics-library/testing/analytics-testing-base.iml" filepath="$PROJECT_DIR$/../analytics-library/testing/analytics-testing-base.iml" group="analytics-library" />
+      <module fileurl="file://$PROJECT_DIR$/../analytics-library/tracker/analytics-tracker-base.iml" filepath="$PROJECT_DIR$/../analytics-library/tracker/analytics-tracker-base.iml" group="analytics-library" />
       <module fileurl="file://$PROJECT_DIR$/annotations/android-annotations.iml" filepath="$PROJECT_DIR$/annotations/android-annotations.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../apksig/apksig.iml" filepath="$PROJECT_DIR$/../apksig/apksig.iml" />
+      <module fileurl="file://$PROJECT_DIR$/apkzlib/apkzlib.iml" filepath="$PROJECT_DIR$/apkzlib/apkzlib.iml" />
       <module fileurl="file://$PROJECT_DIR$/asset-studio/assetstudio-base.iml" filepath="$PROJECT_DIR$/asset-studio/assetstudio-base.iml" />
+      <module fileurl="file://$PROJECT_DIR$/bazel/bazel.iml" filepath="$PROJECT_DIR$/bazel/bazel.iml" />
       <module fileurl="file://$PROJECT_DIR$/../buildSrc/buildSrc.iml" filepath="$PROJECT_DIR$/../buildSrc/buildSrc.iml" />
       <module fileurl="file://$PROJECT_DIR$/build-system/builder/builder.iml" filepath="$PROJECT_DIR$/build-system/builder/builder.iml" />
       <module fileurl="file://$PROJECT_DIR$/build-system/builder-model/builder-model.iml" filepath="$PROJECT_DIR$/build-system/builder-model/builder-model.iml" />
@@ -32,8 +36,10 @@
       <module fileurl="file://$PROJECT_DIR$/instant-run/instant-run-annotations/instant-run-annotations.iml" filepath="$PROJECT_DIR$/instant-run/instant-run-annotations/instant-run-annotations.iml" />
       <module fileurl="file://$PROJECT_DIR$/instant-run/instant-run-client/instant-run-client.iml" filepath="$PROJECT_DIR$/instant-run/instant-run-client/instant-run-client.iml" />
       <module fileurl="file://$PROJECT_DIR$/instant-run/instant-run-common/instant-run-common.iml" filepath="$PROJECT_DIR$/instant-run/instant-run-common/instant-run-common.iml" />
+      <module fileurl="file://$PROJECT_DIR$/build-system/instant-run-instrumentation/instant-run-instrumentation.iml" filepath="$PROJECT_DIR$/build-system/instant-run-instrumentation/instant-run-instrumentation.iml" />
       <module fileurl="file://$PROJECT_DIR$/instant-run/instant-run-runtime/instant-run-runtime.iml" filepath="$PROJECT_DIR$/instant-run/instant-run-runtime/instant-run-runtime.iml" />
       <module fileurl="file://$PROJECT_DIR$/instant-run/instant-run-server/instant-run-server.iml" filepath="$PROJECT_DIR$/instant-run/instant-run-server/instant-run-server.iml" />
+      <module fileurl="file://$PROJECT_DIR$/instant-run-test-instrumenter/instant-run-test-instrumenter.iml" filepath="$PROJECT_DIR$/instant-run-test-instrumenter/instant-run-test-instrumenter.iml" />
       <module fileurl="file://$PROJECT_DIR$/build-system/integration-test/integration-test.iml" filepath="$PROJECT_DIR$/build-system/integration-test/integration-test.iml" />
       <module fileurl="file://$PROJECT_DIR$/jack/jack-api/jack-api.iml" filepath="$PROJECT_DIR$/jack/jack-api/jack-api.iml" />
       <module fileurl="file://$PROJECT_DIR$/jaxb-inheritance-plugin/jaxb-inheritance-plugin.iml" filepath="$PROJECT_DIR$/jaxb-inheritance-plugin/jaxb-inheritance-plugin.iml" />
@@ -53,7 +59,6 @@
       <module fileurl="file://$PROJECT_DIR$/build-system/project-test/project-test.iml" filepath="$PROJECT_DIR$/build-system/project-test/project-test.iml" />
       <module fileurl="file://$PROJECT_DIR$/build-system/project-test-lib/project-test-lib.iml" filepath="$PROJECT_DIR$/build-system/project-test-lib/project-test-lib.iml" />
       <module fileurl="file://$PROJECT_DIR$/repository/repository.iml" filepath="$PROJECT_DIR$/repository/repository.iml" />
-      <module fileurl="file://$PROJECT_DIR$/rule-api/rule-api.iml" filepath="$PROJECT_DIR$/rule-api/rule-api.iml" />
       <module fileurl="file://$PROJECT_DIR$/sdk-common/sdk-common-base.iml" filepath="$PROJECT_DIR$/sdk-common/sdk-common-base.iml" />
       <module fileurl="file://$PROJECT_DIR$/sdklib/sdklib-base.iml" filepath="$PROJECT_DIR$/sdklib/sdklib-base.iml" />
       <module fileurl="file://$PROJECT_DIR$/testutils/testutils.iml" filepath="$PROJECT_DIR$/testutils/testutils.iml" />

@@ -15,6 +15,7 @@
  */
 
 package com.android.build.gradle.integration.application
+
 import com.android.build.OutputFile
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.utils.AssumeUtil
@@ -29,7 +30,7 @@ import org.junit.BeforeClass
 import org.junit.ClassRule
 import org.junit.Test
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 import static com.android.builder.core.BuilderConstants.DEBUG
 import static org.junit.Assert.assertEquals
 import static org.junit.Assert.assertNotNull
@@ -48,8 +49,10 @@ class CombinedAbiDensityPureSplits {
 
     @BeforeClass
     static void setup() {
+        // This test uses the deprecated NDK integration, which does not work properly on Windows.
+        AssumeUtil.assumeNotWindows();
         AssumeUtil.assumeBuildToolsAtLeast(21)
-        model = project.executeAndReturnModel("clean", "assembleDebug")
+        model = project.executeAndReturnModel("clean", "assembleDebug").getOnlyModel()
     }
 
     @AfterClass
@@ -60,7 +63,6 @@ class CombinedAbiDensityPureSplits {
 
     @Test
     public void "test combined density and abi pure splits"() throws Exception {
-
         // Load the custom model for the project
         Collection<Variant> variants = model.getVariants()
         assertEquals("Variant Count", 2 , variants.size())

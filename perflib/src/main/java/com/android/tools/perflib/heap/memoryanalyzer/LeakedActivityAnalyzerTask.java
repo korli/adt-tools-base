@@ -36,8 +36,8 @@ import java.util.List;
 public class LeakedActivityAnalyzerTask extends MemoryAnalyzerTask {
 
     @Override
-    List<AnalysisResultEntry> analyze(@NonNull Configuration configuration,
-            @NonNull Snapshot snapshot) {
+    protected List<AnalysisResultEntry<?>> analyze(@NonNull Configuration configuration,
+                                                @NonNull Snapshot snapshot) {
         List<Instance> leakingInstances = new ArrayList<Instance>();
 
         List<ClassObj> activityClasses = snapshot.findAllDescendantClasses("android.app.Activity");
@@ -67,7 +67,7 @@ public class LeakedActivityAnalyzerTask extends MemoryAnalyzerTask {
             }
         }
 
-        List<AnalysisResultEntry> results = new ArrayList<AnalysisResultEntry>(
+        List<AnalysisResultEntry<?>> results = new ArrayList<AnalysisResultEntry<?>>(
                 leakingInstances.size());
         for (Instance instance : leakingInstances) {
             results.add(new LeakedActivityEntry(instance.getClassObj().getClassName(),

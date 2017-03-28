@@ -257,7 +257,7 @@ public final class AvdInfo implements Comparable<AvdInfo> {
     public static File getDefaultAvdFolder(@NonNull AvdManager manager, @NonNull String avdName,
             @NonNull FileOp fileOp, boolean unique)
             throws AndroidLocationException {
-        String base = manager.getBaseAvdFolder();
+        File base = manager.getBaseAvdFolder();
         File result = new File(base, avdName + AvdManager.AVD_FOLDER_EXTENSION);
         if (unique) {
             int suffix = 0;
@@ -267,15 +267,6 @@ public final class AvdInfo implements Comparable<AvdInfo> {
             }
         }
         return result;
-    }
-
-    /** Compatibility forwarding until the usages in tools/swt are updated */
-    @Deprecated
-    @NonNull
-    public static File getDefaultAvdFolder(@NonNull AvdManager manager, @NonNull String avdName,
-            @NonNull FileOp fileOp)
-            throws AndroidLocationException {
-        return getDefaultAvdFolder(manager, avdName, fileOp, false);
     }
 
     /**
@@ -290,7 +281,7 @@ public final class AvdInfo implements Comparable<AvdInfo> {
     @NonNull
     public static File getDefaultIniFile(@NonNull AvdManager manager, @NonNull String avdName)
             throws AndroidLocationException {
-        String avdRoot = manager.getBaseAvdFolder();
+        File avdRoot = manager.getBaseAvdFolder();
         return new File(avdRoot, avdName + AvdManager.INI_EXTENSION);
     }
 

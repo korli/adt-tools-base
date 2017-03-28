@@ -54,7 +54,6 @@ import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.PsiVariable;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.PsiWildcardType;
-
 import java.util.Map;
 
 /**
@@ -148,7 +147,7 @@ public class PsiPrettyPrinter {
     }
 
     public String print(@NonNull PsiElement root) {
-        if (mIncludeResolves || mIncludeResolves) {
+        if (mIncludeResolves || mIncludeIds) {
             mIds.clear();
             recordIds(root);
         }

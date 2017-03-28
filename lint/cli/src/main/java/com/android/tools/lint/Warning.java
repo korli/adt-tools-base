@@ -27,7 +27,6 @@ import com.android.tools.lint.detector.api.Severity;
 import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -53,8 +52,9 @@ public class Warning implements Comparable<Warning> {
     public String path;
     public int line = -1;
     public int offset = -1;
+    public int endOffset = -1;
     public String errorLine;
-    public String fileContents;
+    public CharSequence fileContents;
     public Set<Variant> variants;
 
     public Warning(Issue issue, String message, Severity severity, Project project) {
@@ -227,7 +227,7 @@ public class Warning implements Comparable<Warning> {
 
     public List<String> getIncludedVariantNames() {
         assert isVariantSpecific();
-        List<String> names = new ArrayList<String>();
+        List<String> names = new ArrayList<>();
         if (variants != null) {
             for (Variant variant : variants) {
                 names.add(variant.getName());
@@ -240,11 +240,11 @@ public class Warning implements Comparable<Warning> {
     public List<String> getExcludedVariantNames() {
         assert isVariantSpecific();
         Collection<Variant> variants = gradleProject.getVariants();
-        Set<String> allVariants = new HashSet<String>(variants.size());
+        Set<String> allVariants = new HashSet<>(variants.size());
         for (Variant variant : variants) {
             allVariants.add(variant.getName());
         }
-        Set<String> included = new HashSet<String>(getIncludedVariantNames());
+        Set<String> included = new HashSet<>(getIncludedVariantNames());
         Set<String> excluded = Sets.difference(allVariants, included);
         List<String> sorted = Lists.newArrayList(excluded);
         Collections.sort(sorted);

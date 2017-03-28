@@ -92,7 +92,7 @@ public class LegacyLocalRepoLoader implements FallbackLocalRepoLoader {
         if (!mFop.exists(new File(dir, SdkConstants.FN_SOURCE_PROP))) {
             return null;
         }
-        progress.logInfo(String.format("Parsing legacy package: %s", dir));
+        progress.logVerbose(String.format("Parsing legacy package: %s", dir));
         LocalPkgInfo info;
         if (mPkgs == null) {
             Map<File, LocalPkgInfo> result = Maps.newHashMap();
@@ -169,8 +169,7 @@ public class LegacyLocalRepoLoader implements FallbackLocalRepoLoader {
         @Nullable
         public License getLicense() {
             License res = mWrapped.getDesc().getLicense();
-            CommonFactory factory = (CommonFactory) RepoManager.getCommonModule()
-                    .createLatestFactory();
+            CommonFactory factory = RepoManager.getCommonModule().createLatestFactory();
             if (res == null) {
                 res = factory.createLicenseType();
                 res.setValue(mWrapped.getSourceProperties().getProperty(PkgProps.PKG_LICENSE));
@@ -185,8 +184,7 @@ public class LegacyLocalRepoLoader implements FallbackLocalRepoLoader {
         public Collection<Dependency> getAllDependencies() {
             List<Dependency> result = Lists.newArrayList();
             Revision rev = mWrapped.getDesc().getMinPlatformToolsRev();
-            CommonFactory factory = (CommonFactory) RepoManager.getCommonModule()
-                    .createLatestFactory();
+            CommonFactory factory = RepoManager.getCommonModule().createLatestFactory();
             if (rev != null) {
                 result.add(factory.createDependencyType(rev, SdkConstants.FD_PLATFORM_TOOLS));
             }
@@ -219,7 +217,7 @@ public class LegacyLocalRepoLoader implements FallbackLocalRepoLoader {
         @Override
         @NonNull
         public CommonFactory createFactory() {
-            return (CommonFactory) RepoManager.getCommonModule().createLatestFactory();
+            return RepoManager.getCommonModule().createLatestFactory();
         }
 
         @NonNull

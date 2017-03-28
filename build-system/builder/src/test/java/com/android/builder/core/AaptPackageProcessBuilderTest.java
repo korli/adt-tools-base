@@ -16,22 +16,22 @@
 
 package com.android.builder.core;
 
-import com.android.annotations.NonNull;
+import com.android.SdkConstants;
 import com.android.builder.model.AaptOptions;
 import com.android.builder.model.AndroidLibrary;
 import com.android.ide.common.process.ProcessInfo;
 import com.android.repository.Revision;
-import com.android.repository.api.LocalPackage;
-import com.android.repository.impl.meta.RepositoryPackages;
+import com.android.repository.api.ProgressIndicator;
 import com.android.repository.testframework.FakeProgressIndicator;
 import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.repository.AndroidSdkHandler;
-import com.android.sdklib.repository.meta.DetailsTypes;
-import com.android.sdklib.repository.targets.AndroidTargetManager;
+import com.android.testutils.TestUtils;
 import com.android.utils.ILogger;
 import com.android.utils.StdLogger;
+import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Range;
 
 import junit.framework.TestCase;
 
@@ -40,53 +40,58 @@ import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 
 import java.io.File;
-import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Tests for {@link AaptPackageProcessBuilder} class
  */
 public class AaptPackageProcessBuilderTest extends TestCase {
 
+    private static final Revision PREFERRED_DENSITY_VERSION = new Revision(24, 0, 1);
+
     @Mock
-    AaptOptions mAaptOptions;
+    AaptOptions aaptOptions;
 
-    BuildToolInfo mBuildToolInfo;
-    IAndroidTarget mIAndroidTarget;
-
+    BuildToolInfo buildToolInfo;
+    IAndroidTarget androidTarget;
     ILogger mLogger = new StdLogger(StdLogger.Level.VERBOSE);
 
     @Override
     public void setUp() throws Exception {
         super.setUp();
         MockitoAnnotations.initMocks(this);
-        FakeProgressIndicator progress = new FakeProgressIndicator();
-        AndroidSdkHandler handler = AndroidSdkHandler.getInstance(getSdkDir());
-        mBuildToolInfo = handler.getLatestBuildTool(progress, false);
-        if (mBuildToolInfo == null) {
-            throw new RuntimeException("Test requires build-tools 21");
-        }
-        AndroidTargetManager targetManager = handler.getAndroidTargetManager(progress);
-        for (IAndroidTarget iAndroidTarget : targetManager.getTargets(progress)) {
-            if (iAndroidTarget.getVersion().getApiLevel() == 21) {
-                mIAndroidTarget = iAndroidTarget;
-            }
-        }
-        if (mIAndroidTarget == null) {
-            throw new RuntimeException("Test requires android-21");
-        }
+        ProgressIndicator progressIndicator = new FakeProgressIndicator();
+        AndroidSdkHandler handler = AndroidSdkHandler.getInstance(TestUtils.getSdk());
+
+        buildToolInfo =
+                BuildToolInfo.fromLocalPackage(
+                        Verify.verifyNotNull(
+                                handler.getPackageInRange(
+                                        SdkConstants.FD_BUILD_TOOLS,
+                                        Range.atLeast(PREFERRED_DENSITY_VERSION),
+                                        progressIndicator),
+                                "Build tools >= %s required.",
+                                PREFERRED_DENSITY_VERSION));
+
+        androidTarget =
+                handler.getAndroidTargetManager(progressIndicator)
+                        .getTargets(progressIndicator)
+                        .stream()
+                        .filter(IAndroidTarget::isPlatform)
+                        .max(Comparator.comparing(IAndroidTarget::getVersion))
+                        .orElseThrow(() -> new AssertionError("Android platform required."));
     }
 
     public void testAndroidManifestPackaging() {
         File virtualAndroidManifestFile = new File("/path/to/non/existent/file");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir");
 
         ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(mBuildToolInfo, mIAndroidTarget, mLogger);
+                .build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
@@ -106,7 +111,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -116,7 +121,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setType(VariantType.DEFAULT);
 
         ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(mBuildToolInfo, mIAndroidTarget, mLogger);
+                .build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
@@ -145,7 +150,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -155,7 +160,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setType(VariantType.ANDROID_TEST);
 
         ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(mBuildToolInfo, mIAndroidTarget, mLogger);
+                .build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
@@ -184,7 +189,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -194,7 +199,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setType(VariantType.LIBRARY);
 
         ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(mBuildToolInfo, mIAndroidTarget, mLogger);
+                .build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
@@ -225,7 +230,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -236,7 +241,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setSplits(ImmutableList.of("mdpi", "hdpi"));
 
         ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(mBuildToolInfo, mIAndroidTarget, mLogger);
+                .build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
@@ -259,50 +264,6 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         assertTrue(command.indexOf("--preferred-density") == -1);
     }
 
-    public void testPre21ResourceConfigsAndPreferredDensity() {
-        File virtualAndroidManifestFile = new File("/path/to/non/existent/file");
-        File assetsFolder = Mockito.mock(File.class);
-        Mockito.when(assetsFolder.isDirectory()).thenReturn(true);
-        Mockito.when(assetsFolder.getAbsolutePath()).thenReturn("/path/to/assets/folder");
-        File resFolder = Mockito.mock(File.class);
-        Mockito.when(resFolder.isDirectory()).thenReturn(true);
-        Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
-
-        AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
-        aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
-                .setAssetsFolder(assetsFolder)
-                .setResFolder(resFolder)
-                .setPackageForR("com.example.package.forR")
-                .setSourceOutputDir("path/to/source/output/dir")
-                .setLibraries(ImmutableList.of(Mockito.mock(AndroidLibrary.class)))
-                .setType(VariantType.DEFAULT)
-                .setResourceConfigs(ImmutableList.of("res1", "res2"))
-                .setPreferredDensity("xhdpi");
-
-
-        FakeProgressIndicator progress = new FakeProgressIndicator();
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(20, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() < 20) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-20");
-        }
-
-        ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(buildToolInfo, androidTarget, mLogger);
-
-        List<String> command = processInfo.getArgs();
-
-        assertTrue("res1,res2,xhdpi,nodpi".equals(command.get(command.indexOf("-c") + 1)));
-        assertTrue(command.indexOf("--preferred-density") == -1);
-    }
-
     public void testPost21ResourceConfigsAndPreferredDensity() {
         File virtualAndroidManifestFile = new File("/path/to/non/existent/file");
         File assetsFolder = Mockito.mock(File.class);
@@ -313,7 +274,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -323,19 +284,6 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setType(VariantType.DEFAULT)
                 .setResourceConfigs(ImmutableList.of("res1", "res2"))
                 .setPreferredDensity("xhdpi");
-
-
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(21, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() < 21) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-21");
-        }
 
         ProcessInfo processInfo = aaptPackageProcessBuilder
                 .build(buildToolInfo, androidTarget, mLogger);
@@ -356,7 +304,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -368,19 +316,6 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                         ImmutableList.of("nodpi", "en", "fr", "mdpi", "hdpi", "xxhdpi", "xxxhdpi"))
                 .setSplits(ImmutableList.of("xhdpi"))
                 .setPreferredDensity("xhdpi");
-
-
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(21, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() < 21) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-21");
-        }
 
         try {
             aaptPackageProcessBuilder.build(buildToolInfo, androidTarget, mLogger);
@@ -407,7 +342,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -418,19 +353,6 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setResourceConfigs(ImmutableList.of("xxxhdpi"))
                 .setSplits(ImmutableList.of("hdpi", "mdpi", "xxhdpi"))
                 .setPreferredDensity("xhdpi");
-
-
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(21, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() < 21) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-21");
-        }
 
         try {
             aaptPackageProcessBuilder.build(buildToolInfo, androidTarget, mLogger);
@@ -449,54 +371,6 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         }
     }
 
-    public void testResConfigAndSplitNoConflict() {
-        File virtualAndroidManifestFile = new File("/path/to/non/existent/file");
-        File assetsFolder = Mockito.mock(File.class);
-        Mockito.when(assetsFolder.isDirectory()).thenReturn(true);
-        Mockito.when(assetsFolder.getAbsolutePath()).thenReturn("/path/to/assets/folder");
-        File resFolder = Mockito.mock(File.class);
-        Mockito.when(resFolder.isDirectory()).thenReturn(true);
-        Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
-
-        AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
-        aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
-                .setAssetsFolder(assetsFolder)
-                .setResFolder(resFolder)
-                .setPackageForR("com.example.package.forR")
-                .setSourceOutputDir("path/to/source/output/dir")
-                .setLibraries(ImmutableList.of(Mockito.mock(AndroidLibrary.class)))
-                .setType(VariantType.DEFAULT)
-                .setResourceConfigs(ImmutableList
-                        .of("en", "fr", "es", "de", "it", "mdpi", "hdpi", "xhdpi", "xxhdpi"))
-                .setSplits(ImmutableList.of("mdpi", "hdpi", "xhdpi", "xxhdpi"));
-
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(20, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() >= 20) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android 20");
-        }
-
-        ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(buildToolInfo, androidTarget, mLogger);
-
-        List<String> command = processInfo.getArgs();
-
-        assertEquals("en,fr,es,de,it,mdpi,hdpi,xhdpi,xxhdpi",
-                command.get(command.indexOf("-c") + 1));
-        assertTrue("--split".equals(command.get(command.indexOf("mdpi") - 1)));
-        assertTrue("--split".equals(command.get(command.indexOf("hdpi") - 1)));
-        assertTrue("--split".equals(command.get(command.indexOf("xhdpi") - 1)));
-        assertTrue("--split".equals(command.get(command.indexOf("xxhdpi") - 1)));
-        assertEquals(-1, command.indexOf("xxxhdpi"));
-    }
-
     public void testResConfigWithPreferredDensityFlags() {
         File virtualAndroidManifestFile = new File("/path/to/non/existent/file");
         File assetsFolder = Mockito.mock(File.class);
@@ -507,7 +381,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -518,20 +392,8 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setResourceConfigs(ImmutableList
                         .of("en", "fr", "es", "de", "it", "hdpi"));
 
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(21, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() >= 21) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-21");
-        }
-
-        ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(buildToolInfo, androidTarget, mLogger);
+        ProcessInfo processInfo =
+                aaptPackageProcessBuilder.build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
@@ -555,7 +417,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -566,18 +428,6 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setResourceConfigs(ImmutableList.of( "en", "fr", "es", "de", "it", "hdpi"))
                 .setSplits(ImmutableList.of("hdpi"))
                 .setPreferredDensity("hdpi");
-
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(21, 0, 0));
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() >= 21) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-21");
-        }
 
         try {
             aaptPackageProcessBuilder.build(buildToolInfo, androidTarget, mLogger);
@@ -598,7 +448,7 @@ public class AaptPackageProcessBuilderTest extends TestCase {
         Mockito.when(resFolder.getAbsolutePath()).thenReturn("/path/to/res/folder");
 
         AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
+                new AaptPackageProcessBuilder(virtualAndroidManifestFile, aaptOptions);
         aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir")
                 .setAssetsFolder(assetsFolder)
                 .setResFolder(resFolder)
@@ -610,80 +460,11 @@ public class AaptPackageProcessBuilderTest extends TestCase {
                 .setResourceConfigs(ImmutableList.of("en", "fr", "es", "de", "it"))
                 .setPreferredDensity("hdpi");
 
-        BuildToolInfo buildToolInfo = getBuildToolInfo(new Revision(21, 0, 0));
-        if (buildToolInfo == null) {
-            throw new RuntimeException("Test requires build-tools 21");
-        }
-        IAndroidTarget androidTarget = null;
-        for (IAndroidTarget iAndroidTarget : getTargets()) {
-            if (iAndroidTarget.getVersion().getApiLevel() >= 21) {
-                androidTarget = iAndroidTarget;
-                break;
-            }
-        }
-        if (androidTarget == null) {
-            throw new RuntimeException("Test requires pre android-21");
-        }
-
-        ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(buildToolInfo, androidTarget, mLogger);
+        ProcessInfo processInfo =
+                aaptPackageProcessBuilder.build(buildToolInfo, androidTarget, mLogger);
 
         List<String> command = processInfo.getArgs();
 
         assertEquals("en,fr,es,de,it", command.get(command.indexOf("-c") + 1));
-    }
-
-    public void testEnvironment() {
-        File virtualAndroidManifestFile = new File("/path/to/non/existent/file");
-
-        AaptPackageProcessBuilder aaptPackageProcessBuilder =
-                new AaptPackageProcessBuilder(virtualAndroidManifestFile, mAaptOptions);
-        aaptPackageProcessBuilder.setResPackageOutput("/path/to/non/existent/dir");
-
-        // add an env to the builder
-        aaptPackageProcessBuilder.addEnvironment("foo", "bar");
-
-        ProcessInfo processInfo = aaptPackageProcessBuilder
-                .build(mBuildToolInfo, mIAndroidTarget, mLogger);
-
-        Map<String, Object> env = processInfo.getEnvironment();
-        assertEquals(1, env.size());
-        assertNotNull(env.get("foo"));
-        assertEquals("bar", env.get("foo"));
-    }
-
-    /**
-     * Returns the SDK folder as built from the Android source tree.
-     * @return the SDK
-     */
-    @NonNull
-    protected static File getSdkDir() {
-        String androidHome = System.getenv("ANDROID_HOME");
-        if (androidHome != null) {
-            File f = new File(androidHome);
-            if (f.isDirectory()) {
-                return f;
-            }
-        }
-
-        throw new IllegalStateException("SDK not defined with ANDROID_HOME");
-    }
-
-    private static BuildToolInfo getBuildToolInfo(Revision revision) {
-        AndroidSdkHandler handler = AndroidSdkHandler.getInstance(getSdkDir());
-        FakeProgressIndicator progress = new FakeProgressIndicator();
-        BuildToolInfo buildToolInfo = handler.getBuildToolInfo(revision, progress);
-        if (buildToolInfo == null) {
-            throw new RuntimeException("Test requires build-tools " + revision);
-        }
-        return buildToolInfo;
-    }
-
-    private static Collection<IAndroidTarget> getTargets() {
-        AndroidSdkHandler handler = AndroidSdkHandler.getInstance(getSdkDir());
-        FakeProgressIndicator progress = new FakeProgressIndicator();
-        Collection<IAndroidTarget> targets = handler.getAndroidTargetManager(progress)
-                .getTargets(progress);
-        return targets;
     }
 }

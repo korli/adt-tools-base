@@ -47,18 +47,15 @@ import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Checks for negative margins in the following scenarios:
@@ -76,7 +73,7 @@ public class NegativeMarginDetector extends LayoutDetector {
 
     /** Negative margins */
     public static final Issue ISSUE = Issue.create(
-            "NegativeMargin", //$NON-NLS-1$
+            "NegativeMargin",
             "Negative Margins",
 
             "Margin values should be positive. Negative values are generally a sign that " +
@@ -96,12 +93,6 @@ public class NegativeMarginDetector extends LayoutDetector {
 
     /** Constructs a new {@link NegativeMarginDetector} */
     public NegativeMarginDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     @Override
@@ -238,7 +229,7 @@ public class NegativeMarginDetector extends LayoutDetector {
             } else if (!context.getDriver().isSuppressed(context, ISSUE, scope)) {
                 // Batch mode where we process layouts then values in order
                 if (mDimenUsage == null) {
-                    mDimenUsage = new HashMap<String, Location.Handle>();
+                    mDimenUsage = new HashMap<>();
                 }
                 mDimenUsage.put(url.name, context.createLocationHandle(scope));
             }

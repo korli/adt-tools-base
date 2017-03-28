@@ -25,6 +25,7 @@ import com.google.common.io.Closer
 import groovy.transform.CompileStatic
 import org.junit.Assume
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 
@@ -34,7 +35,7 @@ import java.util.regex.Pattern
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 import static com.android.build.gradle.tasks.ResourceUsageAnalyzer.REPLACE_DELETED_WITH_EMPTY
 import static java.io.File.separator
 import static org.junit.Assert.assertEquals
@@ -43,6 +44,8 @@ import static org.junit.Assert.assertTrue
 /**
  * Assemble tests for shrink.
  */
+
+@Ignore("Flaky: http://b.android.com/224406")
 @CompileStatic
 class ShrinkResourcesTest {
 

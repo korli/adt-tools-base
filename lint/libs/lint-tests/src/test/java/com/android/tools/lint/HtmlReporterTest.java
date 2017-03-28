@@ -30,7 +30,6 @@ import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Severity;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,8 +49,8 @@ public class HtmlReporterTest extends AbstractCheckTest {
             LintCliClient client = new LintCliClient() {
                 @Override
                 IssueRegistry getRegistry() {
-                    if (mRegistry == null) {
-                        mRegistry = new IssueRegistry()  {
+                    if (registry == null) {
+                        registry = new IssueRegistry()  {
                             @NonNull
                             @Override
                             public List<Issue> getIssues() {
@@ -63,11 +62,11 @@ public class HtmlReporterTest extends AbstractCheckTest {
                             }
                         };
                     }
-                    return mRegistry;
+                    return registry;
                 }
             };
 
-            HtmlReporter reporter = new HtmlReporter(client, reportFile);
+            HtmlReporter reporter = new HtmlReporter(client, reportFile, new LintCliFlags());
             File res = new File(projectDir, "res");
             File layout = new File(res, "layout");
             File main = new File(layout, "main.xml");
@@ -96,11 +95,11 @@ public class HtmlReporterTest extends AbstractCheckTest {
             warning2.location = Location.create(warning2.file,
                     new DefaultPosition(11, 8, 377), new DefaultPosition(11, 27, 396));
 
-            List<Warning> warnings = new ArrayList<Warning>();
+            List<Warning> warnings = new ArrayList<>();
             warnings.add(warning1);
             warnings.add(warning2);
 
-            reporter.write(0, 2, warnings);
+            reporter.write(new Reporter.Stats(0, 2), warnings);
 
             String report = Files.toString(reportFile, Charsets.UTF_8);
 
@@ -318,7 +317,7 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "<h1>Lint Report</h1>\n"
                     + "<div class=\"titleSeparator\"></div>\n"
                     + "Check performed at $DATE.<br/>\n"
-                    + "0 errors and 2 warnings found:<br/><br/>\n"
+                    + "2 warnings found:<br/><br/>\n"
                     + "<table class=\"overview\">\n"
                     + "<tr><td></td><td class=\"categoryColumn\"><a href=\"#Correctness\">Correctness</a>\n"
                     + "</td></tr>\n"
@@ -394,12 +393,15 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "<br/>\n"
                     + "1. With a <code>@SuppressLint</code> annotation in the Java code<br/>\n"
                     + "2. With a <code>tools:ignore</code> attribute in the XML file<br/>\n"
-                    + "3. With ignore flags specified in the <code>build.gradle</code> file, as explained below<br/>\n"
-                    + "4. With a <code>lint.xml</code> configuration file in the project<br/>\n"
-                    + "5. With a <code>lint.xml</code> configuration file passed to lint via the --config flag<br/>\n"
-                    + "6. With the --ignore flag passed to lint.<br/>\n"
+                    + "3. With a //noinspection comment in the source code<br/>\n"
+                    + "4. With ignore flags specified in the <code>build.gradle</code> file, as explained below<br/>\n"
+                    + "5. With a <code>lint.xml</code> configuration file in the project<br/>\n"
+                    + "6. With a <code>lint.xml</code> configuration file passed to lint via the --config flag<br/>\n"
+                    + "7. With the --ignore flag passed to lint.<br/>\n"
                     + "<br/>\n"
                     + "To suppress a lint warning with an annotation, add a <code>@SuppressLint(\"id\")</code> annotation on the class, method or variable declaration closest to the warning instance you want to disable. The id can be one or more issue id's, such as <code>\"UnusedResources\"</code> or <code>{\"UnusedResources\",\"UnusedIds\"}</code>, or it can be <code>\"all\"</code> to suppress all lint warnings in the given scope.<br/>\n"
+                    + "<br/>\n"
+                    + "To suppress a lint warning with a comment, add a <code>//noinspection id</code> comment on the line before the statement with the error.<br/>\n"
                     + "<br/>\n"
                     + "To suppress a lint warning in an XML file, add a <code>tools:ignore=\"id\"</code> attribute on the element containing the error, or one of its surrounding elements. You also need to define the namespace for the tools prefix on the root element in your document, next to the <code>xmlns:android</code> declaration:<br/>\n"
                     + "<code>xmlns:tools=\"http://schemas.android.com/tools\"</code><br/>\n"
@@ -414,7 +416,7 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "<br/>\n"
                     + "Here we specify a comma separated list of issue id's after the disable command. You can also use <code>warning</code> or <code>error</code> instead of <code>disable</code> to change the severity of issues.<br/>\n"
                     + "<br/>\n"
-                    + "To suppress lint warnings with a configuration XML file, create a file named <code>lint.xml</code> and place it at the root directory of the project in which it applies.<br/>\n"
+                    + "To suppress lint warnings with a configuration XML file, create a file named <code>lint.xml</code> and place it at the root directory of the module in which it applies.<br/>\n"
                     + "<br/>\n"
                     + "The format of the <code>lint.xml</code> file is something like the following:<br/>\n"
                     + "<br/>\n"

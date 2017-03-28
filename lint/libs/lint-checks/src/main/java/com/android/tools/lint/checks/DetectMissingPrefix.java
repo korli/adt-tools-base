@@ -33,6 +33,8 @@ import static com.android.SdkConstants.TAG_LAYOUT;
 import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.SdkConstants.VIEW_FRAGMENT;
 import static com.android.SdkConstants.VIEW_TAG;
+import static com.android.SdkConstants.XMLNS;
+import static com.android.SdkConstants.XMLNS_PREFIX;
 import static com.android.resources.ResourceFolderType.ANIM;
 import static com.android.resources.ResourceFolderType.ANIMATOR;
 import static com.android.resources.ResourceFolderType.COLOR;
@@ -55,15 +57,12 @@ import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
-
+import java.util.Collection;
+import java.util.List;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
-
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 
 /**
  * Detects layout attributes on builtin Android widgets that do not specify
@@ -74,7 +73,7 @@ public class DetectMissingPrefix extends LayoutDetector {
     /** Attributes missing the android: prefix */
     @SuppressWarnings("unchecked")
     public static final Issue MISSING_NAMESPACE = Issue.create(
-            "MissingPrefix", //$NON-NLS-1$
+            "MissingPrefix",
             "Missing Android XML namespace",
             "Most Android views have attributes in the Android namespace. When referencing " +
             "these attributes you *must* include the namespace prefix, or your attribute will " +
@@ -90,15 +89,6 @@ public class DetectMissingPrefix extends LayoutDetector {
                     DetectMissingPrefix.class,
                     Scope.MANIFEST_AND_RESOURCE_SCOPE,
                     Scope.MANIFEST_SCOPE, Scope.RESOURCE_FILE_SCOPE));
-
-    private static final Set<String> NO_PREFIX_ATTRS = new HashSet<>();
-    static {
-        NO_PREFIX_ATTRS.add(ATTR_CLASS);
-        NO_PREFIX_ATTRS.add(ATTR_STYLE);
-        NO_PREFIX_ATTRS.add(ATTR_LAYOUT);
-        NO_PREFIX_ATTRS.add(ATTR_PACKAGE);
-        NO_PREFIX_ATTRS.add(ATTR_CORE_APP);
-    }
 
     /** Constructs a new {@link DetectMissingPrefix} */
     public DetectMissingPrefix() {
@@ -120,6 +110,19 @@ public class DetectMissingPrefix extends LayoutDetector {
         return ALL;
     }
 
+    private static boolean isNoPrefixAttribute(@NonNull String attribute) {
+        switch (attribute) {
+            case ATTR_CLASS:
+            case ATTR_STYLE:
+            case ATTR_LAYOUT:
+            case ATTR_PACKAGE:
+            case ATTR_CORE_APP:
+                return true;
+            default:
+                return false;
+        }
+    }
+
     @Override
     public void visitAttribute(@NonNull XmlContext context, @NonNull Attr attribute) {
         String uri = attribute.getNamespaceURI();
@@ -128,7 +131,7 @@ public class DetectMissingPrefix extends LayoutDetector {
             if (name == null) {
                 return;
             }
-            if (NO_PREFIX_ATTRS.contains(name)) {
+            if (isNoPrefixAttribute(name)) {
                 return;
             }
 
@@ -152,6 +155,12 @@ public class DetectMissingPrefix extends LayoutDetector {
                 // when lint is run in the IDE (with a more fault-tolerant XML parser)
                 // this can happen, and we don't want to flag erroneous/misleading lint
                 // errors in this case.
+                return;
+            }
+
+            String elementNamespace = element.getNamespaceURI();
+            if (elementNamespace != null && !elementNamespace.isEmpty()) {
+                // For example, <aapt:attr name="android:drawable">
                 return;
             }
 
@@ -204,10 +213,32 @@ public class DetectMissingPrefix extends LayoutDetector {
                 }
             }
 
+            // A namespace declaration?
+            String prefix = attribute.getPrefix();
+            if (XMLNS.equals(prefix)) {
+                String name = attribute.getNodeName();
+                // See if it's already reported on the root
+                Element root = attribute.getOwnerDocument().getDocumentElement();
+                NamedNodeMap attributes = root.getAttributes();
+                for (int i = 0, n = attributes.getLength(); i < n; i++) {
+                    Node item = attributes.item(i);
+                    if (name.equals(item.getNodeName())
+                            && attribute.getValue().equals(item.getNodeValue())) {
+                        context.report(NamespaceDetector.UNUSED, attribute,
+                                context.getLocation(attribute),
+                                String.format("Unused namespace declaration %1$s; already "
+                                                + "declared on the root element",
+                                        name));
+                    }
+                }
+
+                return;
+            }
+
             context.report(MISSING_NAMESPACE, attribute,
                     context.getLocation(attribute),
                     String.format("Unexpected namespace prefix \"%1$s\" found for tag `%2$s`",
-                            attribute.getPrefix(), attribute.getOwnerElement().getTagName()));
+                            prefix, attribute.getOwnerElement().getTagName()));
         }
     }
 

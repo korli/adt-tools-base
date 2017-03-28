@@ -23,6 +23,7 @@ import com.google.common.collect.Lists;
 import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
 import com.intellij.psi.PsiExpression;
 import com.intellij.psi.PsiField;
@@ -33,13 +34,11 @@ import com.intellij.psi.PsiReference;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiTypeElement;
 import com.intellij.psi.javadoc.PsiDocComment;
-
+import java.util.Collection;
+import java.util.List;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.AnnotationBinding;
 import org.eclipse.jdt.internal.compiler.lookup.FieldBinding;
-
-import java.util.Collection;
-import java.util.List;
 
 class EcjPsiBinaryField extends EcjPsiBinaryElement implements PsiField, PsiModifierList {
 
@@ -69,6 +68,15 @@ class EcjPsiBinaryField extends EcjPsiBinaryElement implements PsiField, PsiModi
     @Override
     public void acceptChildren(@NonNull PsiElementVisitor visitor) {
         // Not exposing field initializers etc for binary elements
+    }
+
+    @Override
+    public PsiElement getParent() {
+        if (mBinding.declaringClass != null) {
+            return mManager.findClass(mBinding.declaringClass);
+        }
+
+        return null;
     }
 
     @NonNull

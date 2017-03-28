@@ -16,21 +16,22 @@
 
 package com.android.build.gradle.internal.dsl;
 
-import com.android.builder.core.BuilderConstants;
+import com.android.testutils.internal.CopyOfTester;
+import org.junit.Test;
 
-import junit.framework.TestCase;
+public class SigningConfigTest {
 
-public class SigningConfigTest extends TestCase {
-
+    @Test
     public void testInitWith() throws Exception {
-        SigningConfig debug = new SigningConfig(BuilderConstants.DEBUG);
-        SigningConfig foo = new SigningConfig("foo").initWith(debug);
+        CopyOfTester.assertAllGettersCalled(
+                SigningConfig.class,
+                new SigningConfig("original"),
+                original -> {
+                    // Manually call getters that are not called by _initWith:
+                    original.getName();
+                    original.isSigningReady();
 
-        assertEquals(debug.getStoreFile(), foo.getStoreFile());
-        assertEquals(debug.getStorePassword(), foo.getStorePassword());
-        assertEquals(debug.getKeyAlias(), foo.getKeyAlias());
-        assertEquals(debug.getKeyPassword(), foo.getKeyPassword());
-        assertEquals(debug.isV1SigningEnabled(), foo.isV1SigningEnabled());
-        assertEquals(debug.isV2SigningEnabled(), foo.isV2SigningEnabled());
+                    new SigningConfig("copy").initWith(original);
+                });
     }
 }

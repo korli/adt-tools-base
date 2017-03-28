@@ -69,7 +69,7 @@ public class NoChangesVerifierTransformTest {
         // make sure the verifier is not set by the constructor.
         ArgumentCaptor<InstantRunVerifierStatus> verifierStatusCaptor =
                 ArgumentCaptor.forClass(InstantRunVerifierStatus.class);
-        Mockito.verify(buildContext, times(1)).setVerifierResult(verifierStatusCaptor.capture());
+        Mockito.verify(buildContext, times(1)).setVerifierStatus(verifierStatusCaptor.capture());
 
         assertThat(verifierStatusCaptor.getValue()).isEqualTo(
                 InstantRunVerifierStatus.DEPENDENCY_CHANGED);
@@ -111,7 +111,7 @@ public class NoChangesVerifierTransformTest {
         // make sure the verifier is not set by the constructor.
         ArgumentCaptor<InstantRunVerifierStatus> verifierStatusCaptor =
                 ArgumentCaptor.forClass(InstantRunVerifierStatus.class);
-        Mockito.verify(buildContext, times(1)).setVerifierResult(verifierStatusCaptor.capture());
+        Mockito.verify(buildContext, times(1)).setVerifierStatus(verifierStatusCaptor.capture());
 
         assertThat(verifierStatusCaptor.getValue()).isEqualTo(
                 InstantRunVerifierStatus.DEPENDENCY_CHANGED);

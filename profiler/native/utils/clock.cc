@@ -19,10 +19,10 @@
 
 namespace profiler {
 
-uint64_t SteadyClock::GetCurrentTime() const {
+int64_t SteadyClock::GetCurrentTime() const {
   timespec time;
   clock_gettime(CLOCK_MONOTONIC, &time);
   return 1e9 * time.tv_sec + time.tv_nsec;
 }
 
-} // namespace profiler
+}  // namespace profiler

@@ -16,22 +16,23 @@
 
 package com.android.build.gradle.integration.application
 
+import com.android.build.gradle.integration.common.fixture.GradleBuildResult
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp
+import com.android.build.gradle.integration.common.truth.TruthHelper
+import com.android.build.gradle.integration.common.utils.AssumeUtil
+import com.android.build.gradle.integration.common.utils.TestFileUtils
+import com.android.builder.core.AndroidBuilder
 import com.android.builder.model.AndroidProject
+import com.android.builder.model.SyncIssue
 import com.google.common.collect.ImmutableList
-import com.google.common.collect.Sets
 import groovy.transform.CompileStatic
-import org.junit.Assume
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
-import java.util.regex.Matcher
-import java.util.regex.Pattern
+import static com.google.common.truth.Truth.assertThat
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat
-import static com.google.common.truth.Truth.assert_
 /**
  * Tests to ensure that changing the build tools version in the build.gradle will trigger
  * re-execution of some tasks even if no source file change was detected.
@@ -39,30 +40,25 @@ import static com.google.common.truth.Truth.assert_
 @CompileStatic
 class BuildToolsTest {
 
-    private static final Pattern UP_TO_DATE_PATTERN = ~/:(\S+)\s+UP-TO-DATE/
-
-    private static final Pattern INPUT_CHANGED_PATTERN =
-            ~/Value of input property '.*' has changed for task ':(\S+)'/
-
     private static final String[] COMMON_TASKS = [
-            "compileDebugAidl", "compileDebugRenderscript",
-            "mergeDebugResources", "processDebugResources",
-            "compileReleaseAidl", "compileReleaseRenderscript",
-            "mergeReleaseResources", "processReleaseResources"
+            ":compileDebugAidl", ":compileDebugRenderscript",
+            ":mergeDebugResources", ":processDebugResources",
+            ":compileReleaseAidl", ":compileReleaseRenderscript",
+            ":mergeReleaseResources", ":processReleaseResources"
     ]
 
     private static final List<String> JAVAC_TASKS = ImmutableList.builder().add(COMMON_TASKS)
-            .add("transformClassesWithDexForDebug")
-            .add("transformClassesWithDexForRelease")
+            .add(":transformClassesWithDexForDebug")
+            .add(":transformClassesWithDexForRelease")
             .build()
 
     private static final List<String> JACK_TASKS = ImmutableList.builder().add(COMMON_TASKS)
-            .add("transformClassesAndResourcesWithPreDexJackRuntimeLibrariesForDebug")
-            .add("transformClassesAndResourcesWithPreDexJackPackagedLibrariesForDebug")
-            .add("transformJackWithJackForRelease")
-            .add("transformClassesAndResourcesWithPreDexJackRuntimeLibrariesForRelease")
-            .add("transformClassesAndResourcesWithPreDexJackPackagedLibrariesForRelease")
-            .add("transformJackWithJackForDebug")
+            .add(":transformClassesWithPreJackRuntimeLibrariesForDebug")
+            .add(":transformClassesWithPreJackPackagedLibrariesForDebug")
+            .add(":transformJackWithJackForRelease")
+            .add(":transformClassesWithPreJackRuntimeLibrariesForRelease")
+            .add(":transformClassesWithPreJackPackagedLibrariesForRelease")
+            .add(":transformJackWithJackForDebug")
             .build()
 
     @Rule
@@ -85,54 +81,61 @@ android {
     @Test
     public void nullBuild() {
         project.execute("assemble")
-        project.execute("assemble")
+        GradleBuildResult result = project.executor().run("assemble")
 
-        Set<String> skippedTasks = getTasksMatching(UP_TO_DATE_PATTERN, project.getStdout())
-        assert_().withFailureMessage("Expecting tasks to be UP-TO-DATE").that(skippedTasks)
+        assertThat(result.getUpToDateTasks())
                 .containsAllIn(GradleTestProject.USE_JACK ? JACK_TASKS : JAVAC_TASKS)
     }
 
     @Test
     public void invalidateBuildTools() {
-        // Jack is tied to a build tools version currently, skip this test when testing Jack.
-        Assume.assumeFalse(GradleTestProject.USE_JACK);
-
-        project.execute("assemble")
-
-        String oldBuildToolsVersion = "22.0.1"
-        // Sanity check:
-        assertThat(oldBuildToolsVersion).isNotEqualTo(GradleTestProject.DEFAULT_BUILD_TOOL_VERSION)
+        // We need at least 2 valid versions of the build tools for this test.
+        AssumeUtil.assumeBuildToolsGreaterThan(AndroidBuilder.MIN_BUILD_TOOLS_REV)
 
         project.getBuildFile() << """
 apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion $GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
-    buildToolsVersion '$oldBuildToolsVersion'
+    buildToolsVersion '$GradleTestProject.DEFAULT_BUILD_TOOL_VERSION'
 }
 """
 
         project.execute("assemble")
-        Set<String> affectedTasks =
-                getTasksMatching(INPUT_CHANGED_PATTERN, project.getStdout())
-        assert_().withFailureMessage("Expecting tasks to be invalidated").that(affectedTasks)
+
+        String otherBuildToolsVersion = AndroidBuilder.MIN_BUILD_TOOLS_REV;
+        // Sanity check:
+        assertThat(otherBuildToolsVersion).isNotEqualTo(GradleTestProject.DEFAULT_BUILD_TOOL_VERSION)
+
+        project.getBuildFile() << """
+android {
+    compileSdkVersion $GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
+    buildToolsVersion '$otherBuildToolsVersion'
+}
+"""
+
+        GradleBuildResult result = project.executor().run("assemble");
+
+        assertThat(result.getInputChangedTasks())
                 .containsAllIn(GradleTestProject.USE_JACK ? JACK_TASKS : JAVAC_TASKS)
     }
 
     @Test
     void buildToolsInModel() {
-        AndroidProject model = project.model().getSingle()
+        AndroidProject model = project.model().getSingle().getOnlyModel()
         assertThat(model.getBuildToolsVersion())
                 .named("Build Tools Version")
                 .isEqualTo(GradleTestProject.DEFAULT_BUILD_TOOL_VERSION)
     }
 
-    private static Set<String> getTasksMatching(Pattern pattern, String output) {
-        Set<String> result = Sets.newHashSet()
-        Matcher matcher = (output =~ pattern)
-        while (matcher.find()) {
-            result.add(matcher.group(1))
-        }
-        result
+    @Test
+    void buildToolsSyncIssue() {
+        TestFileUtils.searchAndReplace(
+                project.getBuildFile(),
+                "buildToolsVersion \"" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "\"",
+                "buildToolsVersion '24.0.3'");
+        AndroidProject model = project.model().ignoreSyncIssues().getSingle().getOnlyModel();
+        TruthHelper.assertThat(model)
+                .hasIssue(SyncIssue.SEVERITY_ERROR, SyncIssue.TYPE_BUILD_TOOLS_TOO_LOW);
     }
 }

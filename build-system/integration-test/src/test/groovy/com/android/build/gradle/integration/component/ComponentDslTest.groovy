@@ -51,7 +51,7 @@ model {
         compileSdkVersion $GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
         buildToolsVersion "$GradleTestProject.DEFAULT_BUILD_TOOL_VERSION"
         defaultConfig {
-            minSdkVersion.apiLevel 7
+            minSdkVersion.apiLevel $GradleTestProject.SUPPORT_LIB_MIN_SDK
         }
         ndk {
             moduleName "hello-jni"
@@ -83,14 +83,14 @@ model {
 }
 
 dependencies {
-    compile 'com.android.support:appcompat-v7:22.2.0'
+    compile 'com.android.support:appcompat-v7:$GradleTestProject.SUPPORT_LIB_VERSION'
 }
 """
     }
 
     @Test
     public void assemble() {
-        AndroidProject model = project.executeAndReturnModel("assemble");
+        AndroidProject model = project.executeAndReturnModel("assemble").getOnlyModel();
         assertThat(model).isNotNull();
         assertThat(model.getName()).isEqualTo(project.name)
         assertThat(model.getBuildTypes()).hasSize(2)

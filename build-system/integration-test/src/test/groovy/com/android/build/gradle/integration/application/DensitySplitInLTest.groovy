@@ -21,7 +21,6 @@ import com.android.annotations.Nullable
 import com.android.build.OutputFile
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.fixture.TemporaryProjectModification
-import com.android.build.gradle.integration.common.utils.AssumeUtil
 import com.android.build.gradle.integration.common.utils.ModelHelper
 import com.android.builder.model.AndroidArtifact
 import com.android.builder.model.AndroidArtifactOutput
@@ -40,7 +39,6 @@ import static org.junit.Assert.assertEquals
 import static org.junit.Assert.assertNotNull
 import static org.junit.Assert.assertTrue
 import static org.junit.Assert.fail
-
 /**
  * Assemble tests for class densitySplitInL
  .
@@ -56,8 +54,12 @@ class DensitySplitInLTest {
 
     @BeforeClass
     static void setUp() {
-        AssumeUtil.assumeBuildToolsAtLeast(21)
-        model = project.executeAndReturnModel("clean", "assembleDebug")
+        project.executor()
+                // Make sure ValidateSigningTask is called to create the debug keystore.
+                .withLocalAndroidSdkHome()
+                .run("clean", "assembleDebug")
+
+        model = project.model().getSingle().getOnlyModel()
     }
 
     @AfterClass
@@ -101,7 +103,7 @@ class DensitySplitInLTest {
         TemporaryProjectModification.doTest(project) {
             it.replaceInFile("build.gradle", "exclude \"ldpi\", \"tvdpi\", \"xxxhdpi\"",
                     "exclude \"ldpi\", \"tvdpi\"")
-            AndroidProject incrementalModel = project.executeAndReturnModel("assembleDebug")
+            AndroidProject incrementalModel = project.executeAndReturnModel("assembleDebug").getOnlyModel()
 
             List<? extends OutputFile> outputs = getOutputs(incrementalModel);
             assertThat(outputs).hasSize(6);
@@ -143,7 +145,7 @@ class DensitySplitInLTest {
         TemporaryProjectModification.doTest(project) {
             it.replaceInFile("build.gradle", "exclude \"ldpi\", \"tvdpi\", \"xxxhdpi\"",
                     "exclude \"ldpi\", \"tvdpi\", \"xxxhdpi\", \"xxhdpi\"")
-            AndroidProject incrementalModel = project.executeAndReturnModel("assembleDebug")
+            AndroidProject incrementalModel = project.executeAndReturnModel("assembleDebug").getOnlyModel()
 
             List<? extends OutputFile> outputs = getOutputs(incrementalModel);
             assertThat(outputs).hasSize(4);

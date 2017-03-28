@@ -16,15 +16,19 @@
 
 package com.android.tools.lint.detector.api;
 
+import static com.android.tools.lint.detector.api.CharSequences.indexOf;
+import static com.android.tools.lint.detector.api.CharSequences.lastIndexOf;
+import static com.android.tools.lint.detector.api.CharSequences.startsWith;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.blame.SourcePosition;
 import com.android.ide.common.res2.ResourceFile;
 import com.android.ide.common.res2.ResourceItem;
 import com.android.tools.lint.client.api.JavaParser;
+import com.android.tools.lint.client.api.LintClient;
 import com.google.common.annotations.Beta;
 import com.intellij.psi.PsiElement;
-
 import java.io.File;
 
 /**
@@ -35,27 +39,57 @@ import java.io.File;
  */
 @Beta
 public class Location {
-    private static final String SUPER_KEYWORD = "super"; //$NON-NLS-1$
+    private static final String SUPER_KEYWORD = "super";
 
-    private final File mFile;
-    private final Position mStart;
-    private final Position mEnd;
-    private String mMessage;
-    private Location mSecondary;
-    private Object mClientData;
+    private final File file;
+    private final Position start;
+    private final Position end;
+    private String message;
+    private Location secondary;
+    private Object clientData;
+    private boolean visible = true;
+    private boolean selfExplanatory = true;
 
     /**
-     * Special marker location which means location not available, or not applicable, or filtered out, etc.
-     * For example, the infrastructure may return {@link #NONE} if you ask {@link JavaParser#getLocation(JavaContext, PsiElement)}
-     * for an element which is not in the current file during an incremental lint run in a single file.
+     * Special marker location which means location not available, or not applicable, or filtered
+     * out, etc. For example, the infrastructure may return {@link #NONE} if you ask {@link
+     * JavaParser#getLocation(JavaContext, PsiElement)} for an element which is not in the current
+     * file during an incremental lint run in a single file.
      */
-    public static final Location NONE = new Location(new File("NONE"), null, null);
+    public static final Location NONE = new Location(new File("NONE"), null, null) {
+        @NonNull
+        @Override
+        public Location setVisible(boolean visible) {
+            return this;
+        }
+
+        @Override
+        public Location setMessage(@NonNull String message, boolean selfExplanatory) {
+            return this;
+        }
+
+        @Override
+        public Location setClientData(@Nullable Object clientData) {
+            return this;
+        }
+
+        @NonNull
+        @Override
+        public Location setSelfExplanatory(boolean selfExplanatory) {
+            return this;
+        }
+
+        @Override
+        public Location setSecondary(@Nullable Location secondary) {
+            return this;
+        }
+    };
 
     /**
      * (Private constructor, use one of the factory methods
      * {@link Location#create(File)},
      * {@link Location#create(File, Position, Position)}, or
-     * {@link Location#create(File, String, int, int)}.
+     * {@link Location#create(File, CharSequence, int, int)}.
      * <p>
      * Constructs a new location range for the given file, from start to end. If
      * the length of the range is not known, end may be null.
@@ -68,9 +102,46 @@ public class Location {
      */
     protected Location(@NonNull File file, @Nullable Position start, @Nullable Position end) {
         super();
-        mFile = file;
-        mStart = start;
-        mEnd = end;
+        this.file = file;
+        this.start = start;
+        this.end = end;
+    }
+
+    /**
+     * Whether this location should be visible on its own. "Visible" here refers to whether
+     * the location is shown in the IDE if the user navigates to the given location.
+     * <p>
+     * For visible locations, especially those that appear far away from the primary
+     * location, it's important that the error message make sense on its own.
+     * For example, for duplicate declarations, usually the primary error message says
+     * something like "foo has already been defined", and the secondary error message
+     * says "previous definition here". In something like a text or HTML report, this
+     * makes sense -- you see the "foo has already been defined" error message, and
+     * it also reports the locations of the previous error message. But if the secondary
+     * error message is visible, the user may encounter that error first, and if that
+     * error message just says "previous definition here", that doesn't make a lot of
+     * sense.
+     * <p>
+     * This attribute is ignored for the primary location for an issue (e.g. the location
+     * passed to {@link LintClient#report(Context, Issue, Severity, Location, String, TextFormat)},
+     * and it applies for all the secondary locations linked from that location.
+     *
+     * @return whether this secondary location should be shown on its own in the editor.
+     */
+    public boolean isVisible() {
+        return visible;
+    }
+
+    /**
+     * Sets whether this location should be visible on its own. See {@link #isVisible()}.
+     *
+     * @param visible whether this location should be visible
+     * @return this, for constructor chaining
+     */
+    @NonNull
+    public Location setVisible(boolean visible) {
+        this.visible = visible;
+        return this;
     }
 
     /**
@@ -85,7 +156,7 @@ public class Location {
      */
     @NonNull
     public File getFile() {
-        return mFile;
+        return file;
     }
 
     /**
@@ -95,7 +166,7 @@ public class Location {
      */
     @Nullable
     public Position getStart() {
-        return mStart;
+        return start;
     }
 
     /**
@@ -105,7 +176,7 @@ public class Location {
      */
     @Nullable
     public Position getEnd() {
-        return mEnd;
+        return end;
     }
 
     /**
@@ -116,16 +187,63 @@ public class Location {
      */
     @Nullable
     public Location getSecondary() {
-        return mSecondary;
+        return secondary;
     }
 
     /**
      * Sets a secondary location for this location.
      *
      * @param secondary a secondary location associated with this location
+     * @return this, for constructor chaining
      */
-    public void setSecondary(@Nullable Location secondary) {
-        mSecondary = secondary;
+    public Location setSecondary(@Nullable Location secondary) {
+        this.secondary = secondary;
+        return this;
+    }
+
+    /**
+     * Sets a secondary location with the given message and returns the current location
+     * updated with the given secondary location.
+     *
+     * @param secondary a secondary location associated with this location
+     * @param message a message to be set on the secondary location
+     * @return current location updated with the secondary location
+     */
+    @NonNull
+    public Location withSecondary(@NonNull Location secondary, @NonNull String message) {
+        return withSecondary(secondary, message, false);
+    }
+
+    /**
+     * Sets a secondary location with the given message and returns the current location
+     * updated with the given secondary location.
+     *
+     * @param secondary       a secondary location associated with this location
+     * @param message         a message to be set on the secondary location
+     * @param selfExplanatory if true, the message is itself self-explanatory; see
+     *                        {@link #isSelfExplanatory()}}
+     * @return current location updated with the secondary location
+     */
+    @NonNull
+    public Location withSecondary(@NonNull Location secondary, @NonNull String message,
+                                  boolean selfExplanatory) {
+        secondary.setMessage(message, selfExplanatory);
+        setSecondary(secondary);
+        return this;
+    }
+    /**
+     * Sets a custom message for this location. This is typically used for
+     * secondary locations, to describe the significance of this alternate
+     * location. For example, for a duplicate id warning, the primary location
+     * might say "This is a duplicate id", pointing to the second occurrence of
+     * id declaration, and then the secondary location could point to the
+     * original declaration with the custom message "Originally defined here".
+     *
+     * @param message the message to apply to this location
+     * @return this, for constructor chaining
+     */
+    public Location setMessage(@NonNull String message) {
+        return setMessage(message, false);
     }
 
     /**
@@ -136,10 +254,42 @@ public class Location {
      * id declaration, and then the secondary location could point to the
      * original declaration with the custom message "Originally defined here".
      *
-     * @param message the message to apply to this location
+     * @param message         the message to apply to this location
+     * @param selfExplanatory if true, the message is itself self-explanatory;
+     *                        if false, it's just describing this particular
+     *                        location and the primary error message is
+     *                        necessary. Controls whether (for example) the
+     *                        IDE will include the original error message along
+     *                        with this location when showing the message.
+     * @return this, for constructor chaining
      */
-    public void setMessage(@NonNull String message) {
-        mMessage = message;
+    public Location setMessage(@NonNull String message, boolean selfExplanatory) {
+        this.message = message;
+        setSelfExplanatory(selfExplanatory);
+        return this;
+    }
+
+    /**
+     * Whether this message is self-explanatory. If false, it's just describing this particular
+     * location and the primary error message is necessary. Controls whether (for example) the
+     * IDE will include the original error message along with this location when showing the
+     * message.
+     *
+     * @@return whether this message is self explanatory.
+     */
+    public boolean isSelfExplanatory() {
+        return selfExplanatory;
+    }
+
+    /**
+     * Sets whether this message is self-explanatory. See {@link #isSelfExplanatory()}.
+     * @param selfExplanatory whether this message is self explanatory.
+     * @return this, for constructor chaining
+     */
+    @NonNull
+    public Location setSelfExplanatory(boolean selfExplanatory) {
+        this.selfExplanatory = selfExplanatory;
+        return this;
     }
 
     /**
@@ -155,7 +305,7 @@ public class Location {
      */
     @Nullable
     public String getMessage() {
-        return mMessage;
+        return message;
     }
 
     /**
@@ -164,9 +314,11 @@ public class Location {
      * temporary state associated with the location.
      *
      * @param clientData the data to store with this location
+     * @return this, for constructor chaining
      */
-    public void setClientData(@Nullable Object clientData) {
-        mClientData = clientData;
+    public Location setClientData(@Nullable Object clientData) {
+        this.clientData = clientData;
+        return this;
     }
 
     /**
@@ -178,13 +330,13 @@ public class Location {
      */
     @Nullable
     public Object getClientData() {
-        return mClientData;
+        return clientData;
     }
 
     @Override
     public String toString() {
-        return "Location [file=" + mFile + ", start=" + mStart + ", end=" + mEnd + ", message="
-                + mMessage + ']';
+        return "Location [file=" + file + ", start=" + start + ", end=" + end + ", message="
+                + message + ']';
     }
 
     /**
@@ -253,7 +405,7 @@ public class Location {
     @NonNull
     public static Location create(
             @NonNull File file,
-            @Nullable String contents,
+            @Nullable CharSequence contents,
             int startOffset,
             int endOffset) {
         if (startOffset < 0 || endOffset < startOffset) {
@@ -327,13 +479,13 @@ public class Location {
      * @return a new location
      */
     @NonNull
-    public static Location create(@NonNull File file, @NonNull String contents, int line,
+    public static Location create(@NonNull File file, @NonNull CharSequence contents, int line,
             @Nullable String patternStart, @Nullable String patternEnd,
             @Nullable SearchHints hints) {
         int currentLine = 0;
         int offset = 0;
         while (currentLine < line) {
-            offset = contents.indexOf('\n', offset);
+            offset = indexOf(contents, '\n', offset);
             if (offset == -1) {
                 return create(file);
             }
@@ -345,7 +497,7 @@ public class Location {
             if (patternStart != null) {
                 SearchDirection direction = SearchDirection.NEAREST;
                 if (hints != null) {
-                    direction = hints.mDirection;
+                    direction = hints.direction;
                 }
 
                 int index;
@@ -353,7 +505,7 @@ public class Location {
                     index = findPreviousMatch(contents, offset, patternStart, hints);
                     line = adjustLine(contents, line, offset, index);
                 } else if (direction == SearchDirection.EOL_BACKWARD) {
-                    int lineEnd = contents.indexOf('\n', offset);
+                    int lineEnd = indexOf(contents, '\n', offset);
                     if (lineEnd == -1) {
                         lineEnd = contents.length();
                     }
@@ -367,7 +519,7 @@ public class Location {
                     assert direction == SearchDirection.NEAREST ||
                             direction == SearchDirection.EOL_NEAREST;
 
-                    int lineEnd = contents.indexOf('\n', offset);
+                    int lineEnd = indexOf(contents, '\n', offset);
                     if (lineEnd == -1) {
                         lineEnd = contents.length();
                     }
@@ -407,7 +559,7 @@ public class Location {
                 }
 
                 if (index != -1) {
-                    int lineStart = contents.lastIndexOf('\n', index);
+                    int lineStart = lastIndexOf(contents, '\n', index);
                     if (lineStart == -1) {
                         lineStart = 0;
                     } else {
@@ -415,13 +567,13 @@ public class Location {
                     }
                     int column = index - lineStart;
                     if (patternEnd != null) {
-                        int end = contents.indexOf(patternEnd, offset + patternStart.length());
+                        int end = indexOf(contents, patternEnd, offset + patternStart.length());
                         if (end != -1) {
                             return new Location(file, new DefaultPosition(line, column, index),
                                     new DefaultPosition(line, -1, end + patternEnd.length()));
                         }
                     } else if (hints != null && (hints.isJavaSymbol() || hints.isWholeWord())) {
-                        if (hints.isConstructor() && contents.startsWith(SUPER_KEYWORD, index)) {
+                        if (hints.isConstructor() && startsWith(contents, SUPER_KEYWORD, index)) {
                             patternStart = SUPER_KEYWORD;
                         }
                         return new Location(file, new DefaultPosition(line, column, index),
@@ -440,37 +592,39 @@ public class Location {
         return create(file);
     }
 
-    private static int findPreviousMatch(@NonNull String contents, int offset, String pattern,
+    private static int findPreviousMatch(@NonNull CharSequence contents, int offset, String pattern,
             @Nullable SearchHints hints) {
+        int loopDecrement = Math.max(1, pattern.length());
         while (true) {
-            int index = contents.lastIndexOf(pattern, offset);
+            int index = lastIndexOf(contents, pattern, offset);
             if (index == -1) {
                 return -1;
             } else {
                 if (isMatch(contents, index, pattern, hints)) {
                     return index;
                 } else {
-                    offset = index - pattern.length();
+                    offset = index - loopDecrement;
                 }
             }
         }
     }
 
-    private static int findNextMatch(@NonNull String contents, int offset, String pattern,
+    private static int findNextMatch(@NonNull CharSequence contents, int offset, String pattern,
             @Nullable SearchHints hints) {
         int constructorIndex = -1;
         if (hints != null && hints.isConstructor()) {
             // Special condition: See if the call is referenced as "super" instead.
             assert hints.isWholeWord();
-            int index = contents.indexOf(SUPER_KEYWORD, offset);
+            int index = indexOf(contents, SUPER_KEYWORD, offset);
             if (index != -1 && isMatch(contents, index, SUPER_KEYWORD, hints)) {
                 constructorIndex = index;
             }
         }
 
+        int loopIncrement = Math.max(1, pattern.length());
         while (true) {
-            int index = contents.indexOf(pattern, offset);
-            if (index == -1) {
+            int index = indexOf(contents, pattern, offset);
+            if (index == -1 || index == contents.length()) {
                 return constructorIndex;
             } else {
                 if (isMatch(contents, index, pattern, hints)) {
@@ -479,15 +633,15 @@ public class Location {
                     }
                     return index;
                 } else {
-                    offset = index + pattern.length();
+                    offset = index + loopIncrement;
                 }
             }
         }
     }
 
-    private static boolean isMatch(@NonNull String contents, int offset, String pattern,
+    private static boolean isMatch(@NonNull CharSequence contents, int offset, String pattern,
             @Nullable SearchHints hints) {
-        if (!contents.startsWith(pattern, offset)) {
+        if (!startsWith(contents, pattern, offset)) {
             return false;
         }
 
@@ -535,7 +689,7 @@ public class Location {
         return true;
     }
 
-    private static int adjustLine(String doc, int line, int offset, int newOffset) {
+    private static int adjustLine(CharSequence doc, int line, int offset, int newOffset) {
         if (newOffset == -1) {
             return line;
         }
@@ -547,7 +701,7 @@ public class Location {
         }
     }
 
-    private static int countLines(String doc, int start, int end) {
+    private static int countLines(CharSequence doc, int start, int end) {
         int lines = 0;
         for (int offset = start; offset < end; offset++) {
             char c = doc.charAt(offset);
@@ -615,11 +769,11 @@ public class Location {
 
     /** A default {@link Handle} implementation for simple file offsets */
     public static class DefaultLocationHandle implements Handle {
-        private final File mFile;
-        private final String mContents;
-        private final int mStartOffset;
-        private final int mEndOffset;
-        private Object mClientData;
+        private final File file;
+        private final CharSequence contents;
+        private final int startOffset;
+        private final int endOffset;
+        private Object clientData;
 
         /**
          * Constructs a new {@link DefaultLocationHandle}
@@ -629,43 +783,43 @@ public class Location {
          * @param endOffset the end offset within the file
          */
         public DefaultLocationHandle(@NonNull Context context, int startOffset, int endOffset) {
-            mFile = context.file;
-            mContents = context.getContents();
-            mStartOffset = startOffset;
-            mEndOffset = endOffset;
+            file = context.file;
+            contents = context.getContents();
+            this.startOffset = startOffset;
+            this.endOffset = endOffset;
         }
 
         @Override
         @NonNull
         public Location resolve() {
-            return create(mFile, mContents, mStartOffset, mEndOffset);
+            return create(file, contents, startOffset, endOffset);
         }
 
         @Override
         public void setClientData(@Nullable Object clientData) {
-            mClientData = clientData;
+            this.clientData = clientData;
         }
 
         @Override
         @Nullable
         public Object getClientData() {
-            return mClientData;
+            return clientData;
         }
     }
 
     public static class ResourceItemHandle implements Handle {
-        private final ResourceItem mItem;
+        private final ResourceItem item;
 
         public ResourceItemHandle(@NonNull ResourceItem item) {
-            mItem = item;
+            this.item = item;
         }
         @NonNull
         @Override
         public Location resolve() {
             // TODO: Look up the exact item location more
             // closely
-            ResourceFile source = mItem.getSource();
-            assert source != null : mItem;
+            ResourceFile source = item.getSource();
+            assert source != null : item;
             return create(source.getFile());
         }
 
@@ -715,7 +869,7 @@ public class Location {
 
     /**
      * Extra information pertaining to finding a symbol in a source buffer,
-     * used by {@link Location#create(File, String, int, String, String, SearchHints)}
+     * used by {@link Location#create(File, CharSequence, int, String, String, SearchHints)}
      */
     public static class SearchHints {
         /**
@@ -723,26 +877,26 @@ public class Location {
          * {@code patternStart} is non null)
          */
         @NonNull
-        private final SearchDirection mDirection;
+        private final SearchDirection direction;
 
         /** Whether the matched pattern should be a whole word */
-        private boolean mWholeWord;
+        private boolean wholeWord;
 
         /**
          * Whether the matched pattern should be a Java symbol (so for example,
          * a match inside a comment or string literal should not be used)
          */
-        private boolean mJavaSymbol;
+        private boolean javaSymbol;
 
         /**
          * Whether the matched pattern corresponds to a constructor; if so, look for
          * some other possible source aliases too, such as "super".
          */
-        private boolean mConstructor;
+        private boolean constructor;
 
         private SearchHints(@NonNull SearchDirection direction) {
             super();
-            mDirection = direction;
+            this.direction = direction;
         }
 
         /**
@@ -763,14 +917,14 @@ public class Location {
          */
         @NonNull
         public SearchHints matchWholeWord() {
-            mWholeWord = true;
+            wholeWord = true;
 
             return this;
         }
 
         /** @return true if the pattern match should be for whole words only */
         public boolean isWholeWord() {
-            return mWholeWord;
+            return wholeWord;
         }
 
         /**
@@ -780,15 +934,15 @@ public class Location {
          */
         @NonNull
         public SearchHints matchJavaSymbol() {
-            mJavaSymbol = true;
-            mWholeWord = true;
+            javaSymbol = true;
+            wholeWord = true;
 
             return this;
         }
 
         /** @return true if the pattern match should be for Java symbols only */
         public boolean isJavaSymbol() {
-            return mJavaSymbol;
+            return javaSymbol;
         }
 
         /**
@@ -799,16 +953,16 @@ public class Location {
          */
         @NonNull
         public SearchHints matchConstructor() {
-            mConstructor = true;
-            mWholeWord = true;
-            mJavaSymbol = true;
+            constructor = true;
+            wholeWord = true;
+            javaSymbol = true;
 
             return this;
         }
 
         /** @return true if the pattern match should be for a constructor */
         public boolean isConstructor() {
-            return mConstructor;
+            return constructor;
         }
     }
 }

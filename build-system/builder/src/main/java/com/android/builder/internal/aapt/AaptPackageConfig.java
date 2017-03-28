@@ -19,6 +19,7 @@ package com.android.builder.internal.aapt;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.core.VariantType;
+import com.android.builder.dependency.level2.AndroidDependency;
 import com.android.builder.model.AaptOptions;
 import com.android.builder.model.AndroidLibrary;
 import com.android.sdklib.BuildToolInfo;
@@ -73,7 +74,7 @@ public class AaptPackageConfig implements Cloneable {
      * All libraries added (see {@link Builder#setLibraries(List)}).
      */
     @NonNull
-    private ImmutableList<AndroidLibrary> mLibraries;
+    private ImmutableList<AndroidDependency> mLibraries;
 
     /**
      * Symbol output directory (see {@link Builder#setSymbolOutputDir(File)}).
@@ -162,12 +163,25 @@ public class AaptPackageConfig implements Cloneable {
     private VariantType mVariantType;
 
     /**
+     * Base feature APK file.
+     */
+    @Nullable
+    private File mBaseFeature;
+
+    /**
+     * Previously compiled feature APK files.
+     */
+    @NonNull
+    private ImmutableSet<File> mPreviousFeatures;
+
+    /**
      * Creates a new instance of the the package configuration with default values.
      */
     private AaptPackageConfig() {
         mLibraries = ImmutableList.of();
         mVerbose = false;
         mResourceConfigs = ImmutableSet.of();
+        mPreviousFeatures = ImmutableSet.of();
     }
 
     @Override
@@ -230,7 +244,7 @@ public class AaptPackageConfig implements Cloneable {
      * @return all libraries; returns an empty list if no libraries were added
      */
     @NonNull
-    public List<? extends AndroidLibrary> getLibraries() {
+    public List<AndroidDependency> getLibraries() {
         return Collections.unmodifiableList(mLibraries);
     }
 
@@ -386,6 +400,26 @@ public class AaptPackageConfig implements Cloneable {
     }
 
     /**
+     * Obtains the base feature APK file.
+     *
+     * @return the base feature APK file, {@code null} if not set
+     */
+    @Nullable
+    public File getBaseFeature() {
+        return mBaseFeature;
+    }
+
+    /**
+     * Obtains the previously compiled feature APK files.
+     *
+     * @return the previously compiled feature APK files
+     */
+    @NonNull
+    public Set<File> getPreviousFeatures() {
+        return mPreviousFeatures;
+    }
+
+    /**
      * Builder used to create a {@link AaptPackageConfig}.
      */
     public static class Builder {
@@ -480,7 +514,7 @@ public class AaptPackageConfig implements Cloneable {
          * @return {@code this}
          */
         @NonNull
-        public Builder setLibraries(@Nullable List<? extends AndroidLibrary> libraries) {
+        public Builder setLibraries(@Nullable List<AndroidDependency> libraries) {
             if (libraries == null) {
                 mConfig.mLibraries = ImmutableList.of();
             } else {
@@ -694,6 +728,30 @@ public class AaptPackageConfig implements Cloneable {
         @NonNull
         public Builder setCustomPackageForR(@Nullable String packageForR) {
             mConfig.mPackageForR = packageForR;
+            return this;
+        }
+
+        /**
+         * Sets the base feature APK file.
+         *
+         * @param baseFeature the base feature APK file.
+         * @return {@code this}
+         */
+        @NonNull
+        public Builder setBaseFeature(@Nullable File baseFeature) {
+            mConfig.mBaseFeature = baseFeature;
+            return this;
+        }
+
+        /**
+         * Sets the previously compiled feature APK files.
+         *
+         * @param previousFeatures the previously compiled feature APK files.
+         * @return {@code this}
+         */
+        @NonNull
+        public Builder setPreviousFeatures(@NonNull Collection<File> previousFeatures) {
+            mConfig.mPreviousFeatures = ImmutableSet.copyOf(previousFeatures);
             return this;
         }
     }

@@ -1,7 +1,14 @@
 import com.android.tools.internal.testing.DevicePool;
 
 apply plugin: 'groovy'
-apply plugin: 'jacoco'
+apply plugin: 'jacoco-tools-base'
+apply plugin: 'com.google.protobuf'
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.0.0'
+    }
+}
 
 repositories {
     maven { url = uri(rootProject.cloneArtifacts.repository) }
@@ -10,28 +17,35 @@ repositories {
 dependencies {
     compile gradleApi()
     compile localGroovy()
-    testCompile project(':base:builder-model')
-    testCompile project(':base:builder')
-    testCompile project(':base:sdk-common')
-    testCompile project(':base:lint')
-    testCompile project(':base:instant-run:instant-run-client')
-    testCompile project(':base:testutils')
-    testCompile project(':base:testing-infrastructure:device-pool:device-provider')
+    compile project(':analytics-library:protos')
+    compile project(':base:apkzlib')
+    compile project(':base:builder')
+    compile project(':base:builder-model')
+    compile project(':base:gradle')
+    compile project(':base:gradle-experimental')
+    compile project(':base:instant-run:instant-run-client')
+    compile project(':base:lint')
+    compile project(':base:sdk-common')
+    compile project(':base:testing-infrastructure:device-pool:device-provider')
+    compile project(':base:testutils')
 
-    testCompile "junit:junit:4.12"
-    testCompile 'commons-io:commons-io:2.4'
-    testCompile 'org.apache.commons:commons-lang3:3.3.2'
-    testCompile "com.google.protobuf:protobuf-java:2.5.0"
-    testCompile 'com.google.truth:truth:0.28'
-    testCompile "org.mockito:mockito-core:1.9.5"
+    compile libs.junit
+    compile libs.apache_commons_io
+    compile libs.apache_commons_lang
+    compile libs.protobuf
+    compile libs.protobuf_util
+    compile libs.truth
+    compile libs.google_api_client
+    compile libs.google_storage_client
+    testCompile libs.mockito_all
 
     // Jacoco version should be the version bundled with Gradle.  Not the default version used by
     // the plugin.
-    testCompile 'org.jacoco:org.jacoco.agent:0.7.5.201505241946'
+    compile 'org.jacoco:org.jacoco.agent:0.7.5.201505241946'
 
     // Add dependency on plugin code.  Exclude transitive dependencies to avoid conflict due to
     // Groovy versions.
-    testCompile(project(':base:gradle-core')) {
+    compile(project(':base:gradle-core')) {
         transitive = false
     }
     testCompile(project(':base:gradle')) {
@@ -42,14 +56,37 @@ dependencies {
     }
 }
 
+configurations {
+    // google-api-client depends on guava-jdk5.
+    compile.exclude group: 'com.google.guava', module: 'guava-jdk5'
+}
+
+File getCheckedInSdk() {
+    String directoryName;
+    String os = System.getProperty("os.name")
+    if (os.startsWith("Mac")) {
+        directoryName = "darwin"
+    } else if (os.startsWith("Linux")) {
+        directoryName = "linux"
+    } else if (os.startsWith("Windows")) {
+        directoryName = "windows"
+    }
+
+    return rootProject.file("../prebuilts/studio/sdk/" + directoryName)
+}
+
 def testEnvironment = System.getenv().findAll {it.value != null}
 testEnvironment << [
+        GRADLE_USER_HOME : new File(project.buildDir, "GRADLE_USER_HOME"),
         PROJECT_BUILD_DIR : project.buildDir,
         CUSTOM_REPO : rootProject.file("../out/repo"),
         INTEGRATION_TEST : "true",
         DATA_BINDING_INTERNAL_REPO : rootProject.file("../tools/data-binding/internal-prebuilts"),
         DATA_BINDING_REPO : rootProject.file("../tools/data-binding/maven-repo")
 ]
+def testEnvironmentCheckedInSdk = new HashMap()
+testEnvironmentCheckedInSdk << testEnvironment
+testEnvironmentCheckedInSdk['ANDROID_HOME'] = getCheckedInSdk()
 
 // These tasks will not depend on publishLocal, so they will run integration
 // tests against whatever version of the plugin is in ../../../out/repo. This
@@ -67,13 +104,13 @@ configure([test, testPrebuilts]) {
                     "source tree, under out/..., or an env var ANDROID_HOME."
     systemProperties['jar.path'] = jar.archivePath
     systemProperties['java.io.tmpdir'] = tempFile.absolutePath
-    environment = testEnvironment
+    environment = testEnvironmentCheckedInSdk
 
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
 
     forkEvery = 1
-    maxParallelForks = Runtime.runtime.availableProcessors() / 2
+    maxParallelForks = Runtime.runtime.availableProcessors() / 4
 
     useJUnit {
         if (System.properties['test.includeCategories'] != null) {
@@ -96,13 +133,13 @@ task automaticTest(type: Test) {
 
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
-    environment = testEnvironment
+    environment = testEnvironmentCheckedInSdk
 }
 
 task onlineTest(type: Test) {
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
-    environment = testEnvironment
+    environment = testEnvironmentCheckedInSdk
 
     useJUnit {
         includeCategories "com.android.build.gradle.integration.common.category.OnlineTests"
@@ -124,16 +161,14 @@ configure([connectedIntegrationTest, connectedIntegrationTestPrebuilts]) {
     group = "verification"
     systemProperties['jar.path'] = jar.archivePath
     systemProperties['java.io.tmpdir'] = tempFile.absolutePath
-    // Add to, rather than replace the environment, so that TEST_CLASSPATH_DEPENDENCY,
-    // REMOTE_TEST_PROVIDER, ADDITIONAL_TEST_CUSTOM_REPO and any dependencies of the remote test
-    // provider are present in the test environment only for these tests.
-    environment testEnvironment + ["RECORD_SPANS" : "true"]
+
+    environment testEnvironment
 
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
 
     forkEvery= 1
-    def count = Runtime.runtime.availableProcessors()
+    def count = Math.ceil(Runtime.runtime.availableProcessors() / 4)
     if (count > 8) {
         count = 8
     }
@@ -162,12 +197,22 @@ task performanceTest(type: Test) {
     reports {
         junitXml.destination "${project.buildDir}/perf-results"
     }
+    outputs.upToDateWhen { false }
+
+}
+
+configure([test, testPrebuilts, onlineTest, connectedIntegrationTest,
+           connectedIntegrationTestPrebuilts, performanceTest]) {
+    testLogging {
+        events = ['FAILED', 'PASSED', 'SKIPPED', 'STANDARD_ERROR', 'STARTED']
+        displayGranularity = 2 // Show test class and method.
+        exceptionFormat = 'full'
+        showCauses = true
+    }
 }
 
 task buildTestDependencies {
-    dependsOn ':base:gradle-core:instrumentIncrementalTestPatches',
-              ':base:gradle-core:instrumentIncrementalTestBaseClasses',
-              ':base:instant-run:instant-run-server:jar'
+    dependsOn ':base:instant-run:instant-run-server:jar'
 }
 
 DevicePool devicePool = new DevicePool();
@@ -192,19 +237,22 @@ connectedIntegrationTest.dependsOn buildTestDependencies, ':publishLocal', start
 connectedIntegrationTestPrebuilts.dependsOn buildTestDependencies, startDevicePool
 performanceTest.dependsOn ':publishLocal'
 
-jacocoTestReport {
-    sourceSets project(':base:gradle-experimental').sourceSets.main
-    sourceSets project(':base:gradle').sourceSets.main
-    sourceSets project(':base:gradle-core').sourceSets.main
-    sourceSets project(':base:builder').sourceSets.main
-    sourceSets project(':base:builder-model').sourceSets.main
-    sourceSets project(':base:builder-test-api').sourceSets.main
-}
 
-// Due to memory constraints, apply jacoco only when jacocoTestReport is invoked.  Make sure to
-// rerun tests when generating report jacoco.
-gradle.taskGraph.whenReady { TaskExecutionGraph taskGraph ->
-    if (taskGraph.hasTask(jacocoTestReport)) {
-        test.environment("ATTACH_JACOCO_AGENT", "yes")
+if (tasks.findByName("jacocoTestReport") != null) {
+    jacocoTestReport {
+        sourceSets project(':base:gradle-experimental').sourceSets.main
+        sourceSets project(':base:gradle').sourceSets.main
+        sourceSets project(':base:gradle-core').sourceSets.main
+        sourceSets project(':base:builder').sourceSets.main
+        sourceSets project(':base:builder-model').sourceSets.main
+        sourceSets project(':base:builder-test-api').sourceSets.main
+    }
+
+    // Due to memory constraints, apply jacoco only when jacocoTestReport is invoked.  Make sure to
+    // rerun tests when generating report jacoco.
+    gradle.taskGraph.whenReady { TaskExecutionGraph taskGraph ->
+        if (taskGraph.hasTask(jacocoTestReport)) {
+            test.environment("ATTACH_JACOCO_AGENT", "yes")
+        }
     }
 }

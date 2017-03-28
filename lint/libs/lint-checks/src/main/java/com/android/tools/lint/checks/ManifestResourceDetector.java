@@ -33,6 +33,8 @@ import com.android.annotations.Nullable;
 import com.android.ide.common.res2.AbstractResourceRepository;
 import com.android.ide.common.res2.ResourceItem;
 import com.android.ide.common.resources.ResourceUrl;
+import com.android.ide.common.resources.configuration.DensityQualifier;
+import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.ide.common.resources.configuration.VersionQualifier;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
@@ -53,19 +55,17 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
-
+import java.io.File;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
-import java.io.File;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Detects references to resources in the manifest that vary by configuration
@@ -74,7 +74,7 @@ public class ManifestResourceDetector extends ResourceXmlDetector {
     /** Using resources in the manifest that vary by configuration */
     @SuppressWarnings("unchecked")
     public static final Issue ISSUE = Issue.create(
-            "ManifestResource", //$NON-NLS-1$
+            "ManifestResource",
             "Manifest Resource References",
             "Elements in the manifest can reference resources, but those resources cannot " +
             "vary across configurations (except as a special case, by version, and except " +
@@ -185,7 +185,8 @@ public class ManifestResourceDetector extends ResourceXmlDetector {
                 || "description".equals(name)
                 || "logo".equals(name)
                 || "banner".equals(name)
-                || "sharedUserLabel".equals(name)) {
+                || "sharedUserLabel".equals(name)
+                || "roundIcon".equals(name)) {
             return ANDROID_URI.equals(attribute.getNamespaceURI());
         }
 
@@ -210,8 +211,27 @@ public class ManifestResourceDetector extends ResourceXmlDetector {
                             continue;
                         }
 
-                        // Version qualifier is okay
-                        if (VersionQualifier.getQualifier(qualifiers) != null) {
+                        // Version qualifier is okay, as is density qualifiers (or both)
+                        int qualifierCount = 1;
+                        for (int i = 0, n = qualifiers.length(); i < n; i++) {
+                            if (qualifiers.charAt(i) == '-') {
+                                qualifierCount++;
+                            }
+                        }
+                        FolderConfiguration configuration = item.getConfiguration();
+                        if (configuration == null) {
+                            // shouldn't happen, but don't throw NPE on invalid projects
+                            continue;
+                        }
+                        DensityQualifier densityQualifier = configuration.getDensityQualifier();
+                        VersionQualifier versionQualifier = configuration.getVersionQualifier();
+                        if (qualifierCount == 1 &&
+                                (versionQualifier != null && versionQualifier.isValid()
+                                || densityQualifier != null && densityQualifier.isValid())) {
+                            continue;
+                        } else if (qualifierCount == 2 &&
+                                densityQualifier != null && densityQualifier.isValid() &&
+                                versionQualifier != null && versionQualifier.isValid()) {
                             continue;
                         }
 

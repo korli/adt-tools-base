@@ -16,6 +16,9 @@
 
 package com.android.build.gradle.integration.application
 
+import com.android.build.gradle.external.gson.NativeBuildConfigValue
+import com.android.build.gradle.external.gson.NativeLibraryValue
+import com.android.build.gradle.external.gson.NativeSourceFileValue
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile
@@ -26,7 +29,14 @@ import com.android.builder.model.NativeAndroidProject
 import com.android.builder.model.NativeArtifact
 import com.android.builder.model.NativeSettings
 import com.android.utils.FileUtils
+import com.android.utils.StringHelper
 import com.google.common.collect.Lists
+import com.google.common.collect.Sets
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.TypeAdapter
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonWriter
 import groovy.transform.CompileStatic
 import org.junit.Before
 import org.junit.Rule
@@ -42,6 +52,7 @@ import static com.android.build.gradle.integration.common.fixture.app.HelloWorld
 import static com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp.applicationMk
 import static com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp.cmakeLists
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat
+
 /**
  * General Model tests
  */
@@ -323,7 +334,8 @@ class NativeModelTest {
                 [Config.ANDROID_MK_FILE_CPP_CLANG].toArray(),
                 [Config.ANDROID_MK_GOOGLE_TEST].toArray(),
                 [Config.ANDROID_MK_FILE_CPP_GCC].toArray(),
-                [Config.ANDROID_MK_FILE_CPP_GCC_VIA_APPLICATION_MK].toArray(),
+                // disabled due to http://b.android.com/230228
+                //[Config.ANDROID_MK_FILE_CPP_GCC_VIA_APPLICATION_MK].toArray(),
                 [Config.ANDROID_MK_CUSTOM_BUILD_TYPE].toArray(),
                 [Config.CMAKELISTS_FILE_C].toArray(),
                 [Config.CMAKELISTS_FILE_CPP].toArray(),
@@ -344,7 +356,7 @@ class NativeModelTest {
 
     @Test
     public void checkModel() {
-        AndroidProject androidProject = project.model().getSingle(AndroidProject.class);
+        AndroidProject androidProject = project.model().getSingle().getOnlyModel();
         assertThat(androidProject.syncIssues).hasSize(0);
         NativeAndroidProject model = project.model().getSingle(NativeAndroidProject.class);
         assertThat(model).isNotNull();
@@ -421,10 +433,12 @@ class NativeModelTest {
             originalTimeStamp = newTimeStamp;
         }
 
+        String originalFileHash = FileUtils.sha1(jsonFile);
+
         // Replace flags in the build file and check that JSON is regenerated
         project.buildFile.text = project.buildFile.text.replace("-DTEST_", "-DTEST_CHANGED_");
         nativeProject = project.model().getSingle(NativeAndroidProject.class);
-        assertThat(getHighestResolutionTimeStamp(jsonFile)).isGreaterThan(originalTimeStamp);
+        assertThat(FileUtils.sha1(jsonFile)).isNotEqualTo(originalFileHash);
 
         // Check that the newly written flags are there.
         if (config.isCpp) {
@@ -453,6 +467,64 @@ class NativeModelTest {
             // But clean shouldn't change the JSON because it is outside of the build/ folder.
             assertThat(originalTimeStamp).isEqualTo(getHighestResolutionTimeStamp(jsonFile));
         }
+    }
+
+    @Test
+    public void checkDebugVsRelease() {
+        // Sync
+        project.model().getSingle(NativeAndroidProject.class);
+
+        File debugJson = getJsonFile("debug", "armeabi");
+        File releaseJson = getJsonFile("release", "armeabi");
+
+        Gson gson = new GsonBuilder()
+                .registerTypeAdapter(File.class, new TypeAdapter() {
+
+                        @Override
+                        void write(JsonWriter jsonWriter, Object o) throws IOException {
+
+                        }
+
+                        @Override
+                        Object read(JsonReader jsonReader) throws IOException {
+                            return new File(jsonReader.nextString());
+                        }
+                    })
+                .create();
+
+        NativeBuildConfigValue debug = gson.fromJson(new FileReader(debugJson),
+                NativeBuildConfigValue.class);
+        NativeBuildConfigValue release = gson.fromJson(new FileReader(releaseJson),
+                NativeBuildConfigValue.class);
+
+        Set<String> releaseFlags = uniqueFlags(release);
+        Set<String> debugFlags = uniqueFlags(debug);
+
+        // Look at flags that are only in release build. Should at least contain -DNDEBUG and -Os
+        Set<String> releaseOnlyFlags = Sets.newHashSet(releaseFlags);
+        releaseOnlyFlags.removeAll(debugFlags);
+        assertThat(releaseOnlyFlags)
+                //.named("release only build flags")
+        // TODO fix when moved to Java
+                .containsAllOf("-DNDEBUG", "-Os");
+
+        // Look at flags that are only in debug build. Should at least contain -O0
+        Set<String> debugOnlyFlags = Sets.newHashSet(debugFlags);
+        debugOnlyFlags.removeAll(releaseFlags);
+        assertThat(debugOnlyFlags)
+                //.named("debug only build flags")
+        // TODO fix when moved to Java
+                .contains("-O0");
+    }
+
+    private static Set<String> uniqueFlags(NativeBuildConfigValue config) {
+        Set<String> flags = Sets.newHashSet();
+        for (NativeLibraryValue library : config.libraries.values()) {
+            for (NativeSourceFileValue file : library.files) {
+                flags.addAll(StringHelper.tokenizeString(file.flags));
+            }
+        }
+        return flags;
     }
 
     /*

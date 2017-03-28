@@ -24,8 +24,8 @@ import com.android.utils.ILogger;
 import com.google.common.base.Optional;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -52,6 +52,9 @@ public class DexParser implements PatternAwareOutputParser {
     private static final Pattern INVALID_BYTE_CODE_VERSION_EXCEPTION_PATTERN = Pattern.compile(
             "com.android.dx.cf.iface.ParseException: bad class file magic \\(cafebabe\\) or version \\((\\d+)\\.\\d+\\).*");
 
+    private static final Pattern UNSUPPORTED_CLASS_FILE_VERSION_PATTERN = Pattern.compile(
+            "unsupported class file version (\\d+)\\.\\d+");
+
     @Override
     public boolean parse(@NonNull String line, @NonNull OutputLineReader reader,
             @NonNull List<Message> messages, @NonNull ILogger logger)
@@ -75,6 +78,26 @@ public class DexParser implements PatternAwareOutputParser {
             return true;
         }
 
+
+        if (line.startsWith("warning: Ignoring InnerClasses attribute")) {
+            StringBuilder original1 = new StringBuilder(line).append('\n');
+            String nextLine = reader.readLine();
+            while (!Strings.isNullOrEmpty(nextLine)) {
+                original1.append(nextLine).append('\n');
+                if (nextLine.equals("indicate that it is *not* an inner class.")) {
+                    break;
+                }
+                nextLine = reader.readLine();
+            }
+            messages.add(new Message(
+                    Message.Kind.WARNING,
+                    original1.toString(),
+                    original1.toString(),
+                    Optional.of(DEX_TOOL_NAME),
+                    ImmutableList.of(SourceFilePosition.UNKNOWN)));
+            return true;
+        }
+
         if (line.startsWith("trouble writing output: Too many method references:")) {
             StringBuilder original1 = new StringBuilder(line).append('\n');
             String nextLine = reader.readLine();
@@ -82,14 +105,43 @@ public class DexParser implements PatternAwareOutputParser {
                 original1.append(nextLine).append('\n');
                 nextLine = reader.readLine();
             }
+            messages.add(
+                    new Message(
+                            Message.Kind.ERROR,
+                            DEX_LIMIT_EXCEEDED_ERROR,
+                            original1.toString(),
+                            Optional.of(DEX_TOOL_NAME),
+                            ImmutableList.of(SourceFilePosition.UNKNOWN)));
+            return true;
+        }
+        if (line.equals("PARSE ERROR:")) {
+            String firstLine = reader.readLine();
+            if (firstLine == null) {
+                return false;
+            }
+            StringBuilder locationsBuilder = new StringBuilder();
+            consumeMatchingLines(reader, nextLine -> nextLine.startsWith("..."), locationsBuilder);
+            String locations = locationsBuilder.toString();
+            String originalMessage = "PARSE ERROR:\n" + firstLine + "\n" + locations;
+            String cause = originalMessage;
+
+            if (firstLine.startsWith("unsupported class file version ")) {
+                Matcher matcher = UNSUPPORTED_CLASS_FILE_VERSION_PATTERN.matcher(firstLine);
+                if (matcher.find()) {
+                    int bytecodeVersion = Integer.valueOf(matcher.group(1));
+                    cause = String.format(INVALID_BYTE_CODE_VERSION, bytecodeVersion)
+                            + "\n" + locations.trim();
+                }
+            }
             messages.add(new Message(
                     Message.Kind.ERROR,
-                    DEX_LIMIT_EXCEEDED_ERROR,
-                    original1.toString(),
+                    String.format(COULD_NOT_CONVERT_BYTECODE_TO_DEX, cause),
+                    originalMessage,
                     Optional.of(DEX_TOOL_NAME),
                     ImmutableList.of(SourceFilePosition.UNKNOWN)));
             return true;
         }
+
         if (!line.equals("UNEXPECTED TOP-LEVEL EXCEPTION:")) {
             return false;
         }
@@ -130,10 +182,21 @@ public class DexParser implements PatternAwareOutputParser {
         }
     }
 
-    private static void consumeStacktrace(OutputLineReader reader, StringBuilder out) {
+    private static void consumeStacktrace(
+            @NonNull OutputLineReader reader,
+            @NonNull StringBuilder out) {
+        consumeMatchingLines(
+                reader,
+                line -> line.startsWith("\t") || line.startsWith("Caused by: "),
+                out);
+    }
+
+    private static void consumeMatchingLines(
+            @NonNull OutputLineReader reader,
+            @NonNull Predicate<String> linePredicate,
+            @NonNull StringBuilder out) {
         String nextLine = reader.readLine();
-        while (nextLine != null &&
-                (nextLine.startsWith("\t") || nextLine.startsWith("Caused by: "))) {
+        while (nextLine != null && linePredicate.test(nextLine)) {
             out.append(nextLine).append('\n');
             nextLine = reader.readLine();
         }

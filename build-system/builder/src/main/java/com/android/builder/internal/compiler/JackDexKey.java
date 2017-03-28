@@ -17,11 +17,13 @@
 package com.android.builder.internal.compiler;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.repository.Revision;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Maps;
 
+import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -40,18 +42,29 @@ final class JackDexKey extends DexKey {
     private static final String ELEM_ADDITIONAL_PARAMETERS = "custom-flags";
     private static final String ATTR_PARAMETER_KEY = "param-key";
     private static final String ATTR_PARAMETER_VALUE = "param-value";
+    // Attribute containing tool used to convert the input e.g. Jack, Jill.
+    private static final String ATTR_TOOL_USED = "toolUsed";
+    private static final String ATTR_MIN_API_NAME = "minApiName";
 
+    @Nullable
+    private final String toolUsed;
     @NonNull
-    private final ImmutableSortedMap<String, String> mAdditionalParameters;
+    private final String minApiName;
+    @NonNull
+    private final ImmutableSortedMap<String, String> additionalParameters;
 
     private JackDexKey(
             @NonNull File sourceFile,
             @NonNull Revision buildToolsRevision,
             boolean jumboMode,
             boolean optimize,
+            @Nullable String toolUsed,
+            @NonNull String minApiName,
             @NonNull Map<String, String> additionalParameters) {
         super(sourceFile, buildToolsRevision, jumboMode, optimize);
-        mAdditionalParameters = ImmutableSortedMap.copyOf(additionalParameters);;
+        this.toolUsed = toolUsed;
+        this.minApiName = minApiName;
+        this.additionalParameters = ImmutableSortedMap.copyOf(additionalParameters);
     }
 
     static JackDexKey of(
@@ -59,9 +72,17 @@ final class JackDexKey extends DexKey {
             @NonNull Revision buildToolsRevision,
             boolean jumboMode,
             boolean optimize,
+            @Nullable String toolUsed,
+            @NonNull String minApiName,
             @NonNull Map<String, String> additionalParameters) {
         return new JackDexKey(
-                sourceFile, buildToolsRevision, jumboMode, optimize, additionalParameters);
+                sourceFile,
+                buildToolsRevision,
+                jumboMode,
+                optimize,
+                toolUsed,
+                minApiName,
+                additionalParameters);
     }
 
     static final PreProcessCache.KeyFactory<JackDexKey> FACTORY = (sourceFile, revision, attrMap) -> {
@@ -79,6 +100,21 @@ final class JackDexKey extends DexKey {
             optimize = true;
         }
 
+        String toolUsed = null;
+        Node toolUsedAttribute = attrMap.getNamedItem(ATTR_TOOL_USED);
+        if (toolUsedAttribute != null) {
+            toolUsed = toolUsedAttribute.getNodeValue();
+        }
+
+        String minApiName;
+        Node minApiAttribute = attrMap.getNamedItem(ATTR_MIN_API_NAME);
+        if (minApiAttribute != null) {
+            minApiName = minApiAttribute.getNodeValue();
+        } else {
+            // specify unknown value
+            minApiName = "-1";
+        }
+
         Map<String, String> additionalParameters = Maps.newHashMap();
         if (attrMap.getLength() > 0) {
             Document document = attrMap.item(0).getOwnerDocument();
@@ -92,14 +128,28 @@ final class JackDexKey extends DexKey {
                     Node paramEntry = elemAdditionalParams.getChildNodes().item(i);
 
                     additionalParameters.put(
-                            paramEntry.getAttributes().getNamedItem(ATTR_PARAMETER_VALUE).getNodeValue(),
-                            paramEntry.getAttributes().getNamedItem(ATTR_PARAMETER_KEY).getNodeValue()
+                            paramEntry
+                                    .getAttributes()
+                                    .getNamedItem(ATTR_PARAMETER_VALUE)
+                                    .getNodeValue(),
+                            paramEntry
+                                    .getAttributes()
+                                    .getNamedItem(ATTR_PARAMETER_KEY)
+                                    .getNodeValue()
                     );
                 }
             }
         }
 
-        return JackDexKey.of(sourceFile, revision, jumboMode, optimize, additionalParameters);
+
+        return JackDexKey.of(
+                sourceFile,
+                revision,
+                jumboMode,
+                optimize,
+                toolUsed,
+                minApiName,
+                additionalParameters);
     };
 
     @Override
@@ -107,9 +157,18 @@ final class JackDexKey extends DexKey {
         super.writeFieldsToXml(itemNode);
 
         Document document = itemNode.getOwnerDocument();
+
+        Attr toolUsedAttr = document.createAttribute(ATTR_TOOL_USED);
+        toolUsedAttr.setValue(toolUsed);
+        itemNode.getAttributes().setNamedItem(toolUsedAttr);
+
+        Attr minApiAttr = document.createAttribute(ATTR_MIN_API_NAME);
+        minApiAttr.setValue(minApiName);
+        itemNode.getAttributes().setNamedItem(minApiAttr);
+
         Element params = document.createElement(ELEM_ADDITIONAL_PARAMETERS);
-        for (String paramKey: mAdditionalParameters.keySet()) {
-            String paramValue = mAdditionalParameters.get(paramKey);
+        for (String paramKey: additionalParameters.keySet()) {
+            String paramValue = additionalParameters.get(paramKey);
 
             Element element = document.createElement(ELEM_ADDITIONAL_PARAMETERS_ENTRY);
             element.setAttribute(ATTR_PARAMETER_KEY, paramKey);
@@ -134,11 +193,13 @@ final class JackDexKey extends DexKey {
 
         JackDexKey dxDexKey = (JackDexKey) o;
 
-        return mAdditionalParameters.equals(dxDexKey.mAdditionalParameters);
+        return Objects.equal(toolUsed, dxDexKey.toolUsed)
+                && minApiName.equals(dxDexKey.minApiName)
+                && additionalParameters.equals(dxDexKey.additionalParameters);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(super.hashCode(), mAdditionalParameters);
+        return Objects.hashCode(super.hashCode(), toolUsed, minApiName, additionalParameters);
     }
 }

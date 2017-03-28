@@ -17,16 +17,29 @@
 package com.android.tools.lint.checks;
 
 import com.android.annotations.NonNull;
-import com.android.tools.lint.detector.api.*;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.detector.api.Detector;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.Location;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
-import org.objectweb.asm.tree.*;
-
 import java.io.File;
 import java.util.List;
 import java.util.Set;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 
 /**
  * Looks for usages of Java packages that are not included in Android.
@@ -34,7 +47,7 @@ import java.util.Set;
 public class InvalidPackageDetector extends Detector implements Detector.ClassScanner {
     /** Accessing an invalid package */
     public static final Issue ISSUE = Issue.create(
-            "InvalidPackage", //$NON-NLS-1$
+            "InvalidPackage",
             "Package not included in Android",
 
             "This check scans through libraries looking for calls to APIs that are not included " +
@@ -58,8 +71,8 @@ public class InvalidPackageDetector extends Detector implements Detector.ClassSc
                     InvalidPackageDetector.class,
                     Scope.JAVA_LIBRARY_SCOPE));
 
-    private static final String JAVA_PKG_PREFIX = "java/";    //$NON-NLS-1$
-    private static final String JAVAX_PKG_PREFIX = "javax/";  //$NON-NLS-1$
+    private static final String JAVA_PKG_PREFIX = "java/";
+    private static final String JAVAX_PKG_PREFIX = "javax/";
 
     private ApiLookup mApiDatabase;
 
@@ -79,12 +92,6 @@ public class InvalidPackageDetector extends Detector implements Detector.ClassSc
 
     /** Constructs a new package check */
     public InvalidPackageDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.SLOW;
     }
 
     @Override
@@ -157,7 +164,7 @@ public class InvalidPackageDetector extends Detector implements Detector.ClassSc
 
                         // For virtual dispatch, walk up the inheritance chain checking
                         // each inherited method
-                        if (owner.startsWith("android/")           //$NON-NLS-1$
+                        if (owner.startsWith("android/")
                                 || owner.startsWith(JAVA_PKG_PREFIX)
                                 || owner.startsWith(JAVAX_PKG_PREFIX)) {
                             owner = null;

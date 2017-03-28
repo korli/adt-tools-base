@@ -19,48 +19,68 @@ package com.android.tools.lint;
 import static com.android.SdkConstants.UTF_8;
 
 import com.android.annotations.NonNull;
-
-import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
-
+import com.android.tools.lint.detector.api.CharSequences;
 import java.io.File;
+import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
 
 /**
  * Source file for ECJ. Subclassed to let us hold on to the String contents (ECJ operates
  * on char[]'s exclusively, whereas for PSI we'll need Strings) and serve it back quickly.
  */
 public class EcjSourceFile extends CompilationUnit {
+    private final File file;
 
-    private File mFile;
-    private String mSource;
-
-    public EcjSourceFile(@NonNull char[] source, @NonNull File file,
-            @NonNull String encoding) {
-        super(source, file.getPath(), encoding);
-        mSource = new String(source);
-        mFile = file;
-    }
-
-    public EcjSourceFile(@NonNull String source, @NonNull File file,
-            @NonNull String encoding) {
-        super(source.toCharArray(), file.getPath(), encoding);
-        mSource = source;
-        mFile = file;
-    }
-
-    public EcjSourceFile(@NonNull String source, @NonNull File file) {
-        this(source, file, UTF_8);
+    private EcjSourceFile(@NonNull char[] source, @NonNull String path,
+            @NonNull String encoding, @NonNull File file) {
+        super(source, path, encoding);
+        this.file = file;
     }
 
     @NonNull
     public String getSource() {
-        if (mSource == null) {
-            mSource = new String(getContents());
-        }
-        return mSource;
+        // Note: Not cached. This method is not expected to be called frequently or really
+        // at all from normal lint checks.
+        return new String(getContents());
     }
 
     @NonNull
     public File getFile() {
-        return mFile;
+        return file;
+    }
+
+
+    public static EcjSourceFile create(@NonNull char[] source, @NonNull File file,
+            @NonNull String encoding) {
+        return new EcjSourceFile(source, file.getPath(), encoding, file);
+    }
+
+    public static EcjSourceFile create(@NonNull CharSequence source, @NonNull File file,
+            @NonNull String encoding) {
+        char[] contents = CharSequences.getCharArray(source);
+        return new EcjSourceFile(contents, file.getPath(), encoding, file);
+    }
+
+    public static EcjSourceFile create(@NonNull CharSequence source, @NonNull File file) {
+        return create(source, file, UTF_8);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        EcjSourceFile that = (EcjSourceFile) o;
+
+        return file.equals(that.file);
+
+    }
+
+    @Override
+    public int hashCode() {
+        return file.hashCode();
     }
 }

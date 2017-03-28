@@ -22,6 +22,7 @@ import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
@@ -51,7 +52,6 @@ import com.intellij.psi.PsiStatement;
 import com.intellij.psi.PsiTypeCastExpression;
 import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.util.PsiTreeUtil;
-
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +62,7 @@ import java.util.Map;
 public class CutPasteDetector extends Detector implements Detector.JavaPsiScanner {
     /** The main issue discovered by this detector */
     public static final Issue ISSUE = Issue.create(
-            "CutPasteId", //$NON-NLS-1$
+            "CutPasteId",
             "Likely cut & paste mistakes",
 
             "This lint check looks for cases where you have cut & pasted calls to " +
@@ -92,7 +92,7 @@ public class CutPasteDetector extends Detector implements Detector.JavaPsiScanne
 
     @Override
     public List<String> getApplicableMethodNames() {
-        return Collections.singletonList("findViewById"); //$NON-NLS-1$
+        return Collections.singletonList("findViewById");
     }
 
     @Override
@@ -145,9 +145,8 @@ public class CutPasteDetector extends Detector implements Detector.JavaPsiScanne
                         secondary.setMessage("First usage here");
                         location.setSecondary(secondary);
                         context.report(ISSUE, call, location, String.format(
-                                "The id `%1$s` has already been looked up in this method; possible "
-                                        +
-                                        "cut & paste error?", first.getText()));
+                            "The id `%1$s` has already been looked up in this method; possible "
+                                    + "cut & paste error?", first.getText()));
                     } else {
                         mIds.put(id, call);
                         mLhs.put(id, lhs);
@@ -157,6 +156,14 @@ public class CutPasteDetector extends Detector implements Detector.JavaPsiScanne
 
             }
         }
+    }
+
+    @Override
+    public void afterCheckFile(@NonNull Context context) {
+        mIds = null;
+        mLhs = null;
+        mCallOperands = null;
+        mLastMethod = null;
     }
 
     @Nullable

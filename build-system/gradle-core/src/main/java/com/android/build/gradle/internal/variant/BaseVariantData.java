@@ -15,6 +15,7 @@
  */
 package com.android.build.gradle.internal.variant;
 
+import android.databinding.tool.LayoutXmlProcessor;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.FilterData;
@@ -48,15 +49,22 @@ import com.android.build.gradle.tasks.ShaderCompile;
 import com.android.builder.core.ErrorReporter;
 import com.android.builder.core.VariantType;
 import com.android.builder.model.SourceProvider;
+import com.android.builder.profile.Recorder;
 import com.android.ide.common.blame.MergingLog;
 import com.android.ide.common.blame.SourceFile;
 import com.android.ide.common.res2.ResourceSet;
 import com.android.utils.StringHelper;
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.file.ConfigurableFileTree;
@@ -66,24 +74,11 @@ import org.gradle.api.tasks.Sync;
 import org.gradle.api.tasks.bundling.Jar;
 import org.gradle.api.tasks.compile.JavaCompile;
 
-import android.databinding.tool.LayoutXmlProcessor;
-
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
 /**
  * Base data about a variant.
  */
 public abstract class BaseVariantData<T extends BaseVariantOutputData> {
 
-
-    @NonNull
-    protected final AndroidConfig androidConfig;
     @NonNull
     protected final TaskManager taskManager;
     @NonNull
@@ -143,6 +138,7 @@ public abstract class BaseVariantData<T extends BaseVariantOutputData> {
     private List<File> extraGeneratedResFolders;
 
     private final List<T> outputs = Lists.newArrayListWithExpectedSize(4);
+    private T mainOutput;
 
     private Set<String> densityFilters;
     private Set<String> languageFilters;
@@ -159,13 +155,12 @@ public abstract class BaseVariantData<T extends BaseVariantOutputData> {
 
     private SplitHandlingPolicy mSplitHandlingPolicy;
 
-
     public BaseVariantData(
             @NonNull AndroidConfig androidConfig,
             @NonNull TaskManager taskManager,
             @NonNull GradleVariantConfiguration variantConfiguration,
-            @NonNull ErrorReporter errorReporter) {
-        this.androidConfig = androidConfig;
+            @NonNull ErrorReporter errorReporter,
+            @NonNull Recorder recorder) {
         this.variantConfiguration = variantConfiguration;
         this.taskManager = taskManager;
 
@@ -185,10 +180,12 @@ public abstract class BaseVariantData<T extends BaseVariantOutputData> {
                             variantConfiguration.getFullName(),
                             variantConfiguration.getMinSdkVersion().getApiLevel()));
         }
-        scope = new VariantScopeImpl(
-                taskManager.getGlobalScope(),
-                new TransformManager(taskManager.getAndroidTasks(), errorReporter),
-                this);
+        scope =
+                new VariantScopeImpl(
+                        taskManager.getGlobalScope(),
+                        new TransformManager(
+                                taskManager.getAndroidTasks(), errorReporter, recorder),
+                        this);
         taskManager.configureScopeForNdk(scope);
     }
 
@@ -201,18 +198,12 @@ public abstract class BaseVariantData<T extends BaseVariantOutputData> {
                     getVariantConfiguration().getOriginalApplicationId(),
                     taskManager.getDataBindingBuilder()
                             .createJavaFileWriter(scope.getClassOutputForDataBinding()),
-                    getVariantConfiguration().getMinSdkVersion().getApiLevel(),
-                    getType() == VariantType.LIBRARY,
-                    new LayoutXmlProcessor.OriginalFileLookup() {
-
-                        @Override
-                        public File getOriginalFileFor(File file) {
-                            SourceFile input = new SourceFile(file);
-                            SourceFile original = mergingLog.find(input);
-                            // merged log api returns the file back if original cannot be found.
-                            // it is not what we want so we alter the response.
-                            return original == input ? null : original.getSourceFile();
-                        }
+                    file -> {
+                        SourceFile input = new SourceFile(file);
+                        SourceFile original = mergingLog.find(input);
+                        // merged log api returns the file back if original cannot be found.
+                        // it is not what we want so we alter the response.
+                        return original == input ? null : original.getSourceFile();
                     }
             );
         }
@@ -249,6 +240,27 @@ public abstract class BaseVariantData<T extends BaseVariantOutputData> {
     @NonNull
     public List<T> getOutputs() {
         return outputs;
+    }
+
+    /** Sets the main output among the multiple outputs returned by {@link #getOutputs()}. */
+    public void setMainOutput(@NonNull T mainOutput) {
+        Preconditions.checkState(outputs.contains(mainOutput));
+        this.mainOutput = mainOutput;
+    }
+
+    /**
+     * Returns the main output among the multiple outputs returned by {@link #getOutputs()}. If the
+     * main output has not been set by {@link #setMainOutput(BaseVariantOutputData)}, this method
+     * returns the first output.
+     */
+    @NonNull
+    public T getMainOutput() {
+        if (mainOutput != null) {
+            return mainOutput;
+        } else {
+            Preconditions.checkState(!outputs.isEmpty());
+            return outputs.get(0);
+        }
     }
 
     @NonNull
@@ -716,7 +728,7 @@ public abstract class BaseVariantData<T extends BaseVariantOutputData> {
 
     @Override
     public String toString() {
-        return Objects.toStringHelper(this)
+        return MoreObjects.toStringHelper(this)
                 .addValue(variantConfiguration.getFullName())
                 .toString();
     }

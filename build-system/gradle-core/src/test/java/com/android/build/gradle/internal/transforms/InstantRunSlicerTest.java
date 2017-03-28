@@ -17,6 +17,7 @@
 package com.android.build.gradle.internal.transforms;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -38,19 +39,11 @@ import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
 import com.android.build.gradle.internal.pipeline.TransformInvocationBuilder;
 import com.android.build.gradle.internal.scope.InstantRunVariantScope;
 import com.android.utils.FileUtils;
+import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Files;
-
-import org.gradle.api.logging.Logger;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -60,6 +53,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.gradle.api.logging.Logger;
+import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 /**
  * Test for the {@link InstantRunSlicer}
@@ -232,7 +233,7 @@ public class InstantRunSlicerTest {
 
         Optional<Integer> sliceForFile =
                 findSliceForFile(getOutputDir(), getInputDir(), singleClassFile);
-        assertThat(sliceForFile.isPresent());
+        assertTrue(sliceForFile.isPresent());
         int slot = sliceForFile.get();
 
         File outputSlice = outputSlices[slot];
@@ -285,22 +286,44 @@ public class InstantRunSlicerTest {
         for (File slice : outputSlices) {
             // ensure guard class presence.
             File guardClassPackage = new File(slice,
-                    InstantRunSlicer.PACKAGE_FOR_GUARD_CLASSS
+                    InstantRunSlicer.PACKAGE_FOR_GUARD_CLASS
                             + File.separator + slice.getName() + ".class");
             assertThat(guardClassPackage.exists()).isTrue();
         }
     }
 
     @Test
-    public void testAddingDirectory() throws IOException, TransformException, InterruptedException {
+    public void testIncrementalAddingFile()
+            throws TransformException, InterruptedException, IOException {
+        testAddingFile(true /* isIncremental */);
+    }
+
+    @Test
+    public void testNonIncrementalAddingFile()
+            throws TransformException, InterruptedException, IOException {
+        testAddingFile(false /* isIncremental */);
+    }
+
+    private void testAddingFile(boolean isIncremental)
+            throws IOException, TransformException, InterruptedException {
         InstantRunSlicer slicer = new InstantRunSlicer(logger, variantScope);
 
         String packagePath = "com/foo/bar";
         File folder = new File(getInputDir(), packagePath);
         File singleClassFile = createFile(folder, "file0.class");
-        Map<File, Status> changedFiles = ImmutableMap.of(folder, Status.ADDED);
+
+        // create the slices by invoking a non incremental mode.
+        slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(false)
+                .addInputs(ImmutableList.of(getInput(getInputDir(), ImmutableMap.of())))
+                .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
+                .build());
+
+        File addedClassFile = createFile(folder, "file1.class");
+        Map<File, Status> changedFiles = ImmutableMap.of(addedClassFile, Status.ADDED);
 
         slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(isIncremental)
                 .addInputs(ImmutableList.of(getInput(getInputDir(), changedFiles)))
                 .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
                 .build());
@@ -311,7 +334,113 @@ public class InstantRunSlicerTest {
 
         Optional<Integer> sliceForFile =
                 findSliceForFile(getOutputDir(), getInputDir(), singleClassFile);
-        assertThat(sliceForFile.isPresent());
+        assertTrue(sliceForFile.isPresent());
+        int slot = sliceForFile.get();
+
+        File outputSlice = outputSlices[slot];
+        File outputFile = new File(new File(outputSlice, packagePath), "file0.class");
+        assertThat(outputFile.exists()).isTrue();
+        outputFile = new File(new File(outputSlice, packagePath), "file1.class");
+        assertThat(outputFile.exists()).isTrue();
+    }
+
+    @Test
+    public void testIncrementalChangingFile()
+            throws TransformException, InterruptedException, IOException {
+        testChangingFile(true /* isIncremental */);
+    }
+
+    @Test
+    public void testNonIncrementalChangingFile()
+            throws TransformException, InterruptedException, IOException {
+        testChangingFile(false /* isIncremental */);
+    }
+
+    private void testChangingFile(boolean isIncremental)
+            throws IOException, TransformException, InterruptedException {
+        InstantRunSlicer slicer = new InstantRunSlicer(logger, variantScope);
+
+        String packagePath = "com/foo/bar";
+        File folder = new File(getInputDir(), packagePath);
+        // add some content.
+        File file0 = createFile(folder, "file0.class");
+        createFile(folder, "file1.class");
+
+        // create the slices by invoking a non incremental mode.
+        slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(false)
+                .addInputs(ImmutableList.of(getInput(getInputDir(), ImmutableMap.of())))
+                .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
+                .build());
+
+        // change one of the slice input.
+        File file1 = createFile(folder, "file1.class", "updated content");
+        Map<File, Status> changedFiles = ImmutableMap.of(file1, Status.CHANGED);
+
+        slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(isIncremental)
+                .addInputs(ImmutableList.of(getInput(getInputDir(), changedFiles)))
+                .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
+                .build());
+
+        File[] outputSlices = getOutputDir().listFiles();
+        assertThat(outputSlices).isNotNull();
+        assertThat(outputSlices).hasLength(InstantRunSlicer.NUMBER_OF_SLICES_FOR_PROJECT_CLASSES);
+
+        Optional<Integer> sliceForFile =
+                findSliceForFile(getOutputDir(), getInputDir(), file0);
+        assertTrue(sliceForFile.isPresent());
+        int slot = sliceForFile.get();
+
+        File outputSlice = outputSlices[slot];
+        File outputFile = new File(new File(outputSlice, packagePath), "file0.class");
+        assertThat(outputFile.exists()).isTrue();
+        outputFile = new File(new File(outputSlice, packagePath), "file1.class");
+        assertThat(outputFile.exists()).isTrue();
+        assertThat(Files.readFirstLine(file1, Charsets.UTF_8)).isEqualTo("updated content");
+    }
+
+    @Test
+    public void testIncrementalAddingDirectory()
+            throws TransformException, InterruptedException, IOException {
+        testAddingDirectory(true /* isIncremental */);
+    }
+
+    @Test
+    public void testNonIncrementalAddingDirectory()
+            throws TransformException, InterruptedException, IOException {
+        testAddingDirectory(false /* isIncremental */);
+    }
+
+    private void testAddingDirectory(boolean isIncremental)
+            throws IOException, TransformException, InterruptedException {
+        InstantRunSlicer slicer = new InstantRunSlicer(logger, variantScope);
+
+        // create the slices by invoking a non incremental mode.
+        slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(false)
+                .addInputs(ImmutableList.of(getInput(getInputDir(), ImmutableMap.of())))
+                .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
+                .build());
+
+        String packagePath = "com/foo/bar";
+        File folder = new File(getInputDir(), packagePath);
+        File singleClassFile = createFile(folder, "file0.class");
+        Map<File, Status> changedFiles = ImmutableMap.of(singleClassFile, Status.ADDED);
+
+        slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(isIncremental)
+                .addInputs(ImmutableList.of(getInput(getInputDir(), changedFiles)))
+                .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
+                .build());
+
+        File[] outputSlices = getOutputDir().listFiles();
+        assertThat(outputSlices).isNotNull();
+        assertThat(outputSlices).hasLength(InstantRunSlicer.NUMBER_OF_SLICES_FOR_PROJECT_CLASSES);
+
+        Optional<Integer> sliceForFile =
+                findSliceForFile(getOutputDir(), getInputDir(), singleClassFile);
+        assertTrue(sliceForFile.isPresent());
         int slot = sliceForFile.get();
 
         File outputSlice = outputSlices[slot];
@@ -320,16 +449,37 @@ public class InstantRunSlicerTest {
     }
 
     @Test
-    public void testRemovingDirectory() throws IOException, TransformException,
+    public void testIncrementalRemovingDirectory()
+            throws TransformException, InterruptedException, IOException {
+        testRemovingDirectory(true /* isIncremental */);
+    }
+
+    @Test
+    public void testNonIncrementalRemovingDirectory()
+            throws TransformException, InterruptedException, IOException {
+        testRemovingDirectory(false /* isIncremental */);
+    }
+
+    private void testRemovingDirectory(boolean isIncremental) throws IOException, TransformException,
             InterruptedException {
         InstantRunSlicer slicer = new InstantRunSlicer(logger, variantScope);
+
+        // create the slices by invoking a non incremental mode.
+        slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(false)
+                .addInputs(ImmutableList.of(getInput(getInputDir(), ImmutableMap.of())))
+                .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
+                .build());
 
         String packagePath = "com/foo/bar";
         File folder = new File(getInputDir(), packagePath);
         File singleClassFile = createFile(folder, "file0.class");
         Map<File, Status> changedFiles = ImmutableMap.of(folder, Status.ADDED);
 
+        // add the file to one of the slice, no need to check it's there, it's covered by another
+        // test.
         slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(true)
                 .addInputs(ImmutableList.of(getInput(getInputDir(), changedFiles)))
                 .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
                 .build());
@@ -340,6 +490,7 @@ public class InstantRunSlicerTest {
         changedFiles = ImmutableMap.of(folder, Status.REMOVED);
 
         slicer.transform(new TransformInvocationBuilder(context)
+                .setIncrementalMode(isIncremental)
                 .addInputs(ImmutableList.of(getInput(getInputDir(), changedFiles)))
                 .addOutputProvider(getOutputProvider(getOutputDir(), jarOutput))
                 .build());
@@ -350,7 +501,7 @@ public class InstantRunSlicerTest {
 
         Optional<Integer> sliceForFile =
                 findSliceForFile(getOutputDir(), getInputDir(), singleClassFile);
-        assertThat(!sliceForFile.isPresent());
+        assertFalse(sliceForFile.isPresent());
     }
 
     private static Optional<Integer> findSliceForFile(
@@ -425,7 +576,7 @@ public class InstantRunSlicerTest {
             @Override
             public File getContentLocation(@NonNull String name,
                     @NonNull Set<QualifiedContent.ContentType> types,
-                    @NonNull Set<QualifiedContent.Scope> scopes, @NonNull Format format) {
+                    @NonNull Set<? super QualifiedContent.Scope> scopes, @NonNull Format format) {
                 if (format == Format.DIRECTORY) {
                     return new File(outputDir, name);
                 }

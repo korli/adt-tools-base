@@ -18,20 +18,14 @@ package com.android.repository.api;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.annotations.VisibleForTesting;
 import com.android.repository.io.FileOp;
-import com.google.common.base.Charsets;
 import com.google.common.base.Objects;
 import com.google.common.hash.Hashing;
-import com.google.common.io.ByteStreams;
 import com.google.common.io.CharStreams;
-import com.google.common.io.Files;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-
 import javax.xml.bind.annotation.XmlTransient;
 
 /**
@@ -39,13 +33,12 @@ import javax.xml.bind.annotation.XmlTransient;
  */
 @SuppressWarnings("MethodMayBeStatic")
 @XmlTransient
-public abstract class License {
+public abstract class License implements Comparable<License> {
 
     /**
      * The name of the directory used to store tokens indicating approval of licenses.
      */
-    @VisibleForTesting
-    static final String LICENSE_DIR = "licenses";
+    public static final String LICENSE_DIR = "licenses";
 
     /**
      * Gets the ID of this license, used to refer to it from within a {@link RepoPackage}.
@@ -149,9 +142,9 @@ public abstract class License {
         if (!fop.exists(licenseFile)) {
             return false;
         }
-        try {
-            for (String hash : CharStreams.readLines(
-                    new InputStreamReader(fop.newFileInputStream(licenseFile)))) {
+        try (InputStreamReader licenseReader = new InputStreamReader(
+                fop.newFileInputStream(licenseFile))) {
+            for (String hash : CharStreams.readLines(licenseReader)) {
                 if (hash.equals(getLicenseHash())) {
                     return true;
                 }
@@ -192,6 +185,11 @@ public abstract class License {
             return false;
         }
         return true;
+    }
+
+    @Override
+    public int compareTo(License otherLicense) {
+        return getId().compareTo(otherLicense.getId());
     }
 }
 

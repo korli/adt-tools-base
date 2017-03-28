@@ -18,25 +18,21 @@ package com.android.utils;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicates;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.Iterables;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
 import com.google.common.io.Files;
-
 import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -211,7 +207,7 @@ public final class FileUtils {
         // attempt to create first.
         // if failure only throw if folder does not exist.
         // This makes this method able to create the same folder(s) from different thread
-        if (!folder.mkdirs() && !folder.exists()) {
+        if (!folder.mkdirs() && !folder.isDirectory()) {
             throw new RuntimeException("Cannot create directory " + folder);
         }
 
@@ -366,6 +362,22 @@ public final class FileUtils {
         return path;
     }
 
+    /**
+     * Returns an absolute path that can be open by system APIs for all platforms.
+     *
+     * @param file The file whose path needs to be converted.
+     * @return On non-Windows platforms, the absolute path of the file. On Windows, the absolute
+     *     path preceded by "\\?\". This ensures that Windows API calls can open the path even if it
+     *     is more than 260 characters long.
+     */
+    @NonNull
+    public static String toExportableSystemDependentPath(@NonNull File file) {
+        if (File.separatorChar != '/' && !file.getAbsolutePath().startsWith("\\\\?\\")) {
+            return "\\\\?\\" + file.getAbsolutePath();
+        }
+        return file.getAbsolutePath();
+    }
+
     @NonNull
     public static String sha1(@NonNull File file) throws IOException {
         return Hashing.sha1().hashBytes(Files.toByteArray(file)).toString();
@@ -418,7 +430,8 @@ public final class FileUtils {
         checkArgument(base.isDirectory(), "'%s' must be a directory.", base.getAbsolutePath());
         return Files.fileTreeTraverser()
                 .preOrderTraversal(base)
-                .filter(Predicates.compose(Predicates.contains(pattern), File::getPath))
+                .filter(file -> pattern.matcher(
+                        FileUtils.toSystemIndependentPath(file.getPath())).find())
                 .toList();
     }
 
@@ -429,41 +442,8 @@ public final class FileUtils {
         checkArgument(base.isDirectory(), "'%s' must be a directory.", base.getAbsolutePath());
         return Files.fileTreeTraverser()
                 .preOrderTraversal(base)
-                .filter(Predicates.compose(Predicates.equalTo(name), File::getName))
+                .filter(file -> name.equals(file.getName()))
                 .last();
-    }
-
-    /**
-     * Reads a portion of a file to memory.
-     *
-     * @param file the file to read data from
-     * @param start the offset in the file to start reading
-     * @param length the number of bytes to read
-     * @return the bytes read
-     * @throws Exception failed to read the file
-     */
-    @NonNull
-    public static byte[] readSegment(@NonNull File file, long start, int length) throws Exception {
-        Preconditions.checkArgument(start >= 0, "start < 0");
-        Preconditions.checkArgument(length >= 0, "length < 0");
-
-        byte data[];
-        try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
-            raf.seek(start);
-
-            data = new byte[length];
-            int tot = 0;
-            while (tot < length) {
-                int r = raf.read(data, tot, length - tot);
-                if (r < 0) {
-                    throw new EOFException();
-                }
-
-                tot += r;
-            }
-        }
-
-        return data;
     }
 
     /**
@@ -476,76 +456,55 @@ public final class FileUtils {
     }
 
     /**
-     * Returns a valid file name modified from the requested file name. This method guarantees that
-     * there is a one-to-one mapping between the requested file names and the returned file names
-     * (i.e., if the input file names are different, the returned file names will also be
-     * different). The file name consists of a base name and an extension (which is an empty string
-     * if there is no extension). A directory where the file is located is also provided to check
-     * the length of the file path and keep both the file name and file path's lengths within limit.
+     * Returns {@code true} if a file/directory is in a given directory or in a subdirectory of the
+     * given directory, and {@code false} otherwise.
+     */
+    public static boolean isFileInDirectory(File file, File directory) throws IOException {
+        File canonicalFile = file.getCanonicalFile();
+        File canonicalDirectory = directory.getCanonicalFile();
+
+        canonicalFile = canonicalFile.getParentFile();
+        while (canonicalFile != null) {
+            if (canonicalFile.equals(canonicalDirectory)) {
+                return true;
+            }
+            canonicalFile = canonicalFile.getParentFile();
+        }
+        return false;
+    }
+
+    /**
+     * Returns the modified canonical path of a file with consideration of the case sensitivity of
+     * the underlying file system.
      *
-     * @param baseName the base name of the requested file name
-     * @param extension the extension of the requested file name (empty string if not available)
-     * @param directory the directory where the file will be located
-     * @throws IOException if the requested file name or file path is too long
+     * <p>This method addresses the scenario where we want to compute a unique path of a file such
+     * that two files with different computed paths are guaranteed to be different physical files,
+     * and vice versa. In such cases, using Java's {@link File#getCanonicalPath()} would not work
+     * because in case-insensitive file systems like Windows, two files having different canonical
+     * paths may actually refer to the same physical file (e.g., {@code "/foo"} and {@code "/Foo"}).
+     *
+     * <p>To address this issue, this method first detects whether the underlying file system is
+     * case-sensitive or not. If it is, this method returns the canonical path of the file, as would
+     * be returned by {@link File#getCanonicalPath()}. If it isn't, this method returns the
+     * lower-case canonical path of the file.
      */
     @NonNull
-    public static String getValidFileName(
-            @NonNull String baseName, @NonNull String extension, @NonNull File directory)
+    public static String getCaseSensitivityAwareCanonicalPath(@NonNull File file)
             throws IOException {
-        String fileName = (extension.isEmpty() ? baseName : (baseName + "." + extension));
-
-        String validBaseName = baseName.replaceAll("[^a-zA-Z0-9]", "_");
-        String validExtension = extension.replaceAll("[^a-zA-Z0-9]", "_");
-        String validExtensionWithDot = (validExtension.isEmpty() ? "" : ("." + validExtension));
-        String validFileName = validBaseName + validExtensionWithDot;
-
-        // Add a hash code to the returned file name to avoid accidental collision (when two
-        // different requested file names produce the same returned file name)
-        String fileHash = Hashing.sha1().hashString(fileName, StandardCharsets.UTF_8).toString();
-        if (!validFileName.equals(fileName)) {
-            validFileName = validBaseName + "_" + fileHash + validExtensionWithDot;
-        }
-
-        // If the file name/file path is too long, retain the hash code only and also keep the
-        // extension
-        if (isFilePathTooLong(validFileName, directory)) {
-            validFileName = fileHash + validExtensionWithDot;
-
-            // If the file name/file path is still too long, throw a RuntimeException
-            if (isFilePathTooLong(validFileName, directory)) {
-                throw new IOException("File name or file path is too long: "
-                        + new File(directory, validFileName).getAbsolutePath());
-            }
-        }
-
-        return validFileName;
-    }
-
-    /**
-     * Returns <code>true</code> if the file name is too long.
-     *
-     * @param fileName the file name
-     */
-    public static boolean isFileNameTooLong(@NonNull String fileName) {
-        return fileName.length() > 255;
-    }
-
-    /**
-     * Returns <code>true</code> if the file name or file path is too long.
-     *
-     * @param fileName the file name
-     * @param directory the directory where the file will be located
-     */
-    public static boolean isFilePathTooLong(@NonNull String fileName, @NonNull File directory) {
-        if (isFileNameTooLong(fileName)) {
-            return true;
-        }
-
-        int filePathLength = new File(directory, fileName).getAbsolutePath().length();
-        if (SdkConstants.currentPlatform() == SdkConstants.PLATFORM_WINDOWS) {
-            return filePathLength > 260;
+        boolean isFileSystemCaseSensitive = !new File("a").equals(new File("A"));
+        if (isFileSystemCaseSensitive) {
+            return file.getCanonicalPath();
         } else {
-            return filePathLength > 4096;
+            // In a case-insensitive file system, Java's File.equals() compares the files by
+            // converting individual characters of the file paths first to uppercase, then to
+            // lowercase, and then compares each pair of characters one by one. The following
+            // implementation mimics that behavior.
+            String canonicalPath = file.getCanonicalPath();
+            char[] chars = new char[canonicalPath.length()];
+            for (int i = 0; i < chars.length; i++) {
+                chars[i] = Character.toLowerCase(Character.toUpperCase(canonicalPath.charAt(i)));
+            }
+            return String.valueOf(chars);
         }
     }
 }

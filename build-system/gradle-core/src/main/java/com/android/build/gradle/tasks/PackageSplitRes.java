@@ -20,7 +20,7 @@ import com.android.annotations.NonNull;
 import com.android.build.FilterData;
 import com.android.build.OutputFile;
 import com.android.build.gradle.api.ApkOutputFile;
-import com.android.build.gradle.internal.model.FilterDataImpl;
+import com.android.build.gradle.internal.ide.FilterDataImpl;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantOutputScope;
 import com.android.build.gradle.internal.scope.VariantScope;
@@ -335,13 +335,11 @@ public class PackageSplitRes extends SplitRelatedTask {
         @Override
         public void execute(@NonNull PackageSplitRes packageSplitResourcesTask) {
             BaseVariantData<? extends BaseVariantOutputData> variantData = scope.getVariantData();
-            List<? extends BaseVariantOutputData> outputs = variantData.getOutputs();
-
             final VariantConfiguration config = variantData.getVariantConfiguration();
             Set<String> densityFilters = variantData.getFilters(OutputFile.FilterType.DENSITY);
             Set<String> languageFilters = variantData.getFilters(OutputFile.FilterType.LANGUAGE);
 
-            final BaseVariantOutputData variantOutputData = outputs.get(0);
+            final BaseVariantOutputData variantOutputData = variantData.getMainOutput();
             variantOutputData.packageSplitResourcesTask = packageSplitResourcesTask;
             VariantOutputScope variantOutputScope = variantOutputData.getScope();
             packageSplitResourcesTask.setInputDirectory(

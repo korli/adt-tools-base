@@ -13,74 +13,45 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <iostream>
-#include <memory>
+
+#include "perfd/cpu/cpu_profiler_component.h"
+#include "perfd/daemon.h"
+#include "perfd/energy/energy_profiler_component.h"
+#include "perfd/event/event_profiler_component.h"
+#include "perfd/generic_component.h"
+#include "perfd/memory/memory_profiler_component.h"
+#include "perfd/network/network_profiler_component.h"
+#include "utils/config.h"
+#include "utils/current_process.h"
+#include "utils/fs/path.h"
+#include "utils/trace.h"
+
 #include <string>
 
-#include <grpc++/grpc++.h>
-
-#include "cpu/cpu_profiler_component.h"
-#include "memory/memory_profiler_component.h"
-#include "perfd/perfa_service.h"
-#include "perfd/profiler_service.h"
-#include "perfd/memory/memory_service.h"
-#include "utils/config.h"
-
-using grpc::Service;
-using grpc::ServerBuilder;
-using namespace profiler;
-
-namespace {
-
-// Registers profiler |component| to perfd's server |builder|.
-// |component| cannot be 'const &' because we need to call its non-const methods
-// that return 'Service*'.
-// TODO: Refactor the dependency. It should be components depend on perfd; not
-// perfd depends on components.
-void RegisterPerfdComponent(ProfilerComponent* component,
-                            ServerBuilder* builder) {
-  Service* public_service = component->GetPublicService();
-  if (public_service != nullptr) {
-    builder->RegisterService(public_service);
-  }
-  Service* internal_service = component->GetInternalService();
-  if (internal_service != nullptr) {
-    builder->RegisterService(internal_service);
-  }
-}
-
-void RunServer() {
-  grpc::ServerBuilder builder;
-  // Listen on the given address without any authentication mechanism.
-  builder.AddListeningPort(kServerAddress, grpc::InsecureServerCredentials());
-
-  // TODO: Group generic_public_service and perfa_service into a component.
-  profiler::ProfilerServiceImpl generic_public_service;
-  builder.RegisterService(&generic_public_service);
-
-  profiler::PerfaServiceImpl perfa_service;
-  builder.RegisterService(&perfa_service);
-
-  profiler::CpuProfilerComponent cpu_component;
-  RegisterPerfdComponent(&cpu_component, &builder);
-
-  profiler::MemoryProfilerComponent memory_component;
-  RegisterPerfdComponent(&memory_component, &builder);
-
-  // Finally assemble the server.
-  std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-
-  std::cout << "Server listening on " << kServerAddress << std::endl;
-
-  // Wait for the server to shutdown. Note that some other thread must be
-  // responsible for shutting down the server for this call to ever return.
-  server->Wait();
-}
-
-}  // anonymous namespace
-
 int main(int argc, char** argv) {
-  RunServer();
+  using std::string;
 
+  profiler::Trace::Init();
+  profiler::Daemon daemon;
+
+  profiler::GenericComponent generic_component{daemon};
+  daemon.RegisterComponent(&generic_component);
+
+  profiler::CpuProfilerComponent cpu_component{daemon};
+  daemon.RegisterComponent(&cpu_component);
+
+  profiler::MemoryProfilerComponent memory_component{daemon};
+  daemon.RegisterComponent(&memory_component);
+
+  profiler::EventProfilerComponent event_component{};
+  daemon.RegisterComponent(&event_component);
+
+  profiler::EnergyProfilerComponent energy_component{daemon};
+  daemon.RegisterComponent(&energy_component);
+
+  profiler::NetworkProfilerComponent network_component{daemon};
+  daemon.RegisterComponent(&network_component);
+
+  daemon.RunServer(profiler::kServerAddress);
   return 0;
 }

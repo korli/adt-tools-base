@@ -6,15 +6,14 @@ import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.JavaContext;
-import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiLiteralExpression;
-
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -36,7 +35,7 @@ public class StringAuthLeakDetector extends Detector implements Detector.JavaPsi
     @Nullable
     @Override
     public List<Class<? extends PsiElement>> getApplicablePsiTypes() {
-        return Collections.<Class<? extends PsiElement>>singletonList(PsiLiteralExpression.class);
+        return Collections.singletonList(PsiLiteralExpression.class);
     }
 
     @Nullable
@@ -46,8 +45,8 @@ public class StringAuthLeakDetector extends Detector implements Detector.JavaPsi
     }
 
     private static class AuthLeakChecker extends JavaElementVisitor {
-        private final static String LEGAL_CHARS = "([\\w_.!~*\'()%;&=+$,-]+)";      // From RFC 2396
-        private final static Pattern AUTH_REGEXP =
+        private static final String LEGAL_CHARS = "([\\w_.!~*\'()%;&=+$,-]+)";      // From RFC 2396
+        private static final Pattern AUTH_REGEXP =
                 Pattern.compile("([\\w+.-]+)://" + LEGAL_CHARS + ':' + LEGAL_CHARS + '@' +
                         LEGAL_CHARS);
 

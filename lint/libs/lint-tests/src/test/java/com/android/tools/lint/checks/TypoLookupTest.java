@@ -21,7 +21,6 @@ import com.android.tools.lint.detector.api.Detector;
 import com.google.common.base.Charsets;
 import com.google.common.base.Splitter;
 import com.google.common.io.Files;
-
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
@@ -39,7 +38,7 @@ public class TypoLookupTest extends AbstractCheckTest {
     private static final String SEPARATOR = "->";
 
     public void testCapitalization() throws Exception {
-        LintClient client = new TestLintClient();
+        LintClient client = createClient();
         // Make sure it can be read in
         TypoLookup db = TypoLookup.get(client, "de", null);
         assertNotNull(db);
@@ -79,7 +78,7 @@ public class TypoLookupTest extends AbstractCheckTest {
     }
 
     public void test1() {
-        TypoLookup db = TypoLookup.get(new TestLintClient(), "en", null);
+        TypoLookup db = TypoLookup.get(createClient(), "en", null);
         assertNull(db.getTypos("hello", 0, "hello".length()));
         assertNull(db.getTypos("this", 0, "this".length()));
 
@@ -106,14 +105,14 @@ public class TypoLookupTest extends AbstractCheckTest {
     }
 
     public void testRegion() {
-        TypoLookup db = TypoLookup.get(new TestLintClient(), "en", "US");
+        TypoLookup db = TypoLookup.get(createClient(), "en", "US");
         assertNotNull(db.getTypos("wiht", 0, "wiht".length()));
-        db = TypoLookup.get(new TestLintClient(), "en", "GB");
+        db = TypoLookup.get(createClient(), "en", "GB");
         assertNotNull(db.getTypos("wiht", 0, "wiht".length()));
     }
 
     public void test2() {
-        TypoLookup db = TypoLookup.get(new TestLintClient(), "nb", null); //$NON-NLS-1$
+        TypoLookup db = TypoLookup.get(createClient(), "nb", null);
         assertNull(db.getTypos("hello", 0, "hello".length()));
         assertNull(db.getTypos("this", 0, "this".length()));
 
@@ -134,7 +133,7 @@ public class TypoLookupTest extends AbstractCheckTest {
         // Some language dictionaries contain multi-word sequences (e.g. where there's a
         // space on the left hand side). This needs some particular care in the lookup
         // which is usually word oriented.
-        TypoLookup db = TypoLookup.get(new TestLintClient(), "de", "DE"); //$NON-NLS-1$
+        TypoLookup db = TypoLookup.get(createClient(), "de", "DE");
 
         // all zu->allzu
 
@@ -164,7 +163,7 @@ public class TypoLookupTest extends AbstractCheckTest {
     }
 
     public void testGlobbing() {
-        TypoLookup db = TypoLookup.get(new TestLintClient(), "de", null);
+        TypoLookup db = TypoLookup.get(createClient(), "de", null);
 
         // Authorisierung*->Autorisierung*
         String text = "Authorisierungscode";
@@ -191,16 +190,15 @@ public class TypoLookupTest extends AbstractCheckTest {
     public void testComparisons() throws Exception {
         // Ensure that the two comparison methods agree
 
-        LintClient client = new TestLintClient();
+        LintClient client = createClient();
         for (String locale : new String[] { "de", "nb", "es", "en", "pt", "hu", "it", "tr" }) {
             File f = client.findResource(String.format("tools/support/typos-%1$s.txt", locale));
             assertTrue(locale, f != null && f.exists());
 
-            Set<String> typos = new HashSet<String>(2000);
+            Set<String> typos = new HashSet<>(2000);
             List<String> lines = Files.readLines(f, Charsets.UTF_8);
-            for (int i = 0, n = lines.size(); i < n; i++) {
-                String line = lines.get(i);
-                if (line.isEmpty() || line.trim().startsWith("#")) { //$NON-NLS-1$
+            for (String line : lines) {
+                if (line.isEmpty() || line.trim().startsWith("#")) {
                     continue;
                 }
 
@@ -210,9 +208,9 @@ public class TypoLookupTest extends AbstractCheckTest {
                 }
                 String typo = line.substring(0, index).trim();
                 typos.add(typo);
-           }
+            }
 
-            List<String> words = new ArrayList<String>(typos);
+            List<String> words = new ArrayList<>(typos);
 
             // Make sure that the two comparison methods agree on all the strings
             // (which should be in a semi-random order now that they're in a set ordered
@@ -294,17 +292,17 @@ public class TypoLookupTest extends AbstractCheckTest {
 
     private void validateDictionary(String locale) throws Exception {
         // Check that all the typo files are well formed
-        LintClient client = new TestLintClient();
+        LintClient client = createClient();
         File f = client.findResource(String.format("tools/support/typos-%1$s.txt", locale));
         assertTrue(locale, f != null && f.exists());
 
-        Set<String> typos = new HashSet<String>(2000);
-        List<Pattern> patterns = new ArrayList<Pattern>(100);
+        Set<String> typos = new HashSet<>(2000);
+        List<Pattern> patterns = new ArrayList<>(100);
 
         List<String> lines = Files.readLines(f, Charsets.UTF_8);
         for (int i = 0, n = lines.size(); i < n; i++) {
             String line = lines.get(i);
-            if (line.isEmpty() || line.trim().startsWith("#")) { //$NON-NLS-1$
+            if (line.isEmpty() || line.trim().startsWith("#")) {
                 continue;
             }
 
@@ -322,7 +320,7 @@ public class TypoLookupTest extends AbstractCheckTest {
             }
 
             if (replacements.indexOf(',') != -1) {
-                Set<String> seen = new HashSet<String>();
+                Set<String> seen = new HashSet<>();
                 for (String s : Splitter.on(',').omitEmptyStrings().split(replacements)) {
                     if (seen.contains(s)) {
                         seen.add(s);
@@ -387,18 +385,17 @@ public class TypoLookupTest extends AbstractCheckTest {
         assertNotNull(db.getTypos("Andriod".getBytes(Charsets.UTF_8), 0, "Andriod".length()));
     }
 
-    private void fixDictionary(File original) throws Exception {
+    private static void fixDictionary(File original) throws Exception {
         File fixed = new File(original.getParentFile(), "fixed-" + original.getName());
 
-        Map<String, Integer> typos = new HashMap<String, Integer>(2000);
-        List<Pattern> patterns = new ArrayList<Pattern>(100);
+        Map<String, Integer> typos = new HashMap<>(2000);
+        List<Pattern> patterns = new ArrayList<>(100);
         List<String> lines = Files.readLines(original, Charsets.UTF_8);
-        List<String> output = new ArrayList<String>(lines.size());
+        List<String> output = new ArrayList<>(lines.size());
 
         wordLoop:
-        for (int i = 0, n = lines.size(); i < n; i++) {
-            String line = lines.get(i);
-            if (line.isEmpty() || line.trim().startsWith("#")) { //$NON-NLS-1$
+        for (String line : lines) {
+            if (line.isEmpty() || line.trim().startsWith("#")) {
                 output.add(line);
                 continue;
             }
@@ -425,8 +422,8 @@ public class TypoLookupTest extends AbstractCheckTest {
 
             // Ensure that all the replacements are unique
             if (replacements.indexOf(',') != -1) {
-                Set<String> seen = new HashSet<String>();
-                List<String> out = new ArrayList<String>();
+                Set<String> seen = new HashSet<>();
+                List<String> out = new ArrayList<>();
                 boolean rewrite = false;
                 for (String s : Splitter.on(',').omitEmptyStrings().split(replacements)) {
                     if (seen.contains(s)) {
@@ -483,7 +480,7 @@ public class TypoLookupTest extends AbstractCheckTest {
                 assertTrue(prev.startsWith(typo));
                 // Append new replacements and put back into the list
                 // (unless they're already listed as replacements)
-                Set<String> seen = new HashSet<String>();
+                Set<String> seen = new HashSet<>();
                 for (String s : Splitter.on(',').split(prev.substring(prev.indexOf(SEPARATOR)
                         + 2))) {
                     seen.add(s);

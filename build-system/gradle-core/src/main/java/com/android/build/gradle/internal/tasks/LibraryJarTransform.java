@@ -33,6 +33,7 @@ import com.android.build.gradle.internal.transforms.JarMerger;
 import com.android.build.gradle.tasks.annotations.TypedefRemover;
 import com.android.builder.packaging.ZipAbortException;
 import com.android.builder.packaging.ZipEntryFilter;
+import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -44,7 +45,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.attribute.FileTime;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
@@ -153,6 +153,10 @@ public class LibraryJarTransform extends Transform {
     @Override
     public void transform(@NonNull TransformInvocation invocation)
             throws IOException, TransformException, InterruptedException {
+        // non incremental transform, need to clear out outputs.
+        // main class jar will get rewritten, just delete local jar folder content.
+        FileUtils.deleteDirectoryContents(localJarsLocation);
+
         List<String> excludes = Lists.newArrayListWithExpectedSize(5);
 
         // these must be regexp to match the zip entries
@@ -223,9 +227,9 @@ public class LibraryJarTransform extends Transform {
 
         for (QualifiedContent content : qualifiedContentList) {
             if (content instanceof JarInput) {
-                jarMerger.addJar(content.getFile(), true);
+                jarMerger.addJar(content.getFile());
             } else {
-                jarMerger.addFolder(content.getFile(), true);
+                jarMerger.addFolder(content.getFile());
             }
         }
 
@@ -263,7 +267,7 @@ public class LibraryJarTransform extends Transform {
             JarMerger jarMerger = new JarMerger(new File(localJarsLocation, "otherclasses.jar"));
             jarMerger.setFilter(classOnlyFilter);
             for (QualifiedContent content : qualifiedContentList) {
-                jarMerger.addFolder(content.getFile(), true);
+                jarMerger.addFolder(content.getFile());
             }
             jarMerger.close();
         }
@@ -276,7 +280,7 @@ public class LibraryJarTransform extends Transform {
         if (typedefRecipe.isFile()) {
             jarMerger.setTypedefRemover(new TypedefRemover().setTypedefFile(typedefRecipe));
         }
-        jarMerger.addFolder(file, true);
+        jarMerger.addFolder(file);
         jarMerger.close();
     }
 
@@ -294,7 +298,6 @@ public class LibraryJarTransform extends Transform {
             @NonNull File to,
             @Nullable ZipEntryFilter filter) throws IOException {
         byte[] buffer = new byte[4096];
-        FileTime zeroTime = FileTime.fromMillis(0);
 
         try (Closer closer = Closer.create()) {
             FileOutputStream fos = closer.register(new FileOutputStream(to));
@@ -324,9 +327,9 @@ public class LibraryJarTransform extends Transform {
                     newEntry = new JarEntry(name);
                 }
 
-                newEntry.setLastModifiedTime(zeroTime);
-                newEntry.setLastAccessTime(zeroTime);
-                newEntry.setCreationTime(zeroTime);
+                newEntry.setLastModifiedTime(JarMerger.ZERO_TIME);
+                newEntry.setLastAccessTime(JarMerger.ZERO_TIME);
+                newEntry.setCreationTime(JarMerger.ZERO_TIME);
 
                 // add the entry to the jar archive
                 zos.putNextEntry(newEntry);

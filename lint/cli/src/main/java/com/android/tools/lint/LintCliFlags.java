@@ -23,7 +23,6 @@ import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.Severity;
 import com.google.common.annotations.Beta;
 import com.google.common.collect.Lists;
-
 import java.io.File;
 import java.util.Collections;
 import java.util.HashSet;
@@ -39,27 +38,30 @@ import java.util.Set;
  */
 @Beta
 public class LintCliFlags {
-    private final Set<String> mSuppress = new HashSet<String>();
-    private final Set<String> mEnabled = new HashSet<String>();
-    private Map<String,Severity> mSeverities;
-    private Set<String> mCheck = null;
-    private boolean mSetExitCode;
-    private boolean mFullPath;
-    private boolean mShowLines = true;
-    private final List<Reporter> mReporters = Lists.newArrayList();
-    private boolean mQuiet;
-    private boolean mWarnAll;
-    private boolean mNoWarnings;
-    private boolean mAllErrors;
-    private boolean mFatalOnly;
-    private boolean mExplainIssues;
-    private List<File> mSources;
-    private List<File> mClasses;
-    private List<File> mLibraries;
-    private List<File> mResources;
+    private final Set<String> suppress = new HashSet<>();
+    private final Set<String> enabled = new HashSet<>();
+    private Map<String,Severity> severities;
+    private Set<String> check = null;
+    private boolean setExitCode;
+    private boolean fullPath;
+    private boolean showLines = true;
+    private final List<Reporter> reporters = Lists.newArrayList();
+    private boolean quiet;
+    private boolean warnAll;
+    private boolean noWarnings;
+    private boolean allErrors;
+    private boolean fatalOnly;
+    private boolean explainIssues;
+    private List<File> sources;
+    private List<File> classes;
+    private List<File> libraries;
+    private List<File> resources;
+    private File baselineFile;
 
-    private File mDefaultConfiguration;
-    private boolean mShowAll;
+    private File defaultConfiguration;
+    private boolean showAll;
+    private boolean removedFixedBaselineIssues;
+    private boolean writeBaselineIfMissing = true;
 
     public static final int ERRNO_SUCCESS = 0;
     public static final int ERRNO_ERRORS = 1;
@@ -67,6 +69,7 @@ public class LintCliFlags {
     public static final int ERRNO_EXISTS = 3;
     public static final int ERRNO_HELP = 4;
     public static final int ERRNO_INVALID_ARGS = 5;
+    public static final int ERRNO_CREATED_BASELINE = 6;
 
     /**
      * Returns the set of issue id's to suppress. Callers are allowed to modify this collection.
@@ -74,7 +77,7 @@ public class LintCliFlags {
      */
     @NonNull
     public Set<String> getSuppressedIds() {
-        return mSuppress;
+        return suppress;
     }
 
     /**
@@ -83,7 +86,7 @@ public class LintCliFlags {
      */
     @NonNull
     public Set<String> getEnabledIds() {
-        return mEnabled;
+        return enabled;
     }
 
     /**
@@ -92,7 +95,7 @@ public class LintCliFlags {
      */
     @NonNull
     public Map<String,Severity> getSeverityOverrides() {
-        return mSeverities == null ? Collections.<String,Severity>emptyMap() : mSeverities;
+        return severities == null ? Collections.emptyMap() : severities;
     }
 
     /**
@@ -102,7 +105,7 @@ public class LintCliFlags {
      */
     @Nullable
     public Set<String> getExactCheckedIds() {
-        return mCheck;
+        return check;
     }
 
     /**
@@ -110,17 +113,17 @@ public class LintCliFlags {
      * @param check the set of issue id's to check
      */
     public void setExactCheckedIds(@Nullable Set<String> check) {
-        mCheck = check;
+        this.check = check;
     }
 
     /** Whether lint should set the exit code of the process if errors are found */
     public boolean isSetExitCode() {
-        return mSetExitCode;
+        return setExitCode;
     }
 
     /** Sets whether lint should set the exit code of the process if errors are found */
     public void setSetExitCode(boolean setExitCode) {
-        mSetExitCode = setExitCode;
+        this.setExitCode = setExitCode;
     }
 
     /**
@@ -128,7 +131,7 @@ public class LintCliFlags {
      * are relative to the path lint was invoked from.
      */
     public boolean isFullPath() {
-        return mFullPath;
+        return fullPath;
     }
 
     /**
@@ -136,7 +139,7 @@ public class LintCliFlags {
      * are relative to the path lint was invoked from.
      */
     public void setFullPath(boolean fullPath) {
-        mFullPath = fullPath;
+        this.fullPath = fullPath;
     }
 
     /**
@@ -144,7 +147,7 @@ public class LintCliFlags {
      * (true by default)
      */
     public boolean isShowSourceLines() {
-        return mShowLines;
+        return showLines;
     }
 
     /**
@@ -152,7 +155,7 @@ public class LintCliFlags {
      * (true by default)
      */
     public void setShowSourceLines(boolean showLines) {
-        mShowLines = showLines;
+        this.showLines = showLines;
     }
 
     /**
@@ -161,7 +164,7 @@ public class LintCliFlags {
      */
     @NonNull
     public List<Reporter> getReporters() {
-        return mReporters;
+        return reporters;
     }
 
     /**
@@ -169,7 +172,7 @@ public class LintCliFlags {
      * file)
      */
     public boolean isQuiet() {
-        return mQuiet;
+        return quiet;
     }
 
     /**
@@ -177,37 +180,37 @@ public class LintCliFlags {
      * file)
      */
     public void setQuiet(boolean quiet) {
-        mQuiet = quiet;
+        this.quiet = quiet;
     }
 
     /** Returns whether lint should check all warnings, including those off by default */
     public boolean isCheckAllWarnings() {
-        return mWarnAll;
+        return warnAll;
     }
 
     /** Sets whether lint should check all warnings, including those off by default */
     public void setCheckAllWarnings(boolean warnAll) {
-        mWarnAll = warnAll;
+        this.warnAll = warnAll;
     }
 
     /** Returns whether lint will only check for errors (ignoring warnings) */
     public boolean isIgnoreWarnings() {
-        return mNoWarnings;
+        return noWarnings;
     }
 
     /** Sets whether lint will only check for errors (ignoring warnings) */
     public void setIgnoreWarnings(boolean noWarnings) {
-        mNoWarnings = noWarnings;
+        this.noWarnings = noWarnings;
     }
 
     /** Returns whether lint should treat all warnings as errors */
     public boolean isWarningsAsErrors() {
-        return mAllErrors;
+        return allErrors;
     }
 
     /** Sets whether lint should treat all warnings as errors */
     public void setWarningsAsErrors(boolean allErrors) {
-        mAllErrors = allErrors;
+        this.allErrors = allErrors;
     }
 
     /**
@@ -215,7 +218,7 @@ public class LintCliFlags {
      * locations, not truncating long messages, etc.)
      */
     public boolean isShowEverything() {
-        return mShowAll;
+        return showAll;
     }
 
     /**
@@ -223,7 +226,7 @@ public class LintCliFlags {
      * locations, not truncating long messages, etc.)
      */
     public void setShowEverything(boolean showAll) {
-        mShowAll = showAll;
+        this.showAll = showAll;
     }
 
     /**
@@ -231,7 +234,7 @@ public class LintCliFlags {
      */
     @Nullable
     public File getDefaultConfiguration() {
-        return mDefaultConfiguration;
+        return defaultConfiguration;
     }
 
     /**
@@ -241,7 +244,7 @@ public class LintCliFlags {
      * {@link LintCliClient#createConfigurationFromFile(java.io.File)}.
      */
     public void setDefaultConfiguration(@Nullable File defaultConfiguration) {
-        mDefaultConfiguration = defaultConfiguration;
+        this.defaultConfiguration = defaultConfiguration;
     }
 
     /**
@@ -255,7 +258,7 @@ public class LintCliFlags {
      */
     @Nullable
     public List<File> getSourcesOverride() {
-        return mSources;
+        return sources;
     }
 
     /**
@@ -268,7 +271,7 @@ public class LintCliFlags {
      * build system unknown to lint, such as say {@code make}.
      */
     public void setSourcesOverride(@Nullable List<File> sources) {
-        mSources = sources;
+        this.sources = sources;
     }
 
     /**
@@ -282,7 +285,7 @@ public class LintCliFlags {
      */
     @Nullable
     public List<File> getClassesOverride() {
-        return mClasses;
+        return classes;
     }
 
     /**
@@ -295,7 +298,7 @@ public class LintCliFlags {
      * build system unknown to lint, such as say {@code make}.
      */
     public void setClassesOverride(@Nullable List<File> classes) {
-        mClasses = classes;
+        this.classes = classes;
     }
 
     /**
@@ -309,7 +312,7 @@ public class LintCliFlags {
      */
     @Nullable
     public List<File> getLibrariesOverride() {
-        return mLibraries;
+        return libraries;
     }
 
     /**
@@ -322,7 +325,7 @@ public class LintCliFlags {
      * build system unknown to lint, such as say {@code make}.
      */
     public void setLibrariesOverride(@Nullable List<File> libraries) {
-        mLibraries = libraries;
+        this.libraries = libraries;
     }
 
     /**
@@ -336,7 +339,7 @@ public class LintCliFlags {
      */
     @Nullable
     public List<File> getResourcesOverride() {
-        return mResources;
+        return resources;
     }
 
     /**
@@ -349,7 +352,7 @@ public class LintCliFlags {
      * build system unknown to lint, such as say {@code make}.
      */
     public void setResourcesOverride(@Nullable List<File> resources) {
-        mResources = resources;
+        this.resources = resources;
     }
 
     /**
@@ -357,7 +360,7 @@ public class LintCliFlags {
      * @return true if we should only check fatal issues
      */
     public boolean isFatalOnly() {
-        return mFatalOnly;
+        return fatalOnly;
     }
 
     /**
@@ -365,7 +368,7 @@ public class LintCliFlags {
      * @param fatalOnly if true, only check fatal issues
      */
     public void setFatalOnly(boolean fatalOnly) {
-        mFatalOnly = fatalOnly;
+        this.fatalOnly = fatalOnly;
     }
 
     /**
@@ -373,7 +376,7 @@ public class LintCliFlags {
      * @param severities map from issue id to severity
      */
     public void setSeverityOverrides(@NonNull Map<String, Severity> severities) {
-        mSeverities = severities;
+        this.severities = severities;
     }
 
     /**
@@ -383,7 +386,7 @@ public class LintCliFlags {
      * @return true if text reports should include explanation text
      */
     public boolean isExplainIssues() {
-        return mExplainIssues;
+        return explainIssues;
     }
 
     /**
@@ -393,6 +396,66 @@ public class LintCliFlags {
      * @param explainText true if text reports should include explanation text
      */
     public void setExplainIssues(boolean explainText) {
-        mExplainIssues = explainText;
+        explainIssues = explainText;
+    }
+
+    /**
+     * Returns the baseline file to use, if any. The baseline file is
+     * an XML report previously created by lint, and any warnings and
+     * errors listed in that report will be ignored from analysis.
+     * <p>
+     * If you have a project with a large number of existing warnings,
+     * this lets you set a baseline and only see newly introduced warnings
+     * until you get a chance to go back and address the "technical debt"
+     * of the earlier warnings.
+     *
+     * @return the baseline file, if any
+     */
+    @Nullable
+    public File getBaselineFile() {
+        return baselineFile;
+    }
+
+    /**
+     * Sets the baseline file, if any.
+     *
+     * @see #getBaselineFile()
+     * @param baselineFile
+     */
+    public void setBaselineFile(@Nullable File baselineFile) {
+        this.baselineFile = baselineFile;
+    }
+
+    /**
+     * Whether lint will update the baseline file to remove any issues that
+     * are no longer present in the codebase. This will only remove fixed issues,
+     * it will not insert any newly found issues.
+     * <p>
+     * Only applies when a baseline file has been configured.
+     *
+     * @return whether to update the baseline file.
+     */
+    public boolean isRemoveFixedBaselineIssues() {
+        return removedFixedBaselineIssues;
+    }
+
+    /**
+     * Sets whether lint should remove fixed baseline issues.
+     *
+     * @see #isRemoveFixedBaselineIssues()
+     * @param removeFixed
+     */
+    public void setRemovedFixedBaselineIssues(boolean removeFixed) {
+        removedFixedBaselineIssues = removeFixed;
+    }
+
+    /** If true, write the baseline file if missing. (This is the default.) */
+    public boolean isWriteBaselineIfMissing() {
+        return writeBaselineIfMissing;
+    }
+
+    /** If true, write the baseline file if missing. (This is the default.) */
+    public void setWriteBaselineIfMissing(boolean writeBaselineIfMissing) {
+        this.writeBaselineIfMissing = writeBaselineIfMissing;
     }
 }

@@ -20,6 +20,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.annotations.concurrency.Immutable;
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.TestAndroidConfig;
@@ -30,18 +31,29 @@ import com.android.build.gradle.internal.dsl.CoreJavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreNdkOptions;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
+import com.android.builder.core.DefaultApiVersion;
 import com.android.builder.core.VariantConfiguration;
 import com.android.builder.core.VariantType;
+import com.android.builder.dependency.level2.AndroidDependency;
+import com.android.builder.model.AndroidLibrary;
+import com.android.builder.model.AndroidProject;
+import com.android.builder.model.ApiVersion;
 import com.android.builder.model.InstantRun;
+import com.android.builder.model.OptionalCompilationStep;
 import com.android.builder.model.SourceProvider;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
 import org.gradle.api.Project;
 
+import android.databinding.tool.DataBindingBuilder;
+
+import java.io.File;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -108,9 +120,39 @@ public class GradleVariantConfiguration
     }
 
     /**
-     * Interface for building the {@link GradleVariantConfiguration} instances.
+     * Returns the minimum SDK version for this variant, potentially overridden by a property passed
+     * by the IDE.
+     *
+     * @see VariantConfiguration#getMinSdkVersion()
      */
-    public interface Builder{
+    @NonNull
+    @Override
+    public ApiVersion getMinSdkVersion() {
+        // The changed behavior comes from overriding getApiVersionsNonTestVariant().
+        return super.getMinSdkVersion();
+    }
+
+    /**
+     * Return the minSdkVersion for filtering out resources.
+     *
+     * <p>This is always the minimum SDK version read from the manifest and/or DSL, ignoring the
+     * property passed from the IDE. This way R.java contents don't change depending on the device
+     * selected in the IDE.
+     */
+    @NonNull
+    public ApiVersion getResourcesMinSdkVersion() {
+        VariantConfiguration testedConfig = getTestedConfig();
+        if (testedConfig == null) {
+            return super.getApiVersionsNonTestVariant().minSdkVersion;
+        } else if (testedConfig instanceof GradleVariantConfiguration) {
+            return ((GradleVariantConfiguration) testedConfig).getResourcesMinSdkVersion();
+        } else {
+            return testedConfig.getMinSdkVersion();
+        }
+    }
+
+    /** Interface for building the {@link GradleVariantConfiguration} instances. */
+    public interface Builder {
         /** Creates a variant configuration */
         @NonNull
         GradleVariantConfiguration create(
@@ -270,6 +312,31 @@ public class GradleVariantConfiguration
     @NonNull
     public CoreNdkOptions getNdkConfig() {
         return mergedNdkConfig;
+    }
+
+    @Override
+    public ApiVersions getApiVersionsNonTestVariant() {
+        ApiVersions apiVersions = super.getApiVersionsNonTestVariant();
+        if (!project.hasProperty(AndroidProject.PROPERTY_BUILD_API)
+                || !getBuildType().isDebuggable()) {
+            return apiVersions;
+        }
+
+        // Consider runtime API passed from the IDE only if the app is debuggable.
+        Integer targetAPILevel =
+                Integer.parseInt(project.property(AndroidProject.PROPERTY_BUILD_API).toString());
+
+        if (targetAPILevel < 23) {
+            // max 100 DEX files in native multidex for L - see http://b.android.com/233093
+            return apiVersions;
+        }
+
+        int minVersion =
+                apiVersions.targetSdkVersion.getApiLevel() > 0
+                        ? Integer.min(apiVersions.targetSdkVersion.getApiLevel(), targetAPILevel)
+                        : targetAPILevel;
+
+        return new ApiVersions(new DefaultApiVersion(minVersion), apiVersions.targetSdkVersion);
     }
 
     @NonNull
@@ -515,5 +582,18 @@ public class GradleVariantConfiguration
         } else {
             return super.getVersionCode();
         }
+    }
+
+    @NonNull
+    public ImmutableSet<File> getSubProjectDataBindingArtifactFolders() {
+        ImmutableSet.Builder<File> builder = ImmutableSet.builder();
+        for (AndroidDependency dependency : getFlatPackageAndroidLibraries()) {
+            File dataBindingDir = new File(dependency.getExtractedFolder(),
+                    DataBindingBuilder.DATA_BINDING_ROOT_FOLDER_IN_AAR);
+            if (dataBindingDir.exists()) {
+                builder.add(dataBindingDir);
+            }
+        }
+        return builder.build();
     }
 }

@@ -19,12 +19,21 @@ package com.android.build.gradle.tasks;
 import static com.android.SdkConstants.DOT_JAVA;
 import static com.android.SdkConstants.UTF_8;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.build.gradle.AndroidConfig;
+import com.android.build.gradle.internal.LibraryTaskManager;
+import com.android.build.gradle.internal.core.GradleVariantConfiguration;
+import com.android.build.gradle.internal.scope.ConventionMappingHelper;
+import com.android.build.gradle.internal.scope.TaskConfigAction;
+import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.AbstractAndroidCompile;
 import com.android.build.gradle.internal.variant.BaseVariantData;
+import com.android.build.gradle.internal.variant.LibraryVariantData;
 import com.android.build.gradle.tasks.annotations.ApiDatabase;
 import com.android.build.gradle.tasks.annotations.Extractor;
 import com.android.build.gradle.tasks.annotations.TypedefRemover;
+import com.android.builder.core.AndroidBuilder;
 import com.android.tools.lint.EcjParser;
 import com.android.tools.lint.EcjSourceFile;
 import com.google.common.collect.Lists;
@@ -34,9 +43,12 @@ import org.eclipse.jdt.core.compiler.IProblem;
 import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
 import org.eclipse.jdt.internal.compiler.util.Util;
+import org.gradle.api.Project;
+import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.EmptyFileVisitor;
 import org.gradle.api.file.FileVisitDetails;
 import org.gradle.api.logging.LogLevel;
+import org.gradle.api.plugins.BasePlugin;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputDirectory;
 import org.gradle.api.tasks.InputFile;
@@ -50,6 +62,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 /**
  * Task which extracts annotations from the source files, and writes them to one of
@@ -137,11 +150,11 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
      */
     @Optional
     @OutputFile
-    public File setTypedefFile() {
+    public File getTypedefFile() {
         return typedefFile;
     }
 
-    public void getTypedefFile(File typedefFile) {
+    public void setTypedefFile(File typedefFile) {
         this.typedefFile = typedefFile;
     }
 
@@ -233,15 +246,18 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
                 for (CompilationUnitDeclaration unit : parsedUnits) {
                     // so maybe I don't need my map!!
                     CategorizedProblem[] problems = unit.compilationResult().getAllProblems();
-                    for (IProblem problem : problems) {
-                        if (problem.isError()) {
-                            getLogger().warn("Not extracting annotations (compilation problems "
-                                    + "encountered)\n"
-                                    + "Error: " + new String(problem.getOriginatingFileName()) +
-                                    ":" +
-                                    problem.getSourceLineNumber() + ": " + problem.getMessage());
-                            // TODO: Consider whether we abort the build at this point!
-                            return;
+                    if (problems != null) {
+                        for (IProblem problem : problems) {
+                            if (problem != null && problem.isError()) {
+                                getLogger().warn("Not extracting annotations (compilation problems "
+                                        + "encountered)\n"
+                                        + "Error: " + new String(problem.getOriginatingFileName()) +
+                                        ":" +
+                                        problem.getSourceLineNumber() + ": " + problem
+                                        .getMessage());
+                                // TODO: Consider whether we abort the build at this point!
+                                return;
+                            }
                         }
                     }
                 }
@@ -304,7 +320,7 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
                         getLogger().warn("Could not read file", e);
                         return;
                     }
-                    EcjSourceFile unit = new EcjSourceFile(contents, file, encoding);
+                    EcjSourceFile unit = EcjSourceFile.create(contents, file, encoding);
                     sourceUnits.add(unit);
                 }
             }
@@ -349,6 +365,80 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
             return EcjParser.getLanguageLevel(1, 8);
         } else {
             return EcjParser.getLanguageLevel(1, 7);
+        }
+    }
+
+    public static class ConfigAction implements TaskConfigAction<ExtractAnnotations> {
+
+        @NonNull private Project project;
+        @NonNull private AndroidConfig extension;
+        @NonNull private VariantScope variantScope;
+
+        public ConfigAction(
+                @NonNull Project project,
+                @NonNull AndroidConfig extension,
+                @NonNull VariantScope variantScope) {
+            this.project = project;
+            this.extension = extension;
+            this.variantScope = variantScope;
+        }
+
+        @NonNull
+        @Override
+        public String getName() {
+            return variantScope.getTaskName("extract", "Annotations");
+        }
+
+        @NonNull
+        @Override
+        public Class<ExtractAnnotations> getType() {
+            return ExtractAnnotations.class;
+        }
+
+        @Override
+        public void execute(@NonNull ExtractAnnotations task) {
+            final GradleVariantConfiguration variantConfig = variantScope.getVariantConfiguration();
+            final AndroidBuilder androidBuilder = variantScope.getGlobalScope().getAndroidBuilder();
+
+            task.setDescription(
+                    "Extracts Android annotations for the "
+                            + variantConfig.getFullName()
+                            + " variant into the archive file");
+            task.setGroup(BasePlugin.BUILD_GROUP);
+            task.setVariant(variantScope.getVariantData());
+            task.setDestinationDir(
+                    new File(
+                            variantScope.getGlobalScope().getIntermediatesDir(),
+                            LibraryTaskManager.ANNOTATIONS + "/" + variantConfig.getDirName()));
+            task.setOutput(new File(task.getDestinationDir(), SdkConstants.FN_ANNOTATIONS_ZIP));
+            task.setTypedefFile(variantScope.getTypedefFile());
+            task.setClassDir(variantScope.getJavaOutputDir());
+            task.setSource(variantScope.getVariantData().getJavaSources());
+            task.setEncoding(extension.getCompileOptions().getEncoding());
+            task.setSourceCompatibility(
+                    extension.getCompileOptions().getSourceCompatibility().toString());
+            ConventionMappingHelper.map(
+                    task,
+                    "classpath",
+                    new Callable<ConfigurableFileCollection>() {
+                        @Override
+                        public ConfigurableFileCollection call() throws Exception {
+                            return project.files(androidBuilder.getCompileClasspath(variantConfig));
+                        }
+                    });
+
+            // Setup the boot classpath just before the task actually runs since this will
+            // force the sdk to be parsed. (Same as in compileTask)
+            task.doFirst(
+                    aTask -> {
+                        if (aTask instanceof ExtractAnnotations) {
+                            ExtractAnnotations extractAnnotations = (ExtractAnnotations) aTask;
+                            extractAnnotations.setBootClasspath(
+                                    androidBuilder.getBootClasspathAsStrings(false));
+                        }
+                    });
+
+            ((LibraryVariantData) variantScope.getVariantData()).generateAnnotationsTask = task;
         }
     }
 }

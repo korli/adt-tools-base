@@ -17,9 +17,11 @@
 package com.android.builder.signing;
 
 import com.android.annotations.NonNull;
-import com.android.builder.packaging.ApkCreatorFactory;
-import com.android.builder.packaging.ApkCreator;
-import com.android.builder.packaging.PackagerException;
+import com.android.apkzlib.zfile.ApkCreator;
+import com.android.apkzlib.zfile.ApkCreatorFactory;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * APK builder factory that creates {@link SignedJarApkCreator}s.
@@ -27,11 +29,13 @@ import com.android.builder.packaging.PackagerException;
 public class SignedJarApkCreatorFactory implements ApkCreatorFactory {
 
     @Override
-    public ApkCreator make(@NonNull CreationData creationData) throws PackagerException {
+    public ApkCreator make(@NonNull CreationData creationData) {
         try {
             return new SignedJarApkCreator(creationData);
-        } catch (Exception e) {
-            throw new PackagerException(e);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e);
         }
     }
 }

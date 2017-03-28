@@ -23,7 +23,6 @@ import com.android.repository.Revision;
 import com.android.repository.api.RepoManager;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.google.common.base.Objects;
-
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -34,6 +33,11 @@ import java.util.regex.Pattern;
  */
 @Deprecated
 public class ArchFilter {
+
+    /**
+     * Environment variable used to override the detected OS.
+     */
+    private static final String OS_OVERRIDE_ENV_VAR = "REPO_OS_OVERRIDE";
 
     private static final String PROP_HOST_OS = "Archive.HostOs";
     private static final String PROP_HOST_BITS = "Archive.HostBits";
@@ -108,7 +112,6 @@ public class ArchFilter {
                 hostOs = HostOs.fromXmlName(props.getProperty(LEGACY_PROP_OS));
             }
             if (!props.containsKey(PROP_HOST_BITS) &&
-                    !props.containsKey(PROP_HOST_BITS) &&
                     props.containsKey(LEGACY_PROP_ARCH)) {
                 // We'll only handle the typical x86 and x86_64 values of the old PROP_ARCH
                 // value and ignore the PPC value. "Any" is equivalent to keeping the new
@@ -208,7 +211,7 @@ public class ArchFilter {
      */
     @NonNull
     public static ArchFilter getCurrent() {
-        String os = System.getenv(com.android.repository.impl.meta.Archive.OS_OVERRIDE_ENV_VAR);
+        String os = System.getenv(OS_OVERRIDE_ENV_VAR);
         if (os == null) {
             os = System.getProperty("os.name");
         }

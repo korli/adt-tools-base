@@ -15,7 +15,6 @@
  */
 package com.android.sdklib.tool;
 
-import static com.android.repository.impl.meta.Archive.OS_OVERRIDE_ENV_VAR;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -35,7 +34,6 @@ import com.android.repository.util.InstallerUtil;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.sdklib.repository.legacy.LegacyDownloader;
 import com.google.common.collect.Lists;
-
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -52,7 +50,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import javax.xml.bind.DatatypeConverter;
 
 /**
@@ -72,23 +69,23 @@ public class OfflineRepoCreator {
         AndroidSdkHandler handler = AndroidSdkHandler.getInstance(tempDir);
         ProgressIndicator progress = new ConsoleProgressIndicator();
         RepoManager mgr = handler.getSdkManager(progress);
-        mgr.loadSynchronously(0, progress, new LegacyDownloader(mConfig.mFop),
-                new SettingsController() {
-                    @Override
-                    public boolean getForceHttp() {
-                        return false;
-                    }
+        SettingsController settings = new SettingsController() {
+            @Override
+            public boolean getForceHttp() {
+                return false;
+            }
 
-                    @Override
-                    public void setForceHttp(boolean force) {
-                    }
+            @Override
+            public void setForceHttp(boolean force) {
+            }
 
-                    @Nullable
-                    @Override
-                    public Channel getChannel() {
-                        return null;
-                    }
-                });
+            @Nullable
+            @Override
+            public Channel getChannel() {
+                return null;
+            }
+        };
+        mgr.loadSynchronously(0, progress, new LegacyDownloader(mConfig.mFop, settings), settings);
 
         Map<String, RemotePackage> remotes = mgr.getPackages().getRemotePackages();
         List<RemotePackageImpl> toWrite = new ArrayList<>();
@@ -140,7 +137,7 @@ public class OfflineRepoCreator {
 
     private void writeRepoXml(@NonNull List<RemotePackageImpl> toWrite, @NonNull RepoManager mgr,
             @NonNull ProgressIndicator progress) throws IOException {
-        CommonFactory factory = (CommonFactory)RepoManager.getCommonModule().createLatestFactory();
+        CommonFactory factory = RepoManager.getCommonModule().createLatestFactory();
         Repository repo = factory.createRepositoryType();
         Set<String> seenLicenses = new HashSet<>();
         for (RemotePackageImpl remote : toWrite) {
@@ -171,9 +168,7 @@ public class OfflineRepoCreator {
 
         private Path mDest;
         private List<String> mPackages = Lists.newArrayList();
-        private String mOs;
         private FileOp mFop = FileOpUtils.create();
-
 
         private static final String DEST = "--dest";
         private static final String PKG_LIST = "--package_file";
@@ -181,12 +176,6 @@ public class OfflineRepoCreator {
         @Nullable
         public static OfflineRepoConfig parse(@NonNull String[] args) {
             OfflineRepoConfig result = new OfflineRepoConfig();
-            String os = System.getenv(OS_OVERRIDE_ENV_VAR);
-            if (os == null) {
-                System.err.println(OS_OVERRIDE_ENV_VAR + " must be set!");
-                return null;
-            }
-            result.mOs = os;
             try {
                 for (int i = 0; i < args.length; i++) {
                     if (args[i].equals(DEST)) {
@@ -197,17 +186,29 @@ public class OfflineRepoCreator {
                         result.mPackages.add(args[i]);
                     }
                 }
+                if (result.mDest == null || result.mPackages.isEmpty()) {
+                    printUsage();
+                    return null;
+                }
                 return result;
             } catch (Exception e) {
-                e.printStackTrace();
                 printUsage();
+                System.err.println();
+                e.printStackTrace();
                 return null;
             }
         }
 
         private static void printUsage() {
-            System.err.println("Usage: java OfflineRepoConfig --dest <dest> "
-                    + "[--package_file filename] [package1 package2 ...]");
+            System.err.println("Usage: java com.android.sdklib.tool.OfflineRepoCreator \\");
+            System.err.println("  --dest <path> [--package_file <filename>] <packages>...");
+            System.err.println();
+            System.err.println("<package> is a sdk-style path (e.g. \"build-tools;23.0.0\" or "
+                    + "\"platforms;android-23\")");
+            System.err.println("<filename> is a file that contains one <package> per line");
+            System.err.println();
+            System.err.println("* If the env var REPO_OS_OVERRIDE is set to \"windows\",\n"
+                    + "  \"macosx\", or \"linux\", packages will be created for that OS");
         }
     }
 }

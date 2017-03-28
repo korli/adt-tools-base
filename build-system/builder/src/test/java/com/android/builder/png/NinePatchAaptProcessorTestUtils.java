@@ -20,80 +20,72 @@ import static org.junit.Assert.assertTrue;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.builder.internal.aapt.v1.AaptV1;
 import com.android.ide.common.internal.PngCruncher;
 import com.android.ide.common.internal.PngException;
 import com.android.repository.Revision;
 import com.android.repository.testframework.FakeProgressIndicator;
 import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.repository.AndroidSdkHandler;
+import com.android.testutils.TestResources;
 import com.android.testutils.TestUtils;
-import com.google.common.base.Throwables;
+import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Range;
 import com.google.common.io.Files;
 import com.google.common.truth.TestVerb;
-
-import org.junit.Assert;
-import org.junit.Assume;
-
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileFilter;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.DataFormatException;
-
 import javax.imageio.ImageIO;
+import org.junit.Assert;
+import org.junit.Assume;
+import org.junit.Assert;
 
 /**
  * Utilities common to tests for both the synchronous and the asynchronous Aapt processor.
  */
 public class NinePatchAaptProcessorTestUtils {
 
-
-    /**
-     * Signature of a PNG file.
-     */
+    /** Signature of a PNG file. */
     public static final byte[] SIGNATURE = new byte[]{
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 
-    /**
-     * Returns the lastest build tools that's at least the passed version.
-     * @param revision the minimum required build tools version.
-     * @return the latest build tools.
-     * @throws RuntimeException if the latest build tools is older than revision.
-     */
-    static File getAapt(Revision revision) {
+    /** Returns the aapt binary to use. */
+    static File getAapt() {
         FakeProgressIndicator progress = new FakeProgressIndicator();
+        Range<Revision> versionRange = Range.atLeast(AaptV1.VERSION_FOR_SERVER_AAPT);
+
         BuildToolInfo buildToolInfo =
-                AndroidSdkHandler.getInstance(TestUtils.getSdkDir()).getBuildToolInfo(
-                        revision, progress);
-        if (buildToolInfo == null) {
-            throw new RuntimeException("Test requires build-tools " + revision.toShortString());
-        }
+                BuildToolInfo.fromLocalPackage(
+                        Verify.verifyNotNull(
+                                AndroidSdkHandler.getInstance(TestUtils.getSdk())
+                                        .getPackageInRange(
+                                                SdkConstants.FD_BUILD_TOOLS,
+                                                versionRange,
+                                                progress),
+                                "Build tools in %s required.",
+                                versionRange));
+
         return new File(buildToolInfo.getPath(BuildToolInfo.PathId.AAPT));
     }
 
-
-    public static void tearDownAndCheck(int cruncherKey,
+    public static void tearDownAndCheck(
+            int cruncherKey,
             @NonNull Map<File, File> sourceAndCrunchedFiles,
             @NonNull PngCruncher cruncher,
             @NonNull AtomicLong classStartTime,
             @NonNull TestVerb expect)
-            throws IOException, DataFormatException {
-        if (isOnJenkins()) {
-            return;
-        }
-
+            throws IOException, DataFormatException, InterruptedException {
         long startTime = System.currentTimeMillis();
         try {
             cruncher.end(cruncherKey);
@@ -105,18 +97,17 @@ public class NinePatchAaptProcessorTestUtils {
         System.out.println("total time : " + (System.currentTimeMillis() - classStartTime.get()));
         System.out.println("Comparing crunched files");
         long comparisonStartTime = System.currentTimeMillis();
-        syncFileSystem();
+        TestUtils.waitForFileSystemTick();
         for (Map.Entry<File, File> sourceAndCrunched : sourceAndCrunchedFiles.entrySet()) {
             System.out.println(sourceAndCrunched.getKey().getName());
             File crunched = new File(sourceAndCrunched.getKey().getParent(),
                     sourceAndCrunched.getKey().getName() + getControlFileSuffix());
 
-            //copyFile(sourceAndCrunched.getValue(), crunched);
             Map<String, Chunk> testedChunks =
                     compareChunks(expect, crunched, sourceAndCrunched.getValue());
 
             try {
-                compareImageContent(expect, crunched, sourceAndCrunched.getValue(), false);
+                compareImageContent(expect, crunched, sourceAndCrunched.getValue());
             } catch (Throwable e) {
                 throw new RuntimeException("Failed with " + testedChunks.get("IHDR"), e);
             }
@@ -125,22 +116,18 @@ public class NinePatchAaptProcessorTestUtils {
                 - comparisonStartTime));
     }
 
+    /**
+     * Suffix used by "golden" files, generated with aapt.
+     *
+     * <p>To regenerate the files using a new version of aapt, run the following:
+     * <pre>
+     * $ cd src/test/resources/testData/png/ninepatch
+     * $ rm *.crunched.aapt
+     * $ for f in *png; do aapt s -i $f -o $f.crunched.aapt; done
+     * </pre>
+     */
     protected static String getControlFileSuffix() {
         return ".crunched.aapt";
-    }
-
-    private static void copyFile(File source, File dest)
-            throws IOException {
-        FileChannel inputChannel = null;
-        FileChannel outputChannel = null;
-        try {
-            inputChannel = new FileInputStream(source).getChannel();
-            outputChannel = new FileOutputStream(dest).getChannel();
-            outputChannel.transferFrom(inputChannel, 0, inputChannel.size());
-        } finally {
-            inputChannel.close();
-            outputChannel.close();
-        }
     }
 
 
@@ -187,12 +174,9 @@ public class NinePatchAaptProcessorTestUtils {
         File pngFolder = getPngFolder();
         File ninePatchFolder = new File(pngFolder, "ninepatch");
 
-        File[] files = ninePatchFolder.listFiles(new FileFilter() {
-            @Override
-            public boolean accept(File file) {
-                return file.getPath().endsWith(SdkConstants.DOT_9PNG);
-            }
-        });
+        File[] files =
+                ninePatchFolder.listFiles(file -> file.getPath().endsWith(SdkConstants.DOT_9PNG));
+
         if (files != null) {
             ImmutableList.Builder<Object[]> params = ImmutableList.builder();
             for (File file : files) {
@@ -205,10 +189,8 @@ public class NinePatchAaptProcessorTestUtils {
     }
 
     protected static void compareImageContent(
-            @NonNull TestVerb expect,
-            @NonNull File originalFile,
-            @NonNull File createdFile,
-            boolean is9Patch) throws IOException {
+            @NonNull TestVerb expect, @NonNull File originalFile, @NonNull File createdFile)
+            throws IOException {
         BufferedImage originalImage = ImageIO.read(originalFile);
         BufferedImage createdImage = ImageIO.read(createdFile);
 
@@ -220,20 +202,14 @@ public class NinePatchAaptProcessorTestUtils {
 
         // compare sizes taking into account if the image is a 9-patch
         // in which case the original is bigger by 2 since it has the patch area still.
-        Assert.assertEquals(originalWidth, createdWidth + (is9Patch ? 2 : 0));
-        Assert.assertEquals(originalHeight, createdHeight + (is9Patch ? 2 : 0));
+        Assert.assertEquals(originalWidth, createdWidth);
+        Assert.assertEquals(originalHeight, createdHeight);
 
         // get the file content
         // always use the created Size. And for the original image, if 9-patch, just take
         // the image minus the 1-pixel border all around.
         int[] originalContent = new int[createdWidth * createdHeight];
-        if (is9Patch) {
-            originalImage
-                    .getRGB(1, 1, createdWidth, createdHeight, originalContent, 0, createdWidth);
-        } else {
-            originalImage
-                    .getRGB(0, 0, createdWidth, createdHeight, originalContent, 0, createdWidth);
-        }
+        originalImage.getRGB(0, 0, createdWidth, createdHeight, originalContent, 0, createdWidth);
 
         int[] createdContent = new int[createdWidth * createdHeight];
         createdImage.getRGB(0, 0, createdWidth, createdHeight, createdContent, 0, createdWidth);
@@ -296,35 +272,8 @@ public class NinePatchAaptProcessorTestUtils {
 
     @NonNull
     protected static File getPngFolder() {
-        File folder = TestUtils.getRoot("png");
+        File folder = TestResources.getDirectory("/testData/png");
         assertTrue(folder.isDirectory());
         return folder;
-    }
-
-    private static void syncFileSystem() {
-        try {
-            if (System.getProperty("os.name").contains("Linux")) {
-                if (Runtime.getRuntime().exec("/bin/sync").waitFor() != 0) {
-                    throw new IOException("Failed to sync file system.");
-                }
-            }
-        } catch (IOException e) {
-            System.err.println(Throwables.getStackTraceAsString(e));
-        } catch (InterruptedException e) {
-            System.err.println(Throwables.getStackTraceAsString(e));
-        }
-    }
-
-    /**
-     *  Skips the test if running on Jenkins.
-     *
-     *  <p>The 9-patch tests don't seem to play well with a network file system.
-     */
-    static void skipOnJenkins() {
-        Assume.assumeFalse(isOnJenkins());
-    }
-
-    private static boolean isOnJenkins() {
-        return System.getenv("JENKINS_URL") != null;
     }
 }

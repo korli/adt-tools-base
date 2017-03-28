@@ -52,33 +52,33 @@ import com.android.resources.Density;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
+import java.io.File;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
 import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
-import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.SourceSet;
 import org.gradle.internal.reflect.Instantiator;
 
-import java.io.File;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
-
 /**
  * Base 'android' extension for all android plugins.
  *
  * <p>This is never used directly. Instead,
- *<ul>
- * <li>Plugin <code>com.android.application</code> uses {@link AppExtension}</li>
- * <li>Plugin <code>com.android.library</code> uses {@link LibraryExtension}</li>
- * <li>Plugin <code>com.android.test</code> uses {@link TestExtension}</li>
+ *
+ * <ul>
+ * <li>Plugin <code>com.android.application</code> uses {@link AppExtension}
+ * <li>Plugin <code>com.android.library</code> uses {@link LibraryExtension}
+ * <li>Plugin <code>com.android.test</code> uses {@link TestExtension}
+ * <li>Plugin <code>com.android.atom</code> uses {@link AtomExtension}
+ * <li>Plugin <code>com.android.instantapp</code> uses {@link InstantAppExtension}
  * </ul>
  */
 // All the public methods are meant to be exposed in the DSL.
@@ -156,7 +156,7 @@ public abstract class BaseExtension implements AndroidConfig {
     protected Project project;
 
     BaseExtension(
-            @NonNull final ProjectInternal project,
+            @NonNull final Project project,
             @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
@@ -164,7 +164,7 @@ public abstract class BaseExtension implements AndroidConfig {
             @NonNull NamedDomainObjectContainer<ProductFlavor> productFlavors,
             @NonNull NamedDomainObjectContainer<SigningConfig> signingConfigs,
             @NonNull ExtraModelInfo extraModelInfo,
-            final boolean isLibrary) {
+            final boolean publishPackage) {
         this.androidBuilder = androidBuilder;
         this.sdkHandler = sdkHandler;
         this.buildTypes = buildTypes;
@@ -192,51 +192,70 @@ public abstract class BaseExtension implements AndroidConfig {
         splits = instantiator.newInstance(Splits.class, instantiator);
         dataBinding = instantiator.newInstance(DataBindingOptions.class);
 
-        sourceSetsContainer = project.container(AndroidSourceSet.class,
-                new AndroidSourceSetFactory(instantiator, project, isLibrary));
+        sourceSetsContainer =
+                project.container(
+                        AndroidSourceSet.class,
+                        new AndroidSourceSetFactory(instantiator, project, publishPackage));
 
-        sourceSetsContainer.whenObjectAdded(new Action<AndroidSourceSet>() {
-            @Override
-            public void execute(AndroidSourceSet sourceSet) {
-                ConfigurationContainer configurations = project.getConfigurations();
+        sourceSetsContainer.whenObjectAdded(
+                new Action<AndroidSourceSet>() {
+                    @Override
+                    public void execute(AndroidSourceSet sourceSet) {
+                        ConfigurationContainer configurations = project.getConfigurations();
 
-                createConfiguration(
-                        configurations,
-                        sourceSet.getCompileConfigurationName(),
-                        "Classpath for compiling the " + sourceSet.getName() + " sources.");
+                        createConfiguration(
+                                configurations,
+                                sourceSet.getCompileConfigurationName(),
+                                "Classpath for compiling the " + sourceSet.getName() + " sources.");
 
-                String packageConfigDescription;
-                if (isLibrary) {
-                    packageConfigDescription
-                            = "Classpath only used when publishing '" + sourceSet.getName() + "'.";
-                } else {
-                    packageConfigDescription
-                            = "Classpath packaged with the compiled '" + sourceSet.getName() + "' classes.";
-                }
-                createConfiguration(
-                        configurations,
-                        sourceSet.getPackageConfigurationName(),
-                        packageConfigDescription);
+                        String packageConfigDescription;
+                        if (publishPackage) {
+                            packageConfigDescription =
+                                    "Classpath only used when publishing '"
+                                            + sourceSet.getName()
+                                            + "'.";
+                        } else {
+                            packageConfigDescription =
+                                    "Classpath packaged with the compiled '"
+                                            + sourceSet.getName()
+                                            + "' classes.";
+                        }
+                        createConfiguration(
+                                configurations,
+                                sourceSet.getPackageConfigurationName(),
+                                packageConfigDescription);
 
-                createConfiguration(
-                        configurations,
-                        sourceSet.getProvidedConfigurationName(),
-                        "Classpath for only compiling the " + sourceSet.getName() + " sources.");
+                        createConfiguration(
+                                configurations,
+                                sourceSet.getProvidedConfigurationName(),
+                                "Classpath for only compiling the "
+                                        + sourceSet.getName()
+                                        + " sources.");
 
-                createConfiguration(
-                        configurations,
-                        sourceSet.getWearAppConfigurationName(),
-                        "Link to a wear app to embed for object '" + sourceSet.getName() + "'.");
+                        createConfiguration(
+                                configurations,
+                                sourceSet.getWearAppConfigurationName(),
+                                "Link to a wear app to embed for object '"
+                                        + sourceSet.getName()
+                                        + "'.");
 
-                createConfiguration(
-                        configurations,
-                        sourceSet.getAnnotationProcessorConfigurationName(),
-                        "Classpath for the annotation processor for '" + sourceSet.getName() +
-                                "'.");
+                        createConfiguration(
+                                configurations,
+                                sourceSet.getAnnotationProcessorConfigurationName(),
+                                "Classpath for the annotation processor for '"
+                                        + sourceSet.getName()
+                                        + "'.");
 
-                sourceSet.setRoot(String.format("src/%s", sourceSet.getName()));
-            }
-        });
+                        createConfiguration(
+                                configurations,
+                                sourceSet.getJackPluginConfigurationName(),
+                                String.format(
+                                        "Classpath for the '%s' Jack plugins.",
+                                        sourceSet.getName()));
+
+                        sourceSet.setRoot(String.format("src/%s", sourceSet.getName()));
+                    }
+                });
 
         sourceSetsContainer.create(defaultConfig.getName());
 
@@ -377,7 +396,7 @@ public abstract class BaseExtension implements AndroidConfig {
     /**
      * Specifies names of flavor dimensions.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/new-build-system/user-guide#TOC-Multi-flavor-variants">Multi-flavor variants</a>.
+     * <p>See <a href="https://developer.android.com/studio/build/build-variants.html#flavor-dimensions">Multi-flavor variants</a>.
      */
     public void flavorDimensions(String... dimensions) {
         checkWritability();
@@ -545,19 +564,19 @@ public abstract class BaseExtension implements AndroidConfig {
 
     /** {@inheritDoc} */
     @Override
-    public Collection<ProductFlavor> getProductFlavors() {
+    public NamedDomainObjectContainer<ProductFlavor> getProductFlavors() {
         return productFlavors;
     }
 
     /** {@inheritDoc} */
     @Override
-    public Collection<BuildType> getBuildTypes() {
+    public NamedDomainObjectContainer<BuildType> getBuildTypes() {
         return buildTypes;
     }
 
     /** {@inheritDoc} */
     @Override
-    public Collection<SigningConfig> getSigningConfigs() {
+    public NamedDomainObjectContainer<SigningConfig> getSigningConfigs() {
         return signingConfigs;
     }
 
@@ -565,15 +584,11 @@ public abstract class BaseExtension implements AndroidConfig {
         setDefaultPublishConfig(value);
     }
 
-    public void publishNonDefault(boolean value) {
-        publishNonDefault = value;
-    }
-
     /**
      * Name of the configuration used to build the default artifact of this project.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/new-build-system/user-guide#TOC-Referencing-a-Library">
-     * Referencing a Library</a>
+     * <p>See <a href="https://developer.android.com/studio/build/dependencies.html">
+     * Add Build Dependencies</a>
      */
     @Override
     public String getDefaultPublishConfig() {
@@ -587,12 +602,16 @@ public abstract class BaseExtension implements AndroidConfig {
     /**
      * Whether to publish artifacts for all configurations, not just the default one.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/new-build-system/user-guide#TOC-Referencing-a-Library">
-     * Referencing a Library</a>
+     * <p>See <a href="https://developer.android.com/studio/build/dependencies.html">
+     * Add Build Dependencies</a>
      */
     @Override
     public boolean getPublishNonDefault() {
         return publishNonDefault;
+    }
+
+    public void setPublishNonDefault(boolean publishNonDefault) {
+        this.publishNonDefault = publishNonDefault;
     }
 
     public void variantFilter(Action<VariantFilter> filter) {
@@ -630,7 +649,7 @@ public abstract class BaseExtension implements AndroidConfig {
     /**
      * Returns the names of flavor dimensions.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/new-build-system/user-guide#TOC-Multi-flavor-variants">Multi-flavor variants</a>.
+     * <p>See <a href="https://developer.android.com/studio/build/build-variants.html#flavor-dimensions">Multi-flavor variants</a>.
      */
     @Override
     public List<String> getFlavorDimensionList() {

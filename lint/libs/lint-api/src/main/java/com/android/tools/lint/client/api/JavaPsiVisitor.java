@@ -21,7 +21,6 @@ import static com.android.SdkConstants.R_CLASS;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.annotations.VisibleForTesting;
 import com.android.resources.ResourceType;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
@@ -29,7 +28,6 @@ import com.android.tools.lint.detector.api.Detector.XmlScanner;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.psi.ImplicitVariable;
 import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.JavaRecursiveElementVisitor;
@@ -121,7 +119,6 @@ import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.javadoc.PsiDocTagValue;
 import com.intellij.psi.javadoc.PsiDocToken;
 import com.intellij.psi.javadoc.PsiInlineDocTag;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -150,62 +147,58 @@ public class JavaPsiVisitor {
     /** Default size of lists holding detectors of the same type for a given node type */
     private static final int SAME_TYPE_COUNT = 8;
 
-    private final Map<String, List<VisitingDetector>> mMethodDetectors =
+    private final Map<String, List<VisitingDetector>> methodDetectors =
             Maps.newHashMapWithExpectedSize(80);
-    private final Map<String, List<VisitingDetector>> mConstructorDetectors =
+    private final Map<String, List<VisitingDetector>> constructorDetectors =
             Maps.newHashMapWithExpectedSize(12);
-    private final Map<String, List<VisitingDetector>> mReferenceDetectors =
+    private final Map<String, List<VisitingDetector>> referenceDetectors =
             Maps.newHashMapWithExpectedSize(10);
-    private Set<String> mConstructorSimpleNames;
-    private final List<VisitingDetector> mResourceFieldDetectors =
-            new ArrayList<VisitingDetector>();
-    private final List<VisitingDetector> mAllDetectors;
-    private final List<VisitingDetector> mFullTreeDetectors;
-    private final Map<Class<? extends PsiElement>, List<VisitingDetector>> mNodePsiTypeDetectors =
-            new HashMap<Class<? extends PsiElement>, List<VisitingDetector>>(16);
-    private final JavaParser mParser;
-    private final Map<String, List<VisitingDetector>> mSuperClassDetectors =
-            new HashMap<String, List<VisitingDetector>>();
+    private Set<String> constructorSimpleNames;
+    private final List<VisitingDetector> resourceFieldDetectors =
+            new ArrayList<>();
+    private final List<VisitingDetector> allDetectors;
+    private final List<VisitingDetector> fullTreeDetectors;
+    private final Map<Class<? extends PsiElement>, List<VisitingDetector>> nodePsiTypeDetectors =
+            new HashMap<>(16);
+    private final JavaParser parser;
+    private final Map<String, List<VisitingDetector>> superClassDetectors =
+            new HashMap<>();
 
     /**
-     * Number of fatal exceptions (internal errors, usually from ECJ) we've
-     * encountered; we don't log each and every one to avoid massive log spam
-     * in code which triggers this condition
+     * Whether we should call {@link JavaParser#dispose(JavaContext, PsiJavaFile)} after the
+     * file has been processed with this visitor
      */
-    private static int sExceptionCount;
-    /** Max number of logs to include */
-    private static final int MAX_REPORTED_CRASHES = 20;
+    private boolean disposeUnitsAfterUse = true;
 
     JavaPsiVisitor(@NonNull JavaParser parser, @NonNull List<Detector> detectors) {
-        mParser = parser;
-        mAllDetectors = new ArrayList<VisitingDetector>(detectors.size());
-        mFullTreeDetectors = new ArrayList<VisitingDetector>(detectors.size());
+        this.parser = parser;
+        allDetectors = new ArrayList<>(detectors.size());
+        fullTreeDetectors = new ArrayList<>(detectors.size());
 
         for (Detector detector : detectors) {
             JavaPsiScanner javaPsiScanner = (JavaPsiScanner) detector;
             VisitingDetector v = new VisitingDetector(detector, javaPsiScanner);
-            mAllDetectors.add(v);
+            allDetectors.add(v);
 
             List<String> applicableSuperClasses = detector.applicableSuperClasses();
             if (applicableSuperClasses != null) {
                 for (String fqn : applicableSuperClasses) {
-                    List<VisitingDetector> list = mSuperClassDetectors.get(fqn);
+                    List<VisitingDetector> list = superClassDetectors.get(fqn);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
-                        mSuperClassDetectors.put(fqn, list);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
+                        superClassDetectors.put(fqn, list);
                     }
                     list.add(v);
                 }
-                continue;
             }
 
             List<Class<? extends PsiElement>> nodePsiTypes = detector.getApplicablePsiTypes();
             if (nodePsiTypes != null) {
                 for (Class<? extends PsiElement> type : nodePsiTypes) {
-                    List<VisitingDetector> list = mNodePsiTypeDetectors.get(type);
+                    List<VisitingDetector> list = nodePsiTypeDetectors.get(type);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
-                        mNodePsiTypeDetectors.put(type, list);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
+                        nodePsiTypeDetectors.put(type, list);
                     }
                     list.add(v);
                 }
@@ -218,10 +211,10 @@ public class JavaPsiVisitor {
                 assert names != XmlScanner.ALL;
 
                 for (String name : names) {
-                    List<VisitingDetector> list = mMethodDetectors.get(name);
+                    List<VisitingDetector> list = methodDetectors.get(name);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
-                        mMethodDetectors.put(name, list);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
+                        methodDetectors.put(name, list);
                     }
                     list.add(v);
                 }
@@ -232,15 +225,15 @@ public class JavaPsiVisitor {
                 // not supported in Java visitors; adding a method invocation node is trivial
                 // for that case.
                 assert types != XmlScanner.ALL;
-                if (mConstructorSimpleNames == null) {
-                    mConstructorSimpleNames = Sets.newHashSet();
+                if (constructorSimpleNames == null) {
+                    constructorSimpleNames = Sets.newHashSet();
                 }
                 for (String type : types) {
-                    List<VisitingDetector> list = mConstructorDetectors.get(type);
+                    List<VisitingDetector> list = constructorDetectors.get(type);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
-                        mConstructorDetectors.put(type, list);
-                        mConstructorSimpleNames.add(type.substring(type.lastIndexOf('.')+1));
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
+                        constructorDetectors.put(type, list);
+                        constructorSimpleNames.add(type.substring(type.lastIndexOf('.')+1));
                     }
                     list.add(v);
                 }
@@ -253,28 +246,33 @@ public class JavaPsiVisitor {
                 assert referenceNames != XmlScanner.ALL;
 
                 for (String name : referenceNames) {
-                    List<VisitingDetector> list = mReferenceDetectors.get(name);
+                    List<VisitingDetector> list = referenceDetectors.get(name);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
-                        mReferenceDetectors.put(name, list);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
+                        referenceDetectors.put(name, list);
                     }
                     list.add(v);
                 }
             }
 
             if (detector.appliesToResourceRefs()) {
-                mResourceFieldDetectors.add(v);
-            } else if ((referenceNames == null || referenceNames.isEmpty())
+                resourceFieldDetectors.add(v);
+            } else if ((applicableSuperClasses == null || applicableSuperClasses.isEmpty())
+                    && (referenceNames == null || referenceNames.isEmpty())
                     && (nodePsiTypes == null || nodePsiTypes.isEmpty())
                     && (types == null || types.isEmpty())) {
-                mFullTreeDetectors.add(v);
+                fullTreeDetectors.add(v);
             }
         }
     }
 
+    public void setDisposeUnitsAfterUse(boolean disposeUnitsAfterUse) {
+        this.disposeUnitsAfterUse = disposeUnitsAfterUse;
+    }
+
     void visitFile(@NonNull final JavaContext context) {
         try {
-            final PsiJavaFile javaFile = mParser.parseJavaToPsi(context);
+            final PsiJavaFile javaFile = parser.parseJavaToPsi(context);
             if (javaFile == null) {
                 // No need to log this; the parser should be reporting
                 // a full warning (such as IssueRegistry#PARSER_ERROR)
@@ -283,150 +281,74 @@ public class JavaPsiVisitor {
             }
             try {
                 context.setJavaFile(javaFile);
+                LintClient client = context.getClient();
 
-                mParser.runReadAction(new Runnable() {
-                    @Override
-                    public void run() {
-                        for (VisitingDetector v : mAllDetectors) {
-                            v.setContext(context);
-                            v.getDetector().beforeCheckFile(context);
-                        }
+                client.runReadAction(() -> {
+                    for (VisitingDetector v : allDetectors) {
+                        v.setContext(context);
+                        v.getDetector().beforeCheckFile(context);
                     }
                 });
 
-                if (!mSuperClassDetectors.isEmpty()) {
-                    mParser.runReadAction(new Runnable() {
-                        @Override
-                        public void run() {
-                            SuperclassPsiVisitor visitor = new SuperclassPsiVisitor(context);
-                            javaFile.accept(visitor);
-                        }
+                if (!superClassDetectors.isEmpty()) {
+                    client.runReadAction(() -> {
+                        SuperclassPsiVisitor visitor = new SuperclassPsiVisitor(context);
+                        javaFile.accept(visitor);
                     });
                 }
 
-                for (final VisitingDetector v : mFullTreeDetectors) {
-                    mParser.runReadAction(new Runnable() {
-                        @Override
-                        public void run() {
-                            JavaElementVisitor visitor = v.getVisitor();
-                            javaFile.accept(visitor);
-                        }
+                for (final VisitingDetector v : fullTreeDetectors) {
+                    client.runReadAction(() -> {
+                        JavaElementVisitor visitor = v.getVisitor();
+                        javaFile.accept(visitor);
                     });
                 }
 
-                if (!mMethodDetectors.isEmpty()
-                        || !mResourceFieldDetectors.isEmpty()
-                        || !mConstructorDetectors.isEmpty()
-                        || !mReferenceDetectors.isEmpty()) {
-                    mParser.runReadAction(new Runnable() {
-                        @Override
-                        public void run() {
-                            // TODO: Do we need to break this one up into finer grain
-                            // locking units
-                            JavaElementVisitor visitor = new DelegatingPsiVisitor(context);
-                            javaFile.accept(visitor);
-                        }
+                if (!methodDetectors.isEmpty()
+                        || !resourceFieldDetectors.isEmpty()
+                        || !constructorDetectors.isEmpty()
+                        || !referenceDetectors.isEmpty()) {
+                    client.runReadAction(() -> {
+                        // TODO: Do we need to break this one up into finer grain
+                        // locking units
+                        JavaElementVisitor visitor = new DelegatingPsiVisitor(context);
+                        javaFile.accept(visitor);
                     });
                 } else {
-                    if (!mNodePsiTypeDetectors.isEmpty()) {
-                        mParser.runReadAction(new Runnable() {
-                            @Override
-                            public void run() {
-                                // TODO: Do we need to break this one up into finer grain
-                                // locking units
-                                JavaElementVisitor visitor = new DispatchPsiVisitor();
-                                javaFile.accept(visitor);
-                            }
+                    if (!nodePsiTypeDetectors.isEmpty()) {
+                        client.runReadAction(() -> {
+                            // TODO: Do we need to break this one up into finer grain
+                            // locking units
+                            JavaElementVisitor visitor = new DispatchPsiVisitor();
+                            javaFile.accept(visitor);
                         });
                     }
                 }
 
-                mParser.runReadAction(new Runnable() {
-                    @Override
-                    public void run() {
-                        for (VisitingDetector v : mAllDetectors) {
-                            v.getDetector().afterCheckFile(context);
-                        }
+                client.runReadAction(() -> {
+                    for (VisitingDetector v : allDetectors) {
+                        v.getDetector().afterCheckFile(context);
                     }
                 });
             } finally {
-                mParser.dispose(context, javaFile);
+                if (disposeUnitsAfterUse) {
+                    parser.dispose(context, javaFile);
+                }
                 context.setJavaFile(null);
             }
-        } catch (ProcessCanceledException ignore) {
-            // Cancelling inspections in the IDE
         } catch (RuntimeException e) {
-            if (sExceptionCount++ > MAX_REPORTED_CRASHES) {
-                // No need to keep spamming the user that a lot of the files
-                // are tripping up ECJ, they get the picture.
-                return;
-            }
-
-            if (e.getClass().getSimpleName().equals("IndexNotReadyException")) {
-                // Attempting to access PSI during startup before indices are ready; ignore these.
-                // See http://b.android.com/176644 for an example.
-                return;
-            }
-
-            // Work around ECJ bugs; see https://code.google.com/p/android/issues/detail?id=172268
             // Don't allow lint bugs to take down the whole build. TRY to log this as a
             // lint error instead!
-            StringBuilder sb = new StringBuilder(100);
-            sb.append("Unexpected failure during lint analysis of ");
-            sb.append(context.file.getName());
-            sb.append(" (this is a bug in lint or one of the libraries it depends on)\n");
-
-            sb.append(e.getClass().getSimpleName());
-            sb.append(':');
-            StackTraceElement[] stackTrace = e.getStackTrace();
-            int count = 0;
-            for (StackTraceElement frame : stackTrace) {
-                if (count > 0) {
-                    sb.append("<-");
-                }
-
-                String className = frame.getClassName();
-                sb.append(className.substring(className.lastIndexOf('.') + 1));
-                sb.append('.').append(frame.getMethodName());
-                sb.append('(');
-                sb.append(frame.getFileName()).append(':').append(frame.getLineNumber());
-                sb.append(')');
-                count++;
-                // Only print the top 3-4 frames such that we can identify the bug
-                if (count == 4) {
-                    break;
-                }
-            }
-            Throwable throwable = null; // NOT e: this makes for very noisy logs
-            //noinspection ConstantConditions
-            context.log(throwable, sb.toString());
+            LintDriver.handleDetectorError(context, e);
         }
     }
 
-    /**
-     * For testing only: returns the number of exceptions thrown during Java AST analysis
-     *
-     * @return the number of internal errors found
-     */
-    @VisibleForTesting
-    public static int getCrashCount() {
-        return sExceptionCount;
-    }
-
-    /**
-     * For testing only: clears the crash counter
-     */
-    @VisibleForTesting
-    public static void clearCrashCount() {
-        sExceptionCount = 0;
-    }
-
-    public void prepare(@NonNull List<JavaContext> contexts) {
-        mParser.prepareJavaParse(contexts);
+    public boolean prepare(@NonNull List<JavaContext> contexts) {
+        return parser.prepareJavaParse(contexts);
     }
 
     public void dispose() {
-        mParser.dispose();
+        parser.dispose();
     }
 
     @Nullable
@@ -506,7 +428,7 @@ public class JavaPsiVisitor {
     }
 
     private class SuperclassPsiVisitor extends JavaRecursiveElementVisitor {
-        private JavaContext mContext;
+        private final JavaContext mContext;
 
         public SuperclassPsiVisitor(@NonNull JavaContext context) {
             mContext = context;
@@ -527,7 +449,7 @@ public class JavaPsiVisitor {
             PsiClass cls = node;
             int depth = 0;
             while (cls != null) {
-                List<VisitingDetector> list = mSuperClassDetectors.get(cls.getQualifiedName());
+                List<VisitingDetector> list = superClassDetectors.get(cls.getQualifiedName());
                 if (list != null) {
                     for (VisitingDetector v : list) {
                         JavaPsiScanner javaPsiScanner = v.getJavaScanner();
@@ -541,7 +463,7 @@ public class JavaPsiVisitor {
                 Set<String> interfaceNames = getInterfaceNames(null, cls);
                 if (interfaceNames != null) {
                     for (String name : interfaceNames) {
-                        list = mSuperClassDetectors.get(name);
+                        list = superClassDetectors.get(name);
                         if (list != null) {
                             for (VisitingDetector v : list) {
                                 JavaPsiScanner javaPsiScanner = v.getJavaScanner();
@@ -569,7 +491,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAnonymousClass(PsiAnonymousClass node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiAnonymousClass.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiAnonymousClass.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitAnonymousClass(node);
@@ -580,7 +502,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitArrayAccessExpression(PsiArrayAccessExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiArrayAccessExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiArrayAccessExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitArrayAccessExpression(node);
@@ -591,7 +513,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitArrayInitializerExpression(PsiArrayInitializerExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiArrayInitializerExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -603,7 +525,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAssertStatement(PsiAssertStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiAssertStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiAssertStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitAssertStatement(node);
@@ -614,7 +536,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAssignmentExpression(PsiAssignmentExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiAssignmentExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiAssignmentExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitAssignmentExpression(node);
@@ -625,7 +547,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitBinaryExpression(PsiBinaryExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiBinaryExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiBinaryExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitBinaryExpression(node);
@@ -636,7 +558,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitBlockStatement(PsiBlockStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiBlockStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiBlockStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitBlockStatement(node);
@@ -647,7 +569,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitBreakStatement(PsiBreakStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiBreakStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiBreakStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitBreakStatement(node);
@@ -658,7 +580,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitClass(PsiClass node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiClass.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiClass.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitClass(node);
@@ -669,7 +591,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitClassInitializer(PsiClassInitializer node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiClassInitializer.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiClassInitializer.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitClassInitializer(node);
@@ -680,7 +602,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitClassObjectAccessExpression(PsiClassObjectAccessExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiClassObjectAccessExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -692,7 +614,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitCodeBlock(PsiCodeBlock node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiCodeBlock.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiCodeBlock.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitCodeBlock(node);
@@ -703,7 +625,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitConditionalExpression(PsiConditionalExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiConditionalExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiConditionalExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitConditionalExpression(node);
@@ -714,7 +636,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitContinueStatement(PsiContinueStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiContinueStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiContinueStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitContinueStatement(node);
@@ -725,7 +647,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitDeclarationStatement(PsiDeclarationStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiDeclarationStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiDeclarationStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitDeclarationStatement(node);
@@ -736,7 +658,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitDocComment(PsiDocComment node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiDocComment.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiDocComment.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitDocComment(node);
@@ -747,7 +669,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitDocTag(PsiDocTag node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiDocTag.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiDocTag.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitDocTag(node);
@@ -758,7 +680,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitDocTagValue(PsiDocTagValue node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiDocTagValue.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiDocTagValue.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitDocTagValue(node);
@@ -769,7 +691,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitDoWhileStatement(PsiDoWhileStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiDoWhileStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiDoWhileStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitDoWhileStatement(node);
@@ -780,7 +702,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitEmptyStatement(PsiEmptyStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiEmptyStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiEmptyStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitEmptyStatement(node);
@@ -791,7 +713,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitExpression(PsiExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitExpression(node);
@@ -802,7 +724,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitExpressionList(PsiExpressionList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiExpressionList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiExpressionList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitExpressionList(node);
@@ -813,7 +735,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitExpressionListStatement(PsiExpressionListStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiExpressionListStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -825,7 +747,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitExpressionStatement(PsiExpressionStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiExpressionStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiExpressionStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitExpressionStatement(node);
@@ -836,7 +758,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitField(PsiField node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiField.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiField.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitField(node);
@@ -847,7 +769,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitForStatement(PsiForStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiForStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiForStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitForStatement(node);
@@ -858,7 +780,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitForeachStatement(PsiForeachStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiForeachStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiForeachStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitForeachStatement(node);
@@ -869,7 +791,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitIdentifier(PsiIdentifier node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiIdentifier.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiIdentifier.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitIdentifier(node);
@@ -880,7 +802,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitIfStatement(PsiIfStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiIfStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiIfStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitIfStatement(node);
@@ -891,7 +813,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitImportList(PsiImportList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiImportList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiImportList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitImportList(node);
@@ -902,7 +824,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitImportStatement(PsiImportStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiImportStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiImportStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitImportStatement(node);
@@ -913,7 +835,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitImportStaticStatement(PsiImportStaticStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiImportStaticStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiImportStaticStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitImportStaticStatement(node);
@@ -924,7 +846,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitInlineDocTag(PsiInlineDocTag node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiInlineDocTag.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiInlineDocTag.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitInlineDocTag(node);
@@ -935,7 +857,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitInstanceOfExpression(PsiInstanceOfExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiInstanceOfExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiInstanceOfExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitInstanceOfExpression(node);
@@ -946,7 +868,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitJavaToken(PsiJavaToken node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiJavaToken.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiJavaToken.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitJavaToken(node);
@@ -957,7 +879,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitKeyword(PsiKeyword node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiKeyword.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiKeyword.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitKeyword(node);
@@ -968,7 +890,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitLabeledStatement(PsiLabeledStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiLabeledStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiLabeledStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitLabeledStatement(node);
@@ -979,7 +901,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitLiteralExpression(PsiLiteralExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiLiteralExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiLiteralExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitLiteralExpression(node);
@@ -990,7 +912,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitLocalVariable(PsiLocalVariable node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiLocalVariable.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiLocalVariable.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitLocalVariable(node);
@@ -1001,7 +923,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitMethod(PsiMethod node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiMethod.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiMethod.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitMethod(node);
@@ -1012,7 +934,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitMethodCallExpression(PsiMethodCallExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiMethodCallExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiMethodCallExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitMethodCallExpression(node);
@@ -1023,7 +945,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitCallExpression(PsiCallExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiCallExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiCallExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitCallExpression(node);
@@ -1034,7 +956,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitModifierList(PsiModifierList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiModifierList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiModifierList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitModifierList(node);
@@ -1045,7 +967,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitNewExpression(PsiNewExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiNewExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiNewExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitNewExpression(node);
@@ -1056,7 +978,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitPackage(PsiPackage node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiPackage.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiPackage.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitPackage(node);
@@ -1067,7 +989,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitPackageStatement(PsiPackageStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiPackageStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiPackageStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitPackageStatement(node);
@@ -1078,7 +1000,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitParameter(PsiParameter node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiParameter.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiParameter.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitParameter(node);
@@ -1089,7 +1011,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitReceiverParameter(PsiReceiverParameter node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiReceiverParameter.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiReceiverParameter.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitReceiverParameter(node);
@@ -1100,7 +1022,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitParameterList(PsiParameterList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiParameterList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiParameterList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitParameterList(node);
@@ -1111,7 +1033,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitParenthesizedExpression(PsiParenthesizedExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiParenthesizedExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1123,7 +1045,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitPostfixExpression(PsiPostfixExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiPostfixExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiPostfixExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitPostfixExpression(node);
@@ -1134,7 +1056,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitPrefixExpression(PsiPrefixExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiPrefixExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiPrefixExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitPrefixExpression(node);
@@ -1145,7 +1067,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitReferenceElement(PsiJavaCodeReferenceElement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiJavaCodeReferenceElement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1157,7 +1079,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitImportStaticReferenceElement(PsiImportStaticReferenceElement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiImportStaticReferenceElement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1169,7 +1091,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitReferenceExpression(PsiReferenceExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiReferenceExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiReferenceExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitReferenceExpression(node);
@@ -1180,7 +1102,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitMethodReferenceExpression(PsiMethodReferenceExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiMethodReferenceExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1192,7 +1114,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitReferenceList(PsiReferenceList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiReferenceList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiReferenceList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitReferenceList(node);
@@ -1203,7 +1125,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitReferenceParameterList(PsiReferenceParameterList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiReferenceParameterList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1215,7 +1137,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitTypeParameterList(PsiTypeParameterList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiTypeParameterList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiTypeParameterList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitTypeParameterList(node);
@@ -1226,7 +1148,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitReturnStatement(PsiReturnStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiReturnStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiReturnStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitReturnStatement(node);
@@ -1237,7 +1159,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitStatement(PsiStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitStatement(node);
@@ -1248,7 +1170,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitSuperExpression(PsiSuperExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiSuperExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiSuperExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitSuperExpression(node);
@@ -1259,7 +1181,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitSwitchLabelStatement(PsiSwitchLabelStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiSwitchLabelStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiSwitchLabelStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitSwitchLabelStatement(node);
@@ -1270,7 +1192,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitSwitchStatement(PsiSwitchStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiSwitchStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiSwitchStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitSwitchStatement(node);
@@ -1281,7 +1203,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitSynchronizedStatement(PsiSynchronizedStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiSynchronizedStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiSynchronizedStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitSynchronizedStatement(node);
@@ -1292,7 +1214,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitThisExpression(PsiThisExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiThisExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiThisExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitThisExpression(node);
@@ -1303,7 +1225,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitThrowStatement(PsiThrowStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiThrowStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiThrowStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitThrowStatement(node);
@@ -1314,7 +1236,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitTryStatement(PsiTryStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiTryStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiTryStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitTryStatement(node);
@@ -1325,7 +1247,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitCatchSection(PsiCatchSection node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiCatchSection.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiCatchSection.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitCatchSection(node);
@@ -1336,7 +1258,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitResourceList(PsiResourceList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiResourceList.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiResourceList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitResourceList(node);
@@ -1347,7 +1269,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitResourceVariable(PsiResourceVariable node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiResourceVariable.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiResourceVariable.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitResourceVariable(node);
@@ -1358,7 +1280,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitTypeElement(PsiTypeElement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiTypeElement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiTypeElement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitTypeElement(node);
@@ -1369,7 +1291,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitTypeCastExpression(PsiTypeCastExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiTypeCastExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiTypeCastExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitTypeCastExpression(node);
@@ -1380,7 +1302,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitVariable(PsiVariable node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiVariable.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiVariable.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitVariable(node);
@@ -1391,7 +1313,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitWhileStatement(PsiWhileStatement node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiWhileStatement.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiWhileStatement.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitWhileStatement(node);
@@ -1402,7 +1324,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitJavaFile(PsiJavaFile node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiJavaFile.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiJavaFile.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitJavaFile(node);
@@ -1413,7 +1335,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitImplicitVariable(ImplicitVariable node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(ImplicitVariable.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(ImplicitVariable.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitImplicitVariable(node);
@@ -1424,7 +1346,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitDocToken(PsiDocToken node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiDocToken.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiDocToken.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitDocToken(node);
@@ -1435,7 +1357,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitTypeParameter(PsiTypeParameter node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiTypeParameter.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiTypeParameter.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitTypeParameter(node);
@@ -1446,7 +1368,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAnnotation(PsiAnnotation node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiAnnotation.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiAnnotation.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitAnnotation(node);
@@ -1457,7 +1379,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAnnotationParameterList(PsiAnnotationParameterList node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiAnnotationParameterList.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1469,7 +1391,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAnnotationArrayInitializer(PsiArrayInitializerMemberValue node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiArrayInitializerMemberValue.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1481,7 +1403,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitNameValuePair(PsiNameValuePair node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiNameValuePair.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiNameValuePair.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitNameValuePair(node);
@@ -1492,7 +1414,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitAnnotationMethod(PsiAnnotationMethod node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiAnnotationMethod.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiAnnotationMethod.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitAnnotationMethod(node);
@@ -1503,7 +1425,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitEnumConstant(PsiEnumConstant node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiEnumConstant.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiEnumConstant.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitEnumConstant(node);
@@ -1514,7 +1436,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitEnumConstantInitializer(PsiEnumConstantInitializer node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors
+            List<VisitingDetector> list = nodePsiTypeDetectors
                     .get(PsiEnumConstantInitializer.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
@@ -1526,7 +1448,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitPolyadicExpression(PsiPolyadicExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiPolyadicExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiPolyadicExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitPolyadicExpression(node);
@@ -1537,7 +1459,7 @@ public class JavaPsiVisitor {
 
         @Override
         public void visitLambdaExpression(PsiLambdaExpression node) {
-            List<VisitingDetector> list = mNodePsiTypeDetectors.get(PsiLambdaExpression.class);
+            List<VisitingDetector> list = nodePsiTypeDetectors.get(PsiLambdaExpression.class);
             if (list != null) {
                 for (VisitingDetector v : list) {
                     v.getVisitor().visitLambdaExpression(node);
@@ -1559,10 +1481,10 @@ public class JavaPsiVisitor {
         public DelegatingPsiVisitor(JavaContext context) {
             mContext = context;
 
-            mVisitMethods = !mMethodDetectors.isEmpty();
-            mVisitConstructors = !mConstructorDetectors.isEmpty();
-            mVisitResources = !mResourceFieldDetectors.isEmpty();
-            mVisitReferences = !mReferenceDetectors.isEmpty();
+            mVisitMethods = !methodDetectors.isEmpty();
+            mVisitConstructors = !constructorDetectors.isEmpty();
+            mVisitResources = !resourceFieldDetectors.isEmpty();
+            mVisitReferences = !referenceDetectors.isEmpty();
         }
 
         @Override
@@ -1570,7 +1492,7 @@ public class JavaPsiVisitor {
             if (mVisitReferences) {
                 String name = element.getReferenceName();
                 if (name != null) {
-                    List<VisitingDetector> list = mReferenceDetectors.get(name);
+                    List<VisitingDetector> list = referenceDetectors.get(name);
                     if (list != null) {
                         PsiElement referenced = element.resolve();
                         if (referenced != null) {
@@ -1593,8 +1515,9 @@ public class JavaPsiVisitor {
         public void visitReferenceExpression(PsiReferenceExpression node) {
             if (mVisitResources) {
                 // R.type.name
-                if (node.getQualifier() instanceof PsiReferenceExpression) {
-                    PsiReferenceExpression select = (PsiReferenceExpression) node.getQualifier();
+                PsiElement qualifier = node.getQualifier();
+                if (qualifier instanceof PsiReferenceExpression) {
+                    PsiReferenceExpression select = (PsiReferenceExpression)qualifier;
                     if (select.getQualifier() instanceof PsiReferenceExpression) {
                         PsiReferenceExpression reference = (PsiReferenceExpression) select.getQualifier();
                         if (R_CLASS.equals(reference.getReferenceName())) {
@@ -1608,7 +1531,7 @@ public class JavaPsiVisitor {
                                         && ANDROID_PKG.equals(((PsiReferenceExpression)reference.
                                                 getQualifier()).getReferenceName());
 
-                                for (VisitingDetector v : mResourceFieldDetectors) {
+                                for (VisitingDetector v : resourceFieldDetectors) {
                                     JavaPsiScanner detector = v.getJavaScanner();
                                     if (detector != null) {
                                         //noinspection ConstantConditions
@@ -1617,14 +1540,12 @@ public class JavaPsiVisitor {
                                     }
                                 }
                             }
-
-                            return;
                         }
                     }
                 }
 
                 // Arbitrary packages -- android.R.type.name, foo.bar.R.type.name
-                if (R_CLASS.equals(node.getReferenceName())) {
+                if (qualifier != null && R_CLASS.equals(node.getReferenceName())) {
                     PsiElement parent = node.getParent();
                     if (parent instanceof PsiReferenceExpression) {
                         PsiElement grandParent = parent.getParent();
@@ -1640,9 +1561,8 @@ public class JavaPsiVisitor {
                                         ? ResourceType.getEnum(typeName)
                                         : null;
                                 if (type != null) {
-                                    boolean isFramework = node.getQualifier().getText().equals(
-                                            ANDROID_PKG);
-                                    for (VisitingDetector v : mResourceFieldDetectors) {
+                                    boolean isFramework = qualifier.textMatches(ANDROID_PKG);
+                                    for (VisitingDetector v : resourceFieldDetectors) {
                                         JavaPsiScanner detector = v.getJavaScanner();
                                         if (detector != null) {
                                             detector.visitResourceReference(mContext,
@@ -1651,8 +1571,6 @@ public class JavaPsiVisitor {
                                         }
                                     }
                                 }
-
-                                return;
                             }
                         }
                     }
@@ -1669,7 +1587,7 @@ public class JavaPsiVisitor {
             if (mVisitMethods) {
                 String methodName = node.getMethodExpression().getReferenceName();
                 if (methodName != null) {
-                    List<VisitingDetector> list = mMethodDetectors.get(methodName);
+                    List<VisitingDetector> list = methodDetectors.get(methodName);
                     if (list != null) {
                         PsiMethod method = node.resolveMethod();
                         if (method != null) {
@@ -1695,7 +1613,7 @@ public class JavaPsiVisitor {
                 if (typeReference != null) {
                     String type = typeReference.getQualifiedName();
                     if (type != null) {
-                        List<VisitingDetector> list = mConstructorDetectors.get(type);
+                        List<VisitingDetector> list = constructorDetectors.get(type);
                         if (list != null) {
                             PsiMethod method = node.resolveMethod();
                             if (method != null) {

@@ -16,6 +16,7 @@
 
 package com.android.ide.common.res2;
 
+import static com.android.testutils.truth.MoreTruth.assertThat;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -23,10 +24,13 @@ import static org.junit.Assert.assertTrue;
 
 import com.android.SdkConstants;
 import com.android.testutils.NoErrorsOrWarningsLogger;
+import com.android.testutils.TestResources;
 import com.android.testutils.TestUtils;
+import com.android.testutils.truth.MoreTruth;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ListMultimap;
 import com.google.common.io.Files;
+import com.google.common.truth.Truth;
 
 import org.junit.Rule;
 import org.junit.Test;
@@ -113,9 +117,9 @@ public class AssetMergerTest extends BaseTestCase {
         MergedAssetWriter writer = new MergedAssetWriter(outputFolder.toFile());
         merger.mergeData(writer, false /*doCleanUp*/);
 
-        assertTrue(Arrays.equals(
-                Files.toByteArray(outputFolder.resolve("asset.txt").toFile()),
-                "test.txt file content".getBytes(Charsets.UTF_8)));
+        assertThat(outputFolder.resolve("asset.txt").toFile())
+                .hasContents("test.txt file content");
+
     }
 
     @Test
@@ -138,7 +142,7 @@ public class AssetMergerTest extends BaseTestCase {
      */
     @Test
     public void testLoadingTestPathReplacement() throws Exception {
-        File root = TestUtils.getRoot("assets", "baseMerge");
+        File root = TestResources.getDirectory(getClass(), "/testData/assets/baseMerge");
         File fakeRoot = getMergedBlobFolder(root);
 
         AssetMerger assetMerger = new AssetMerger();
@@ -383,7 +387,7 @@ public class AssetMergerTest extends BaseTestCase {
         AssetMerger assetMerger = new AssetMerger();
         assetMerger.addDataSet(assetSet);
 
-        File root = TestUtils.getRoot("assets", "baseSet");
+        File root = TestResources.getDirectory(getClass(), "/testData/assets/baseSet");
         File changedCVSFoo = new File(root, "CVS/foo.txt");
         FileValidity<AssetSet> fileValidity = assetMerger.findDataSetContaining(changedCVSFoo);
 
@@ -416,7 +420,8 @@ public class AssetMergerTest extends BaseTestCase {
     private static AssetMerger getAssetMerger()
             throws IOException, MergingException {
         if (sAssetMerger == null) {
-            File root = TestUtils.getRoot("assets", "baseMerge");
+            File root = TestResources
+                    .getDirectory(AssetMergerTest.class, "/testData/assets/baseMerge");
 
             AssetSet res = AssetSetTest.getBaseAssetSet();
 
@@ -448,7 +453,8 @@ public class AssetMergerTest extends BaseTestCase {
     }
 
     private File getIncMergeRoot(String name) throws IOException {
-        File root = TestUtils.getCanonicalRoot("assets", "incMergeData");
+        File root = TestResources.getDirectory(getClass(), "/testData/assets/incMergeData")
+                .getCanonicalFile();
         return new File(root, name);
     }
 

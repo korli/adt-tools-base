@@ -20,19 +20,17 @@ package com.android.build.gradle.internal.profile;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.tasks.DefaultAndroidTask;
+import com.android.builder.profile.ProcessProfileWriter;
+import com.android.builder.profile.ProfileRecordWriter;
 import com.android.builder.profile.Recorder;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.CaseFormat;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats.GradleBuildProfileSpan;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats.GradleBuildProfileSpan.ExecutionType;
-
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan;
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan.ExecutionType;
+import com.google.wireless.android.sdk.stats.GradleTaskExecution;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionListener;
 import org.gradle.api.tasks.TaskState;
-
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Implementation of the {@link TaskExecutionListener} that records the execution span of
@@ -40,60 +38,43 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class RecordingBuildListener implements TaskExecutionListener {
 
+    @NonNull private final ProfileRecordWriter recordWriter;
+    // map of outstanding tasks executing, keyed by their path.
     @NonNull
-    private final Recorder mRecorder;
-    // map of outstanding tasks executing, keyed by their name.
-    @NonNull
-    private final Map<String, GradleBuildProfileSpan.Builder> mTaskRecords =
+    private final Map<String, GradleBuildProfileSpan.Builder> taskRecords =
             new ConcurrentHashMap<>();
 
-    RecordingBuildListener(@NonNull Recorder recorder) {
-        mRecorder = recorder;
+    RecordingBuildListener(@NonNull ProfileRecordWriter recorder) {
+        recordWriter = recorder;
     }
 
     @Override
     public void beforeExecute(@NonNull Task task) {
         GradleBuildProfileSpan.Builder builder = GradleBuildProfileSpan.newBuilder();
         builder.setType(ExecutionType.TASK_EXECUTION);
-        builder.setId(mRecorder.allocationRecordId());
+        builder.setId(recordWriter.allocateRecordId());
         builder.setStartTimeInMs(System.currentTimeMillis());
 
-        mTaskRecords.put(task.getName(), builder);
+        taskRecords.put(task.getPath(), builder);
     }
 
     @Override
     public void afterExecute(@NonNull Task task, @NonNull TaskState taskState) {
-        GradleBuildProfileSpan.Builder record = mTaskRecords.get(task.getName());
+        GradleBuildProfileSpan.Builder record = taskRecords.remove(task.getPath());
 
         record.setDurationInMs(System.currentTimeMillis() - record.getStartTimeInMs());
 
         //noinspection ThrowableResultOfMethodCallIgnored Just logging the failure.
         record.setTask(
-                AndroidStudioStats.GradleTaskExecution.newBuilder()
-                        .setType(getExecutionType(task.getClass()))
+                GradleTaskExecution.newBuilder()
+                        .setType(AnalyticsUtil.getTaskExecutionType(task.getClass()))
                         .setDidWork(taskState.getDidWork())
                         .setSkipped(taskState.getSkipped())
                         .setUpToDate(taskState.getUpToDate())
                         .setFailed(taskState.getFailure() != null));
 
-        mRecorder.closeRecord(task.getProject().getPath(), getVariantName(task), record);
-    }
-
-    @VisibleForTesting
-    @NonNull
-    static AndroidStudioStats.GradleTaskExecution.Type getExecutionType(@NonNull Class<?> taskClass) {
-        // find the right ExecutionType.
-        String taskImpl = taskClass.getSimpleName();
-        if (taskImpl.endsWith("_Decorated")) {
-            taskImpl = taskImpl.substring(0, taskImpl.length() - "_Decorated".length());
-        }
-        String potentialExecutionTypeName =
-                CaseFormat.LOWER_CAMEL.to(CaseFormat.UPPER_UNDERSCORE, taskImpl);
-        try {
-            return AndroidStudioStats.GradleTaskExecution.Type.valueOf(potentialExecutionTypeName);
-        } catch (IllegalArgumentException ignored) {
-            return AndroidStudioStats.GradleTaskExecution.Type.UNKNOWN_TASK_TYPE;
-        }
+        recordWriter.writeRecord(task.getProject().getPath(), getVariantName(task), record);
+        ProcessProfileWriter.recordMemorySample();
     }
 
     @Nullable

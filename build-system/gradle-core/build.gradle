@@ -1,7 +1,14 @@
-apply plugin: 'groovy'
-apply plugin: 'jacoco'
+apply plugin: 'java'
+apply plugin: 'jacoco-tools-base'
 apply plugin: 'clone-artifacts'
 apply plugin: 'antlr'
+apply plugin: 'com.google.protobuf'
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.0.0'
+    }
+}
 
 configurations {
     provided
@@ -16,7 +23,6 @@ File baseInstrumentedClasses = new File(classesDir, "baseInstrumented")
 sourceSets {
     main {
         java.srcDirs += 'src/fromGradle/java'
-        java.srcDirs += 'src/main/generated'
         resources.srcDirs = ['src/main/resources', 'src/fromGradle/resources']
         compileClasspath += configurations.provided
     }
@@ -27,8 +33,6 @@ sourceSets {
     }
 }
 
-ext.proguardVersion = "5.2.1"
-
 dependencies {
     compile project(':base:builder')
     compile project(':base:lint')
@@ -36,13 +40,13 @@ dependencies {
     compile project(':base:transform-api')
     compile project(':base:gradle-api')
     compile project(':dataBinding:compilerCommon')
-    compile 'org.ow2.asm:asm:5.0.4'
-    compile 'org.ow2.asm:asm-commons:5.0.4'
-    compile "net.sf.proguard:proguard-gradle:${project.ext.proguardVersion}"
-    compile "org.jacoco:org.jacoco.core:0.7.5.201505241946"   // When updating this version, also
-    compile "org.jacoco:org.jacoco.report:0.7.5.201505241946" // update JacocoPlugin.
-    compile "net.sf.jopt-simple:jopt-simple:4.9"
-    compile "com.google.protobuf:protobuf-java:2.5.0"
+    compile libs.asm
+    compile libs.asm_commons
+    compile libs.proguard
+    compile libs.jacoco_core
+    compile libs.jacoco_report
+    compile libs.jopt
+    compile libs.protobuf
     testCompile project(':base:instant-run:instant-run-annotations')
     testCompile project(':base:instant-run:instant-run-runtime')
 
@@ -58,15 +62,16 @@ dependencies {
 
     includeInJar project(':base:instant-run:instant-run-server')
 
-    antlr 'org.antlr:antlr:3.5.2'
+    antlr libs.antlr3
 
-    testCompile 'junit:junit:4.12'
-    testCompile 'com.google.truth:truth:0.28'
-    testCompile 'org.mockito:mockito-core:1.9.5'
-    testCompile 'com.google.guava:guava:17.0'
+    testCompile libs.junit
+    testCompile libs.truth
+    testCompile libs.mockito_core
+    testCompile libs.guava
+	testCompile libs.equalsverifier
     testCompile project(':base:project-test-lib')
     testCompile project(':base:testutils')
-    testCompile 'org.jsoup:jsoup:1.6.3'
+    testCompile libs.jsoup
 }
 
 jar {
@@ -95,21 +100,17 @@ test {
     maxParallelForks = Runtime.runtime.availableProcessors() / 2
 }
 
-groovydoc {
+javadoc {
     exclude     "**/internal/**"
-    includePrivate false
 
-    docTitle "Gradle Plugin for Android"
-    header ""
-    footer "Copyright (C) 2012 The Android Open Source Project"
-    overview ""
-
-    groovyClasspath = configurations.provided
+    options.docTitle "Gradle Plugin for Android"
+    options.header ""
+    options.footer "Copyright (C) 2012 The Android Open Source Project"
 }
 
-task javadocJar(type: Jar, dependsOn:groovydoc) {
+task javadocJar(type: Jar, dependsOn:javadoc) {
     classifier  'javadoc'
-    from        groovydoc.destinationDir
+    from        javadoc.destinationDir
 
 }
 
@@ -118,154 +119,43 @@ tasks.withType(Javadoc) {
 }
 
 // Only package JavaDoc if using --init-script=buildSrc/base/release.gradle
-if (project.has("release")) {
+if (project.hasProperty("release")) {
     artifacts {
         archives javadocJar
     }
 }
 
-// Incremental update test support
-File androidJar = file('../../../../prebuilts/sdk/23/android.jar');
 
-class JasminTask extends AbstractCompile {
-    @TaskAction
-    public void compile() {
-        getSource().matching { include '**/*.j' }.getFiles().each { file ->
-            project.javaexec {
-                classpath project.files(new File(project.getProjectDir(), "../../../../prebuilts/tools/common/jasmin/jasmin.jar"))
-                main 'jasmin.Main'
-                args file.getAbsolutePath(), "-d", getDestinationDir().getAbsolutePath()
-            }
-        }
-    }
-}
-
-File baseClassesJasmin = new File(classesDir, "baseJasmin")
-Task compileIncrementalTestBaseClassesJasmin = tasks.create(
-        name: "compileIncrementalTestBaseClassesJasmin",
-        type: JasminTask) {
-    source(new File(project.getProjectDir(), "src/test/incremental-test-classes/base"))
-    classpath = sourceSets.test.compileClasspath
-    destinationDir baseClassesJasmin
-}
-
-File baseClassesJava = new File(classesDir, "baseJava")
-Task compileIncrementalTestBaseClassesJava = tasks.create(
-        name: "compileIncrementalTestBaseClassesJava",
-        type: org.gradle.api.tasks.compile.JavaCompile) {
-    source = new File(project.getProjectDir(), "src/test/incremental-test-classes/base")
-    classpath = sourceSets.test.compileClasspath
-    destinationDir = baseClassesJava
-    sourceCompatibility '1.6'
-    targetCompatibility '1.6'
-    options.bootClasspath = androidJar
-}
-
-def compileIncrementalTestBaseClasses = tasks.create(name: "copyBaseClasses", type: Copy) {
-    from           baseClassesJava
-    from           baseClassesJasmin
-    destinationDir baseClasses
-}
-compileIncrementalTestBaseClasses.dependsOn compileIncrementalTestBaseClassesJava
-compileIncrementalTestBaseClasses.dependsOn compileIncrementalTestBaseClassesJasmin
-compileTestJava.dependsOn compileIncrementalTestBaseClasses
-
-Task instrumentIncrementalTestBaseClasses = tasks.create(
-        name: "instrumentIncrementalTestBaseClasses",
-        type: org.gradle.api.tasks.JavaExec) {
-    main = 'com.android.build.gradle.internal.incremental.IncrementalSupportVisitor'
-//    jvmArgs = [ '-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005']
-    classpath = sourceSets.main.runtimeClasspath + sourceSets.test.compileClasspath
-    args baseClasses, baseInstrumentedClasses, androidJar
-    inputs.files sourceSets.main.runtimeClasspath, sourceSets.test.compileClasspath, baseClasses,
-            androidJar
-    outputs.files baseInstrumentedClasses
-}
-
-instrumentIncrementalTestBaseClasses.dependsOn compileIncrementalTestBaseClasses
-
-// Compile other changesets. They have the default changset on their classpath.
-Task instrumentIncrementalTestPatches = tasks.create("instrumentIncrementalTestPatches")
-
-compileTestJava.dependsOn(
-        instrumentIncrementalTestPatches,
-        instrumentIncrementalTestBaseClasses)
-
-File incrementalTestOutDirJava = new File(classesDir, "patchesJava")
-File incrementalTestOutDirJasmin = new File(classesDir, "patchesJasmin")
-File incrementalTestOutDir = new File(classesDir, "patches")
-File instrumentedIncrementalTestOutDir = new File(classesDir, "instrumentedPatches")
-
-for (File f: new File(project.projectDir, "src/test/incremental-test-classes/patches").listFiles()) {
-    File incrementalPatchClassFileDirJava = new File(incrementalTestOutDirJava, f.getName())
-    Task compilePatchJava = tasks.create(
-            name: "compileIncrementalTestPatchJava${f.getName().capitalize()}",
-            type: org.gradle.api.tasks.compile.JavaCompile) {
-        source = project.files(f)
-        classpath = sourceSets.test.compileClasspath
-        destinationDir = incrementalPatchClassFileDirJava
-        sourceCompatibility '1.6'
-        targetCompatibility '1.6'
-        options.bootClasspath = androidJar
-    }
-
-    File incrementalPatchClassFileDirJasmin = new File(incrementalTestOutDirJasmin, f.getName())
-    Task compilePatchJasmin = tasks.create(
-            name: "compileIncrementalTestPatchJasmin${f.getName().capitalize()}",
-            type: JasminTask) {
-        source = project.files(f)
-        classpath = sourceSets.test.compileClasspath
-        destinationDir incrementalPatchClassFileDirJasmin
-    }
-
-    File incrementalPatchClassFileDir = new File(incrementalTestOutDir, f.getName())
-    Task compilePatch = tasks.create(name: "compilePatch${f.getName().capitalize()}" , type: Copy) {
-        from           incrementalPatchClassFileDirJava
-        from           incrementalPatchClassFileDirJasmin
-        destinationDir incrementalPatchClassFileDir
-    }
-    compilePatch.dependsOn compilePatchJava
-    compilePatch.dependsOn compilePatchJasmin
-
-    File patchOutDir = new File(instrumentedIncrementalTestOutDir, f.getName())
-    Task instrumentPatch = tasks.create(
-            name: "instrumentIncrementalTestPatch${f.getName().capitalize()}",
-            type: org.gradle.api.tasks.JavaExec) {
-        main = 'com.android.build.gradle.internal.incremental.IncrementalChangeVisitor'
-//        jvmArgs = [ '-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005']
-        classpath = sourceSets.main.runtimeClasspath + sourceSets.test.compileClasspath
-        args incrementalPatchClassFileDir, patchOutDir,
-                androidJar.absolutePath + File.pathSeparator + baseClasses
-        inputs.files sourceSets.main.runtimeClasspath, sourceSets.test.compileClasspath,
-                incrementalPatchClassFileDir, androidJar, baseClasses
-        outputs.files patchOutDir
-    }
-
-    instrumentPatch.dependsOn(compilePatch)
-
-    instrumentIncrementalTestPatches.dependsOn instrumentPatch
-}
-
-Task jarIncrementalTests = tasks.create(name: "jarIncrementalTests", type: Jar) {
-    from sourceSets.test,outputs
-    into 'build/incrementalTests.jar'
-    include "com/android/build/gradle/internal/incremental/**"
-    exclude "com/android/build/gradle/internal/incremental/fixture/**"
-}
-
+// Package instant run instrumentation inside of gradle-core.
 configurations {
-    incrementalTestClasses
+    subsumedProvided
+    sourcesSubsumedProvided
 }
-
-test {
-    inputs.files instrumentedIncrementalTestOutDir
+dependencies {
+    subsumedProvided(project(':base:instant-run-instrumentation')) {
+        transitive = false
+    }
+    sourcesSubsumedProvided(project(path:':base:instant-run-instrumentation', configuration:'sourcesOnly')) {
+        transitive = false
+    }
 }
-
-artifacts {
-    incrementalTestClasses jarIncrementalTests
+sourceSets.main.compileClasspath += configurations.subsumedProvided
+sourceSets.test.compileClasspath += configurations.subsumedProvided
+sourceSets.test.runtimeClasspath += configurations.subsumedProvided
+tasks.compileJava.dependsOn(configurations.subsumedProvided)
+tasks.sourcesJar.dependsOn(configurations.sourcesSubsumedProvided)
+tasks.jar {
+    from({ zipTree(configurations.subsumedProvided.singleFile)})
 }
+tasks.sourcesJar {
+    from({zipTree(configurations.sourcesSubsumedProvided.singleFile)})
+}
+javadoc {
+    classpath += configurations.subsumedProvided
+}
+// End Package instant run instrumentation inside of gradle-core.
 
+// Incremental update test support
 javadoc {
     classpath += configurations.provided
 }
-

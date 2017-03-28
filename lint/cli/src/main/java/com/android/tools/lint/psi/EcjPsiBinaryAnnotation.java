@@ -28,9 +28,11 @@ import com.intellij.psi.PsiAnnotationParameterList;
 import com.intellij.psi.PsiJavaCodeReferenceElement;
 import com.intellij.psi.PsiNameValuePair;
 import com.intellij.psi.meta.PsiMetaData;
-
 import org.eclipse.jdt.internal.compiler.lookup.AnnotationBinding;
+import org.eclipse.jdt.internal.compiler.lookup.Binding;
 import org.eclipse.jdt.internal.compiler.lookup.ElementValuePair;
+import org.eclipse.jdt.internal.compiler.lookup.MethodBinding;
+import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
 
 class EcjPsiBinaryAnnotation extends EcjPsiBinaryElement implements PsiAnnotation,
         PsiAnnotationParameterList {
@@ -39,7 +41,9 @@ class EcjPsiBinaryAnnotation extends EcjPsiBinaryElement implements PsiAnnotatio
 
     private final String mQualifiedName;
 
-    private final PsiAnnotationOwner mOwner;
+    private PsiAnnotationOwner mOwner;
+
+    private Binding mOwnerBinding;
 
     private PsiNameValuePair[] mPairs;
 
@@ -49,8 +53,24 @@ class EcjPsiBinaryAnnotation extends EcjPsiBinaryElement implements PsiAnnotatio
             @NonNull EcjPsiManager manager,
             @NonNull PsiAnnotationOwner owner,
             @NonNull final AnnotationBinding binding) {
-        super(manager, null);
+        this(manager, binding);
         mOwner = owner;
+        mOwnerBinding = null;
+    }
+
+    EcjPsiBinaryAnnotation(
+            @NonNull EcjPsiManager manager,
+            @NonNull Binding owner,
+            @NonNull final AnnotationBinding binding) {
+        this(manager, binding);
+        mOwner = null;
+        mOwnerBinding = owner;
+    }
+
+    private EcjPsiBinaryAnnotation(
+            @NonNull EcjPsiManager manager,
+            @NonNull final AnnotationBinding binding) {
+        super(manager, null);
         mBinding = binding;
         mQualifiedName = getTypeName(mBinding.getAnnotationType());
     }
@@ -102,6 +122,16 @@ class EcjPsiBinaryAnnotation extends EcjPsiBinaryElement implements PsiAnnotatio
     @Nullable
     @Override
     public PsiAnnotationOwner getOwner() {
+        if (mOwner == null) {
+            assert mOwnerBinding != null;
+            if (mOwnerBinding instanceof MethodBinding) {
+                MethodBinding methodBinding = (MethodBinding) this.mOwnerBinding;
+                mOwner = new EcjPsiBinaryMethod(mManager, methodBinding).getModifierList();
+            } else if (mOwnerBinding instanceof ReferenceBinding) {
+                ReferenceBinding referenceBinding = (ReferenceBinding) this.mOwnerBinding;
+                mOwner = new EcjPsiBinaryClass(mManager, referenceBinding).getModifierList();
+            }
+        }
         return mOwner;
     }
 
@@ -121,7 +151,6 @@ class EcjPsiBinaryAnnotation extends EcjPsiBinaryElement implements PsiAnnotatio
                 for (int i = 0; i < elementValuePairs.length; i++) {
                     ElementValuePair pair = elementValuePairs[i];
                     mPairs[i] = new EcjPsiBinaryNameValuePair(mManager, pair);
-
                 }
             } else {
                 mPairs = PsiNameValuePair.EMPTY_ARRAY;

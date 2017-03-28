@@ -1,12 +1,15 @@
 add_library(perfa SHARED
+            support/energy_passthrough.cc
+            support/event_passthrough.cc
+            support/http_tracker.cc
             support/profiler_service.cc
+            support/vm_stats_sampler.cc
             perfa.cc)
 
 target_link_libraries(perfa
-                      ProfilerProtos
-                      ProfilerUtils)
+                      profiler_protos
+                      profiler_utils)
 
-if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
-  set_target_properties(perfa PROPERTIES
-                        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
-endif()
+set_linker_script(perfa perfa.exports perfa.cc)
+
+install_library(perfa)

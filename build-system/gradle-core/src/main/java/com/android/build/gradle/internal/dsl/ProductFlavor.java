@@ -29,15 +29,13 @@ import com.android.builder.model.ClassField;
 import com.android.builder.model.SyncIssue;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
-
+import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.logging.Logger;
 import org.gradle.internal.reflect.Instantiator;
-
-import java.util.Collection;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * DSL object used to configure product flavors.
@@ -454,10 +452,16 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Adds a resource configuration filter.
      *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same type
-     * but of different value will be ignored from the final packaging of the APK.
+     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
+     * type but of different value will be ignored from the final packaging of the APK.
      *
      * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
+     *
+     * <p>To package only the localization languages your app includes as string resources, specify
+     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
+     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
+     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
+     * package 'values-ja' resources in the final APK.
      */
     public void resConfig(@NonNull String config) {
         addResourceConfiguration(config);
@@ -466,10 +470,16 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Adds several resource configuration filters.
      *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same type
-     * but of different value will be ignored from the final packaging of the APK.
+     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
+     * type but of different value will be ignored from the final packaging of the APK.
      *
      * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
+     *
+     * <p>To package only the localization languages your app includes as string resources, specify
+     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
+     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
+     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
+     * package 'values-ja' resources in the final APK.
      */
     public void resConfigs(@NonNull String... config) {
         addResourceConfigurations(config);
@@ -478,10 +488,16 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Adds several resource configuration filters.
      *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same type
-     * but of different value will be ignored from the final packaging of the APK.
+     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
+     * type but of different value will be ignored from the final packaging of the APK.
      *
      * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
+     *
+     * <p>To package only the localization languages your app includes as string resources, specify
+     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
+     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
+     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
+     * package 'values-ja' resources in the final APK.
      */
     public void resConfigs(@NonNull Collection<String> config) {
         addResourceConfigurations(config);
@@ -490,7 +506,7 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Options for configuring jack.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/jackandjill">Jack and Jill</a>
+     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
      */
     @Override
     @NonNull
@@ -501,7 +517,7 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Configure Jack options for this product flavor.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/jackandjill">Jack and Jill</a>
+     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
      */
     public void jackOptions(@NonNull Action<JackOptions> action) {
         action.execute(jackOptions);
@@ -523,7 +539,7 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Whether the experimental Jack toolchain should be used.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/jackandjill">Jack and Jill</a>
+     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
      *
      * @deprecated use getJack.setEnabled instead.
      */
@@ -537,7 +553,7 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
     /**
      * Whether the experimental Jack toolchain should be used.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/jackandjill">Jack and Jill</a>
+     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
      *
      * @deprecated use getJack.setEnabled instead.
      */

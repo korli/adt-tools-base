@@ -40,9 +40,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
-
-import junit.framework.TestCase;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -52,6 +49,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import junit.framework.TestCase;
 
 public class PluralsDatabaseTest extends TestCase {
     public void testGetRelevant() {
@@ -98,7 +96,7 @@ public class PluralsDatabaseTest extends TestCase {
      * dump out updated data structures for the database.
      */
     public void testDatabaseAccurate() {
-        List<String> languages = new ArrayList<String>(LocaleManager.getLanguageCodes());
+        List<String> languages = new ArrayList<>(LocaleManager.getLanguageCodes());
         Collections.sort(languages);
         PluralsTextDatabase db = PluralsTextDatabase.get();
         db.ensureInitialized();
@@ -140,7 +138,7 @@ public class PluralsDatabaseTest extends TestCase {
     }
 
     private static void dumpDatabaseTables() {
-        List<String> languages = new ArrayList<String>(LocaleManager.getLanguageCodes());
+        List<String> languages = new ArrayList<>(LocaleManager.getLanguageCodes());
         Collections.sort(languages);
         PluralsTextDatabase db = PluralsTextDatabase.get();
         db.ensureInitialized();
@@ -358,7 +356,7 @@ public class PluralsDatabaseTest extends TestCase {
             Map<String, Integer> indices,
             Map<String, String> setsWithExamples) {
 
-        List<String> sorted = new ArrayList<String>(setsWithExamples.keySet());
+        List<String> sorted = new ArrayList<>(setsWithExamples.keySet());
         Collections.sort(sorted);
 
         StringBuilder sb = new StringBuilder();
