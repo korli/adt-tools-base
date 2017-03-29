@@ -50,7 +50,7 @@ public class DeviceConfigTest {
         assertEquals("bar,zar", config.getValue(DeviceConfig.Category.ABI).get());
 
         assertEquals(2, config.getAbis().size());
-        List<String> expected = new ArrayList<>();
+        List<String> expected = new ArrayList<String>();
         expected.add("foo:bar");
         expected.add("foo:zar");
 
