@@ -13,5 +13,18 @@
     <orderEntry type="library" name="mockito" level="project" />
     <orderEntry type="library" name="truth" level="project" />
     <orderEntry type="library" name="dexlib2" level="project" />
+    <orderEntry type="module-library">
+      <library>
+        <CLASSES>
+          <root url="jar://$MODULE_DIR$/../../android/lib/dexlib2-2.0.8-dev.jar!/" />
+          <root url="jar://$MODULE_DIR$/../../android/lib/dexlib2-util-2.0.8-dev.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES>
+          <root url="jar://$MODULE_DIR$/../../android/lib/src/dexlib2-2.0.8-dev-sources.jar!/" />
+          <root url="jar://$MODULE_DIR$/../../android/lib/src/dexlib2-util-2.0.8-dev-sources.jar!/" />
+        </SOURCES>
+      </library>
+    </orderEntry>
   </component>
 </module>
