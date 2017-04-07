@@ -6,9 +6,6 @@
       <sourceFolder url="file://$MODULE_DIR$/src/main/java" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/test/java" isTestSource="true" />
     </content>
-    <content url="file://$MODULE_DIR$/../../../../out/build/base/builder-model/build/generated">
-      <sourceFolder url="file://$MODULE_DIR$/../../../../out/build/base/builder-model/build/generated/resources" type="java-resource" />
-    </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="android-annotations" />
