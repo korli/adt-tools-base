@@ -17,17 +17,14 @@
 package com.android.tools.perflib.vmtrace.viz;
 
 import com.android.tools.perflib.vmtrace.*;
-
-import com.android.tools.perflib.vmtrace.ClockType;
-import com.android.tools.perflib.vmtrace.SearchResult;
-import com.android.tools.perflib.vmtrace.ThreadInfo;
-import com.android.tools.perflib.vmtrace.VmTraceData;
-import com.android.tools.perflib.vmtrace.VmTraceParser;
 import com.google.common.collect.Iterables;
 
-import java.awt.BorderLayout;
-import java.awt.Component;
-import java.awt.FlowLayout;
+import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
@@ -35,21 +32,8 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.List;
 
-import javax.swing.DefaultComboBoxModel;
-import javax.swing.DefaultListCellRenderer;
-import javax.swing.JCheckBox;
-import javax.swing.JComboBox;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JList;
-import javax.swing.JPanel;
-import javax.swing.JTextField;
-import javax.swing.SwingUtilities;
-import javax.swing.WindowConstants;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.Document;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 
 /**
  * This is just a simple test application that loads a particular trace file,

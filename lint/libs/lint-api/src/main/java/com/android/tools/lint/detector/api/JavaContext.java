@@ -26,8 +26,13 @@ import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.util.containers.ContainerUtil;
+import lombok.ast.*;
+import lombok.ast.Position;
+
 import java.io.File;
 import java.util.Iterator;
+
 import static com.android.SdkConstants.CLASS_CONTEXT;
 import static com.android.tools.lint.client.api.JavaParser.ResolvedNode;
 import static com.android.tools.lint.client.api.JavaParser.TypeDescriptor;

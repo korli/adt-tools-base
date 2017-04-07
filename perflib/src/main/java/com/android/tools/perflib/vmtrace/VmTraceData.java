@@ -18,6 +18,8 @@ package com.android.tools.perflib.vmtrace;
 
 import com.android.utils.SparseArray;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
 import java.util.*;
@@ -110,7 +112,7 @@ public class VmTraceData {
         }
 
         return Lists.newArrayList(
-                Iterables.filter(allThreads, input -> input.getTopLevelCall() != null));
+          Iterables.filter(allThreads, input -> input.getTopLevelCall() != null));
     }
 
     public ThreadInfo getThread(String name) {
