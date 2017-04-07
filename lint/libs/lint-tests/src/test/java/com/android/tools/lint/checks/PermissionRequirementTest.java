@@ -28,7 +28,6 @@ import static org.mockito.Mockito.when;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.sdklib.AndroidVersion;
-import com.android.testutils.SdkTestCase;
 import com.android.testutils.TestUtils;
 import com.android.tools.lint.checks.PermissionHolder.SetPermissionLookup;
 import com.android.tools.lint.client.api.JavaParser.ResolvedAnnotation;
@@ -43,14 +42,6 @@ import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiAnnotationParameterList;
 import com.intellij.psi.PsiLiteral;
 import com.intellij.psi.PsiNameValuePair;
-
-import junit.framework.TestCase;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
@@ -58,6 +49,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
+import junit.framework.TestCase;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 public class PermissionRequirementTest extends TestCase {
     private static PsiAnnotation createAnnotation(
@@ -93,7 +89,7 @@ public class PermissionRequirementTest extends TestCase {
         Set<String> emptySet = Collections.emptySet();
         Set<String> fineSet = Collections.singleton("android.permission.ACCESS_FINE_LOCATION");
         PsiAnnotation annotation = createAnnotation(PERMISSION_ANNOTATION, values);
-        PermissionRequirement req = PermissionRequirement.create(null, annotation);
+        PermissionRequirement req = PermissionRequirement.create(annotation);
         assertTrue(req.isRevocable(new SetPermissionLookup(emptySet)));
 
         assertFalse(req.isSatisfied(new SetPermissionLookup(emptySet)));
@@ -120,7 +116,7 @@ public class PermissionRequirementTest extends TestCase {
                 "android.permission.ACCESS_COARSE_LOCATION");
 
         PsiAnnotation annotation = createAnnotation(PERMISSION_ANNOTATION, values);
-        PermissionRequirement req = PermissionRequirement.create(null, annotation);
+        PermissionRequirement req = PermissionRequirement.create(annotation);
         assertTrue(req.isRevocable(new SetPermissionLookup(emptySet)));
         assertFalse(req.isSatisfied(new SetPermissionLookup(emptySet)));
         assertFalse(req.isSatisfied(new SetPermissionLookup(Collections.singleton(""))));
@@ -146,7 +142,7 @@ public class PermissionRequirementTest extends TestCase {
                 "android.permission.ACCESS_COARSE_LOCATION");
 
         PsiAnnotation annotation = createAnnotation(PERMISSION_ANNOTATION, values);
-        PermissionRequirement req = PermissionRequirement.create(null, annotation);
+        PermissionRequirement req = PermissionRequirement.create(annotation);
         assertTrue(req.isRevocable(new SetPermissionLookup(emptySet)));
         assertFalse(req.isSatisfied(new SetPermissionLookup(emptySet)));
         assertFalse(req.isSatisfied(new SetPermissionLookup(Collections.singleton(""))));
@@ -174,21 +170,14 @@ public class PermissionRequirementTest extends TestCase {
         ResolvedAnnotation.Value values = new ResolvedAnnotation.Value("allOf",
                 "android.permission.ACCESS_FINE_LOCATION");
         PsiAnnotation annotation = createAnnotation(PERMISSION_ANNOTATION, values);
-        assertTrue(PermissionRequirement.create(null, annotation).isSingle());
-    }
-
-    public void testSingleAsArray() {
-        // Annotations let you supply a single string to an array method
-        ResolvedAnnotation.Value values = new ResolvedAnnotation.Value("allOf",
-                "android.permission.ACCESS_FINE_LOCATION");
-        ResolvedAnnotation annotation = createAnnotation(PERMISSION_ANNOTATION, values);
-        assertTrue(PermissionRequirement.create(null, annotation).isSingle());
+        assertTrue(PermissionRequirement.create(annotation).isSingle());
     }
 
     public void testRevocable() {
         assertTrue(isRevocableSystemPermission("android.permission.ACCESS_FINE_LOCATION"));
         assertTrue(isRevocableSystemPermission("android.permission.ACCESS_COARSE_LOCATION"));
         assertFalse(isRevocableSystemPermission("android.permission.UNKNOWN_PERMISSION_NAME"));
+        assertFalse(isRevocableSystemPermission("android.permission.GET_ACCOUNTS"));
     }
 
     public void testRevocable2() {
@@ -203,7 +192,7 @@ public class PermissionRequirementTest extends TestCase {
         // No date range applies to permission
         annotation = createAnnotation(PERMISSION_ANNOTATION,
                 new ResolvedAnnotation.Value("value", "android.permission.AUTHENTICATE_ACCOUNTS"));
-        req = PermissionRequirement.create(null, annotation);
+        req = PermissionRequirement.create(annotation);
         assertTrue(req.appliesTo(getHolder(15, 1)));
         assertTrue(req.appliesTo(getHolder(15, 19)));
         assertTrue(req.appliesTo(getHolder(15, 23)));
@@ -214,7 +203,7 @@ public class PermissionRequirementTest extends TestCase {
         annotation = createAnnotation(PERMISSION_ANNOTATION,
                 new ResolvedAnnotation.Value("value", "android.permission.AUTHENTICATE_ACCOUNTS"),
                 new ResolvedAnnotation.Value("apis", "..22"));
-        req = PermissionRequirement.create(null, annotation);
+        req = PermissionRequirement.create(annotation);
         assertTrue(req.appliesTo(getHolder(15, 1)));
         assertTrue(req.appliesTo(getHolder(15, 19)));
         assertTrue(req.appliesTo(getHolder(15, 23)));
@@ -225,7 +214,7 @@ public class PermissionRequirementTest extends TestCase {
         annotation = createAnnotation(PERMISSION_ANNOTATION,
                 new ResolvedAnnotation.Value("value", "android.permission.AUTHENTICATE_ACCOUNTS"),
                 new ResolvedAnnotation.Value("apis", "23.."));
-        req = PermissionRequirement.create(null, annotation);
+        req = PermissionRequirement.create(annotation);
         assertFalse(req.appliesTo(getHolder(15, 1)));
         assertFalse(req.appliesTo(getHolder(1, 19)));
         assertFalse(req.appliesTo(getHolder(15, 22)));
@@ -236,7 +225,7 @@ public class PermissionRequirementTest extends TestCase {
         annotation = createAnnotation(PERMISSION_ANNOTATION,
                 new ResolvedAnnotation.Value("value", "android.permission.AUTHENTICATE_ACCOUNTS"),
                 new ResolvedAnnotation.Value("apis", "14..18"));
-        req = PermissionRequirement.create(null, annotation);
+        req = PermissionRequirement.create(annotation);
         assertFalse(req.appliesTo(getHolder(1, 5)));
         assertTrue(req.appliesTo(getHolder(15, 19)));
     }
@@ -278,7 +267,7 @@ public class PermissionRequirementTest extends TestCase {
     @Nullable
     private static List<String> getDangerousPermissions() throws IOException {
         Pattern pattern = Pattern.compile("dangerous");
-        String top = System.getenv("ANDROID_BUILD_TOP");   //$NON-NLS-1$
+        String top = System.getenv("ANDROID_BUILD_TOP");
 
         // Alternatively, you can look up the version for the release branch on ag via
         // something like
@@ -313,6 +302,10 @@ public class PermissionRequirementTest extends TestCase {
                     Element element = (Element) child;
                     String protectionLevel = element.getAttributeNS(ANDROID_URI, "protectionLevel");
                     String name = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
+                    if (name.equals("android.permission.GET_ACCOUNTS")) {
+                        // No longer needed in M. See issue 223244.
+                        continue;
+                    }
                     if (!name.isEmpty() && pattern.matcher(protectionLevel).find()) {
                         revocable.add(name);
                     } else {
@@ -333,7 +326,6 @@ public class PermissionRequirementTest extends TestCase {
                             // This one seems to have gone from a dangerous permission
                             // in M to a signature permission
                             revocable.add(name);
-
                         }
                     }
                 }

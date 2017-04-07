@@ -15,6 +15,8 @@
  */
 package com.android.tools.lint.client.api;
 
+import static com.android.tools.lint.client.api.CustomRuleTest.LINT_JAR_BASE64_GZIP;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.testutils.TestUtils;
@@ -22,27 +24,26 @@ import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.Speed;
-import com.google.common.io.Files;
-
 import java.io.File;
+import java.io.IOException;
 import java.io.StringWriter;
 import java.util.List;
 
 @SuppressWarnings("SpellCheckingInspection")
 public class JarFileIssueRegistryTest extends AbstractCheckTest {
-    public void testError() {
+    public void testError() throws Exception {
         try {
-            JarFileIssueRegistry.get(new TestLintClient(), new File("bogus"));
+            JarFileIssueRegistry.get(createClient(), new File("bogus"));
             fail("Expected exception for bogus path");
-        } catch (Throwable t) {
+        } catch (IOException expected) {
             // pass
         }
     }
 
     public void testCached() throws Exception {
         File targetDir = TestUtils.createTempDirDeletedOnExit();
-        File file1 = getTestfile(targetDir, "rules/appcompat.jar.data");
-        File file2 = getTestfile(targetDir, "apicheck/unsupported.jar.data");
+        File file1 = base64gzip("lint.jar", LINT_JAR_BASE64_GZIP).createFile(targetDir);
+        File file2 = jar("unsupported.jar").createFile(targetDir);
         assertTrue(file1.getPath(), file1.exists());
         final StringWriter mLoggedWarnings = new StringWriter();
         TestLintClient client = new TestLintClient() {
@@ -69,7 +70,6 @@ public class JarFileIssueRegistryTest extends AbstractCheckTest {
         Detector detector =
                 registry1.getIssues().get(0).getImplementation().getDetectorClass().newInstance();
         detector.getApplicableAsmNodeTypes();
-        assertSame(Speed.NORMAL, detector.getSpeed());
         List<String> applicableCallNames = detector.getApplicableCallNames();
         assertNotNull(applicableCallNames);
         assertTrue(applicableCallNames.contains("getActionBar"));

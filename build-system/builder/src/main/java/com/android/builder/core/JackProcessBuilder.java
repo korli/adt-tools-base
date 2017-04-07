@@ -25,7 +25,9 @@ import com.android.ide.common.process.ProcessEnvBuilder;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.sdklib.BuildToolInfo;
+import com.android.sdklib.BuildToolInfo.JackVersion;
 import com.android.utils.FileUtils;
+import com.android.utils.ILogger;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.io.Files;
@@ -41,9 +43,12 @@ public class JackProcessBuilder extends ProcessEnvBuilder<JackProcessBuilder> {
 
     @NonNull
     private final JackProcessOptions options;
+    @NonNull
+    private final ILogger logger;
 
-    public JackProcessBuilder(@NonNull JackProcessOptions options) {
+    public JackProcessBuilder(@NonNull JackProcessOptions options, @NonNull ILogger logger) {
         this.options = options;
+        this.logger = logger;
     }
 
     @NonNull
@@ -68,13 +73,19 @@ public class JackProcessBuilder extends ProcessEnvBuilder<JackProcessBuilder> {
             builder.addJvmArg("-Xmx1024M");
         }
 
-        builder.addArgs("-D", "jack.dex.optimize=" + Boolean.toString(options.getDexOptimize()));
+        builder.addJvmArg("-Dfile.encoding=" + options.getEncoding());
+        // due to b.android.com/82031
+        builder.addArgs("-D", "jack.dex.optimize=true");
 
-        if (options.isDebugLog()) {
-            builder.addArgs("--verbose", "debug");
-        } else if (options.isVerbose()) {
+        if (options.isDebugJackInternals()) {
+            builder.addJvmArg("-Dcom.android.jack.log=DEBUG");
+        }
+
+        if (options.isVerboseProcessing()) {
             builder.addArgs("--verbose", "info");
         }
+
+        builder.addArgs("-D", "jack.reporter=sdk");
 
         builder.addArgs("-D", "jack.dex.debug.vars=" + options.isDebuggable());
 
@@ -108,7 +119,7 @@ public class JackProcessBuilder extends ProcessEnvBuilder<JackProcessBuilder> {
 
         if (options.isMultiDex()) {
             builder.addArgs("--multi-dex");
-            if (options.getMinSdkVersion() < 21) {
+            if (DefaultApiVersion.isLegacyMultidex(options.getMinSdkVersion())) {
                 builder.addArgs("legacy");
             } else {
                 builder.addArgs("native");
@@ -127,8 +138,9 @@ public class JackProcessBuilder extends ProcessEnvBuilder<JackProcessBuilder> {
             builder.addArgs("--incremental-folder", options.getIncrementalDir().getAbsolutePath());
         }
 
-        if (options.getMinSdkVersion() > 0) {
-            builder.addArgs("-D", "jack.android.min-api-level=" + options.getMinSdkVersion());
+        if (!DefaultApiVersion.isPreview(options.getMinSdkVersion())) {
+            builder.addArgs(
+                    "-D", "jack.android.min-api-level=" + options.getMinSdkVersion().getApiLevel());
         }
 
         if (!options.getAnnotationProcessorNames().isEmpty()) {
@@ -173,32 +185,50 @@ public class JackProcessBuilder extends ProcessEnvBuilder<JackProcessBuilder> {
             }
         }
 
-        if (options.getCoverageMetadataFile() != null) {
-            if (buildToolInfo.getRevision().compareTo(JackProcessOptions.DOUARN_REV) >= 0) {
-                String coveragePluginPath = buildToolInfo.getPath(
-                        BuildToolInfo.PathId.JACK_COVERAGE_PLUGIN);
-                builder.addArgs("--pluginpath", coveragePluginPath);
-                builder.addArgs("--plugin", JackProcessOptions.COVERAGE_PLUGIN_NAME);
-                builder.addArgs(
-                        "-D",
-                        "jack.coverage.metadata.file="
-                                + options.getCoverageMetadataFile().getAbsolutePath());
-            } else {
-                builder.addArgs("-D", "jack.coverage=true");
-                builder.addArgs(
-                        "-D",
-                        "jack.coverage.metadata.file="
-                                + options.getCoverageMetadataFile().getAbsolutePath());
-            };
+        JackVersion apiVersion = buildToolInfo.getSupportedJackApi();
+
+        if (apiVersion.getVersion() >= JackVersion.V4.getVersion()) {
+            api04Specific(buildToolInfo, builder);
         }
 
         // apply all additional params
         for (String paramKey: options.getAdditionalParameters().keySet()) {
             String paramValue = options.getAdditionalParameters().get(paramKey);
-            builder.addArgs(paramKey, paramValue);
+            builder.addArgs(
+                "-D",
+                paramKey + "=" + paramValue);
         }
 
         return builder.createJavaProcess();
+    }
+
+    private void api04Specific(
+            @NonNull BuildToolInfo buildToolInfo, @NonNull ProcessInfoBuilder builder) {
+        if (options.getCoverageMetadataFile() != null) {
+            String coveragePluginPath =
+                    buildToolInfo.getPath(BuildToolInfo.PathId.JACK_COVERAGE_PLUGIN);
+            if (coveragePluginPath == null || !new File(coveragePluginPath).isFile()) {
+                logger.warning(
+                        "Unable to find coverage plugin '%s'.  Disabling code coverage.",
+                        coveragePluginPath);
+            } else {
+                options.addJackPluginClassPath(new File(coveragePluginPath));
+                options.addJackPluginName(JackProcessOptions.COVERAGE_PLUGIN_NAME);
+                builder.addArgs(
+                        "-D",
+                        "jack.coverage.metadata.file="
+                                + options.getCoverageMetadataFile().getAbsolutePath());
+                builder.addArgs("-D", "jack.coverage=true");
+            }
+        }
+
+        if (!options.getJackPluginClassPath().isEmpty()) {
+            builder.addArgs(
+                    "--pluginpath", FileUtils.joinFilePaths(options.getJackPluginClassPath()));
+        }
+        if (!options.getJackPluginNames().isEmpty()) {
+            builder.addArgs("--plugin", Joiner.on(",").join(options.getJackPluginNames()));
+        }
     }
 
     private void createEcjOptionFile() throws IOException {

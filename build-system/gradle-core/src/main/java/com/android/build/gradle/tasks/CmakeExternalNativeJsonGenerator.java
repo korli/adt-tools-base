@@ -25,6 +25,7 @@ import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.builder.core.AndroidBuilder;
+import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.repository.api.ConsoleProgressIndicator;
 import com.android.repository.api.LocalPackage;
@@ -102,6 +103,8 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         builder.setExecutable(getCmakeExecutable());
         builder.addArgs(String.format("-H%s", cmakeListsFolder));
         builder.addArgs(String.format("-B%s", outputJson.getParentFile()));
+        // TODO: possibly remove the Android Gradle part.
+        // Depends on how upstream CMake accepts our JSON patch.
         builder.addArgs("-GAndroid Gradle - Ninja");
         builder.addArgs(String.format("-DANDROID_ABI=%s", abi));
         builder.addArgs(String.format("-DANDROID_NDK=%s", getNdkFolder()));
@@ -115,7 +118,7 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         builder.addArgs(String.format("-DCMAKE_TOOLCHAIN_FILE=%s",
                 getToolChainFile().getAbsolutePath()));
 
-        builder.addArgs(String.format("-DANDROID_NATIVE_API_LEVEL=%s", abiPlatformVersion));
+        builder.addArgs(String.format("-DANDROID_PLATFORM=android-%s", abiPlatformVersion));
 
         if (!getcFlags().isEmpty()) {
             builder.addArgs(String.format("-DCMAKE_C_FLAGS=%s", Joiner.on(" ").join(getcFlags())));
@@ -131,6 +134,15 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         }
 
         return builder;
+    }
+
+    @Override
+    String executeProcess(ProcessInfoBuilder processBuilder) throws ProcessException, IOException {
+        return ExternalNativeBuildTaskUtils
+                .executeBuildProcessAndLogError(
+                        androidBuilder,
+                        processBuilder,
+                        true /* logStdioToInfo */);
     }
 
     @NonNull

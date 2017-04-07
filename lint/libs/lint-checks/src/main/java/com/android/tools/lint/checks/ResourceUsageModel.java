@@ -16,6 +16,7 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.AAPT_URI;
 import static com.android.SdkConstants.ANDROID_STYLE_RESOURCE_PREFIX;
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_DISCARD;
@@ -55,24 +56,21 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
-
+import java.io.File;
+import java.io.IOException;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
  * A model for Android resource declarations and usages
@@ -88,6 +86,11 @@ public class ResourceUsageModel {
     /** Map from R field value to corresponding resource */
     private final Map<Integer, Resource> mValueToResource =
             Maps.newHashMapWithExpectedSize(TYPICAL_RESOURCE_COUNT);
+    /**
+     * Next id suffix to be appended for the {@code <aapt:attr>} inlined resources created by
+     * aapt
+     */
+    private int nextInlinedResourceSuffix;
 
     public static String getFieldName(Element element) {
         return LintUtils.getFieldName(element.getAttribute(ATTR_NAME));
@@ -427,16 +430,12 @@ public class ResourceUsageModel {
 
     public String dumpResourceModel() {
         StringBuilder sb = new StringBuilder(1000);
-        Collections.sort(mResources, new Comparator<Resource>() {
-            @Override
-            public int compare(Resource resource1,
-                    Resource resource2) {
-                int delta = resource1.type.compareTo(resource2.type);
-                if (delta != 0) {
-                    return delta;
-                }
-                return resource1.name.compareTo(resource2.name);
+        Collections.sort(mResources, (resource1, resource2) -> {
+            int delta = resource1.type.compareTo(resource2.type);
+            if (delta != 0) {
+                return delta;
             }
+            return resource1.name.compareTo(resource2.name);
         });
 
         for (Resource resource : mResources) {
@@ -457,7 +456,7 @@ public class ResourceUsageModel {
     public List<Resource> findUnused(List<Resource> resources) {
         List<Resource> roots = findRoots(resources);
 
-        Map<Resource,Boolean> seen = new IdentityHashMap<Resource,Boolean>(resources.size());
+        Map<Resource,Boolean> seen = new IdentityHashMap<>(resources.size());
         for (Resource root : roots) {
             visit(root, seen);
         }
@@ -755,6 +754,8 @@ public class ResourceUsageModel {
             return;
         }
 
+        nextInlinedResourceSuffix = 1;
+
         // For value files, and drawables and colors etc also pull in resource
         // references inside the context.file
         recordResourceReferences(folderType, document.getDocumentElement(), from);
@@ -764,7 +765,7 @@ public class ResourceUsageModel {
         }
     }
 
-    private static final String ANALYTICS_FILE = "analytics.xml"; //$NON-NLS-1$
+    private static final String ANALYTICS_FILE = "analytics.xml";
 
     /**
      * Returns true if this XML file corresponds to an Analytics configuration file;
@@ -776,6 +777,18 @@ public class ResourceUsageModel {
      */
     public static boolean isAnalyticsFile(File file) {
         return file.getPath().endsWith(ANALYTICS_FILE) && file.getName().equals(ANALYTICS_FILE);
+    }
+
+    /**
+     * Whether we should ignore tools attribute resource references.
+     * <p>
+     * For example, for resource shrinking we want to ignore tools attributes,
+     * whereas for resource refactoring on the source code we do not.
+     *
+     * @return whether tools attributes should be ignored
+     */
+    protected boolean ignoreToolsAttributes() {
+        return false;
     }
 
     /**
@@ -791,6 +804,24 @@ public class ResourceUsageModel {
         short nodeType = node.getNodeType();
         if (nodeType == Node.ELEMENT_NODE) {
             Element element = (Element) node;
+
+            if ("attr".equals(element.getLocalName()) &&
+                    AAPT_URI.equals(element.getNamespaceURI()) &&
+                    from != null) {
+                // AAPT inlined resource.
+                Node child = element.getFirstChild();
+
+                String base = from.name;
+                while (child != null) {
+                    if (child.getNodeType() == Node.ELEMENT_NODE) {
+                        String name = base + '_' + Integer.toString(nextInlinedResourceSuffix++);
+                        Resource inlined = addResource(from.type, name, null);
+                        from.addReference(inlined);
+                    }
+                    child = child.getNextSibling();
+                }
+            }
+
             if (from != null) {
                 NamedNodeMap attributes = element.getAttributes();
                 for (int i = 0, n = attributes.getLength(); i < n; i++) {
@@ -800,8 +831,10 @@ public class ResourceUsageModel {
                     // a keep attribute
                     if (TOOLS_URI.equals(attr.getNamespaceURI())) {
                         recordToolsAttributes(attr);
-                        // Skip all other tools: attributes
-                        continue;
+                        // Skip all other tools: attributes?
+                        if (ignoreToolsAttributes()) {
+                            continue;
+                        }
                     }
 
                     String value = attr.getValue();
@@ -1031,6 +1064,7 @@ public class ResourceUsageModel {
         final int STATE_ATTRIBUTE_VALUE_SINGLE = 10;
         final int STATE_ATTRIBUTE_VALUE_DOUBLE = 11;
         final int STATE_CLOSE_TAG = 12;
+        final int STATE_ENDING_TAG = 13;
 
         int state = STATE_TEXT;
         int offset = 0;
@@ -1080,6 +1114,7 @@ public class ResourceUsageModel {
                                 offset = length;
                                 break;
                             }
+                            state = STATE_TEXT;
                             offset = end + 3;
                             continue;
                         } else if (html.startsWith("![CDATA[", offset)) {
@@ -1090,6 +1125,7 @@ public class ResourceUsageModel {
                                 offset = length;
                                 break;
                             }
+                            state = STATE_TEXT;
                             offset = end + 3;
                             continue;
                         }
@@ -1102,9 +1138,11 @@ public class ResourceUsageModel {
                         int end = html.indexOf('>', offset + 2);
                         if (end == -1) {
                             offset = length;
+                            state = STATE_TEXT;
                             break;
                         }
                         offset = end + 1;
+                        state = STATE_TEXT;
                         continue;
                     }
                     state = STATE_IN_TAG;
@@ -1137,10 +1175,23 @@ public class ResourceUsageModel {
                         tag = html.substring(tagStart, offset).trim();
                         endHtmlTag(from, html, offset, tag);
                         state = STATE_TEXT;
+                    } else if (c == '/') {
+                        tag = html.substring(tagStart, offset).trim();
+                        endHtmlTag(from, html, offset, tag);
+                        state = STATE_ENDING_TAG;
                     }
                     offset++;
                     break;
                 }
+
+                case STATE_ENDING_TAG: {
+                    if (c == '>') {
+                        offset++;
+                        state = STATE_TEXT;
+                    }
+                    break;
+                }
+
                 case STATE_BEFORE_ATTRIBUTE: {
                     if (c == '>') {
                         endHtmlTag(from, html, offset, tag);

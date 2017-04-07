@@ -19,6 +19,7 @@ package com.android.ide.common.res2;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import com.android.testutils.TestResources;
 import com.android.testutils.TestUtils;
 
 import org.junit.Test;
@@ -50,7 +51,7 @@ public class AssetSetTest extends BaseTestCase {
 
     @Test
     public void testDupAssetSet() throws Exception {
-        File root = TestUtils.getRoot("assets", "dupSet");
+        File root = TestResources.getDirectory(getClass(), "/testData/assets/dupSet");
 
         AssetSet set = new AssetSet("main");
         set.addSource(new File(root, "assets1"));
@@ -69,7 +70,7 @@ public class AssetSetTest extends BaseTestCase {
 
     static AssetSet getBaseAssetSet() throws MergingException, IOException {
         if (sBaseResourceSet == null) {
-            File root = TestUtils.getRoot("assets", "baseSet");
+            File root = TestResources.getDirectory(AssetSetTest.class, "/testData/assets/baseSet");
 
             RecordingLogger logger = new RecordingLogger();
 

@@ -16,6 +16,11 @@
 
 package com.android.build.gradle.internal.variant;
 
+import static com.android.SdkConstants.DOT_RES;
+import static com.android.SdkConstants.FD_RES;
+import static com.android.SdkConstants.FN_RES_BASE;
+import static com.android.SdkConstants.RES_QUALIFIER_SEP;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.FilterData;
@@ -23,18 +28,21 @@ import com.android.build.OutputFile;
 import com.android.build.VariantOutput;
 import com.android.build.gradle.api.ApkOutputFile;
 import com.android.build.gradle.internal.scope.VariantOutputScope;
+import com.android.build.gradle.tasks.BundleAtom;
+import com.android.build.gradle.tasks.GenerateAtomMetadata;
 import com.android.build.gradle.tasks.ManifestProcessorTask;
 import com.android.build.gradle.tasks.PackageAndroidArtifact;
 import com.android.build.gradle.tasks.PackageSplitAbi;
 import com.android.build.gradle.tasks.PackageSplitRes;
 import com.android.build.gradle.tasks.ProcessAndroidResources;
+import com.android.builder.dependency.level2.AtomDependency;
+import com.android.builder.model.AndroidAtom;
+import com.android.utils.FileUtils;
 import com.android.utils.StringHelper;
 import com.google.common.collect.ImmutableList;
-
-import org.gradle.api.Task;
-
 import java.io.File;
 import java.util.Collection;
+import org.gradle.api.Task;
 
 /**
  * Base output data about a variant.
@@ -61,6 +69,10 @@ public abstract class BaseVariantOutputData implements VariantOutput {
 
     public PackageAndroidArtifact packageAndroidArtifactTask;
 
+    public GenerateAtomMetadata generateAtomMetadataTask;
+
+    public BundleAtom bundleAtomTask;
+
     public Task assembleTask;
 
     @NonNull
@@ -84,7 +96,7 @@ public abstract class BaseVariantOutputData implements VariantOutput {
 
     public abstract void setOutputFile(@NonNull File file);
 
-    @Nullable
+    @NonNull
     public abstract File getOutputFile();
 
     @NonNull
@@ -148,6 +160,32 @@ public abstract class BaseVariantOutputData implements VariantOutput {
 
     void setMultiOutput(boolean multiOutput) {
         this.multiOutput = multiOutput;
+    }
+
+    @Nullable
+    public File getAtomMetadataBaseFolder() {
+        if (generateAtomMetadataTask == null)
+            return null;
+        else
+            return generateAtomMetadataTask.getAtomMetadataFolder();
+    }
+
+    @NonNull
+    public File getProcessResourcePackageOutputFile() {
+        return FileUtils.join(getScope().getGlobalScope().getIntermediatesDir(),
+                FD_RES, FN_RES_BASE + RES_QUALIFIER_SEP + getBaseName() + DOT_RES);
+
+    }
+
+    @NonNull
+    public File getProcessResourcePackageOutputFile(@NonNull AtomDependency atomDependency) {
+        return FileUtils.join(getScope().getGlobalScope().getIntermediatesDir(),
+                FD_RES, FN_RES_BASE
+                        + RES_QUALIFIER_SEP
+                        + atomDependency.getAtomName()
+                        + RES_QUALIFIER_SEP
+                        + getBaseName()
+                        + DOT_RES);
     }
 
     @NonNull

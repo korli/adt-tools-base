@@ -31,28 +31,29 @@ import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
 import com.android.build.api.transform.TransformOutputProvider;
+import com.android.build.gradle.internal.BuildCacheUtils;
 import com.android.build.gradle.internal.LoggerWrapper;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
-import com.android.build.gradle.internal.incremental.InstantRunBuildContext.FileType;
+import com.android.build.gradle.internal.incremental.FileType;
 import com.android.build.gradle.internal.pipeline.TransformManager;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.DexOptions;
-import com.android.builder.internal.utils.FileCache;
 import com.android.builder.sdk.TargetInfo;
+import com.android.builder.utils.FileCache;
 import com.android.ide.common.blame.Message;
 import com.android.ide.common.blame.ParsingProcessOutputHandler;
 import com.android.ide.common.blame.parser.DexParser;
 import com.android.ide.common.blame.parser.ToolOutputParser;
 import com.android.ide.common.internal.WaitableExecutor;
-import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessOutputHandler;
+import com.android.repository.Revision;
 import com.android.sdklib.BuildToolInfo;
 import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
-import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -72,8 +73,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -111,7 +114,7 @@ public class DexTransform extends Transform {
     private final InstantRunBuildContext instantRunBuildContext;
 
     @NonNull
-    private final FileCache buildCache;
+    private final Optional<FileCache> buildCache;
 
     public DexTransform(
             @NonNull DexOptions dexOptions,
@@ -122,7 +125,7 @@ public class DexTransform extends Transform {
             @NonNull AndroidBuilder androidBuilder,
             @NonNull Logger logger,
             @NonNull InstantRunBuildContext instantRunBuildContext,
-            @NonNull FileCache buildCache) {
+            @NonNull Optional<FileCache> buildCache) {
         this.dexOptions = dexOptions;
         this.debugMode = debugMode;
         this.multiDex = multiDex;
@@ -154,8 +157,8 @@ public class DexTransform extends Transform {
 
     @NonNull
     @Override
-    public Set<Scope> getScopes() {
-        return TransformManager.SCOPE_FULL_PROJECT;
+    public Set<? super Scope> getScopes() {
+        return TransformManager.SCOPE_FULL_INSTANT_RUN_PROJECT;
     }
 
     @NonNull
@@ -190,7 +193,7 @@ public class DexTransform extends Transform {
 
             Map<String, Object> params = Maps.newHashMapWithExpectedSize(4);
 
-            params.put("optimize", getOptimize());
+            params.put("optimize", true);
             params.put("predex", dexOptions.getPreDexLibraries());
             params.put("jumbo", dexOptions.getJumboMode());
             params.put("multidex", multiDex);
@@ -232,11 +235,11 @@ public class DexTransform extends Transform {
             jarInputs.addAll(input.getJarInputs());
             directoryInputs.addAll(input.getDirectoryInputs());
         }
-        logger.info("Task is incremental : %b ", isIncremental);
-        logger.info("JarInputs %s", Joiner.on(",").join(jarInputs));
-        logger.info("DirInputs %s", Joiner.on(",").join(directoryInputs));
+        logger.verbose("Task is incremental : %b ", isIncremental);
+        logger.verbose("JarInputs %s", Joiner.on(",").join(jarInputs));
+        logger.verbose("DirInputs %s", Joiner.on(",").join(directoryInputs));
 
-        if (!dexOptions.getKeepRuntimeAnnotatedClasses() && mainDexListFile != null) {
+        if (!dexOptions.getKeepRuntimeAnnotatedClasses() && mainDexListFile == null) {
             logger.info("DexOptions.keepRuntimeAnnotatedClasses has no affect in native multidex.");
         }
 
@@ -253,8 +256,12 @@ public class DexTransform extends Transform {
             // runs dx on everything.
             if ((jarInputs.size() + directoryInputs.size()) == 1
                     || !dexOptions.getPreDexLibraries()) {
+
+                // since there is only one dex file, we can merge all the scopes into the full
+                // application one.
                 File outputDir = outputProvider.getContentLocation("main",
-                        getOutputTypes(), getScopes(),
+                        getOutputTypes(),
+                        TransformManager.SCOPE_FULL_PROJECT,
                         Format.DIRECTORY);
                 FileUtils.mkdirs(outputDir);
 
@@ -275,7 +282,6 @@ public class DexTransform extends Transform {
                         multiDex,
                         mainDexListFile,
                         dexOptions,
-                        getOptimize(),
                         outputHandler);
 
                 for (File file : Files.fileTreeTraverser().breadthFirstTraversal(outputDir)) {
@@ -308,8 +314,8 @@ public class DexTransform extends Transform {
                 final Set<String> hashs = Sets.newHashSet();
                 // input files to output file map
                 final Map<File, File> inputFiles = Maps.newHashMap();
-                // set of input files that are external libraries
-                final Set<File> externalLibs = Sets.newHashSet();
+                // set of input files that are external-library jar files
+                final Set<File> externalLibJarFiles = Sets.newHashSet();
                 // stuff to delete. Might be folders.
                 final List<File> deletedFiles = Lists.newArrayList();
 
@@ -331,15 +337,12 @@ public class DexTransform extends Transform {
                     } else if (!isIncremental || !directoryInput.getChangedFiles().isEmpty()) {
                         // add the folder for re-dexing only if we're not in incremental
                         // mode or if it contains changed files.
-                        logger.info("Changed file for %s are %s",
+                        logger.verbose("Changed file for %s are %s",
                                 directoryInput.getFile().getAbsolutePath(),
                                 Joiner.on(",").join(directoryInput.getChangedFiles().entrySet()));
                         File preDexFile = getPreDexFile(
                                 outputProvider, needMerge, perStreamDexFolder, directoryInput);
                         inputFiles.put(rootFolder, preDexFile);
-                        if (isExternalLibrary(directoryInput)) {
-                            externalLibs.add(rootFolder);
-                        }
                     }
                 }
 
@@ -355,8 +358,9 @@ public class DexTransform extends Transform {
                             File preDexFile = getPreDexFile(
                                     outputProvider, needMerge, perStreamDexFolder, jarInput);
                             inputFiles.put(jarInput.getFile(), preDexFile);
-                            if (isExternalLibrary(jarInput)) {
-                                externalLibs.add(jarInput.getFile());
+                            if (jarInput.getScopes()
+                                    .equals(Collections.singleton(Scope.EXTERNAL_LIBRARIES))) {
+                                externalLibJarFiles.add(jarInput.getFile());
                             }
                             break;
                         }
@@ -371,19 +375,26 @@ public class DexTransform extends Transform {
                     }
                 }
 
-                logger.info("inputFiles : %s", Joiner.on(",").join(inputFiles.entrySet()));
-                logger.info("externalLibs %s: ", Joiner.on(",").join(externalLibs));
+                logger.verbose("inputFiles : %s", Joiner.on(",").join(inputFiles.entrySet()));
+                logger.verbose(
+                        "externalLibJarFiles %s: ", Joiner.on(",").join(externalLibJarFiles));
 
                 WaitableExecutor<Void> executor = WaitableExecutor.useGlobalSharedThreadPool();
 
                 for (Map.Entry<File, File> entry : inputFiles.entrySet()) {
-                    Callable<Void> action = new PreDexTask(
-                            entry.getKey(),
-                            entry.getValue(),
-                            hashs,
-                            outputHandler,
-                            externalLibs.contains(entry.getKey()) ? buildCache : FileCache.NO_CACHE);
-                    logger.info("Adding PreDexTask for %s : %s", entry.getKey(), action);
+                    Callable<Void> action =
+                            new PreDexTask(
+                                    entry.getKey(),
+                                    entry.getValue(),
+                                    hashs,
+                                    outputHandler,
+                                    shouldUseBuildCache(
+                                                    buildCache.isPresent(),
+                                                    entry.getKey(),
+                                                    externalLibJarFiles)
+                                            ? buildCache
+                                            : Optional.empty());
+                    logger.verbose("Adding PreDexTask for %s : %s", entry.getKey(), action);
                     executor.execute(action);
                 }
 
@@ -395,11 +406,11 @@ public class DexTransform extends Transform {
                 }
 
                 executor.waitForTasksWithQuickFail(false);
-                logger.info("Done with all dexing");
+                logger.verbose("Done with all dexing");
 
                 if (needMerge) {
                     File outputDir = outputProvider.getContentLocation("main",
-                            TransformManager.CONTENT_DEX, getScopes(),
+                            TransformManager.CONTENT_DEX, TransformManager.SCOPE_FULL_PROJECT,
                             Format.DIRECTORY);
                     FileUtils.mkdirs(outputDir);
 
@@ -435,7 +446,6 @@ public class DexTransform extends Transform {
                             multiDex,
                             mainDexListFile,
                             dexOptions,
-                            getOptimize(),
                             outputHandler);
                 }
             }
@@ -454,89 +464,90 @@ public class DexTransform extends Transform {
         @NonNull
         private final ProcessOutputHandler outputHandler;
         @NonNull
-        private final FileCache fileCache;
+        private final Optional<FileCache> buildCache;
 
         private PreDexTask(
                 @NonNull File from,
                 @NonNull File to,
                 @NonNull Set<String> hashs,
                 @NonNull ProcessOutputHandler outputHandler,
-                @NonNull FileCache fileCache) {
+                @NonNull Optional<FileCache> buildCache) {
             this.from = from;
             this.to = to;
             this.hashs = hashs;
             this.outputHandler = outputHandler;
-            this.fileCache = fileCache;
+            this.buildCache = buildCache;
         }
 
         @Override
         public Void call() throws Exception {
-            logger.info("predex called for %s", from);
+            logger.verbose("predex called for %s", from);
             // TODO remove once we can properly add a library as a dependency of its test.
             String hash = getFileHash(from);
 
             synchronized (hashs) {
                 if (hashs.contains(hash)) {
-                    logger.info("Hash unknown");
+                    logger.verbose("Hash unknown");
                     return null;
                 }
 
                 hashs.add(hash);
             }
 
-            boolean optimize = getOptimize();
+            Callable<Void> preDexLibraryAction = () -> {
+                FileUtils.deletePath(to);
+                Files.createParentDirs(to);
+                if (multiDex) {
+                    FileUtils.mkdirs(to);
+                }
+                androidBuilder.preDexLibrary(from, to, multiDex, dexOptions, outputHandler);
+                return null;
+            };
 
-            // To use the cache for pre-dexing, we first need to specify all the inputs that affect
-            // the outcome of a pre-dex (see DxDexKey for an exhaustive list of these inputs)
-            FileCache.Inputs.Builder inputs = new FileCache.Inputs.Builder();
-
-            String inputFilePath = from.getCanonicalPath();
-            int explodedAarIndex = inputFilePath.lastIndexOf("exploded-aar");
-            if (explodedAarIndex != -1) {
-                // If a file is exploded from an aar, we can use the file path relative to the
-                // "exploded-aar" directory as the unique ID of the file (i.e., if two files having
-                // the same relative file paths under "exploded-aar", their contents must be the
-                // same regardless of where the "exploded-aar" directories are located).
-                inputs.put(
-                        "exploded-aar-file",
-                        inputFilePath.substring(explodedAarIndex + "exploded-aar".length() + 1));
+            // If the build cache is used, run pre-dexing using the cache
+            if (buildCache.isPresent()) {
+                FileCache.Inputs buildCacheInputs =
+                        getBuildCacheInputs(
+                                from,
+                                androidBuilder.getTargetInfo().getBuildTools().getRevision(),
+                                dexOptions,
+                                multiDex);
+                FileCache.QueryResult result = null;
+                try {
+                     result =
+                             buildCache.get().createFile(to, buildCacheInputs, preDexLibraryAction);
+                } catch (ExecutionException exception) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Unable to pre-dex '%1$s' to '%2$s'",
+                                    from.getAbsolutePath(),
+                                    to.getAbsolutePath()),
+                            exception);
+                } catch (Exception exception) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Unable to pre-dex '%1$s' to '%2$s' using the build cache at"
+                                            + " '%3$s'.\n"
+                                            + "%4$s",
+                                    from.getAbsolutePath(),
+                                    to.getAbsolutePath(),
+                                    buildCache.get().getCacheDirectory().getAbsolutePath(),
+                                    BuildCacheUtils.BUILD_CACHE_TROUBLESHOOTING_MESSAGE),
+                            exception);
+                }
+                if (result.getQueryEvent().equals(FileCache.QueryEvent.CORRUPTED)) {
+                    logger.verbose(
+                            "The build cache at '%1$s' contained an invalid cache entry.\n"
+                                    + "Cause: %2$s\n"
+                                    + "We have recreated the cache entry.\n"
+                                    + "%3$s",
+                            buildCache.get().getCacheDirectory().getAbsolutePath(),
+                            Throwables.getStackTraceAsString(result.getCauseOfCorruption().get()),
+                            BuildCacheUtils.BUILD_CACHE_TROUBLESHOOTING_MESSAGE);
+                }
             } else {
-                inputs.put("file", from);
+                preDexLibraryAction.call();
             }
-            inputs.put(
-                    "buildToolsRevision",
-                    androidBuilder.getTargetInfo().getBuildTools().getRevision().toString());
-            inputs.put("jumboMode", dexOptions.getJumboMode())
-                    .put("optimize", optimize)
-                    .put("multiDex", multiDex);
-            List<String> additionalParams = dexOptions.getAdditionalParameters();
-            for (int i = 0; i < additionalParams.size(); i++) {
-                inputs.put("additionalParameter" + (i + 1), additionalParams.get(i));
-            }
-
-            // Run pre-dexing using the cache
-            fileCache.getOrCreateFile(
-                    to,
-                    inputs.build(),
-                    (outputFile) -> {
-                        if (multiDex) {
-                            FileUtils.mkdirs(outputFile);
-                        }
-                        try {
-                            androidBuilder.preDexLibrary(
-                                    from,
-                                    outputFile,
-                                    multiDex,
-                                    dexOptions,
-                                    optimize,
-                                    outputHandler);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        } catch (ProcessException e) {
-                            throw new RuntimeException(e);
-                        }
-                        return null;
-                    });
 
             for (File file : Files.fileTreeTraverser().breadthFirstTraversal(to)) {
                 if (file.isFile()) {
@@ -546,6 +557,123 @@ public class DexTransform extends Transform {
 
             return null;
         }
+    }
+
+    /**
+     * Returns {@code true} if the build cache should be used for the predex-library task, and
+     * {@code false} otherwise.
+     */
+    private boolean shouldUseBuildCache(
+            boolean buildCacheEnabled,
+            @NonNull File inputFile,
+            @NonNull Set<File> externalLibJarFiles) {
+        // We use the build cache only when it is enabled and the input file is a (non-snapshot)
+        // external-library jar file
+        if (!buildCacheEnabled || !externalLibJarFiles.contains(inputFile)) {
+            return false;
+        }
+        // After the check above, here the build cache should be enabled and the input file is an
+        // external-library jar file. We now check whether it is a snapshot version or not (to
+        // address http://b.android.com/228623).
+        // Note that the current check is based on the file path; if later on there is a more
+        // reliable way to verify whether an input file is a snapshot, we should replace this check
+        // with that.
+        return !inputFile.getPath().contains("-SNAPSHOT");
+    }
+
+    /**
+     * Returns a {@link FileCache.Inputs} object computed from the given parameters for the
+     * predex-library task to use the build cache.
+     */
+    @NonNull
+    private FileCache.Inputs getBuildCacheInputs(
+            @NonNull File inputFile,
+            @NonNull Revision buildToolsRevision,
+            @NonNull DexOptions dexOptions,
+            boolean multiDex) throws IOException {
+        // To use the cache, we need to specify all the inputs that affect the outcome of a pre-dex
+        // (see DxDexKey for an exhaustive list of these inputs)
+        FileCache.Inputs.Builder buildCacheInputs =
+                new FileCache.Inputs.Builder(FileCache.Command.PREDEX_LIBRARY);
+
+        // As a general rule, we use the file's path and hash to uniquely identify a file. However,
+        // certain types of files are usually copied/duplicated at different locations. To recognize
+        // those files as the same file, instead of using the full file path, we use a substring of
+        // the file path as the file's identifier.
+        if (inputFile.getPath().contains("exploded-aar")) {
+            // If the file is exploded from an aar file, we use the path relative to the
+            // "exploded-aar" directory as the file's identifier, which contains the aar artifact
+            // information (e.g., "exploded-aar/com.android.support/support-v4/23.3.0/jars/
+            // classes.jar")
+            buildCacheInputs.putString(
+                    FileCacheInputParams.EXPLODED_AAR_FILE_PATH.name(),
+                    inputFile.getPath().substring(inputFile.getPath().lastIndexOf("exploded-aar")));
+        } else if (inputFile.getName().equals("instant-run.jar")) {
+            // If the file is an instant-run.jar file, we use the the file name itself as
+            // the file's identifier
+            buildCacheInputs.putString(
+                    FileCacheInputParams.INSTANT_RUN_JAR_FILE_NAME.name(), inputFile.getName());
+        } else {
+            // In all other cases, we use the file's path as the file's identifier
+            buildCacheInputs.putFilePath(FileCacheInputParams.FILE_PATH.name(), inputFile);
+        }
+
+        // In all cases, in addition to the (full or extracted) file path, we always use the file's
+        // hash to identify an input file, and provide other input parameters to the cache
+        buildCacheInputs
+                .putFileHash(FileCacheInputParams.FILE_HASH.name(), inputFile)
+                .putString(
+                        FileCacheInputParams.BUILD_TOOLS_REVISION.name(),
+                        buildToolsRevision.toString())
+                .putBoolean(FileCacheInputParams.JUMBO_MODE.name(), dexOptions.getJumboMode())
+                .putBoolean(FileCacheInputParams.OPTIMIZE.name(), true)
+                .putBoolean(FileCacheInputParams.MULTI_DEX.name(), multiDex);
+
+        List<String> additionalParams = dexOptions.getAdditionalParameters();
+        for (int i = 0; i < additionalParams.size(); i++) {
+            buildCacheInputs.putString(
+                    FileCacheInputParams.ADDITIONAL_PARAMETERS.name() + "[" + i + "]",
+                    additionalParams.get(i));
+        }
+
+        return buildCacheInputs.build();
+    }
+
+    /**
+     * Input parameters to be provided by the client when using {@link FileCache}.
+     *
+     * <p>The clients of {@link FileCache} need to exhaustively specify all the inputs that affect
+     * the creation of an output file/directory. This enum class lists the input parameters that are
+     * used in {@link DexTransform.PreDexTask}.
+     */
+    private enum FileCacheInputParams {
+
+        /** Path of an input file. */
+        FILE_PATH,
+
+        /** Relative path of an input file exploded from an aar file. */
+        EXPLODED_AAR_FILE_PATH,
+
+        /** Name of an input file that is an instant-run.jar file. */
+        INSTANT_RUN_JAR_FILE_NAME,
+
+        /** Hash of an input file. */
+        FILE_HASH,
+
+        /** Revision of the build tools. */
+        BUILD_TOOLS_REVISION,
+
+        /** Whether jumbo mode is enabled. */
+        JUMBO_MODE,
+
+        /** Whether optimize is enabled. */
+        OPTIMIZE,
+
+        /** Whether multi-dex is enabled. */
+        MULTI_DEX,
+
+        /** List of additional parameters. */
+        ADDITIONAL_PARAMETERS
     }
 
     /**
@@ -623,22 +751,5 @@ public class DexTransform extends Transform {
         String suffix = multiDex ? "" : SdkConstants.DOT_JAR;
 
         return FileUtils.getDirectoryNameForJar(inputFile) + suffix;
-    }
-
-    /**
-     * Decides whether to run dx with optimizations.
-     *
-     * <p>Value from {@link DexOptions} is used if set, otherwise we check if the build is
-     * debuggable.
-     */
-    private boolean getOptimize() {
-        return MoreObjects.firstNonNull(dexOptions.getOptimize(), !debugMode);
-    }
-
-    /**
-     * Determines whether a content is an external library.
-     */
-    private static boolean isExternalLibrary(@NonNull QualifiedContent content) {
-        return content.getScopes().equals(Collections.singleton(Scope.EXTERNAL_LIBRARIES));
     }
 }

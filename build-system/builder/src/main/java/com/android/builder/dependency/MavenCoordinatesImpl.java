@@ -33,7 +33,9 @@ import java.util.List;
  * Serializable implementation of MavenCoordinates for use in the model.
  */
 @Immutable
-public class MavenCoordinatesImpl implements MavenCoordinates, Serializable {
+public final class MavenCoordinatesImpl implements MavenCoordinates, Serializable {
+    private static final long serialVersionUID = 1L;
+
     @NonNull
     private final String groupId;
     @NonNull
@@ -142,7 +144,9 @@ public class MavenCoordinatesImpl implements MavenCoordinates, Serializable {
     /**
      * Returns this coordinates Id without the version attribute.
      */
-    public String getVersionLessId() {
+    @NonNull
+    @Override
+    public String getVersionlessId() {
         return versionLessId;
     }
 
@@ -151,20 +155,31 @@ public class MavenCoordinatesImpl implements MavenCoordinates, Serializable {
     }
 
     private String computeToString() {
-        List<String> segments = Lists.newArrayList(groupId, artifactId, packaging);
-        if (!Strings.isNullOrEmpty(classifier)) {
-            segments.add(classifier);
-        }
-        segments.add(version);
-        return Joiner.on(':').join(segments);
-    }
-
-    private String computeVersionLessId() {
-        StringBuilder sb = new StringBuilder(groupId);
-        sb.append(':').append(artifactId);
+        StringBuilder sb = new StringBuilder(
+                groupId.length()
+                        + artifactId.length()
+                        + version.length()
+                        + 2 // the 2 ':'
+                        + (classifier != null ? classifier.length() + 1 : 0) // +1 for the ':'
+                        + packaging.length() + 1); // +1 for the '@'
+        sb.append(groupId).append(':').append(artifactId).append(':').append(version);
         if (classifier != null) {
             sb.append(':').append(classifier);
         }
-        return sb.toString();
+        sb.append('@').append(packaging);
+        return sb.toString().intern();
+    }
+
+    private String computeVersionLessId() {
+        StringBuilder sb = new StringBuilder(
+                groupId.length()
+                        + artifactId.length()
+                        + 1 // +1 for the ':'
+                        + (classifier != null ? classifier.length() + 1 : 0)); // +1 for the ':'
+        sb.append(groupId).append(':').append(artifactId);
+        if (classifier != null) {
+            sb.append(':').append(classifier);
+        }
+        return sb.toString().intern();
     }
 }

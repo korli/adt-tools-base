@@ -21,27 +21,23 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.files.NativeLibraryAbiPredicate;
 import com.android.builder.files.RelativeFile;
-import com.android.builder.packaging.ApkCreator;
-import com.android.builder.packaging.ApkCreatorFactory;
+import com.android.apkzlib.zfile.ApkCreator;
+import com.android.apkzlib.zfile.ApkCreatorFactory;
 import com.android.builder.packaging.PackagerException;
 import com.android.ide.common.res2.FileStatus;
-import com.google.common.base.Function;
-import com.google.common.base.Functions;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.io.Closer;
-import com.google.common.io.Files;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -51,6 +47,7 @@ import java.util.stream.Collectors;
  *     <li>Java resource files;
  *     <li>JNI libraries;
  *     <li>Dex files;
+ *     <li>Atom metadata files;</li>
  * </ul>
  *
  * <p>The {@code IncrementalPackager} class can create an APK from scratch and can incrementally
@@ -156,35 +153,20 @@ public class IncrementalPackager implements Closeable {
                 Iterables.transform(
                         Iterables.filter(
                                 updates,
-                                Predicates.compose(
-                                        Predicates.equalTo(FileStatus.REMOVED),
-                                        PackagedFileUpdate.EXTRACT_STATUS)),
-                        PackagedFileUpdate.EXTRACT_NAME);
+                                p -> p.getStatus() == FileStatus.REMOVED),
+                        PackagedFileUpdate::getName);
 
         for (String deletedPath : deletedPaths) {
             mApkCreator.deleteFile(deletedPath);
         }
 
         Predicate<PackagedFileUpdate> isNewOrChanged =
-                Predicates.compose(
-                        Predicates.or(
-                                Predicates.equalTo(FileStatus.NEW),
-                                Predicates.equalTo(FileStatus.CHANGED)),
-                        PackagedFileUpdate.EXTRACT_STATUS);
-
-        Function<PackagedFileUpdate, File> extractBaseFile =
-                Functions.compose(
-                        RelativeFile.EXTRACT_BASE,
-                        PackagedFileUpdate.EXTRACT_SOURCE);
+                pfu -> pfu.getStatus() == FileStatus.NEW || pfu.getStatus() == FileStatus.CHANGED;
 
         Iterable<PackagedFileUpdate> newOrChangedNonArchiveFiles =
                 Iterables.filter(
                         updates,
-                        Predicates.and(
-                                isNewOrChanged,
-                                Predicates.compose(
-                                        Files.isDirectory(),
-                                        extractBaseFile)));
+                        pfu -> pfu.getSource().getBase().isDirectory() && isNewOrChanged.test(pfu));
 
         for (PackagedFileUpdate rf : newOrChangedNonArchiveFiles) {
             mApkCreator.writeFile(rf.getSource().getFile(), rf.getName());
@@ -193,17 +175,14 @@ public class IncrementalPackager implements Closeable {
         Iterable<PackagedFileUpdate> newOrChangedArchiveFiles =
                 Iterables.filter(
                         updates,
-                        Predicates.and(
-                                isNewOrChanged,
-                                Predicates.compose(
-                                        Files.isFile(),
-                                        extractBaseFile)));
+                        pfu -> pfu.getSource().getBase().isFile() && isNewOrChanged.test(pfu));
 
-        Iterable<File> archives = Iterables.transform(newOrChangedArchiveFiles, extractBaseFile);
+        Iterable<File> archives =
+                Iterables.transform(newOrChangedArchiveFiles, pfu -> pfu.getSource().getBase());
         Set<String> names = Sets.newHashSet(
                 Iterables.transform(
                         newOrChangedArchiveFiles,
-                        PackagedFileUpdate.EXTRACT_NAME));
+                        PackagedFileUpdate::getName));
 
         /*
          * Build the name map. The name of the file in the filesystem (or zip file) may not
@@ -233,20 +212,12 @@ public class IncrementalPackager implements Closeable {
          * resources. These will be removed here, but this filtering code can -- and should -- be
          * removed once that bug is fixed.
          */
-        Predicate<String> isNotClassFile = new Predicate<String>() {
-            @Override
-            public boolean apply(String input) {
-                return !input.endsWith(SdkConstants.DOT_CLASS);
-            }
-        };
-
         updateFiles(
                 PackagedFileUpdates.fromIncrementalRelativeFileSet(
                         Maps.filterKeys(
                                 files,
-                                Predicates.compose(
-                                        isNotClassFile,
-                                        RelativeFile.EXTRACT_PATH))));
+                                rf -> !rf.getOsIndependentRelativePath()
+                                        .endsWith(SdkConstants.DOT_CLASS))));
     }
 
     /**
@@ -289,12 +260,32 @@ public class IncrementalPackager implements Closeable {
                 PackagedFileUpdates.fromIncrementalRelativeFileSet(
                         Maps.filterKeys(
                                 files,
-                                Predicates.compose(
-                                        mAbiPredicate,
-                                        RelativeFile.EXTRACT_PATH
-                                )
+                                rf -> mAbiPredicate.test(rf.getOsIndependentRelativePath())
                         )
                 )
+        );
+    }
+
+    /**
+     * Updates the atom metadata file.
+     *
+     * @param files the atom metadata folder.
+     * @throws IOException failed
+     */
+    public void updateAtomMetadata(@NonNull ImmutableMap<RelativeFile, FileStatus> files)
+            throws IOException {
+        Predicate<File> isAtomMetadataFile = input ->
+                input.getName().equals(SdkConstants.FN_ATOM_METADATA) ||
+                        input.getName().equals(SdkConstants.FN_INSTANTAPP_METADATA);
+
+        updateFiles(PackagedFileUpdates.fromIncrementalRelativeFileSet(
+                Maps.filterKeys(files, rf -> isAtomMetadataFile.test(rf.getFile())))
+                .stream()
+                .map(pfu -> new PackagedFileUpdate(
+                        pfu.getSource(),
+                        "META-INF/" + pfu.getName(),
+                        pfu.getStatus()))
+                .collect(Collectors.toSet())
         );
     }
 

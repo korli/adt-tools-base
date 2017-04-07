@@ -15,7 +15,6 @@
  */
 package com.android.sdklib.repository.legacy;
 
-import com.android.prefs.AndroidLocation;
 import com.android.repository.Revision;
 import com.android.repository.api.Channel;
 import com.android.repository.api.ConstantSourceProvider;
@@ -38,18 +37,21 @@ import com.google.common.io.ByteStreams;
 import junit.framework.Assert;
 import junit.framework.TestCase;
 
+import java.io.File;
 import java.net.URL;
 import java.util.Map;
-
 
 /**
  * Tests for {@link LegacyRemoteRepoLoader}.
  */
 public class LegacyRemoteTest extends TestCase {
 
+    public static final File ANDROID_FOLDER = new File("/android-home");
+
     public void testLegacyRemoteSdk() throws Exception {
         MockFileOp fop = new MockFileOp();
-        final AndroidSdkHandler handler = new AndroidSdkHandler(null, fop);
+        final AndroidSdkHandler handler =
+                new AndroidSdkHandler(null, ANDROID_FOLDER, fop);
         FakeProgressIndicator progress = new FakeProgressIndicator();
         RepoManager mgr = handler.getSdkManager(progress);
         progress.assertNoErrorsOrWarnings();
@@ -68,18 +70,20 @@ public class LegacyRemoteTest extends TestCase {
 
         FakeSettingsController settings = new FakeSettingsController(false);
         LegacyRemoteRepoLoader sdk = new LegacyRemoteRepoLoader();
-        sdk.setDownloadCache(new DownloadCache(fop, DownloadCache.Strategy.ONLY_CACHE));
+        sdk.setDownloadCache(
+                new DownloadCache(
+                        ANDROID_FOLDER, fop, DownloadCache.Strategy.ONLY_CACHE, settings));
         mgr.setFallbackRemoteRepoLoader(sdk);
         FakeDownloader downloader = new FakeDownloader(fop);
         // TODO: find a better way to get it into the cache/have the fallback load it
         fop.recordExistingFile(fop.getAgnosticAbsPath(
-                AndroidLocation.getFolder() + "cache/sdkbin-1_951b49ff-test_epo"), ByteStreams
-                .toByteArray(getClass().getResourceAsStream("../../testdata/repository_sample_10.xml")));
+                ANDROID_FOLDER + "/cache/sdkbin-1_951b49ff-test_epo"), ByteStreams
+                .toByteArray(getClass().getResourceAsStream("/repository_sample_10.xml")));
 
         downloader.registerUrl(new URL("http://www.example.com/testRepo2"),
-                getClass().getResourceAsStream("../testdata/repository2_sample_1.xml"));
+                getClass().getResourceAsStream("/repository2_sample_1.xml"));
         downloader.registerUrl(new URL("http://www.example.com/testRepo"),
-                getClass().getResourceAsStream("../../testdata/repository_sample_10.xml"));
+                getClass().getResourceAsStream("/repository_sample_10.xml"));
         FakeProgressRunner runner = new FakeProgressRunner();
 
         mgr.load(0, Lists.<RepoManager.RepoLoadedCallback>newArrayList(),
@@ -93,6 +97,7 @@ public class LegacyRemoteTest extends TestCase {
         Assert.assertEquals(12, packages.getNewPkgs().size());
 
         settings.setChannel(Channel.create(1));
+        mgr.markInvalid();
         mgr.load(0, Lists.<RepoManager.RepoLoadedCallback>newArrayList(),
                 Lists.<RepoManager.RepoLoadedCallback>newArrayList(),
                 Lists.<Runnable>newArrayList(), runner, downloader, settings, true);

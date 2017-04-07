@@ -22,13 +22,19 @@ import static java.io.File.separator;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.tasks.Lint;
+import com.android.builder.Version;
 import com.android.builder.model.AndroidProject;
+import com.android.builder.model.LintOptions;
 import com.android.builder.model.Variant;
 import com.android.sdklib.BuildToolInfo;
 import com.android.tools.lint.LintCliClient;
 import com.android.tools.lint.LintCliFlags;
 import com.android.tools.lint.Warning;
+import com.android.tools.lint.client.api.Configuration;
+import com.android.tools.lint.client.api.DefaultConfiguration;
 import com.android.tools.lint.client.api.IssueRegistry;
+import com.android.tools.lint.client.api.LintBaseline;
+import com.android.tools.lint.client.api.LintDriver;
 import com.android.tools.lint.client.api.LintRequest;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Issue;
@@ -40,31 +46,29 @@ import com.android.utils.Pair;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
-import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import org.gradle.api.GradleException;
 
 public class LintGradleClient extends LintCliClient {
-    private final AndroidProject mModelProject;
+    private final AndroidProject modelProject;
 
     /**
      * Variant to run the client on.
      */
-    @NonNull private final Variant mVariant;
+    @NonNull private final Variant variant;
 
-    private final org.gradle.api.Project mGradleProject;
+    private final org.gradle.api.Project gradleProject;
     /**
      * Note that as soon as we disable {@link Lint#MODEL_LIBRARIES} this is
      * unused and we can delete it and all the callers passing it recursively
      */
-    private List<File> mCustomRules = Lists.newArrayList();
-    private File mSdkHome;
-    private final BuildToolInfo mBuildToolInfo;
+    private List<File> customRules = Lists.newArrayList();
+    private File sdkHome;
+    private final BuildToolInfo buildToolInfo;
 
     public LintGradleClient(
             @NonNull IssueRegistry registry,
@@ -75,22 +79,68 @@ public class LintGradleClient extends LintCliClient {
             @NonNull Variant variant,
             @Nullable BuildToolInfo buildToolInfo) {
         super(flags, CLIENT_GRADLE);
-        mGradleProject = gradleProject;
-        mModelProject = modelProject;
-        mSdkHome = sdkHome;
-        mRegistry = registry;
-        mBuildToolInfo = buildToolInfo;
-        mVariant = variant;
+        this.gradleProject = gradleProject;
+        this.modelProject = modelProject;
+        this.sdkHome = sdkHome;
+        this.registry = registry;
+        this.buildToolInfo = buildToolInfo;
+        this.variant = variant;
+    }
+
+    @Nullable
+    @Override
+    public String getClientRevision() {
+        return Version.ANDROID_GRADLE_PLUGIN_VERSION;
     }
 
     public void setCustomRules(List<File> customRules) {
-        mCustomRules = customRules;
+        this.customRules = customRules;
+    }
+
+    @NonNull
+    @Override
+    public Configuration getConfiguration(@NonNull Project project, @Nullable LintDriver driver) {
+        // Look up local lint configuration for this project, either via Gradle lintOptions
+        // or via local lint.xml
+        AndroidProject gradleProjectModel = project.getGradleProjectModel();
+        if (gradleProjectModel != null) {
+            LintOptions lintOptions = gradleProjectModel.getLintOptions();
+            File lintXml = lintOptions.getLintConfig();
+            if (lintXml == null) {
+                lintXml = new File(project.getDir(), DefaultConfiguration.CONFIG_FILE_NAME);
+            }
+
+            Map<String, Integer> overrides = lintOptions.getSeverityOverrides();
+            if (overrides != null && !overrides.isEmpty()) {
+                return new CliConfiguration(lintXml, getConfiguration(), project,
+                        flags.isFatalOnly()) {
+                    @NonNull
+                    @Override
+                    public Severity getSeverity(@NonNull Issue issue) {
+                        Integer optionSeverity = overrides.get(issue.getId());
+                        if (optionSeverity != null) {
+                            Severity severity = Severity.fromLintOptionSeverity(optionSeverity);
+
+                            if (flags.isFatalOnly() && severity != Severity.FATAL) {
+                                return Severity.IGNORE;
+                            }
+
+                            return severity;
+                        }
+
+                        return super.getSeverity(issue);
+                    }
+                };
+            }
+        }
+
+        return super.getConfiguration(project, driver);
     }
 
     @NonNull
     @Override
     public List<File> findRuleJars(@NonNull Project project) {
-        return mCustomRules;
+        return customRules;
     }
 
     @NonNull
@@ -103,8 +153,8 @@ public class LintGradleClient extends LintCliClient {
 
     @Override
     public File getSdkHome() {
-        if (mSdkHome != null) {
-            return mSdkHome;
+        if (sdkHome != null) {
+            return sdkHome;
         }
         return super.getSdkHome();
     }
@@ -112,7 +162,7 @@ public class LintGradleClient extends LintCliClient {
     @Override
     @Nullable
     public File getCacheDir(boolean create) {
-        File dir = new File(mGradleProject.getRootProject().getBuildDir(),
+        File dir = new File(gradleProject.getRootProject().getBuildDir(),
                 FD_INTERMEDIATES + separator + "lint-cache"); //$NON-NLS-1$
         if (dir.exists() || create && dir.mkdirs()) {
             return dir;
@@ -127,13 +177,13 @@ public class LintGradleClient extends LintCliClient {
         LintRequest lintRequest = new LintRequest(this, files);
         if (Lint.MODEL_LIBRARIES) {
             LintGradleProject.ProjectSearch search = new LintGradleProject.ProjectSearch();
-            Project project = search.getProject(this, mGradleProject, mVariant.getName());
+            Project project = search.getProject(this, gradleProject, variant.getName());
             lintRequest.setProjects(Collections.singletonList(project));
             setCustomRules(search.customViewRuleJars);
         } else {
             Pair<LintGradleProject,List<File>> result = LintGradleProject.create(
-                    this, mModelProject, mVariant, mGradleProject);
-            lintRequest.setProjects(Collections.<Project>singletonList(result.getFirst()));
+                    this, modelProject, variant, gradleProject);
+            lintRequest.setProjects(Collections.singletonList(result.getFirst()));
             setCustomRules(result.getSecond());
         }
 
@@ -142,9 +192,15 @@ public class LintGradleClient extends LintCliClient {
 
     /** Run lint with the given registry and return the resulting warnings */
     @NonNull
-    public List<Warning> run(@NonNull IssueRegistry registry) throws IOException {
-        run(registry, Collections.<File>emptyList());
-        return mWarnings;
+    public Pair<List<Warning>,LintBaseline> run(@NonNull IssueRegistry registry)
+            throws IOException {
+        int exitCode = run(registry, Collections.emptyList());
+
+        if (exitCode == LintCliFlags.ERRNO_CREATED_BASELINE) {
+            throw new GradleException("Aborting build since new baseline file was created");
+        }
+
+        return Pair.of(warnings, driver.getBaseline());
     }
 
     /**
@@ -233,7 +289,7 @@ public class LintGradleClient extends LintCliClient {
     @Nullable
     @Override
     public BuildToolInfo getBuildTools(@NonNull Project project) {
-        return mBuildToolInfo;
+        return buildToolInfo;
     }
 
     @Override

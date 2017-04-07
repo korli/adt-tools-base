@@ -21,7 +21,6 @@ import static com.android.SdkConstants.R_CLASS;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.annotations.VisibleForTesting;
 import com.android.tools.lint.client.api.JavaParser.ResolvedClass;
 import com.android.tools.lint.client.api.JavaParser.ResolvedMethod;
 import com.android.tools.lint.client.api.JavaParser.ResolvedNode;
@@ -31,13 +30,11 @@ import com.android.tools.lint.detector.api.Detector.XmlScanner;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import lombok.ast.AlternateConstructorInvocation;
 import lombok.ast.Annotation;
 import lombok.ast.AnnotationDeclaration;
@@ -144,28 +141,19 @@ public class JavaVisitor {
             Maps.newHashMapWithExpectedSize(12);
     private Set<String> mConstructorSimpleNames;
     private final List<VisitingDetector> mResourceFieldDetectors =
-            new ArrayList<VisitingDetector>();
+            new ArrayList<>();
     private final List<VisitingDetector> mAllDetectors;
     private final List<VisitingDetector> mFullTreeDetectors;
     private final Map<Class<? extends Node>, List<VisitingDetector>> mNodeTypeDetectors =
-            new HashMap<Class<? extends Node>, List<VisitingDetector>>(16);
+            new HashMap<>(16);
     private final JavaParser mParser;
     private final Map<String, List<VisitingDetector>> mSuperClassDetectors =
-            new HashMap<String, List<VisitingDetector>>();
-
-    /**
-     * Number of fatal exceptions (internal errors, usually from ECJ) we've
-     * encountered; we don't log each and every one to avoid massive log spam
-     * in code which triggers this condition
-     */
-    private static int sExceptionCount;
-    /** Max number of logs to include */
-    private static final int MAX_REPORTED_CRASHES = 20;
+            new HashMap<>();
 
     JavaVisitor(@NonNull JavaParser parser, @NonNull List<Detector> detectors) {
         mParser = parser;
-        mAllDetectors = new ArrayList<VisitingDetector>(detectors.size());
-        mFullTreeDetectors = new ArrayList<VisitingDetector>(detectors.size());
+        mAllDetectors = new ArrayList<>(detectors.size());
+        mFullTreeDetectors = new ArrayList<>(detectors.size());
 
         for (Detector detector : detectors) {
             VisitingDetector v = new VisitingDetector(detector, (JavaScanner) detector);
@@ -176,7 +164,7 @@ public class JavaVisitor {
                 for (String fqn : applicableSuperClasses) {
                     List<VisitingDetector> list = mSuperClassDetectors.get(fqn);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
                         mSuperClassDetectors.put(fqn, list);
                     }
                     list.add(v);
@@ -189,7 +177,7 @@ public class JavaVisitor {
                 for (Class<? extends Node> type : nodeTypes) {
                     List<VisitingDetector> list = mNodeTypeDetectors.get(type);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
                         mNodeTypeDetectors.put(type, list);
                     }
                     list.add(v);
@@ -205,7 +193,7 @@ public class JavaVisitor {
                 for (String name : names) {
                     List<VisitingDetector> list = mMethodDetectors.get(name);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
                         mMethodDetectors.put(name, list);
                     }
                     list.add(v);
@@ -223,7 +211,7 @@ public class JavaVisitor {
                 for (String type : types) {
                     List<VisitingDetector> list = mConstructorDetectors.get(type);
                     if (list == null) {
-                        list = new ArrayList<VisitingDetector>(SAME_TYPE_COUNT);
+                        list = new ArrayList<>(SAME_TYPE_COUNT);
                         mConstructorDetectors.put(type, list);
                         mConstructorSimpleNames.add(type.substring(type.lastIndexOf('.')+1));
                     }
@@ -281,85 +269,15 @@ public class JavaVisitor {
                 v.getDetector().afterCheckFile(context);
             }
         } catch (RuntimeException e) {
-            if (sExceptionCount++ > MAX_REPORTED_CRASHES) {
-                // No need to keep spamming the user that a lot of the files
-                // are tripping up ECJ, they get the picture.
-                return;
-            }
-
-            if (e.getClass().getSimpleName().equals("IndexNotReadyException")) {
-                // Attempting to access PSI during startup before indices are ready; ignore these.
-                // See http://b.android.com/176644 for an example.
-                return;
-            } else if (e.getClass().getSimpleName().equals("ProcessCanceledException")) {
-                // Cancelling inspections in the IDE
-                context.getDriver().cancel();
-                return;
-            }
-
             // Work around ECJ bugs; see https://code.google.com/p/android/issues/detail?id=172268
             // Don't allow lint bugs to take down the whole build. TRY to log this as a
             // lint error instead!
-            StringBuilder sb = new StringBuilder(100);
-            sb.append("Unexpected failure during lint analysis of ");
-            sb.append(context.file.getName());
-            sb.append(" (this is a bug in lint or one of the libraries it depends on)\n");
-
-            sb.append(e.getClass().getSimpleName());
-            sb.append(':');
-            StackTraceElement[] stackTrace = e.getStackTrace();
-            int count = 0;
-            for (StackTraceElement frame : stackTrace) {
-                if (count > 0) {
-                    sb.append("<-");
-                }
-
-                String className = frame.getClassName();
-                sb.append(className.substring(className.lastIndexOf('.') + 1));
-                sb.append('.').append(frame.getMethodName());
-                sb.append('(');
-                sb.append(frame.getFileName()).append(':').append(frame.getLineNumber());
-                sb.append(')');
-                count++;
-                // Only print the top 3-4 frames such that we can identify the bug
-                if (count == 4) {
-                    break;
-                }
-            }
-            Throwable throwable = null; // NOT e: this makes for very noisy logs
-            //noinspection ConstantConditions
-            context.log(throwable, sb.toString());
+            LintDriver.handleDetectorError(context, e);
         } finally {
             if (compilationUnit != null) {
                 mParser.dispose(context, compilationUnit);
             }
         }
-    }
-
-    /**
-     * For testing only: returns the number of exceptions thrown during Java AST analysis
-     *
-     * @return the number of internal errors found
-     */
-    @VisibleForTesting
-    public static int getCrashCount() {
-        return sExceptionCount;
-    }
-
-    /**
-     * For testing only: clears the crash counter
-     */
-    @VisibleForTesting
-    public static void clearCrashCount() {
-        sExceptionCount = 0;
-    }
-
-    public void prepare(@NonNull List<JavaContext> contexts) {
-        mParser.prepareJavaParse(contexts);
-    }
-
-    public void dispose() {
-        mParser.dispose();
     }
 
     @Nullable
@@ -428,7 +346,7 @@ public class JavaVisitor {
     }
 
     private class SuperclassVisitor extends ForwardingAstVisitor {
-        private JavaContext mContext;
+        private final JavaContext mContext;
 
         public SuperclassVisitor(@NonNull JavaContext context) {
             mContext = context;

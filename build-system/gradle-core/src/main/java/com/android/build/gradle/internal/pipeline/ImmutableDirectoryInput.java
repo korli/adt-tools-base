@@ -21,7 +21,7 @@ import com.android.annotations.concurrency.Immutable;
 import com.android.build.api.transform.DirectoryInput;
 import com.android.build.api.transform.Status;
 import com.google.common.base.Joiner;
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 
 import java.io.File;
@@ -41,7 +41,7 @@ class ImmutableDirectoryInput extends QualifiedContentImpl implements DirectoryI
             @NonNull String name,
             @NonNull File file,
             @NonNull Set<ContentType> contentTypes,
-            @NonNull Set<Scope> scopes) {
+            @NonNull Set<? super Scope> scopes) {
         super(name, file, contentTypes, scopes);
         this.changedFiles = ImmutableMap.of();
     }
@@ -50,7 +50,7 @@ class ImmutableDirectoryInput extends QualifiedContentImpl implements DirectoryI
             @NonNull String name,
             @NonNull File file,
             @NonNull Set<ContentType> contentTypes,
-            @NonNull Set<Scope> scopes,
+            @NonNull Set<? super Scope> scopes,
             @NonNull Map<File, Status> changedFiles) {
         super(name, file, contentTypes, scopes);
         this.changedFiles = ImmutableMap.copyOf(changedFiles);
@@ -64,7 +64,7 @@ class ImmutableDirectoryInput extends QualifiedContentImpl implements DirectoryI
 
     @Override
     public String toString() {
-        return Objects.toStringHelper(this)
+        return MoreObjects.toStringHelper(this)
                 .add("name", getName())
                 .add("file", getFile())
                 .add("contentTypes", Joiner.on(',').join(getContentTypes()))

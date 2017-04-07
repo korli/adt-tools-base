@@ -103,6 +103,11 @@ public class ResourceUsageAnalyzerTest {
                 + "@attr/myAttr2 : reachable=false\n"
                 + "@dimen/activity_horizontal_margin : reachable=true\n"
                 + "@dimen/activity_vertical_margin : reachable=true\n"
+                + "@drawable/avd_heart_fill : reachable=false\n"
+                + "    @drawable/avd_heart_fill_1\n"
+                + "    @drawable/avd_heart_fill_2\n"
+                + "@drawable/avd_heart_fill_1 : reachable=false\n"
+                + "@drawable/avd_heart_fill_2 : reachable=false\n"
                 + "@drawable/ic_launcher : reachable=true\n"
                 + "@drawable/unused : reachable=false\n"
                 + "@id/action_settings : reachable=true\n"
@@ -184,42 +189,36 @@ public class ResourceUsageAnalyzerTest {
         } else {
             List<File> files = Lists.newArrayList();
             addFiles(resources, files);
-            Collections.sort(files, new Comparator<File>() {
-
-                @Override
-                public int compare(File file, File file2) {
-                    return file.getPath().compareTo(file2.getPath());
-                }
-            });
+            Collections.sort(files, (file, file2) -> file.getPath().compareTo(file2.getPath()));
 
             // Generate a .zip file from a directory
             File uncompressedFile = File.createTempFile("uncompressed", ".ap_");
             String prefix = resources.getPath() + File.separatorChar;
-            FileOutputStream fos = new FileOutputStream(uncompressedFile);
-            ZipOutputStream zos = new ZipOutputStream(fos);
-            for (File file : files) {
-                if (file.equals(resources)) {
-                    continue;
+            try (FileOutputStream fos = new FileOutputStream(uncompressedFile);
+                 ZipOutputStream zos = new ZipOutputStream(fos)) {
+                for (File file : files) {
+                    if (file.equals(resources)) {
+                        continue;
+                    }
+                    assertTrue(file.getPath().startsWith(prefix));
+                    String relative = "res/" + file.getPath().substring(prefix.length())
+                            .replace(File.separatorChar, '/');
+                    boolean isValuesFile = relative.equals("res/values/values.xml");
+                    if (isValuesFile) {
+                        relative = "resources.arsc";
+                    }
+                    ZipEntry ze = new ZipEntry(relative);
+                    zos.putNextEntry(ze);
+                    if (!file.isDirectory() && !isValuesFile) {
+                        byte[] bytes = Files.toByteArray(file);
+                        zos.write(bytes);
+                    }
+                    zos.closeEntry();
                 }
-                assertTrue(file.getPath().startsWith(prefix));
-                String relative = "res/" + file.getPath().substring(prefix.length())
-                        .replace(File.separatorChar, '/');
-                boolean isValuesFile = relative.equals("res/values/values.xml");
-                if (isValuesFile) {
-                    relative = "resources.arsc";
-                }
-                ZipEntry ze = new ZipEntry(relative);
-                zos.putNextEntry(ze);
-                if (!file.isDirectory() && !isValuesFile) {
-                    byte[] bytes = Files.toByteArray(file);
-                    zos.write(bytes);
-                }
-                zos.closeEntry();
             }
-            zos.close();
-            fos.close();
 
             assertEquals(""
+                    + "res/drawable\n"
                     + "res/drawable-hdpi\n"
                     + "res/drawable-hdpi/ic_launcher.png\n"
                     + "res/drawable-mdpi\n"
@@ -227,6 +226,7 @@ public class ResourceUsageAnalyzerTest {
                     + "res/drawable-xxhdpi\n"
                     + "res/drawable-xxhdpi/ic_launcher.png\n"
                     + "res/drawable-xxhdpi/unused.png\n"
+                    + "res/drawable/avd_heart_fill.xml\n"
                     + "res/layout\n"
                     + "res/layout/activity_main.xml\n"
                     + "res/menu\n"
@@ -252,6 +252,7 @@ public class ResourceUsageAnalyzerTest {
 
             // Check contents
             assertEquals(""
+                    + "res/drawable\n"
                     + "res/drawable-hdpi\n"
                     + "res/drawable-hdpi/ic_launcher.png\n"
                     + "res/drawable-mdpi\n"
@@ -259,6 +260,7 @@ public class ResourceUsageAnalyzerTest {
                     + "res/drawable-xxhdpi\n"
                     + "res/drawable-xxhdpi/ic_launcher.png\n"
                     + (REPLACE_DELETED_WITH_EMPTY ? "res/drawable-xxhdpi/unused.png\n" : "")
+                    + (REPLACE_DELETED_WITH_EMPTY ? "res/drawable/avd_heart_fill.xml\n" : "")
                     + "res/layout\n"
                     + "res/layout/activity_main.xml\n"
                     + "res/menu\n"
@@ -531,6 +533,31 @@ public class ResourceUsageAnalyzerTest {
                 + "  elt.style.color = \"#000\";\n"
                 + "  show('status_submit');\n"
                 + "}\n");
+
+        // Nested resources
+        createFile(resources, "drawable/avd_heart_fill.xml", ""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<animated-vector\n"
+                + "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    xmlns:aapt=\"http://schemas.android.com/aapt\">\n"
+                + "\n"
+                + "    <aapt:attr name=\"android:drawable\">\n"
+                + "        <vector\n"
+                + "            android:width=\"56dp\"\n"
+                + "            android:height=\"56dp\"\n"
+                + "            android:viewportWidth=\"56\"\n"
+                + "            android:viewportHeight=\"56\">\n"
+                + "        </vector>\n"
+                + "    </aapt:attr>\n"
+                + "\n"
+                + "    <target android:name=\"clip\">\n"
+                + "        <aapt:attr name=\"android:animation\">\n"
+                + "            <objectAnimator\n"
+                + "                android:propertyName=\"pathData\"\n"
+                + "                android:interpolator=\"@android:interpolator/fast_out_slow_in\" />\n"
+                + "        </aapt:attr>\n"
+                + "    </target>\n"
+                + "</animated-vector>");
 
         return resources;
     }
@@ -1019,6 +1046,7 @@ public class ResourceUsageAnalyzerTest {
         // Comprehensive test
         String p = "prefix%s%%%n%c%x%d%o%b%h%f%e%a%g%C%X%5B%E%A%G";
         String s = String.format(p, "", 'c', 1, 1, 1, true, 1, 1f, 1f, 1f, 1f, 'c', 1, 1, 1f, 1f, 1f);
+        s = s.replaceAll("\r\n", "\n");
         assertTrue(s.matches(convertFormatStringToRegexp(p)));
     }
 

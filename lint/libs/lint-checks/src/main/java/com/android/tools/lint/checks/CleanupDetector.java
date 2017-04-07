@@ -25,6 +25,7 @@ import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.client.api.JavaEvaluator;
+import com.android.tools.lint.client.api.LintDriver;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
@@ -61,7 +62,6 @@ import com.intellij.psi.PsiStatement;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiVariable;
 import com.intellij.psi.PsiWhileStatement;
-
 import java.util.Arrays;
 import java.util.List;
 
@@ -77,7 +77,7 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
 
     /** Problems with missing recycle calls */
     public static final Issue RECYCLE_RESOURCE = Issue.create(
-        "Recycle", //$NON-NLS-1$
+        "Recycle",
         "Missing `recycle()` calls",
 
         "Many resources, such as TypedArrays, VelocityTrackers, etc., " +
@@ -91,7 +91,7 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
 
     /** Problems with missing commit calls. */
     public static final Issue COMMIT_FRAGMENT = Issue.create(
-            "CommitTransaction", //$NON-NLS-1$
+            "CommitTransaction",
             "Missing `commit()` calls",
 
             "After creating a `FragmentTransaction`, you typically need to commit it as well",
@@ -101,9 +101,9 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
             Severity.WARNING,
             IMPLEMENTATION);
 
-    /** The main issue discovered by this detector */
+    /** Failing to commit a shared preference */
     public static final Issue SHARED_PREF = Issue.create(
-            "CommitPrefEdits", //$NON-NLS-1$
+            "CommitPrefEdits",
             "Missing `commit()` on `SharedPreference` editor",
 
             "After calling `edit()` on a `SharedPreference`, you must call `commit()` " +
@@ -116,41 +116,58 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
                     CleanupDetector.class,
                     Scope.JAVA_FILE_SCOPE));
 
-    // Target method names
-    private static final String RECYCLE = "recycle";                                  //$NON-NLS-1$
-    private static final String RELEASE = "release";                                  //$NON-NLS-1$
-    private static final String OBTAIN = "obtain";                                    //$NON-NLS-1$
-    private static final String SHOW = "show";                                        //$NON-NLS-1$
-    private static final String ACQUIRE_CPC = "acquireContentProviderClient";         //$NON-NLS-1$
-    private static final String OBTAIN_NO_HISTORY = "obtainNoHistory";                //$NON-NLS-1$
-    private static final String OBTAIN_ATTRIBUTES = "obtainAttributes";               //$NON-NLS-1$
-    private static final String OBTAIN_TYPED_ARRAY = "obtainTypedArray";              //$NON-NLS-1$
-    private static final String OBTAIN_STYLED_ATTRIBUTES = "obtainStyledAttributes";  //$NON-NLS-1$
-    private static final String BEGIN_TRANSACTION = "beginTransaction";               //$NON-NLS-1$
-    private static final String COMMIT = "commit";                                    //$NON-NLS-1$
-    private static final String COMMIT_NOW = "commitNow";                             //$NON-NLS-1$
-    private static final String APPLY = "apply";                                      //$NON-NLS-1$
-    private static final String COMMIT_ALLOWING_LOSS = "commitAllowingStateLoss";     //$NON-NLS-1$
-    private static final String QUERY = "query";                                      //$NON-NLS-1$
-    private static final String RAW_QUERY = "rawQuery";                               //$NON-NLS-1$
-    private static final String QUERY_WITH_FACTORY = "queryWithFactory";              //$NON-NLS-1$
-    private static final String RAW_QUERY_WITH_FACTORY = "rawQueryWithFactory";       //$NON-NLS-1$
-    private static final String CLOSE = "close";                                      //$NON-NLS-1$
-    private static final String EDIT = "edit";                                        //$NON-NLS-1$
+    /** Using commit instead of apply on a shared preference */
+    public static final Issue APPLY_SHARED_PREF = Issue.create(
+            "ApplySharedPref",
+            "Use `apply()` on `SharedPreferences`",
 
-    private static final String MOTION_EVENT_CLS = "android.view.MotionEvent";        //$NON-NLS-1$
-    private static final String PARCEL_CLS = "android.os.Parcel";                     //$NON-NLS-1$
-    private static final String VELOCITY_TRACKER_CLS = "android.view.VelocityTracker";//$NON-NLS-1$
-    private static final String DIALOG_FRAGMENT = "android.app.DialogFragment";       //$NON-NLS-1$
+            "Consider using `apply()` instead of `commit` on shared preferences. Whereas "
+                    + "`commit` blocks and writes its data to persistent storage immediately, "
+                    + "`apply` will handle it in the background.",
+
+            Category.CORRECTNESS,
+            6,
+            Severity.WARNING,
+            new Implementation(
+                    CleanupDetector.class,
+                    Scope.JAVA_FILE_SCOPE));
+
+    // Target method names
+    private static final String RECYCLE = "recycle";
+    private static final String RELEASE = "release";
+    private static final String OBTAIN = "obtain";
+    private static final String SHOW = "show";
+    private static final String ACQUIRE_CPC = "acquireContentProviderClient";
+    private static final String OBTAIN_NO_HISTORY = "obtainNoHistory";
+    private static final String OBTAIN_ATTRIBUTES = "obtainAttributes";
+    private static final String OBTAIN_TYPED_ARRAY = "obtainTypedArray";
+    private static final String OBTAIN_STYLED_ATTRIBUTES = "obtainStyledAttributes";
+    private static final String BEGIN_TRANSACTION = "beginTransaction";
+    private static final String COMMIT = "commit";
+    private static final String COMMIT_NOW = "commitNow";
+    private static final String APPLY = "apply";
+    private static final String COMMIT_ALLOWING_LOSS = "commitAllowingStateLoss";
+    private static final String COMMIT_NOW_ALLOWING_LOSS = "commitNowAllowingStateLoss";
+    private static final String QUERY = "query";
+    private static final String RAW_QUERY = "rawQuery";
+    private static final String QUERY_WITH_FACTORY = "queryWithFactory";
+    private static final String RAW_QUERY_WITH_FACTORY = "rawQueryWithFactory";
+    private static final String CLOSE = "close";
+    private static final String EDIT = "edit";
+
+    private static final String MOTION_EVENT_CLS = "android.view.MotionEvent";
+    private static final String PARCEL_CLS = "android.os.Parcel";
+    private static final String VELOCITY_TRACKER_CLS = "android.view.VelocityTracker";
+    private static final String DIALOG_FRAGMENT = "android.app.DialogFragment";
     private static final String DIALOG_V4_FRAGMENT =
-            "android.support.v4.app.DialogFragment";                                  //$NON-NLS-1$
-    private static final String FRAGMENT_MANAGER_CLS = "android.app.FragmentManager"; //$NON-NLS-1$
+            "android.support.v4.app.DialogFragment";
+    private static final String FRAGMENT_MANAGER_CLS = "android.app.FragmentManager";
     private static final String FRAGMENT_MANAGER_V4_CLS =
-            "android.support.v4.app.FragmentManager";                                 //$NON-NLS-1$
+            "android.support.v4.app.FragmentManager";
     private static final String FRAGMENT_TRANSACTION_CLS =
-            "android.app.FragmentTransaction";                                        //$NON-NLS-1$
+            "android.app.FragmentTransaction";
     private static final String FRAGMENT_TRANSACTION_V4_CLS =
-            "android.support.v4.app.FragmentTransaction";                             //$NON-NLS-1$
+            "android.support.v4.app.FragmentTransaction";
 
     public static final String SURFACE_CLS = "android.view.Surface";
     public static final String SURFACE_TEXTURE_CLS = "android.graphics.SurfaceTexture";
@@ -165,9 +182,9 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
     public static final String CURSOR_CLS = "android.database.Cursor";
 
     public static final String ANDROID_CONTENT_SHARED_PREFERENCES =
-            "android.content.SharedPreferences"; //$NON-NLS-1$
+            "android.content.SharedPreferences";
     private static final String ANDROID_CONTENT_SHARED_PREFERENCES_EDITOR =
-            "android.content.SharedPreferences.Editor"; //$NON-NLS-1$
+            "android.content.SharedPreferences.Editor";
 
     /** Constructs a new {@link CleanupDetector} */
     public CleanupDetector() {
@@ -362,7 +379,7 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
     private static void checkTransactionCommits(@NonNull JavaContext context,
             @NonNull PsiMethodCallExpression node, @NonNull PsiMethod calledMethod) {
         if (isBeginTransaction(context, calledMethod)) {
-            PsiVariable boundVariable = getVariableElement(node, true);
+            PsiVariable boundVariable = getVariableElement(node, true, true);
             if (boundVariable == null && isCommittedInChainedCalls(context, node)) {
                 return;
             }
@@ -459,6 +476,7 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
         String methodName = call.getMethodExpression().getReferenceName();
         return (COMMIT.equals(methodName)
                     || COMMIT_ALLOWING_LOSS.equals(methodName)
+                    || COMMIT_NOW_ALLOWING_LOSS.equals(methodName)
                     || COMMIT_NOW.equals(methodName)) &&
                 isMethodOnFragmentClass(context, call,
                         FRAGMENT_TRANSACTION_CLS,
@@ -496,7 +514,7 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
     private static void checkEditorApplied(@NonNull JavaContext context,
             @NonNull PsiMethodCallExpression node, @NonNull PsiMethod calledMethod) {
         if (isSharedEditorCreation(context, calledMethod)) {
-            PsiVariable boundVariable = getVariableElement(node, true);
+            PsiVariable boundVariable = getVariableElement(node, true, true);
             if (isEditorCommittedInChainedCalls(context, node)) {
                 return;
             }
@@ -679,18 +697,19 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
                     returnValueIgnored = ((PsiDoWhileStatement)parent).getCondition() != node;
                 } else if (parent instanceof PsiAssertStatement) {
                     returnValueIgnored = ((PsiAssertStatement)parent).getAssertCondition() != node;
-                } else if (parent instanceof PsiReturnStatement
-                        || parent instanceof PsiDeclarationStatement) {
-                    returnValueIgnored = false;
-                } else {
-                    returnValueIgnored = true;
-                }
+                } else
+                    returnValueIgnored = !(parent instanceof PsiReturnStatement
+                            || parent instanceof PsiDeclarationStatement);
             }
-            if (returnValueIgnored) {
+            if (returnValueIgnored
+                    // This issue used to be reported on SHARED_PREF instead of APPLY_SHARED_PREF
+                    // so consult the older issue id too such that people who have manually
+                    // suppressed the issue don't suddenly start to see these warnings again
+                    && !LintDriver.isSuppressed(SHARED_PREF, node)) {
                 String message = "Consider using `apply()` instead; `commit` writes "
                         + "its data to persistent storage immediately, whereas "
                         + "`apply` will handle it in the background";
-                context.report(SHARED_PREF, node, context.getLocation(node), message);
+                context.report(APPLY_SHARED_PREF, node, context.getLocation(node), message);
             }
         }
     }
@@ -698,12 +717,12 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
     /** Returns the variable the expression is assigned to, if any */
     @Nullable
     public static PsiVariable getVariableElement(@NonNull PsiElement rhs) {
-        return getVariableElement(rhs, false);
+        return getVariableElement(rhs, false, false);
     }
 
     @Nullable
     public static PsiVariable getVariableElement(@NonNull PsiElement rhs,
-            boolean allowChainedCalls) {
+            boolean allowChainedCalls, boolean allowFields) {
         PsiElement parent = skipParentheses(rhs.getParent());
 
         // Handle some types of chained calls; e.g. you might have
@@ -729,12 +748,14 @@ public class CleanupDetector extends Detector implements JavaPsiScanner {
             PsiExpression lhs = assignment.getLExpression();
             if (lhs instanceof PsiReference) {
                 PsiElement resolved = ((PsiReference)lhs).resolve();
-                if (resolved instanceof PsiVariable && !(resolved instanceof PsiField)) {
+                if (resolved instanceof PsiVariable
+                        && (allowFields || !(resolved instanceof PsiField))) {
                     // e.g. local variable, parameter - but not a field
                     return (PsiVariable) resolved;
                 }
             }
-        } else if (parent instanceof PsiVariable && !(parent instanceof PsiField)) {
+        } else if (parent instanceof PsiVariable
+                && (allowFields || !(parent instanceof PsiField))) {
             return (PsiVariable) parent;
         }
 

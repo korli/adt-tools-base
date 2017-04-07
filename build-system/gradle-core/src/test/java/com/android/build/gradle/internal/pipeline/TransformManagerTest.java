@@ -19,10 +19,10 @@ package com.android.build.gradle.internal.pipeline;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.android.build.api.transform.QualifiedContent;
-import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.api.transform.QualifiedContent.DefaultContentType;
 import com.android.build.api.transform.QualifiedContent.Scope;
 import com.android.build.api.transform.Transform;
+import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.builder.model.SyncIssue;
 import com.google.common.collect.Iterables;
 
@@ -32,6 +32,7 @@ import org.junit.rules.ExpectedException;
 
 import java.io.File;
 import java.util.List;
+import java.util.Optional;
 
 public class TransformManagerTest extends TaskTestUtils {
 
@@ -56,8 +57,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -103,8 +106,10 @@ public class TransformManagerTest extends TaskTestUtils {
 
         SyncIssue syncIssue = errorReporter.getSyncIssue();
         assertThat(syncIssue).isNotNull();
-        assertThat(syncIssue.getMessage()).isEqualTo(
-                "Unable to add Transform 'transform name' on variant 'null': requested streams not available: [PROJECT]+[] / [RESOURCES]");
+        assertThat(syncIssue.getMessage())
+                .isEqualTo(
+                        "Unable to add Transform 'transform name' on variant 'null': "
+                                + "requested streams not available: [PROJECT]+[] / [RESOURCES]");
         assertThat(syncIssue.getType()).isEqualTo(SyncIssue.TYPE_GENERIC);
     }
 
@@ -143,8 +148,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -184,8 +191,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new streams
         List<TransformStream> streams = transformManager.getStreams();
@@ -246,8 +255,7 @@ public class TransformManagerTest extends TaskTestUtils {
                 .setScopes(Scope.PROJECT)
                 .setReferencedScopes(Scope.EXTERNAL_LIBRARIES)
                 .build();
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        transformManager.addTransform(taskFactory, scope, t);
 
         // get the new streams
         List<TransformStream> streams = transformManager.getStreams();
@@ -280,8 +288,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new streams
         List<TransformStream> streams = transformManager.getStreams();
@@ -343,8 +353,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -387,8 +399,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // check the class stream was not consumed.
         assertThat(transformManager.getStreams()).containsExactly(projectClass);
@@ -427,8 +441,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -475,8 +491,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -529,8 +547,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -578,8 +598,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(
-                taskFactory, scope, t);
+        AndroidTask<TransformTask> task =
+                transformManager
+                        .addTransform(taskFactory, scope, t)
+                        .orElseThrow(mTransformTaskFailed);
 
         // get the new stream
         List<TransformStream> streams = transformManager.getStreams();
@@ -632,9 +654,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(taskFactory, scope, t);
+        Optional<AndroidTask<TransformTask>> task =
+                transformManager.addTransform(taskFactory, scope, t);
 
-        assertThat(task).isNull();
+        assertThat(task.isPresent()).isFalse();
 
         SyncIssue syncIssue = errorReporter.getSyncIssue();
         assertThat(syncIssue).isNotNull();
@@ -655,9 +678,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(taskFactory, scope, t);
+        Optional<AndroidTask<TransformTask>> task =
+                transformManager.addTransform(taskFactory, scope, t);
 
-        assertThat(task).isNull();
+        assertThat(task.isPresent()).isFalse();
 
         SyncIssue syncIssue = errorReporter.getSyncIssue();
         assertThat(syncIssue).isNotNull();
@@ -677,9 +701,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(taskFactory, scope, t);
+        Optional<AndroidTask<TransformTask>> task =
+                transformManager.addTransform(taskFactory, scope, t);
 
-        assertThat(task).isNull();
+        assertThat(task.isPresent()).isFalse();
 
         SyncIssue syncIssue = errorReporter.getSyncIssue();
         assertThat(syncIssue).isNotNull();
@@ -697,9 +722,10 @@ public class TransformManagerTest extends TaskTestUtils {
                 .build();
 
         // add the transform
-        AndroidTask<TransformTask> task = transformManager.addTransform(taskFactory, scope, t);
+        Optional<AndroidTask<TransformTask>> task =
+                transformManager.addTransform(taskFactory, scope, t);
 
-        assertThat(task).isNull();
+        assertThat(task.isPresent()).isFalse();
 
         SyncIssue syncIssue = errorReporter.getSyncIssue();
         assertThat(syncIssue).isNotNull();
@@ -708,4 +734,34 @@ public class TransformManagerTest extends TaskTestUtils {
         assertThat(syncIssue.getType()).isEqualTo(SyncIssue.TYPE_GENERIC);
     }
 
+    @Test
+    public void testTaskName() throws Exception {
+        Transform transform;
+
+        transform =
+                TestTransform.builder()
+                        .setInputTypes(DefaultContentType.CLASSES)
+                        .setName("Enhancer")
+                        .build();
+        assertThat(TransformManager.getTaskNamePrefix(transform))
+                .isEqualTo("transformClassesWithEnhancerFor");
+
+        transform =
+                TestTransform.builder()
+                        .setInputTypes(DefaultContentType.CLASSES, DefaultContentType.RESOURCES)
+                        .setName("verifier")
+                        .build();
+        assertThat(TransformManager.getTaskNamePrefix(transform))
+                .isEqualTo("transformClassesAndResourcesWithVerifierFor");
+
+        transform =
+                TestTransform.builder()
+                        .setInputTypes(
+                                ExtendedContentType.CLASSES_ENHANCED,
+                                ExtendedContentType.NATIVE_LIBS)
+                        .setName("fooBar")
+                        .build();
+        assertThat(TransformManager.getTaskNamePrefix(transform))
+                .isEqualTo("transformClassesEnhancedAndNativeLibsWithFooBarFor");
+    }
 }

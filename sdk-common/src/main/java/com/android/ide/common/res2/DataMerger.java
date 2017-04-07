@@ -88,7 +88,6 @@ abstract class DataMerger<I extends DataItem<F>, F extends DataFile<I>, S extend
      * @param dataItemKey the key for the items
      * @param items the items, from lower priority to higher priority.
      * @param consumer the consumer to receive the merged items.
-     * @throws MergingException
      */
     protected abstract void mergeItems(
             @NonNull String dataItemKey,
@@ -199,8 +198,10 @@ abstract class DataMerger<I extends DataItem<F>, F extends DataFile<I>, S extend
                         // look for the resource key in the set
                         ListMultimap<String, I> itemMap = dataSet.getDataMap();
 
-                        List<I> setItems = itemMap.get(dataItemKey);
-                        items.addAll(setItems);
+                        if (itemMap.containsKey(dataItemKey)) {
+                            List<I> setItems = itemMap.get(dataItemKey);
+                            items.addAll(setItems);
+                        }
                     }
 
                     mergeItems(dataItemKey, items, consumer);
@@ -225,6 +226,9 @@ abstract class DataMerger<I extends DataItem<F>, F extends DataFile<I>, S extend
                     // look for the resource key in the set
                     ListMultimap<String, I> itemMap = dataSet.getDataMap();
 
+                    if (!itemMap.containsKey(dataItemKey)) {
+                        continue;
+                    }
                     List<I> items = itemMap.get(dataItemKey);
                     if (items.isEmpty()) {
                         continue;
@@ -683,12 +687,11 @@ abstract class DataMerger<I extends DataItem<F>, F extends DataFile<I>, S extend
             return fileValidity;
         }
 
-        if (DataSet.isIgnored(file)) {
-            fileValidity.status = FileValidity.FileStatus.IGNORED_FILE;
-            return fileValidity;
-        }
-
         for (S dataSet : mDataSets) {
+            if (dataSet.isIgnored(file)) {
+                continue;
+            }
+
             File sourceFile = dataSet.findMatchingSourceFile(file);
 
             if (sourceFile != null) {

@@ -20,14 +20,15 @@ import static com.android.ide.common.blame.parser.JsonEncodedGradleMessageParser
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.annotations.concurrency.Immutable;
 import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.api.BaseVariant;
+import com.android.build.gradle.internal.dependency.ConfigurationDependencyGraphs;
 import com.android.build.gradle.internal.dsl.CoreBuildType;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
-import com.android.build.gradle.internal.model.ArtifactMetaDataImpl;
-import com.android.build.gradle.internal.model.JavaArtifactImpl;
-import com.android.build.gradle.internal.model.SyncIssueImpl;
-import com.android.build.gradle.internal.model.SyncIssueKey;
+import com.android.build.gradle.internal.ide.ArtifactMetaDataImpl;
+import com.android.build.gradle.internal.ide.JavaArtifactImpl;
+import com.android.build.gradle.internal.ide.SyncIssueImpl;
 import com.android.build.gradle.internal.variant.DefaultSourceProviderContainer;
 import com.android.builder.core.ErrorReporter;
 import com.android.builder.model.AndroidArtifact;
@@ -41,6 +42,7 @@ import com.android.ide.common.blame.MessageJsonSerializer;
 import com.android.ide.common.blame.SourceFilePosition;
 import com.android.utils.SdkUtils;
 import com.google.common.base.Joiner;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
@@ -48,15 +50,14 @@ import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Maps;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-
-import org.gradle.api.GradleException;
-import org.gradle.api.Project;
-import org.gradle.api.artifacts.Configuration;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import org.gradle.api.GradleException;
+import org.gradle.api.Project;
+import org.gradle.api.artifacts.Configuration;
 
 /**
  * For storing additional model information.
@@ -65,7 +66,6 @@ public class ExtraModelInfo extends ErrorReporter {
 
     @NonNull
     private final Project project;
-    private final boolean isLibrary;
 
     @NonNull
     private final ErrorFormatMode errorFormatMode;
@@ -83,10 +83,9 @@ public class ExtraModelInfo extends ErrorReporter {
     @Nullable
     private final Gson mGson;
 
-    public ExtraModelInfo(@NonNull Project project, boolean isLibrary) {
+    public ExtraModelInfo(@NonNull Project project) {
         super(computeModelQueryMode(project));
         this.project = project;
-        this.isLibrary = isLibrary;
         errorFormatMode = computeErrorFormatMode(project);
         if (errorFormatMode == ErrorFormatMode.MACHINE_PARSABLE) {
             GsonBuilder gsonBuilder = new GsonBuilder();
@@ -95,10 +94,6 @@ public class ExtraModelInfo extends ErrorReporter {
         } else {
             mGson = null;
         }
-    }
-
-    public boolean isLibrary() {
-        return isLibrary;
     }
 
     public Map<SyncIssueKey, SyncIssue> getSyncIssues() {
@@ -322,12 +317,12 @@ public class ExtraModelInfo extends ErrorReporter {
                     String.format("Artifact with name %1$s is not of type JAVA", name));
         }
 
-        ConfigurationDependencies compileDependencies = new ConfigurationDependencies(
-                configuration);
         JavaArtifact artifact = new JavaArtifactImpl(
                 name, assembleTaskName, javaCompileTaskName,
                 ideSetupTaskNames, generatedSourceFolders, classesFolder, javaResourcesFolder, null,
-                compileDependencies, compileDependencies, sourceProvider, null);
+                new ConfigurationDependencies(configuration),
+                new ConfigurationDependencyGraphs(configuration),
+                sourceProvider, null);
 
         extraJavaArtifacts.put(variant.getName(), artifact);
     }
@@ -364,5 +359,52 @@ public class ExtraModelInfo extends ErrorReporter {
 
     public enum ErrorFormatMode {
         MACHINE_PARSABLE, HUMAN_READABLE
+    }
+
+    /**
+     * Creates a key from a SyncIssue to use in a map.
+     */
+    @Immutable
+    static final class SyncIssueKey {
+
+        private final int type;
+
+        @Nullable
+        private final String data;
+
+        static SyncIssueKey from(@NonNull SyncIssue syncIssue) {
+            return new SyncIssueKey(syncIssue.getType(), syncIssue.getData());
+        }
+
+        private SyncIssueKey(int type, @Nullable String data) {
+            this.type = type;
+            this.data = data;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SyncIssueKey that = (SyncIssueKey) o;
+            return type == that.type &&
+                    Objects.equals(data, that.data);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(type, data);
+        }
+
+        @Override
+        public String toString() {
+            return MoreObjects.toStringHelper(this)
+                    .add("type", type)
+                    .add("data", data)
+                    .toString();
+        }
     }
 }

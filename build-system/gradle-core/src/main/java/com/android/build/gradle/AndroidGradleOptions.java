@@ -18,87 +18,100 @@ package com.android.build.gradle;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.annotations.VisibleForTesting;
-import com.android.builder.internal.utils.FileCache;
+import com.android.build.gradle.internal.BuildCacheUtils;
+import com.android.build.gradle.internal.incremental.InstantRunApiLevelMode;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.OptionalCompilationStep;
+import com.android.builder.utils.FileCache;
+import com.android.prefs.AndroidLocation;
+import com.android.repository.api.Channel;
 import com.android.sdklib.AndroidVersion;
-import com.android.utils.FileUtils;
 import com.google.common.collect.Maps;
-
-import org.gradle.api.Project;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.StringTokenizer;
+import org.gradle.api.InvalidUserDataException;
+import org.gradle.api.Project;
 
 /**
  * Determines if various options, triggered from the command line or environment, are set.
  */
 public class AndroidGradleOptions {
 
-    @VisibleForTesting
-    public static final boolean DEFAULT_USE_OLD_PACKAGING = false;
-
     private static final boolean DEFAULT_ENABLE_AAPT2 = false;
 
-    private static final boolean DEFAULT_ENABLE_BUILD_CACHE = false;
+    private static final boolean DEFAULT_ENABLE_BUILD_CACHE = true;
 
-    private static final String PROPERTY_TEST_RUNNER_ARGS =
+    public static final String PROPERTY_TEST_RUNNER_ARGS =
             "android.testInstrumentationRunnerArguments.";
 
-    private static final String PROPERTY_THREAD_POOL_SIZE = "android.threadPoolSize";
-    private static final String PROPERTY_THREAD_POOL_SIZE_OLD = "com.android.build.threadPoolSize";
+    public static final String PROPERTY_THREAD_POOL_SIZE = "android.threadPoolSize";
+    public static final String PROPERTY_THREAD_POOL_SIZE_OLD = "com.android.build.threadPoolSize";
 
     public static final String USE_DEPRECATED_NDK = "android.useDeprecatedNdk";
 
-    private static final String PROPERTY_DISABLE_RESOURCE_VALIDATION =
+    public static final String PROPERTY_DISABLE_RESOURCE_VALIDATION =
             "android.disableResourceValidation";
-
-    // TODO: Drop the "com." prefix, for consistency.
-    private static final String PROPERTY_BENCHMARK_NAME = "com.android.benchmark.name";
-    private static final String PROPERTY_BENCHMARK_MODE = "com.android.benchmark.mode";
 
     public static final String PROPERTY_INCREMENTAL_JAVA_COMPILE =
             "android.incrementalJavaCompile";
 
-    public static final String PROPERTY_USE_OLD_PACKAGING = "android.useOldPackaging";
+    public static final String PROPERTY_KEEP_TIMESTAMPS_IN_APK = "android.keepTimestampsInApk";
 
-    private static final String PROPERTY_KEEP_TIMESTAMPS_IN_APK = "android.keepTimestampsInApk";
+    public static final String PROPERTY_ENABLE_AAPT2 = "android.enableAapt2";
 
-    private static final String PROPERTY_ENABLE_AAPT2 = "android.enableAapt2";
+    public static final String ANDROID_ADDITIONAL_PLUGINS = "android.additional.plugins";
 
-    private static final String ANDROID_ADDITIONAL_PLUGINS = "android.additional.plugins";
+    public static final String ANDROID_SDK_CHANNEL = "android.sdk.channel";
 
     /**
      * Set to true to build native .so libraries only for the device it will be run on.
      */
     public static final String PROPERTY_BUILD_ONLY_TARGET_ABI = "android.buildOnlyTargetAbi";
 
-    private static final String PROPERTY_SHARD_TESTS_BETWEEN_DEVICES =
+    public static final String PROPERTY_SHARD_TESTS_BETWEEN_DEVICES =
             "android.androidTest.shardBetweenDevices";
-    private static final String PROPERTY_SHARD_COUNT =
+    public static final String PROPERTY_SHARD_COUNT =
             "android.androidTest.numShards";
     public static  final String PROPERTY_USE_SDK_DOWNLOAD =
             "android.builder.sdkDownload";
 
-    private static final String PROPERTY_ENABLE_BUILD_CACHE = "android.enableBuildCache";
+    public static final String PROPERTY_ENABLE_BUILD_CACHE = "android.enableBuildCache";
 
-    private static final String PROPERTY_BUILD_CACHE_DIR = "android.buildCacheDir";
+    public static final String PROPERTY_BUILD_CACHE_DIR = "android.buildCacheDir";
+
+    /**
+     * Set to true to delay dependency resolution to task execution.
+     */
+    public static final String PROPERTY_ENABLE_IMPROVED_DEPENDENCY_RESOLUTION =
+            "android.enableImprovedDependenciesResolution";
 
     public static final String GRADLE_VERSION_CHECK_OVERRIDE_PROPERTY =
             "android.overrideVersionCheck";
 
-    private static final String OLD_GRADLE_VERSION_CHECK_OVERRIDE_PROPERTY =
+    public static final String OLD_GRADLE_VERSION_CHECK_OVERRIDE_PROPERTY =
             "com.android.build.gradle.overrideVersionCheck";
 
     public static final String OVERRIDE_PATH_CHECK_PROPERTY = "android.overridePathCheck";
 
-    private static final String OLD_OVERRIDE_PATH_CHECK_PROPERTY =
+    public static final String OLD_OVERRIDE_PATH_CHECK_PROPERTY =
             "com.android.build.gradle.overridePathCheck";
+
+    public static final String INSTANT_RUN_API_LEVEL_PROPERTY = "android.instantRun.apiLevel";
+
+    /**
+     * Validate flag options.
+     */
+    public static void validate(@NonNull Project project) {
+        if (isImprovedDependencyResolutionEnabled(project) && !isBuildCacheEnabled(project)) {
+            throw new InvalidUserDataException("Build cache must be enable to use improved "
+                    + "dependency resolution.  Set -Pandroid.enableBuildCache=true to continue.");
+        }
+    }
 
     public static boolean getUseSdkDownload(@NonNull Project project) {
         return getBoolean(project, PROPERTY_USE_SDK_DOWNLOAD, true) && !invokedFromIde(project);
@@ -128,16 +141,6 @@ public class AndroidGradleOptions {
         return getInteger(project, PROPERTY_SHARD_COUNT);
     }
 
-    @Nullable
-    public static String getBenchmarkName(@NonNull Project project) {
-        return getString(project, PROPERTY_BENCHMARK_NAME);
-    }
-
-    @Nullable
-    public static String getBenchmarkMode(@NonNull Project project) {
-        return getString(project, PROPERTY_BENCHMARK_MODE);
-    }
-
     public static boolean invokedFromIde(@NonNull Project project) {
         return getBoolean(project, AndroidProject.PROPERTY_INVOKED_FROM_IDE);
     }
@@ -158,16 +161,16 @@ public class AndroidGradleOptions {
         return getBoolean(project, AndroidProject.PROPERTY_GENERATE_SOURCES_ONLY);
     }
 
-    public static boolean useOldPackaging(@NonNull Project project) {
-        return getBoolean(project, PROPERTY_USE_OLD_PACKAGING, DEFAULT_USE_OLD_PACKAGING);
-    }
-
     public static boolean keepTimestampsInApk(@NonNull Project project) {
         return getBoolean(project, PROPERTY_KEEP_TIMESTAMPS_IN_APK);
     }
 
     public static boolean isAapt2Enabled(@NonNull Project project) {
         return getBoolean(project, PROPERTY_ENABLE_AAPT2, DEFAULT_ENABLE_AAPT2);
+    }
+
+    public static boolean getTestOnly(@NonNull Project project) {
+        return getBoolean(project, AndroidProject.PROPERTY_TEST_ONLY);
     }
 
     /**
@@ -180,29 +183,34 @@ public class AndroidGradleOptions {
      * @param project the project
      * @return an integer or null if we are not in model-only mode.
      *
-     * @see AndroidProject#MODEL_LEVEL_0_ORIGNAL
+     * @see AndroidProject#MODEL_LEVEL_0_ORIGINAL
      * @see AndroidProject#MODEL_LEVEL_1_SYNC_ISSUE
-     * @see AndroidProject#MODEL_LEVEL_2_DEP_GRAPH
+     * @see AndroidProject#MODEL_LEVEL_2_DONT_USE
      */
     @Nullable
     public static Integer buildModelOnlyVersion(@NonNull Project project) {
-        /*
-        Disabled in 2.2 as level 2 is not fully frozen.
         String revision = getString(project, AndroidProject.PROPERTY_BUILD_MODEL_ONLY_VERSIONED);
         if (revision != null) {
             return Integer.parseInt(revision);
         }
-        */
 
         if (getBoolean(project, AndroidProject.PROPERTY_BUILD_MODEL_ONLY_ADVANCED)) {
             return AndroidProject.MODEL_LEVEL_1_SYNC_ISSUE;
         }
 
         if (getBoolean(project, AndroidProject.PROPERTY_BUILD_MODEL_ONLY)) {
-            return AndroidProject.MODEL_LEVEL_0_ORIGNAL;
+            return AndroidProject.MODEL_LEVEL_0_ORIGINAL;
         }
 
         return null;
+    }
+
+    public static boolean buildModelWithFullDependencies(@NonNull Project project) {
+        String value = getString(project, AndroidProject.PROPERTY_BUILD_MODEL_FEATURE_FULL_DEPENDENCIES);
+        if (value == null) {
+            return false;
+        }
+        return Boolean.valueOf(value);
     }
 
     /**
@@ -300,7 +308,9 @@ public class AndroidGradleOptions {
                     signingStorePassword,
                     signingKeyAlias,
                     signingKeyPassword,
-                    signingStoreType);
+                    signingStoreType,
+                    getOptionalBoolean(project, AndroidProject.PROPERTY_SIGNING_V1_ENABLED),
+                    getOptionalBoolean(project, AndroidProject.PROPERTY_SIGNING_V2_ENABLED));
         }
 
         return null;
@@ -336,9 +346,27 @@ public class AndroidGradleOptions {
         return getString(project, AndroidProject.PROPERTY_VERSION_NAME);
     }
 
+    @NonNull
+    public static InstantRunApiLevelMode getInstantRunApiLevelMode(@NonNull Project project) {
+        String valueName = getString(project, INSTANT_RUN_API_LEVEL_PROPERTY);
+        if (valueName != null) {
+            try {
+                return InstantRunApiLevelMode.valueOf(valueName);
+            } catch (IllegalArgumentException ignored) {
+                // Return the default value below.
+            }
+        }
+
+        return InstantRunApiLevelMode.COMPILE_SDK;
+    }
+
+    public static boolean isImprovedDependencyResolutionEnabled(@NonNull Project project) {
+        return getBoolean(project, PROPERTY_ENABLE_IMPROVED_DEPENDENCY_RESOLUTION);
+    }
+
     @Nullable
     private static String getString(@NonNull Project project, String propertyName) {
-        return project.hasProperty(propertyName) ? (String) project.property(propertyName) : null;
+        return project.hasProperty(propertyName) ? project.property(propertyName).toString() : null;
     }
 
     @Nullable
@@ -358,6 +386,17 @@ public class AndroidGradleOptions {
             @NonNull Project project,
             @NonNull String propertyName) {
         return getBoolean(project, propertyName, false /*defaultValue*/);
+    }
+
+    @Nullable
+    private static Boolean getOptionalBoolean(
+            @NonNull Project project,
+            @NonNull String propertyName) {
+        if (project.hasProperty(propertyName)) {
+            return getBoolean(project, propertyName);
+        } else {
+            return null;
+        }
     }
 
     private static boolean getBoolean(
@@ -403,20 +442,45 @@ public class AndroidGradleOptions {
     public static File getBuildCacheDir(@NonNull Project project) {
         String buildCacheDir = getString(project, PROPERTY_BUILD_CACHE_DIR);
         if (buildCacheDir != null) {
-            return new File(buildCacheDir);
+            return project.getRootProject().file(buildCacheDir);
         } else {
-            // Use a directory under the user home directory if the build cache directory is not set
-            return new File(
-                    FileUtils.join(
-                            System.getProperty("user.home"), ".android", "build-cache"));
+            // Use a directory under the ".android" directory if the build cache directory is not
+            // set
+            try {
+                return new File(AndroidLocation.getFolder(), "build-cache");
+            } catch (AndroidLocation.AndroidLocationException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
     @NonNull
-    public static FileCache getBuildCache(@NonNull Project project) {
-        return isBuildCacheEnabled(project)
-                ? FileCache.withInterProcessLocking(getBuildCacheDir(project))
-                : FileCache.NO_CACHE;
+    public static Optional<FileCache> getBuildCache(@NonNull Project project) {
+        if (isBuildCacheEnabled(project)) {
+            File buildCacheDir = getBuildCacheDir(project);
+            try {
+                return Optional.of(FileCache.getInstanceWithInterProcessLocking(buildCacheDir));
+            } catch (Exception exception) {
+                throw new RuntimeException(
+                        String.format(
+                                "Unable to create the build cache at '%1$s'.\n"
+                                        + "%2$s",
+                                buildCacheDir.getAbsolutePath(),
+                                BuildCacheUtils.BUILD_CACHE_TROUBLESHOOTING_MESSAGE),
+                        exception);
+            }
+        } else {
+            return Optional.empty();
+        }
+    }
+
+    public static Channel getSdkChannel(@NonNull Project project) {
+        Integer channel = getInteger(project, ANDROID_SDK_CHANNEL);
+        if (channel != null) {
+            return Channel.create(channel);
+        } else {
+            return Channel.DEFAULT;
+        }
     }
 
     public static boolean overrideGradleVersionCheck(@NonNull Project project) {
@@ -443,18 +507,24 @@ public class AndroidGradleOptions {
         @NonNull public final String keyAlias;
         @NonNull public final String keyPassword;
         @Nullable public final String storeType;
+        @Nullable public final Boolean v1Enabled;
+        @Nullable public final Boolean v2Enabled;
 
         SigningOptions(
                 @NonNull String storeFile,
                 @NonNull String storePassword,
                 @NonNull String keyAlias,
                 @NonNull String keyPassword,
-                @Nullable String storeType) {
+                @Nullable String storeType,
+                @Nullable Boolean v1Enabled,
+                @Nullable Boolean v2Enabled) {
             this.storeFile = storeFile;
             this.storeType = storeType;
             this.storePassword = storePassword;
             this.keyAlias = keyAlias;
             this.keyPassword = keyPassword;
+            this.v1Enabled = v1Enabled;
+            this.v2Enabled = v2Enabled;
         }
     }
 }

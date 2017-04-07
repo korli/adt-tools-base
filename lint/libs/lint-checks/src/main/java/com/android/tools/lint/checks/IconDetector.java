@@ -16,9 +16,9 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.ANDROID_MANIFEST_XML;
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_ICON;
+import static com.android.SdkConstants.ATTR_ROUND_ICON;
 import static com.android.SdkConstants.DOT_9PNG;
 import static com.android.SdkConstants.DOT_GIF;
 import static com.android.SdkConstants.DOT_JPEG;
@@ -33,23 +33,31 @@ import static com.android.SdkConstants.DRAWABLE_MDPI;
 import static com.android.SdkConstants.DRAWABLE_PREFIX;
 import static com.android.SdkConstants.DRAWABLE_XHDPI;
 import static com.android.SdkConstants.DRAWABLE_XXHDPI;
-import static com.android.SdkConstants.DRAWABLE_XXXHDPI;
+import static com.android.SdkConstants.MIPMAP_FOLDER;
+import static com.android.SdkConstants.MIPMAP_PREFIX;
 import static com.android.SdkConstants.TAG_ACTIVITY;
+import static com.android.SdkConstants.TAG_ACTIVITY_ALIAS;
 import static com.android.SdkConstants.TAG_APPLICATION;
 import static com.android.SdkConstants.TAG_ITEM;
 import static com.android.SdkConstants.TAG_PROVIDER;
 import static com.android.SdkConstants.TAG_RECEIVER;
 import static com.android.SdkConstants.TAG_SERVICE;
 import static com.android.tools.lint.detector.api.LintUtils.endsWith;
+import static com.android.utils.SdkUtils.endsWithIgnoreCase;
+import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.ide.common.resources.ResourceUrl;
+import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.resources.Density;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
+import com.android.tools.lint.client.api.JavaParser;
+import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
@@ -82,18 +90,18 @@ import com.intellij.psi.PsiMethodCallExpression;
 import com.intellij.psi.PsiNewExpression;
 import com.intellij.psi.PsiReferenceExpression;
 import com.intellij.psi.util.PsiTreeUtil;
-
-import org.w3c.dom.Element;
-
 import java.awt.Dimension;
+import java.awt.Graphics;
 import java.awt.image.BufferedImage;
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -106,10 +114,10 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import org.w3c.dom.Element;
 
 /**
  * Checks for common icon problems, such as wrong icon sizes, placing icons in the
@@ -121,7 +129,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     static {
         boolean includeLdpi = false;
 
-        String value = System.getenv("ANDROID_LINT_INCLUDE_LDPI"); //$NON-NLS-1$
+        String value = System.getenv("ANDROID_LINT_INCLUDE_LDPI");
         if (value != null) {
             includeLdpi = Boolean.valueOf(value);
         }
@@ -130,27 +138,27 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Pattern for the expected density folders to be found in the project */
     private static final Pattern DENSITY_PATTERN = Pattern.compile(
-            "^drawable-(nodpi|xxxhdpi|xxhdpi|xhdpi|hdpi|mdpi"     //$NON-NLS-1$
-                + (INCLUDE_LDPI ? "|ldpi" : "") + ")$");  //$NON-NLS-1$ //$NON-NLS-2$ //$NON-NLS-3$
+            "^drawable-(nodpi|xxxhdpi|xxhdpi|xhdpi|hdpi|mdpi"
+                + (INCLUDE_LDPI ? "|ldpi" : "") + ")$");
 
     /** Pattern for icon names that include their dp size as part of the name */
-    private static final Pattern DP_NAME_PATTERN = Pattern.compile(".+_(\\d+)dp\\.png"); //$NON-NLS-1$
+    private static final Pattern DP_NAME_PATTERN = Pattern.compile(".+_(\\d+)dp\\.[a-zA-Z]+");
 
     /** Cache for {@link #getRequiredDensityFolders(Context)} */
-    private List<String> mCachedRequiredDensities;
+    private List<String> cachedRequiredDensities;
     /** Cache key for {@link #getRequiredDensityFolders(Context)} */
-    private Project mCachedDensitiesForProject;
+    private Project cachedDensitiesForProject;
 
     // TODO: Convert this over to using the Density enum and FolderConfiguration
     // for qualifier lookup
     private static final String[] DENSITY_QUALIFIERS =
         new String[] {
-            "-ldpi",  //$NON-NLS-1$
-            "-mdpi",  //$NON-NLS-1$
-            "-hdpi",  //$NON-NLS-1$
-            "-xhdpi", //$NON-NLS-1$
-            "-xxhdpi",//$NON-NLS-1$
-            "-xxxhdpi",//$NON-NLS-1$
+            "-ldpi",
+            "-mdpi",
+            "-hdpi",
+            "-xhdpi",
+            "-xxhdpi",
+            "-xxxhdpi",
     };
 
     /** Scope needed to detect the types of icons (which involves scanning .java files,
@@ -169,7 +177,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Wrong icon size according to published conventions */
     public static final Issue ICON_EXPECTED_SIZE = Issue.create(
-            "IconExpectedSize", //$NON-NLS-1$
+            "IconExpectedSize",
             "Icon has incorrect size",
             "There are predefined sizes (for each density) for launcher icons. You " +
             "should follow these conventions to make sure your icons fit in with the " +
@@ -181,11 +189,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             // Still some potential false positives:
             .setEnabledByDefault(false)
             .addMoreInfo(
-                    "http://developer.android.com/design/style/iconography.html"); //$NON-NLS-1$
+                    "http://developer.android.com/design/style/iconography.html");
 
     /** Inconsistent dip size across densities */
     public static final Issue ICON_DIP_SIZE = Issue.create(
-            "IconDipSize", //$NON-NLS-1$
+            "IconDipSize",
             "Icon density-independent size validation",
             "Checks the all icons which are provided in multiple densities, all compute to " +
             "roughly the same density-independent pixel (`dip`) size. This catches errors where " +
@@ -198,7 +206,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Images in res/drawable folder */
     public static final Issue ICON_LOCATION = Issue.create(
-            "IconLocation", //$NON-NLS-1$
+            "IconLocation",
             "Image defined in density-independent drawable folder",
             "The res/drawable folder is intended for density-independent graphics such as " +
             "shapes defined in XML. For bitmaps, move it to `drawable-mdpi` and consider " +
@@ -209,11 +217,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             5,
             Severity.WARNING,
             IMPLEMENTATION_RES_ONLY).addMoreInfo(
-            "http://developer.android.com/guide/practices/screens_support.html"); //$NON-NLS-1$
+            "http://developer.android.com/guide/practices/screens_support.html");
 
     /** Missing density versions of image */
     public static final Issue ICON_DENSITIES = Issue.create(
-            "IconDensities", //$NON-NLS-1$
+            "IconDensities",
             "Icon densities validation",
             "Icons will look best if a custom version is provided for each of the " +
             "major screen density classes (low, medium, high, extra high). " +
@@ -229,11 +237,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             4,
             Severity.WARNING,
             IMPLEMENTATION_RES_ONLY).addMoreInfo(
-            "http://developer.android.com/guide/practices/screens_support.html"); //$NON-NLS-1$
+            "http://developer.android.com/guide/practices/screens_support.html");
 
     /** Missing density folders */
     public static final Issue ICON_MISSING_FOLDER = Issue.create(
-            "IconMissingDensityFolder", //$NON-NLS-1$
+            "IconMissingDensityFolder",
             "Missing density folder",
             "Icons will look best if a custom version is provided for each of the " +
             "major screen density classes (low, medium, high, extra-high, extra-extra-high). " +
@@ -248,11 +256,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             3,
             Severity.WARNING,
             IMPLEMENTATION_RES_ONLY).addMoreInfo(
-            "http://developer.android.com/guide/practices/screens_support.html"); //$NON-NLS-1$
+            "http://developer.android.com/guide/practices/screens_support.html");
 
     /** Using .gif bitmaps */
     public static final Issue GIF_USAGE = Issue.create(
-            "GifUsage", //$NON-NLS-1$
+            "GifUsage",
             "Using `.gif` format for bitmaps is discouraged",
             "The `.gif` file format is discouraged. Consider using `.png` (preferred) " +
             "or `.jpg` (acceptable) instead.",
@@ -260,11 +268,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             5,
             Severity.WARNING,
             IMPLEMENTATION_RES_ONLY).addMoreInfo(
-            "http://developer.android.com/guide/topics/resources/drawable-resource.html#Bitmap"); //$NON-NLS-1$
+            "http://developer.android.com/guide/topics/resources/drawable-resource.html#Bitmap");
 
     /** Duplicated icons across different names */
     public static final Issue DUPLICATES_NAMES = Issue.create(
-            "IconDuplicates", //$NON-NLS-1$
+            "IconDuplicates",
             "Duplicated icons under different names",
             "If an icon is repeated under different names, you can consolidate and just " +
             "use one of the icons and delete the others to make your application smaller. " +
@@ -277,7 +285,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Duplicated contents across configurations for a given name */
     public static final Issue DUPLICATES_CONFIGURATIONS = Issue.create(
-            "IconDuplicatesConfig", //$NON-NLS-1$
+            "IconDuplicatesConfig",
             "Identical bitmaps across various configurations",
             "If an icon is provided under different configuration parameters such as " +
             "`drawable-hdpi` or `-v11`, they should typically be different. This detector " +
@@ -290,7 +298,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Icons appearing in both -nodpi and a -Ndpi folder */
     public static final Issue ICON_NODPI = Issue.create(
-            "IconNoDpi", //$NON-NLS-1$
+            "IconNoDpi",
             "Icon appears in both `-nodpi` and dpi folders",
             "Bitmaps that appear in `drawable-nodpi` folders will not be scaled by the " +
             "Android framework. If a drawable resource of the same name appears *both* in " +
@@ -304,7 +312,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Drawables provided as both .9.png and .png files */
     public static final Issue ICON_MIX_9PNG = Issue.create(
-            "IconMixedNinePatch", //$NON-NLS-1$
+            "IconMixedNinePatch",
             "Clashing PNG and 9-PNG files",
 
             "If you accidentally name two separate resources `file.png` and `file.9.png`, " +
@@ -317,7 +325,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Icons appearing as both drawable xml files and bitmaps */
     public static final Issue ICON_XML_AND_PNG = Issue.create(
-            "IconXmlAndPng", //$NON-NLS-1$
+            "IconXmlAndPng",
             "Icon is specified both as `.xml` file and as a bitmap",
             "If a drawable resource appears as an `.xml` file in the `drawable/` folder, " +
             "it's usually not intentional for it to also appear as a bitmap using the " +
@@ -330,7 +338,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Wrong filename according to the format */
     public static final Issue ICON_EXTENSION = Issue.create(
-            "IconExtension", //$NON-NLS-1$
+            "IconExtension",
             "Icon format does not match the file extension",
 
             "Ensures that icons have the correct file extension (e.g. a `.png` file is " +
@@ -342,7 +350,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     /** Wrong filename according to the format */
     public static final Issue ICON_COLORS = Issue.create(
-            "IconColors", //$NON-NLS-1$
+            "IconColors",
             "Icon colors do not follow the recommended visual style",
 
             "Notification icons and Action Bar icons should only white and shades of gray. " +
@@ -356,11 +364,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             6,
             Severity.WARNING,
             IMPLEMENTATION_JAVA).addMoreInfo(
-                "http://developer.android.com/design/style/iconography.html"); //$NON-NLS-1$
+                "http://developer.android.com/design/style/iconography.html");
 
     /** Wrong launcher icon shape */
     public static final Issue ICON_LAUNCHER_SHAPE = Issue.create(
-            "IconLauncherShape", //$NON-NLS-1$
+            "IconLauncherShape",
             "The launcher icon shape should use a distinct silhouette",
 
             "According to the Android Design Guide " +
@@ -375,7 +383,49 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             6,
             Severity.WARNING,
             IMPLEMENTATION_JAVA).addMoreInfo(
-                "http://developer.android.com/design/style/iconography.html"); //$NON-NLS-1$
+                "http://developer.android.com/design/style/iconography.html");
+
+    /** Launcher icon using wrong format */
+    public static final Issue ICON_LAUNCHER_FORMAT = Issue.create(
+            "IconLauncherFormat",
+            "Wrong launcher icon format",
+
+            "Launcher icons should be in the PNG format. This requirement is enforced by the " +
+            "The Google Play Developer Console.",
+            Category.ICONS,
+            6,
+            Severity.ERROR,
+            IMPLEMENTATION_JAVA).addMoreInfo(
+            "https://developer.android.com/guide/practices/ui_guidelines/icon_design_launcher.html#size");
+
+    /** Switch to webp? */
+    public static final Issue WEBP_ELIGIBLE = Issue.create(
+            "ConvertToWebp",
+            "Convert to WebP",
+
+            "The WebP format is typically more compact than PNG and JPEG. As of Android 4.2.1 " +
+            "it supports transparency and lossless conversion as well. Note that there is a " +
+            "quickfix in the IDE which lets you perform conversion.\n" +
+            "\n" +
+            "Launcher icons must be in the PNG format.",
+            Category.ICONS,
+            6,
+            Severity.WARNING,
+            IMPLEMENTATION_JAVA)
+            // Actual performance being benchmarked
+            .setEnabledByDefault(false);
+
+    /** Webp unsupported? */
+    public static final Issue WEBP_UNSUPPORTED = Issue.create(
+            "WebpUnsupported",
+            "WebP Unsupported",
+
+            "The WebP format requires Android 4.0 (API 15). Certain features, such as lossless " +
+            "encoding and transparency, requires Android 4.2.1 (API 18; API 17 is 4.2.0.)",
+            Category.ICONS,
+            6,
+            Severity.ERROR,
+            IMPLEMENTATION_JAVA);
 
     /** Constructs a new {@link IconDetector} check */
     public IconDetector() {
@@ -383,9 +433,10 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     @Override
     public void beforeCheckProject(@NonNull Context context) {
-        mLauncherIcons = null;
-        mActionBarIcons = null;
-        mNotificationIcons = null;
+        launcherIcons = null;
+        actionBarIcons = null;
+        notificationIcons = null;
+        roundIcons = null;
     }
 
     @Override
@@ -416,24 +467,26 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 boolean checkDipSizes = context.isEnabled(ICON_DIP_SIZE);
                 boolean checkDuplicates = context.isEnabled(DUPLICATES_NAMES)
                          || context.isEnabled(DUPLICATES_CONFIGURATIONS);
+                boolean checkWebp = context.isEnabled(WEBP_ELIGIBLE);
 
                 Map<File, Dimension> pixelSizes = null;
                 Map<File, Long> fileSizes = null;
-                if (checkDipSizes || checkDuplicates) {
-                    pixelSizes = new HashMap<File, Dimension>();
-                    fileSizes = new HashMap<File, Long>();
+                if (checkDipSizes || checkDuplicates || checkWebp) {
+                    pixelSizes = new HashMap<>();
+                    fileSizes = new HashMap<>();
                 }
-                Map<File, Set<String>> folderToNames = new HashMap<File, Set<String>>();
-                Map<File, Set<String>> nonDpiFolderNames = new HashMap<File, Set<String>>();
+                Map<File, Set<String>> folderToNames = new HashMap<>();
+                Map<File, Set<String>> nonDpiFolderNames = new HashMap<>();
                 for (File folder : folders) {
                     String folderName = folder.getName();
-                    if (folderName.startsWith(DRAWABLE_FOLDER)) {
+                    if (folderName.startsWith(DRAWABLE_FOLDER)
+                            || folderName.startsWith(MIPMAP_FOLDER)) {
                         File[] files = folder.listFiles();
                         if (files != null) {
                             checkDrawableDir(context, folder, files, pixelSizes, fileSizes);
 
                             if (checkFolders && DENSITY_PATTERN.matcher(folderName).matches()) {
-                                Set<String> names = new HashSet<String>(files.length);
+                                Set<String> names = new HashSet<>(files.length);
                                 for (File f : files) {
                                     String name = f.getName();
                                     if (isDrawableFile(name)) {
@@ -442,7 +495,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                                 }
                                 folderToNames.put(folder, names);
                             } else if (checkFolders) {
-                                Set<String> names = new HashSet<String>(files.length);
+                                Set<String> names = new HashSet<>(files.length);
                                 for (File f : files) {
                                     String name = f.getName();
                                     if (isDrawableFile(name)) {
@@ -466,6 +519,51 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 if (checkFolders && !folderToNames.isEmpty()) {
                     checkDensities(context, res, folderToNames, nonDpiFolderNames);
                 }
+
+                // Report webp-conversion-eligible images
+                // We only check for 18 here, which supports transparency and lossless
+                // encoding. We could also offer this for API 15, but in that case we'd need to
+                // (1) skip images with alpha, and (2) make it clear that only lossy conversion
+                // should be used.
+                // (It's Android 4.2.1 which starts supporting transparent WebP, whereas
+                // API level 17 corresponds to 4.2 and API level 18 corresponds to 4.3; we can't
+                // use API level 17 to determine whether WebP is safe since that also includes
+                // 4.2.0)
+
+                if (checkWebp && context.getMainProject().getMinSdkVersion().getApiLevel() >= 18) {
+                    // (1) See if we have any png or jpeg images
+                    // (2) Use the location of the largest such image
+                    File largest = null;
+                    long size = 0;
+                    for (Entry<File, Long> entry : fileSizes.entrySet()) {
+                        File f = entry.getKey();
+                        String name = f.getName();
+                        if (endsWithIgnoreCase(name, DOT_PNG)
+                                && !endsWithIgnoreCase(name, DOT_9PNG)
+                                ||endsWithIgnoreCase(name, DOT_JPG)
+                                || endsWithIgnoreCase(name, DOT_JPEG)) {
+                            // Launcher icons are not eligible for WEBP conversion
+                            String folderName = f.getParentFile().getName();
+                            if (isLauncherIcon(folderName, getBaseName(name))) {
+                                continue;
+                            }
+
+                            Long sizeLong = entry.getValue();
+                            if (sizeLong != null && sizeLong > size) {
+                                size = sizeLong;
+                                largest = f;
+                            }
+                        }
+                    }
+
+                    if (largest != null) {
+                        Location location = Location.create(largest);
+                        String message = "One or more images in this project can be converted to "
+                                + "the WebP format which typically results in smaller file sizes, "
+                                + "even for lossless conversion (but launcher icons should use PNG).";
+                        context.report(WEBP_ELIGIBLE, location, message);
+                    }
+                }
             }
         }
     }
@@ -483,15 +581,15 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     // needs to check actual file contents on a small subset of the available files.
     private static void checkDuplicates(Context context, Map<File, Dimension> pixelSizes,
             Map<File, Long> fileSizes) {
-        Map<Long, Set<File>> sameSizes = new HashMap<Long, Set<File>>();
-        Map<Long, File> seenSizes = new HashMap<Long, File>(fileSizes.size());
+        Map<Long, Set<File>> sameSizes = new HashMap<>();
+        Map<Long, File> seenSizes = new HashMap<>(fileSizes.size());
         for (Map.Entry<File, Long> entry : fileSizes.entrySet()) {
             File file = entry.getKey();
             Long size = entry.getValue();
             if (seenSizes.containsKey(size)) {
                 Set<File> set = sameSizes.get(size);
                 if (set == null) {
-                    set = new HashSet<File>();
+                    set = new HashSet<>();
                     set.add(seenSizes.get(size));
                     sameSizes.put(size, set);
                 }
@@ -511,15 +609,15 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         // we don't have file sizes for ninepatch files.
         Collection<Set<File>> candidateLists = sameSizes.values();
         for (Set<File> candidates : candidateLists) {
-            Map<Dimension, Set<File>> sameDimensions = new HashMap<Dimension, Set<File>>(
-                    candidates.size());
-            List<File> noSize = new ArrayList<File>();
+            Map<Dimension, Set<File>> sameDimensions = new HashMap<>(
+              candidates.size());
+            List<File> noSize = new ArrayList<>();
             for (File file : candidates) {
                 Dimension dimension = pixelSizes.get(file);
                 if (dimension != null) {
                     Set<File> set = sameDimensions.get(dimension);
                     if (set == null) {
-                        set = new HashSet<File>();
+                        set = new HashSet<>();
                         sameDimensions.put(dimension, set);
                     }
                     set.add(file);
@@ -538,15 +636,15 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                     }
                 } else {
                     // Must just test the noSize elements against themselves
-                    HashSet<File> noSizeSet = new HashSet<File>(noSize);
-                    sets = Collections.<Set<File>>singletonList(noSizeSet);
+                    HashSet<File> noSizeSet = new HashSet<>(noSize);
+                    sets = Collections.singletonList(noSizeSet);
                 }
             }
 
             // Map from file to actual byte contents of the file.
             // We store this in a map such that for repeated files, such as noSize files
             // which can appear in multiple buckets, we only need to read them once
-            Map<File, byte[]> fileContents = new HashMap<File, byte[]>();
+            Map<File, byte[]> fileContents = new HashMap<>();
 
             // Now we're ready for the final check where we actually check the
             // bits. We have to partition the files into buckets of files that
@@ -572,12 +670,12 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 // Map where the key file is known to be equal to the value file.
                 // After we check individual files for equality this will be used
                 // to look for transitive equality.
-                Map<File, File> equal = new HashMap<File, File>();
+                Map<File, File> equal = new HashMap<>();
 
                 // Now go and compare all the files. This isn't an efficient algorithm
                 // but the number of candidates should be very small
 
-                List<File> files = new ArrayList<File>(set);
+                List<File> files = new ArrayList<>(set);
                 Collections.sort(files);
                 for (int i = 0; i < files.size() - 1; i++) {
                     for (int j = i + 1; j < files.size(); j++) {
@@ -611,8 +709,8 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 }
 
                 if (!equal.isEmpty()) {
-                    Map<File, Set<File>> partitions = new HashMap<File, Set<File>>();
-                    List<Set<File>> sameSets = new ArrayList<Set<File>>();
+                    Map<File, Set<File>> partitions = new HashMap<>();
+                    List<Set<File>> sameSets = new ArrayList<>();
                     for (Map.Entry<File, File> entry : equal.entrySet()) {
                         File file1 = entry.getKey();
                         File file2 = entry.getValue();
@@ -623,7 +721,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                         } else if (set2 != null) {
                             set2.add(file1);
                         } else {
-                            set = new HashSet<File>();
+                            set = new HashSet<>();
                             sameSets.add(set);
                             set.add(file1);
                             set.add(file2);
@@ -634,20 +732,15 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
                     // We've computed the partitions of equal files. Now sort them
                     // for stable output.
-                    List<List<File>> lists = new ArrayList<List<File>>();
+                    List<List<File>> lists = new ArrayList<>();
                     for (Set<File> same : sameSets) {
                         assert !same.isEmpty();
-                        ArrayList<File> sorted = new ArrayList<File>(same);
+                        ArrayList<File> sorted = new ArrayList<>(same);
                         Collections.sort(sorted);
                         lists.add(sorted);
                     }
                     // Sort overall partitions by the first item in each list
-                    Collections.sort(lists, new Comparator<List<File>>() {
-                        @Override
-                        public int compare(List<File> list1, List<File> list2) {
-                            return list1.get(0).compareTo(list2.get(0));
-                        }
-                    });
+                    lists.sort((list1, list2) -> list1.get(0).compareTo(list2.get(0)));
 
                     // Allow one specific scenario of duplicated icon contents:
                     // Checking in different size icons (within a single density
@@ -692,7 +785,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                             StringBuilder sb = new StringBuilder(sameFiles.size() * 16);
                             for (File file : sameFiles) {
                                 if (sb.length() > 0) {
-                                    sb.append(", "); //$NON-NLS-1$
+                                    sb.append(", ");
                                 }
                                 sb.append(file.getParentFile().getName());
                             }
@@ -706,7 +799,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                             StringBuilder sb = new StringBuilder(sameFiles.size() * 16);
                             for (File file : sameFiles) {
                                 if (sb.length() > 0) {
-                                    sb.append(", "); //$NON-NLS-1$
+                                    sb.append(", ");
                                 }
                                 sb.append(file.getName());
                             }
@@ -730,18 +823,18 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         // creates a map from filename (such as foo.png) to a list of files
         // providing that icon in various folders: drawable-mdpi/foo.png, drawable-hdpi/foo.png
         // etc.
-        Map<String, List<File>> nameToFiles = new HashMap<String, List<File>>();
+        Map<String, List<File>> nameToFiles = new HashMap<>();
         for (File file : pixelSizes.keySet()) {
             String name = file.getName();
             List<File> list = nameToFiles.get(name);
             if (list == null) {
-                list = new ArrayList<File>();
+                list = new ArrayList<>();
                 nameToFiles.put(name, list);
             }
             list.add(file);
         }
 
-        ArrayList<String> names = new ArrayList<String>(nameToFiles.keySet());
+        ArrayList<String> names = new ArrayList<>(nameToFiles.keySet());
         Collections.sort(names);
 
         // We have to partition the files further because it's possible for the project
@@ -755,8 +848,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         // the drawable-{density} icons are consistent.
 
         // Map from name to list of map from parent folder to list of files
-        Map<String, Map<String, List<File>>> configMap =
-                new HashMap<String, Map<String,List<File>>>();
+        Map<String, Map<String, List<File>>> configMap = new HashMap<>();
         for (Map.Entry<String, List<File>> entry : nameToFiles.entrySet()) {
             String name = entry.getKey();
             List<File> files = entry.getValue();
@@ -781,13 +873,13 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
                 Map<String, List<File>> folderMap = configMap.get(name);
                 if (folderMap == null) {
-                    folderMap = new HashMap<String,List<File>>();
+                    folderMap = new HashMap<>();
                     configMap.put(name, folderMap);
                 }
                 // Map from name to a map from parent folder to files
                 List<File> list = folderMap.get(parentName);
                 if (list == null) {
-                    list = new ArrayList<File>();
+                    list = new ArrayList<>();
                     folderMap.put(parentName, list);
                 }
                 list.add(file);
@@ -807,7 +899,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 List<File> files = entry.getValue();
 
                 // Ensure that all the dip sizes are *roughly* the same
-                Map<File, Dimension> dipSizes = new HashMap<File, Dimension>();
+                Map<File, Dimension> dipSizes = new HashMap<>();
                 int dipWidthSum = 0; // Incremental computation of average
                 int dipHeightSum = 0; // Incremental computation of average
                 int count = 0;
@@ -874,24 +966,18 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                     StringBuilder sb = new StringBuilder(100);
 
                     // Sort entries by decreasing dip size
-                    List<Map.Entry<File, Dimension>> entries =
-                            new ArrayList<Map.Entry<File,Dimension>>();
+                    List<Map.Entry<File, Dimension>> entries = new ArrayList<>();
                     for (Map.Entry<File, Dimension> entry2 : dipSizes.entrySet()) {
                         entries.add(entry2);
                     }
-                    Collections.sort(entries,
-                            new Comparator<Map.Entry<File, Dimension>>() {
-                        @Override
-                        public int compare(Entry<File, Dimension> e1,
-                                Entry<File, Dimension> e2) {
-                            Dimension d1 = e1.getValue();
-                            Dimension d2 = e2.getValue();
-                            if (d1.width != d2.width) {
-                                return d2.width - d1.width;
-                            }
-
-                            return d2.height - d1.height;
+                    entries.sort((e1, e2) -> {
+                        Dimension d1 = e1.getValue();
+                        Dimension d2 = e2.getValue();
+                        if (d1.width != d2.width) {
+                            return d2.width - d1.width;
                         }
+
+                        return d2.height - d1.height;
                     });
                     for (Map.Entry<File, Dimension> entry2 : entries) {
                         if (sb.length() > 0) {
@@ -933,7 +1019,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         // TODO: Use the matrix to check out if we can eliminate densities based
         // on the target screens?
 
-        Set<String> definedDensities = new HashSet<String>();
+        Set<String> definedDensities = new HashSet<>();
         for (File f : folderToNames.keySet()) {
             definedDensities.add(f.getName());
         }
@@ -941,13 +1027,22 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         // Look for missing folders -- if you define say drawable-mdpi then you
         // should also define -hdpi and -xhdpi.
         if (context.isEnabled(ICON_MISSING_FOLDER)) {
-            List<String> missing = new ArrayList<String>();
-            for (String density : getRequiredDensityFolders(context)) {
+            List<String> missing = new ArrayList<>();
+            List<String> requiredDensityFolders = getRequiredDensityFolders(context);
+
+            boolean foundSome = false;
+            for (String density : requiredDensityFolders) {
                 if (!definedDensities.contains(density)) {
                     missing.add(density);
+                } else {
+                    // Make sure the we have at least one of the folders required
+                    // (e.g. we might only have mipmap folders as well as drawable/ or
+                    // drawable-nodpi)
+                    foundSome = true;
                 }
             }
-            if (!missing.isEmpty()) {
+
+            if (!missing.isEmpty() && foundSome) {
                 context.report(
                     ICON_MISSING_FOLDER,
                     Location.create(res),
@@ -958,7 +1053,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
 
         if (context.isEnabled(ICON_NODPI)) {
-            Set<String> noDpiNames = new HashSet<String>();
+            Set<String> noDpiNames = new HashSet<>();
             for (Map.Entry<File, Set<String>> entry : folderToNames.entrySet()) {
                 if (isNoDpiFolder(entry.getKey())) {
                     noDpiNames.addAll(entry.getValue());
@@ -966,8 +1061,8 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
             if (!noDpiNames.isEmpty()) {
                 // Make sure that none of the nodpi names appear in a non-nodpi folder
-                Set<String> inBoth = new HashSet<String>();
-                List<File> files = new ArrayList<File>();
+                Set<String> inBoth = new HashSet<>();
+                List<File> files = new ArrayList<>();
                 for (Map.Entry<File, Set<String>> entry : folderToNames.entrySet()) {
                     File folder = entry.getKey();
                     String folderName = folder.getName();
@@ -982,7 +1077,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 }
 
                 if (!inBoth.isEmpty()) {
-                    List<String> list = new ArrayList<String>(inBoth);
+                    List<String> list = new ArrayList<>(inBoth);
                     Collections.sort(list);
 
                     // Chain locations together
@@ -1009,16 +1104,20 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
             for (Map.Entry<File, Set<String>> entry : folderMap.entrySet()) {
                 Set<String> names = entry.getValue();
+                String folderName = entry.getKey().getName();
                 for (String name : names) {
                     if (endsWith(name, DOT_XML)) {
-                        xmlNames.add(name);
+                        // Ignore .xml files in version qualifier folders
+                        if (!folderName.contains("-v")) {
+                            xmlNames.add(name);
+                        }
                     } else if (isDrawableFile(name)) {
                         bitmapNames.add(name);
                     }
                 }
             }
             if (!xmlNames.isEmpty() && !bitmapNames.isEmpty()) {
-                // Make sure that none of the nodpi names appear in a non-nodpi folder
+                // Make sure that none of the density-independent names appear in a density folder
                 Set<String> overlap = nameIntersection(xmlNames, bitmapNames);
                 if (!overlap.isEmpty()) {
                     Multimap<String, File> map = ArrayListMultimap.create();
@@ -1037,7 +1136,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                             }
                         }
                     }
-                    List<String> sorted = new ArrayList<String>(map.keySet());
+                    List<String> sorted = new ArrayList<>(map.keySet());
                     Collections.sort(sorted);
                     for (String name : sorted) {
                         List<File> lists = Lists.newArrayList(map.get(name));
@@ -1069,7 +1168,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
         if (context.isEnabled(ICON_DENSITIES)) {
             // Look for folders missing some of the specific assets
-            Set<String> allNames = new HashSet<String>();
+            Set<String> allNames = new HashSet<>();
             for (Entry<File,Set<String>> entry : folderToNames.entrySet()) {
                 if (!isNoDpiFolder(entry.getKey())) {
                     Set<String> names = entry.getValue();
@@ -1084,7 +1183,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 }
                 Set<String> names = entry.getValue();
                 if (names.size() != allNames.size()) {
-                    List<String> delta = new ArrayList<String>(nameDifferences(allNames,  names));
+                    List<String> delta = new ArrayList<>(nameDifferences(allNames, names));
                     if (delta.isEmpty()) {
                         continue;
                     }
@@ -1092,7 +1191,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                     String foundIn = "";
                     if (delta.size() == 1) {
                         // Produce list of where the icon is actually defined
-                        List<String> defined = new ArrayList<String>();
+                        List<String> defined = new ArrayList<>();
                         String name = delta.get(0);
                         for (Map.Entry<File, Set<String>> e : folderToNames.entrySet()) {
                             if (e.getValue().contains(name)) {
@@ -1125,27 +1224,31 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     }
 
     private List<String> getRequiredDensityFolders(@NonNull Context context) {
-        if (mCachedRequiredDensities == null
-                || context.getProject() != mCachedDensitiesForProject) {
-            mCachedDensitiesForProject = context.getProject();
-            mCachedRequiredDensities = Lists.newArrayListWithExpectedSize(10);
+        if (cachedRequiredDensities == null
+                || context.getProject() != cachedDensitiesForProject) {
+            cachedDensitiesForProject = context.getProject();
+            cachedRequiredDensities = Lists.newArrayListWithExpectedSize(10);
 
             List<String> applicableDensities = context.getProject().getApplicableDensities();
             if (applicableDensities != null) {
-                mCachedRequiredDensities.addAll(applicableDensities);
+                cachedRequiredDensities.addAll(applicableDensities);
             } else {
                 if (INCLUDE_LDPI) {
-                    mCachedRequiredDensities.add(DRAWABLE_LDPI);
+                    cachedRequiredDensities.add(DRAWABLE_LDPI);
                 }
-                mCachedRequiredDensities.add(DRAWABLE_MDPI);
-                mCachedRequiredDensities.add(DRAWABLE_HDPI);
-                mCachedRequiredDensities.add(DRAWABLE_XHDPI);
-                mCachedRequiredDensities.add(DRAWABLE_XXHDPI);
-                mCachedRequiredDensities.add(DRAWABLE_XXXHDPI);
+                cachedRequiredDensities.add(DRAWABLE_MDPI);
+                cachedRequiredDensities.add(DRAWABLE_HDPI);
+                cachedRequiredDensities.add(DRAWABLE_XHDPI);
+                cachedRequiredDensities.add(DRAWABLE_XXHDPI);
+                // xxxhdpi is not required - only required for launchers
+                // From http://developer.android.com/guide/practices/screens_support.html:
+                // "Note: the drawable-xxxhdpi qualifier is necessary only to provide a launcher
+                //  icon that can appear larger than usual on an xxhdpi device. You do not need
+                // to provide xxxhdpi assets for all your app's images."
             }
         }
 
-        return mCachedRequiredDensities;
+        return cachedRequiredDensities;
     }
 
     /**
@@ -1175,11 +1278,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
      * file extensions</b> and return the result <b>with</b>..
      */
     private static Set<String> nameDifferences(Set<String> a, Set<String> b) {
-        Set<String> names1 = new HashSet<String>(a.size());
+        Set<String> names1 = new HashSet<>(a.size());
         for (String s : a) {
             names1.add(LintUtils.getBaseName(s));
         }
-        Set<String> names2 = new HashSet<String>(b.size());
+        Set<String> names2 = new HashSet<>(b.size());
         for (String s : b) {
             names2.add(LintUtils.getBaseName(s));
         }
@@ -1188,7 +1291,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
         if (!names1.isEmpty()) {
             // Map filenames back to original filenames with extensions
-            Set<String> result = new HashSet<String>(names1.size());
+            Set<String> result = new HashSet<>(names1.size());
             for (String s : a) {
                 if (names1.contains(LintUtils.getBaseName(s))) {
                     result.add(s);
@@ -1212,11 +1315,11 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
      * file extensions</b> and return the result <b>with</b>.
      */
     private static Set<String> nameIntersection(Set<String> a, Set<String> b) {
-        Set<String> names1 = new HashSet<String>(a.size());
+        Set<String> names1 = new HashSet<>(a.size());
         for (String s : a) {
             names1.add(LintUtils.getBaseName(s));
         }
-        Set<String> names2 = new HashSet<String>(b.size());
+        Set<String> names2 = new HashSet<>(b.size());
         for (String s : b) {
             names2.add(LintUtils.getBaseName(s));
         }
@@ -1225,7 +1328,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
         if (!names1.isEmpty()) {
             // Map filenames back to original filenames with extensions
-            Set<String> result = new HashSet<String>(names1.size());
+            Set<String> result = new HashSet<>(names1.size());
             for (String s : a) {
                 if (names1.contains(LintUtils.getBaseName(s))) {
                     result.add(s);
@@ -1247,31 +1350,32 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         return file.getName().contains("-nodpi");
     }
 
-    private Map<File, BufferedImage> mImageCache;
+    private Map<File, BufferedImage> imageCache;
 
     @Nullable
     private BufferedImage getImage(@Nullable File file) throws IOException {
         if (file == null) {
             return null;
         }
-        if (mImageCache == null) {
-            mImageCache = Maps.newHashMap();
+        if (imageCache == null) {
+            imageCache = Maps.newHashMap();
         } else {
-            BufferedImage image = mImageCache.get(file);
+            BufferedImage image = imageCache.get(file);
             if (image != null) {
                 return image;
             }
         }
 
         BufferedImage image = ImageIO.read(file);
-        mImageCache.put(file, image);
+        imageCache.put(file, image);
 
         return image;
     }
 
     private void checkDrawableDir(Context context, File folder, File[] files,
             Map<File, Dimension> pixelSizes, Map<File, Long> fileSizes) {
-        if (folder.getName().equals(DRAWABLE_FOLDER)
+        String folderName = folder.getName();
+        if (folderName.equals(DRAWABLE_FOLDER)
                 && context.isEnabled(ICON_LOCATION) &&
                 // If supporting older versions than Android 1.6, it's not an error
                 // to include bitmaps in drawable/
@@ -1284,6 +1388,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 } else if (endsWith(name, DOT_PNG)
                         || endsWith(name, DOT_JPG)
                         || endsWith(name, DOT_JPEG)
+                        || endsWith(name, DOT_WEBP)
                         || endsWith(name, DOT_GIF)) {
                     context.report(ICON_LOCATION,
                         Location.create(file),
@@ -1321,7 +1426,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                         && !endsWith(name, DOT_XML)
                         && !endsWith(name, DOT_9PNG)) {
                     String baseName = getBaseName(name);
-                    boolean isActionBarIcon = isActionBarIcon(context, baseName, file);
+                    boolean isActionBarIcon = isActionBarIcon(context, folderName, baseName, file);
                     if (isActionBarIcon || isNotificationIcon(baseName)) {
                         Dimension size = checkColor(context, file, isActionBarIcon);
 
@@ -1334,14 +1439,20 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
         }
 
-        if (context.isEnabled(ICON_LAUNCHER_SHAPE)) {
-            // Look up launcher icon name
+        boolean checkLauncherShape = context.isEnabled(ICON_LAUNCHER_SHAPE);
+        boolean checkLauncherFormat = context.isEnabled(ICON_LAUNCHER_FORMAT);
+        if (checkLauncherShape || checkLauncherFormat) {
             for (File file : files) {
                 String name = file.getName();
-                if (isLauncherIcon(getBaseName(name))
-                        && !endsWith(name, DOT_XML)
-                        && !endsWith(name, DOT_9PNG)) {
-                    checkLauncherShape(context, file);
+                if (isLauncherIcon(folderName, getBaseName(name))) {
+                    if (checkLauncherShape
+                            && !endsWith(name, DOT_XML)
+                            && !endsWith(name, DOT_9PNG)) {
+                        checkLauncherShape(context, folderName, file);
+                    }
+                    if (checkLauncherFormat) {
+                        checkLauncherIconFormat(context, file);
+                    }
                 }
             }
         }
@@ -1358,7 +1469,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 String fileName = file.getName();
 
                 if (endsWith(fileName, DOT_PNG) || endsWith(fileName, DOT_JPG)
-                        || endsWith(fileName, DOT_JPEG)) {
+                        || endsWith(fileName, DOT_JPEG) || endsWith(fileName, DOT_WEBP)) {
                     // Only scan .png files (except 9-patch png's) and jpg files for
                     // dip sizes. Duplicate checks can also be performed on ninepatch files.
                     if (pixelSizes != null && !endsWith(fileName, DOT_9PNG)
@@ -1373,16 +1484,80 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
         }
 
-        mImageCache = null;
+        if (context.isEnabled(WEBP_UNSUPPORTED) && files.length > 0) {
+            checkWebpSupported(context, files);
+        }
+
+        imageCache = null;
+    }
+
+    private void checkWebpSupported(@NonNull Context context, @NonNull File[] files) {
+        // all files in this folder have the same folder minSdkVersion
+        int minSdk = Math.max(context.getMainProject().getMinSdk(),
+                context.getDriver().getResourceFolderVersion(files[0]));
+        if (minSdk >= 18) {
+            return;
+        }
+
+        for (File file : files) {
+            String path = file.getPath();
+            if (!endsWithIgnoreCase(path, DOT_WEBP)) {
+                continue;
+            }
+            String name = file.getName();
+            if (isLauncherIcon(file.getParentFile().getName(), getBaseName(name))) {
+                Location location = Location.create(file);
+                String message = "Launcher icons must be in PNG format";
+                context.report(WEBP_UNSUPPORTED, location, message);
+                continue;
+            }
+
+            WebpHeader header = WebpHeader.getWebpHeader(file);
+            if (header != null && header.format != null) {
+                boolean simpleFormat = "VP8".equals(header.format);
+                int required = simpleFormat ? 15 : 18;
+                if (required > minSdk) {
+                    Location location = Location.create(file);
+                    String message = simpleFormat ?
+                        "WebP requires Android 4.0 (API 15)" :
+                        "WebP extended or lossless format requires Android 4.2.1 (API 18)";
+                    message += "; " + "current minSdkVersion is " + minSdk;
+                    context.report(WEBP_UNSUPPORTED, location, message);
+                }
+            }
+        }
+    }
+
+    /**
+     * Check that launcher icons are PNG or JPEG
+     */
+    private static void checkLauncherIconFormat(Context context, File file) {
+        String path = file.getPath();
+        if (endsWithIgnoreCase(path, DOT_PNG) || endsWithIgnoreCase(path, DOT_JPEG)) {
+            return;
+        }
+        Location location = Location.create(file);
+        String message = "Launcher icons must be in PNG format";
+        context.report(ICON_LAUNCHER_FORMAT, location, message);
     }
 
     /**
      * Check that launcher icons do not fill every pixel in the image
      */
-    private void checkLauncherShape(Context context, File file) {
+    private void checkLauncherShape(Context context, String folderName, File file) {
         try {
             BufferedImage image = getImage(file);
             if (image != null) {
+                if (isRoundIcon(folderName, getBaseName(file.getName()))) {
+                    if (!isRound(image)) {
+                        String message = "Launcher icon used as round icon did not have a "
+                                + "circular shape";
+                        context.report(ICON_LAUNCHER_SHAPE, Location.create(file),
+                                message);
+                        return;
+                    }
+                }
+
                 // TODO: see if the shape is rectangular but inset from outer rectangle; if so
                 // that's probably not right either!
                 for (int y = 0, height = image.getHeight(); y < height; y++) {
@@ -1402,6 +1577,77 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         } catch (IOException e) {
             // Pass: ignore files we can't read
         }
+    }
+
+    private static boolean isRound(@NonNull BufferedImage image) {
+        // Simple algorithm: compute radius and center of the launcher icon;
+        // then compute a mask for it and then diff it with a drawing of a circle
+
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int maxX = 0;
+        int maxY = 0;
+
+        int imageHeight = image.getHeight();
+        int imageWidth = image.getWidth();
+        for (int y = 0; y < imageHeight; y++) {
+            for (int x = 0; x < imageWidth; x++) {
+                int rgb = image.getRGB(x, y);
+                if ((rgb & 0xFF000000) != 0) {
+                    if (x > maxX) {
+                        maxX = x;
+                    }
+                    if (y > maxY) {
+                        maxY = y;
+                    }
+                    if (x < minX) {
+                        minX = x;
+                    }
+                    if (y < minY) {
+                        minY = y;
+                    }
+                }
+            }
+        }
+
+        int shapeWidth = maxX - minX + 1;
+        int shapeHeight = maxY - minY + 1;
+
+        // The shape width and height should be roughly equal; it's supposed to be
+        // a circle, not an oval
+        if (Math.abs(shapeWidth - shapeHeight) > imageWidth / 10) {
+            return false;
+        }
+
+        BufferedImage circle = new BufferedImage(imageWidth, imageHeight, TYPE_INT_ARGB);
+        Graphics graphics = circle.getGraphics();
+        graphics.fillOval(minX, minY, shapeWidth, shapeHeight);
+        graphics.dispose();
+
+        final int threshold = 64;
+
+        int different = 0;
+        for (int y = 0; y < imageHeight; y++) {
+            for (int x = 0; x < imageWidth; x++) {
+                int sourceAlpha = (image.getRGB(x, y) & 0xFF000000) >>> 24;
+                int circleAlpha = (circle.getRGB(x, y) & 0xFF000000) >>> 24;
+                if (sourceAlpha > 0 && sourceAlpha < threshold) {
+                    // Don't compare pixels in the alpha area
+                    continue;
+                }
+                boolean original = sourceAlpha < threshold;
+                boolean cir = circleAlpha < threshold;
+                if (original != cir) {
+                    different++;
+                }
+            }
+        }
+
+        long total = imageHeight * imageWidth;
+        double percentDifferent = 100 * different / (double) total;
+
+        // Allow 4% difference or less -- mainly to account for anti-aliasing edge differences
+        return percentDifferent < 4;
     }
 
     /**
@@ -1482,9 +1728,25 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                                         }
                                     }
 
+
                                     String message = "Notification icons must be entirely white";
-                                    context.report(ICON_COLORS, Location.create(file),
-                                            message);
+                                    Location location = Location.create(file);
+
+                                    String name = getBaseName(file.getName());
+                                    PsiElement usage = notificationIcons != null ?
+                                            notificationIcons.get(name) : null;
+                                    if (usage != null) {
+                                        LintClient client = context.getClient();
+                                        Project project = context.getProject();
+                                        JavaParser parser = client.getJavaParser(project);
+                                        if (parser != null) {
+                                            Location secondary = parser.createLocation(usage);
+                                            secondary.setMessage("Icon used in notification here");
+                                            location.setSecondary(secondary);
+                                        }
+                                    }
+
+                                    context.report(ICON_COLORS, location, message);
                                     break checkPixels;
                                 }
                             }
@@ -1527,6 +1789,21 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             if (input != null) {
                 try {
                     Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+                    if (!readers.hasNext() && !endsWithIgnoreCase(file.getPath(), DOT_WEBP)) {
+                        // Check WEBP: No decoder available outside of Android Studio
+                        // See if it's a WEBP file without a webp extension
+                        //noinspection VariableNotUsedInsideIf
+                        if (WebpHeader.getWebpHeader(file) != null) {
+                            String extension = file.getName();
+                            extension = extension.substring(extension.lastIndexOf('.') + 1);
+                            String message = String.format(
+                                    "Misleading file extension; named `.%1$s` but the " +
+                                            "file format is `%2$s`", extension, "webp");
+                            Location location = Location.create(file);
+                            context.report(ICON_EXTENSION, location, message);
+                        }
+                    }
+
                     while (readers.hasNext()) {
                         ImageReader reader = readers.next();
                         try {
@@ -1541,7 +1818,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
                                 if (!formatName.equalsIgnoreCase(extension)) {
                                     if (endsWith(path, DOT_JPG)
-                                            && formatName.equals("JPEG")) { //$NON-NLS-1$
+                                            && formatName.equals("JPEG")) {
                                         return;
                                     }
                                     String message = String.format(
@@ -1562,6 +1839,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
         } catch (IOException e) {
             // Pass -- we can't handle all image types, warn about those we can
+            System.out.println("foo");
         }
     }
 
@@ -1581,7 +1859,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         Set<String> conflictSet = null;
 
         for (Entry<File, Set<String>> entry : folderToNames.entrySet()) {
-            Set<String> baseNames = new HashSet<String>();
+            Set<String> baseNames = new HashSet<>();
             Set<String> names = entry.getValue();
             for (String name : names) {
                 assert isDrawableFile(name) : name;
@@ -1627,7 +1905,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
 
         assert conflicts != null && !conflicts.isEmpty() : conflictSet;
-        List<String> names = new ArrayList<String>(conflicts.keySet());
+        List<String> names = new ArrayList<>(conflicts.keySet());
         Collections.sort(names);
         for (String name : names) {
             List<File> files = conflicts.get(name);
@@ -1660,6 +1938,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
         String folderName = folder.getName();
         int folderVersion = context.getDriver().getResourceFolderVersion(files[0]);
+        FolderConfiguration folderConfig = FolderConfiguration.getConfigForFolder(folderName);
 
         for (File file : files) {
             String name = file.getName();
@@ -1671,44 +1950,44 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
             String baseName = getBaseName(name);
 
-            if (isLauncherIcon(baseName)) {
+            if (isLauncherIcon(folderName, baseName)) {
                 // Launcher icons
-                checkSize(context, folderName, file, 48, 48, true /*exact*/);
-            } else if (isActionBarIcon(baseName)) {
-                checkSize(context, folderName, file, 32, 32, true /*exact*/);
-            } else if (name.startsWith("ic_dialog_")) { //$NON-NLS-1$
+                checkSize(context, folderName, file, 48, 48, true, /*exact*/folderConfig);
+            } else if (isActionBarIcon(folderName, baseName)) {
+                checkSize(context, folderName, file, 32, 32, true, /*exact*/folderConfig);
+            } else if (name.startsWith("ic_dialog_")) {
                 // Dialog
-                checkSize(context, folderName, file, 32, 32, true /*exact*/);
-            } else if (name.startsWith("ic_tab_")) { //$NON-NLS-1$
+                checkSize(context, folderName, file, 32, 32, true, /*exact*/folderConfig);
+            } else if (name.startsWith("ic_tab_")) {
                 // Tab icons
-                checkSize(context, folderName, file, 32, 32, true /*exact*/);
+                checkSize(context, folderName, file, 32, 32, true, /*exact*/folderConfig);
             } else if (isNotificationIcon(baseName)) {
                 // Notification icons
                 if (isAndroid30(context, folderVersion)) {
-                    checkSize(context, folderName, file, 24, 24, true /*exact*/);
+                    checkSize(context, folderName, file, 24, 24, true, /*exact*/folderConfig);
                 } else if (isAndroid23(context, folderVersion)) {
-                    checkSize(context, folderName, file, 16, 25, false /*exact*/);
+                    checkSize(context, folderName, file, 16, 25, false, /*exact*/folderConfig);
                 } else {
                     // Android 2.2 or earlier
                     // TODO: Should this be done for each folder size?
-                    checkSize(context, folderName, file, 25, 25, true /*exact*/);
+                    checkSize(context, folderName, file, 25, 25, true, /*exact*/folderConfig);
                 }
-            } else if (name.startsWith("ic_menu_")) { //$NON-NLS-1$
+            } else if (name.startsWith("ic_menu_")) {
                 if (isAndroid30(context, folderVersion)) {
                  // Menu icons (<=2.3 only: Replaced by action bar icons (ic_action_ in 3.0).
                  // However the table halfway down the page on
                  // http://developer.android.com/guide/practices/ui_guidelines/icon_design.html
                  // and the README in the icon template download says that convention is ic_menu
-                    checkSize(context, folderName, file, 32, 32, true);
+                    checkSize(context, folderName, file, 32, 32, true, folderConfig);
                 } else if (isAndroid23(context, folderVersion)) {
                     // The icon should be 32x32 inside the transparent image; should
                     // we check that this is mostly the case (a few pixels are allowed to
                     // overlap for anti-aliasing etc)
-                    checkSize(context, folderName, file, 48, 48, true /*exact*/);
+                    checkSize(context, folderName, file, 48, 48, true, /*exact*/folderConfig);
                 } else {
                     // Android 2.2 or earlier
                     // TODO: Should this be done for each folder size?
-                    checkSize(context, folderName, file, 48, 48, true /*exact*/);
+                    checkSize(context, folderName, file, 48, 48, true, /*exact*/folderConfig);
                 }
             }
             // TODO: ListView icons?
@@ -1746,17 +2025,17 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     private static float getMdpiScalingFactor(String folderName) {
         // Can't do startsWith(DRAWABLE_MDPI) because the folder could
         // be something like "drawable-sw600dp-mdpi".
-        if (folderName.contains("-mdpi")) {            //$NON-NLS-1$
+        if (folderName.contains("-mdpi")) {
             return 1.0f;
-        } else if (folderName.contains("-hdpi")) {     //$NON-NLS-1$
+        } else if (folderName.contains("-hdpi")) {
             return 1.5f;
-        } else if (folderName.contains("-xhdpi")) {    //$NON-NLS-1$
+        } else if (folderName.contains("-xhdpi")) {
             return 2.0f;
-        } else if (folderName.contains("-xxhdpi")) {   //$NON-NLS-1$
+        } else if (folderName.contains("-xxhdpi")) {
             return 3.0f;
-        } else if (folderName.contains("-xxxhdpi")) {   //$NON-NLS-1$
+        } else if (folderName.contains("-xxxhdpi")) {
             return 4.0f;
-        } else if (folderName.contains("-ldpi")) {     //$NON-NLS-1$
+        } else if (folderName.contains("-ldpi")) {
             return 0.75f;
         } else {
             return 0f;
@@ -1764,10 +2043,12 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     }
 
     private static void checkSize(Context context, String folderName, File file,
-            int mdpiWidth, int mdpiHeight, boolean exactMatch) {
+              int mdpiWidth, int mdpiHeight, boolean exactMatch,
+              @Nullable FolderConfiguration folderConfig) {
         String fileName = file.getName();
         // Only scan .png files (except 9-patch png's) and jpg files
         if (!((endsWith(fileName, DOT_PNG) && !endsWith(fileName, DOT_9PNG)) ||
+                endsWith(fileName, DOT_WEBP) ||
                 endsWith(fileName, DOT_JPG) || endsWith(fileName, DOT_JPEG))) {
             return;
         }
@@ -1794,6 +2075,14 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         } else if (folderName.startsWith(DRAWABLE_LDPI)) {
             width = Math.round(mdpiWidth * 3f / 4);
             height = Math.round(mdpiHeight * 3f / 4);
+        } else if (folderConfig != null && folderConfig.getDensityQualifier() != null
+                && !folderConfig.getDensityQualifier().hasFakeValue()) {
+            Density density = folderConfig.getDensityQualifier().getValue();
+            if (density == null) {
+                return;
+            }
+            width = mdpiWidth * density.getDpiValue() / Density.DEFAULT_DENSITY;
+            height = mdpiHeight * density.getDpiValue() / Density.DEFAULT_DENSITY;
         } else {
             return;
         }
@@ -1820,7 +2109,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
     }
 
-    public static Dimension getSize(File file) {
+    public static Dimension getSize(@NonNull File file) {
         try {
             ImageInputStream input = ImageIO.createImageInputStream(file);
             if (input != null) {
@@ -1840,6 +2129,15 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 }
             }
 
+            // WEBP custom file header decoding, not available via ImageReaders outside
+            // of Android Studio since that requires native code around libwebp
+            if (endsWithIgnoreCase(file.getPath(), DOT_WEBP)) {
+                WebpHeader header = WebpHeader.getWebpHeader(file);
+                if (header != null && header.width > 0) {
+                    return new Dimension(header.width, header.height);
+                }
+            }
+
             // Fallback: read the image using the normal means
             BufferedImage image = ImageIO.read(file);
             if (image != null) {
@@ -1853,21 +2151,207 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
     }
 
+    private static class WebpHeader {
+        public String format;
+        int width;
+        int height;
 
-    private Set<String> mActionBarIcons;
-    private Set<String> mNotificationIcons;
-    private Set<String> mLauncherIcons;
-    private Multimap<String, String> mMenuToIcons;
+        @Nullable
+        private static WebpHeader getWebpHeader(@NonNull File file) {
+            try (InputStream is = new BufferedInputStream(new FileInputStream(file))) {
+                // WEBP header:
+                //
+                //   0                   1                   2                   3
+                //   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+                //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //  |      'R'      |      'I'      |      'F'      |      'F'      |
+                //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //  |                           File Size                           |
+                //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                //  |      'W'      |      'E'      |      'B'      |      'P'      |
+                //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
-    private boolean isLauncherIcon(String name) {
+                //noinspection DuplicateCondition
+                if (is.read() != 'R' || is.read() != 'I' || is.read() != 'F' || is.read() != 'F' ||
+                        is.read() == -1 || is.read() == -1 || is.read() == -1 || is.read() == -1 ||
+                        is.read() != 'W' || is.read() != 'E' || is.read() != 'B'
+                        || is.read() != 'P') {
+                    return null;
+                }
+
+                // See https://developers.google.com/speed/webp/docs/riff_container
+
+                if (is.read() != 'V' || is.read() != 'P' || is.read() != '8') {
+                    return null;
+                }
+
+                // Found WEBP header. API level 15 is required for the simple format; extended
+                // or lossless formats require API 18.
+                int format = is.read();
+                WebpHeader data = new WebpHeader();
+
+                if (format == 'L') {
+                    data.format = "VP8L";
+
+                    // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#2_riff_header
+                    // So far we've read up to number 5.
+                    // "5. A little-endian 32-bit value of the number of bytes in the lossless
+                    //     stream."
+                    for (int i = 0; i < 4; i++) {
+                        //noinspection ResultOfMethodCallIgnored
+                        is.read();
+                    }
+
+                    // "6. One byte signature 0x2f."
+                    if (is.read() == 0x2f) { // signature
+                        // "The first 28 bits of the bitstream specify the width and height of the
+                        //  image. Width and height are decoded as 14-bit integers as follows:
+                        //  int image_width = ReadBits(14) + 1;
+                        //  int image_height = ReadBits(14) + 1;"
+                        int byte1 = is.read();
+                        int byte2 = is.read();
+                        int byte3 = is.read();
+                        int byte4 = is.read();
+                        if (is.read() != -1) {
+                            data.width = ((byte2 & 0b111111) << 8 | byte1) + 1;
+                            data.height = ((byte4 & 0b1111) << 10 | byte3 << 2 |
+                                    (byte2 & 0b11000000) >> 6) + 1;
+                        } // else already reached end somehow: invalid file
+                    }
+                    return data;
+                } else if (format == 'X') {
+                    // VP8X - extended file format
+                    data.format =  "VP8X";
+
+                    //     0                   1                   2                   3
+                    //     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+                    //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                    //    |                   WebP file header (12 bytes)                 |
+                    //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                    //    |                      ChunkHeader('VP8X')                      |
+                    //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                    //    |Rsv|I|L|E|X|A|R|                   Reserved                    |
+                    //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                    //    |          Canvas Width Minus One               |             ...
+                    //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+                    //    ...  Canvas Height Minus One    |
+                    //    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+                    // Skip flags
+                    for (int i = 0; i < 8; i++) {
+                        //noinspection ResultOfMethodCallIgnored
+                        is.read();
+                    }
+
+                    int byte1 = is.read();
+                    int byte2 = is.read();
+                    int byte3 = is.read();
+                    int byte4 = is.read();
+                    int byte5 = is.read();
+                    int byte6 = is.read();
+
+                    if (is.read() != -1) {
+                        data.width = (byte1 | byte2 << 8 | byte3 << 16) + 1;
+                        data.height = (byte4 | byte5 << 8 | byte6 << 16) + 1;
+                    } // else already reached end somehow: invalid file
+
+                    return data;
+                } else if (format == ' ') {
+                    data.format =  "VP8";
+
+                    // https://tools.ietf.org/html/rfc6386#section-9
+
+                    for (int i = 0; i < 7; i++) {
+                        //noinspection ResultOfMethodCallIgnored
+                        is.read();
+                    }
+
+                    //     ---- Begin code block --------------------------------------
+                    //
+                    //       Start code byte 0     0x9d
+                    //       Start code byte 1     0x01
+                    //       Start code byte 2     0x2a
+                    //
+                    //       16 bits      :     (2 bits Horizontal Scale << 14) | Width (14 bits)
+                    //       16 bits      :     (2 bits Vertical Scale << 14) | Height (14 bits)
+                    //
+                    //       ---- End code block ----------------------------------------
+
+                    if (is.read() == 0x9d && is.read() == 0x01 && is.read() == 0x2a) {
+                        int byte1 = is.read();
+                        int byte2 = is.read();
+                        int byte3 = is.read();
+                        int byte4 = is.read();
+                        if (is.read() != -1) {
+                            data.width = byte1 | ((byte2 & 0b111111) << 8);
+                            data.height = byte3 | ((byte4 & 0b111111) << 8);
+                        } // else already reached end somehow: invalid file
+                    }
+
+                    return data;
+                } else {
+                    return null;
+                }
+            } catch (IOException ignore) {
+            }
+            return null;
+        }
+    }
+
+    private Map<String,PsiElement> notificationIcons;
+    /**
+     * Set of names of @drawable resources that represent action bar icons, <b>or</b>,
+     * if the icons is a @mipmap icon, the resource url (@mipmap/name).
+     */
+    private Set<String> actionBarIcons;
+    /**
+     * Set of names of @drawable resources that represent launcher icons, <b>or</b>,
+     * if the icons is a @mipmap icon, the resource url (@mipmap/name).
+     */
+    private Set<String> launcherIcons;
+    private Multimap<String, String> menuToIcons;
+    /**
+     * Set of names of @drawable resources that represent round icons, <b>or</b>,
+     * if the icons is a @mipmap icon, the resource url (@mipmap/name).
+     */
+    private Set<Object> roundIcons;
+
+    private boolean isLauncherIcon(@NonNull String folderName, @NonNull String name) {
         assert name.indexOf('.') == -1 : name; // Should supply base name
 
         // Naming convention
         //noinspection SimplifiableIfStatement
-        if (name.startsWith("ic_launcher")) { //$NON-NLS-1$
+        if (name.startsWith("ic_launcher")) {
             return true;
         }
-        return mLauncherIcons != null && mLauncherIcons.contains(name);
+
+        if (launcherIcons != null) {
+            if (folderName.startsWith(MIPMAP_FOLDER)) {
+                name = MIPMAP_PREFIX + name;
+            }
+            return launcherIcons.contains(name);
+        }
+
+        return false;
+    }
+
+    private boolean isRoundIcon(@NonNull String folderName, @NonNull String name) {
+        assert name.indexOf('.') == -1 : name; // Should supply base name
+
+        // Naming convention
+        //noinspection SimplifiableIfStatement
+        if (name.endsWith("_round")) {
+            return true;
+        }
+
+        if (roundIcons != null) {
+            if (folderName.startsWith(MIPMAP_FOLDER)) {
+                name = MIPMAP_PREFIX + name;
+            }
+            return roundIcons.contains(name);
+        }
+
+        return false;
     }
 
     private boolean isNotificationIcon(String name) {
@@ -1875,35 +2359,40 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
         // Naming convention
         //noinspection SimplifiableIfStatement
-        if (name.startsWith("ic_stat_")) { //$NON-NLS-1$
+        if (name.startsWith("ic_stat_")) {
             return true;
         }
 
-        return mNotificationIcons != null && mNotificationIcons.contains(name);
+        return notificationIcons != null && notificationIcons.containsKey(name);
     }
 
-    private boolean isActionBarIcon(String name) {
+    private boolean isActionBarIcon(@NonNull String folderName, @NonNull String name) {
         assert name.indexOf('.') == -1; // Should supply base name
 
         // Naming convention
         //noinspection SimplifiableIfStatement
-        if (name.startsWith("ic_action_")) { //$NON-NLS-1$
+        if (name.startsWith("ic_action_")) {
             return true;
         }
 
-        // Naming convention
+        if (actionBarIcons != null) {
+            if (folderName.startsWith(MIPMAP_FOLDER)) {
+                name = MIPMAP_PREFIX + name;
+            }
+            return actionBarIcons.contains(name);
+        }
 
-        return mActionBarIcons != null && mActionBarIcons.contains(name);
+        return false;
     }
 
-    private boolean isActionBarIcon(Context context, String name, File file) {
-        if (isActionBarIcon(name)) {
+    private boolean isActionBarIcon(Context context, String folderName, String name, File file) {
+        if (isActionBarIcon(folderName, name)) {
             return true;
         }
 
         // As of Android 3.0 ic_menu_ are action icons
         //noinspection SimplifiableIfStatement,RedundantIfStatement
-        if (file != null && name.startsWith("ic_menu_") //$NON-NLS-1$
+        if (file != null && name.startsWith("ic_menu_")
                 && isAndroid30(context, context.getDriver().getResourceFolderVersion(file))) {
             // Naming convention
             return true;
@@ -1913,11 +2402,6 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     }
 
     // XML detector: Skim manifest and menu files
-
-    @Override
-    public boolean appliesTo(@NonNull Context context, @NonNull File file) {
-        return file.getName().equals(ANDROID_MANIFEST_XML);
-    }
 
     @Override
     public boolean appliesTo(@NonNull ResourceFolderType folderType) {
@@ -1930,6 +2414,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 // Manifest
                 TAG_APPLICATION,
                 TAG_ACTIVITY,
+                TAG_ACTIVITY_ALIAS,
                 TAG_SERVICE,
                 TAG_PROVIDER,
                 TAG_RECEIVER,
@@ -1942,24 +2427,48 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     @Override
     public void visitElement(@NonNull XmlContext context, @NonNull Element element) {
         String icon = element.getAttributeNS(ANDROID_URI, ATTR_ICON);
-        if (icon != null && icon.startsWith(DRAWABLE_PREFIX)) {
-            icon = icon.substring(DRAWABLE_PREFIX.length());
-
-            String tagName = element.getTagName();
-            if (tagName.equals(TAG_ITEM)) {
-                if (mMenuToIcons == null) {
-                    mMenuToIcons = ArrayListMultimap.create();
-                }
-                String menu = getBaseName(context.file.getName());
-                mMenuToIcons.put(menu, icon);
-            } else {
-                // Manifest tags: launcher icons
-                if (mLauncherIcons == null) {
-                    mLauncherIcons = Sets.newHashSet();
-                }
-                mLauncherIcons.add(icon);
+        addIcon(context, element, icon);
+        icon = element.getAttributeNS(ANDROID_URI, ATTR_ROUND_ICON);
+        String key = addIcon(context, element, icon);
+        if (key != null) {
+            if (roundIcons == null) {
+                roundIcons = Sets.newHashSet();
             }
+            roundIcons.add(key);
         }
+    }
+
+    @Nullable
+    private String addIcon(@NonNull XmlContext context, @NonNull Element element,
+            @Nullable String icon) {
+        if (icon == null || icon.isEmpty()) {
+            return null;
+        }
+
+        if (icon.startsWith(DRAWABLE_PREFIX)) {
+            icon = icon.substring(DRAWABLE_PREFIX.length());
+        } else if (!icon.startsWith(MIPMAP_PREFIX)) {
+            // Store mipmaps as @mipmap/name instead of just name to avoid
+            // confusing @drawable/foo and @mipmap/foo as representing the same icon
+            return null;
+        }
+
+        String tagName = element.getTagName();
+        if (tagName.equals(TAG_ITEM)) {
+            if (menuToIcons == null) {
+                menuToIcons = ArrayListMultimap.create();
+            }
+            String menu = getBaseName(context.file.getName());
+            menuToIcons.put(menu, icon);
+        } else {
+            // Manifest tags: launcher icons
+            if (launcherIcons == null) {
+                launcherIcons = Sets.newHashSet();
+            }
+            launcherIcons.add(icon);
+        }
+
+        return icon;
     }
 
     // ---- Implements JavaScanner ----
@@ -1972,7 +2481,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
     @Override
     public List<Class<? extends PsiElement>> getApplicablePsiTypes() {
-        List<Class<? extends PsiElement>> types = new ArrayList<Class<? extends PsiElement>>(2);
+        List<Class<? extends PsiElement>> types = new ArrayList<>(2);
         types.add(PsiNewExpression.class);
         types.add(PsiMethod.class);
         return types;
@@ -2019,10 +2528,10 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                             && (url.type == ResourceType.DRAWABLE
                             || url.type == ResourceType.COLOR
                             || url.type == ResourceType.MIPMAP)) {
-                        if (mNotificationIcons == null) {
-                            mNotificationIcons = Sets.newHashSet();
+                        if (notificationIcons == null) {
+                            notificationIcons = Maps.newHashMap();
                         }
-                        mNotificationIcons.add(url.name);
+                        notificationIcons.put(url.name, node);
                     }
                 }
             } else if (NOTIFICATION_BUILDER_CLASS.equals(typeName)
@@ -2039,10 +2548,10 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
     private boolean handleSelect(PsiElement select) {
         ResourceUrl url = ResourceEvaluator.getResourceConstant(select);
         if (url != null && url.type == ResourceType.DRAWABLE && !url.framework) {
-            if (mNotificationIcons == null) {
-                mNotificationIcons = Sets.newHashSet();
+            if (notificationIcons == null) {
+                notificationIcons = Maps.newHashMap();
             }
-            mNotificationIcons.add(url.name);
+            notificationIcons.put(url.name, select);
 
             return true;
         }
@@ -2075,13 +2584,13 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             ResourceUrl url = ResourceEvaluator.getResourceConstant(node);
             if (url != null && url.type == ResourceType.MENU && !url.framework) {
                 // Reclassify icons in the given menu as action bar icons
-                if (mMenuToIcons != null) {
-                    Collection<String> icons = mMenuToIcons.get(url.name);
+                if (menuToIcons != null) {
+                    Collection<String> icons = menuToIcons.get(url.name);
                     if (icons != null) {
-                        if (mActionBarIcons == null) {
-                            mActionBarIcons = Sets.newHashSet();
+                        if (actionBarIcons == null) {
+                            actionBarIcons = Sets.newHashSet();
                         }
-                        mActionBarIcons.addAll(icons);
+                        actionBarIcons.addAll(icons);
                     }
                 }
             }

@@ -24,19 +24,10 @@ import com.android.ide.common.process.DefaultProcessExecutor;
 import com.android.ide.common.process.LoggedProcessOutputHandler;
 import com.android.ide.common.process.ProcessExecutor;
 import com.android.ide.common.process.ProcessOutputHandler;
-import com.android.repository.Revision;
 import com.android.utils.ILogger;
 import com.android.utils.StdLogger;
 import com.google.common.collect.Maps;
 import com.google.common.truth.Expect;
-
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
@@ -44,6 +35,12 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.DataFormatException;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.ClassRule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 @RunWith(Parameterized.class)
 public class NinePatchAaptProcessorTest {
@@ -51,7 +48,7 @@ public class NinePatchAaptProcessorTest {
     @ClassRule
     public static Expect expect = Expect.createAndEnableStackTrace();
 
-    private static Map<File, File> mSourceAndCrunchedFiles;
+    private static Map<File, File> sSourceAndCrunchedFiles;
 
     private static AtomicLong sClassStartTime = new AtomicLong();
     private static final AtomicInteger sCruncherKey = new AtomicInteger();
@@ -65,24 +62,24 @@ public class NinePatchAaptProcessorTest {
 
     @BeforeClass
     public static void setup() {
-        mSourceAndCrunchedFiles = Maps.newHashMap();
+        sSourceAndCrunchedFiles = Maps.newHashMap();
         sCruncherKey.set(sCruncher.start());
     }
 
     @Test
     public void run() throws PngException, IOException {
-        NinePatchAaptProcessorTestUtils.skipOnJenkins();
         File outFile = NinePatchAaptProcessorTestUtils.crunchFile(
                 sCruncherKey.get(), mFile, sCruncher);
-        mSourceAndCrunchedFiles.put(mFile, outFile);
+        sSourceAndCrunchedFiles.put(mFile, outFile);
     }
 
 
     @AfterClass
-    public static void tearDownAndCheck() throws IOException, DataFormatException {
+    public static void tearDownAndCheck()
+            throws IOException, DataFormatException, InterruptedException {
         NinePatchAaptProcessorTestUtils.tearDownAndCheck(
-                sCruncherKey.get(), mSourceAndCrunchedFiles, sCruncher, sClassStartTime, expect);
-        mSourceAndCrunchedFiles = null;
+                sCruncherKey.get(), sSourceAndCrunchedFiles, sCruncher, sClassStartTime, expect);
+        sSourceAndCrunchedFiles = null;
     }
 
     @NonNull
@@ -90,7 +87,7 @@ public class NinePatchAaptProcessorTest {
         ILogger logger = new StdLogger(StdLogger.Level.VERBOSE);
         ProcessExecutor processExecutor = new DefaultProcessExecutor(logger);
         ProcessOutputHandler processOutputHandler = new LoggedProcessOutputHandler(logger);
-        File aapt = NinePatchAaptProcessorTestUtils.getAapt(Revision.parseRevision("22.0.1"));
+        File aapt = NinePatchAaptProcessorTestUtils.getAapt();
         return new AaptCruncher(aapt.getAbsolutePath(), processExecutor, processOutputHandler);
     }
 

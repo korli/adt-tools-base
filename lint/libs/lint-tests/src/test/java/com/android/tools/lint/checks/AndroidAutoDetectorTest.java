@@ -18,27 +18,22 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.FN_ANDROID_MANIFEST_XML;
 
-import com.android.annotations.NonNull;
-import com.android.testutils.SdkTestCase;
-import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.Project;
-
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
 public class AndroidAutoDetectorTest extends AbstractCheckTest {
 
-    private final SdkTestCase.TestFile mValidAutomotiveDescriptor =
+    private final TestFile mValidAutomotiveDescriptor =
             xml("res/xml/automotive_app_desc.xml", ""
                     + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                     + "<automotiveApp>\n"
                     + "    <uses name=\"media\"/>\n"
                     + "</automotiveApp>\n");
 
-    private SdkTestCase.TestFile mValidAutoAndroidXml = xml(FN_ANDROID_MANIFEST_XML, ""
+    private final TestFile mValidAutoAndroidXml = xml(FN_ANDROID_MANIFEST_XML, ""
             + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
             + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
             + "          xmlns:tools=\"http://schemas.android.com/tools\"\n"
@@ -70,7 +65,7 @@ public class AndroidAutoDetectorTest extends AbstractCheckTest {
             + "\n"
             + "</manifest>\n");
 
-    private Set<Issue> mEnabled = new HashSet<Issue>();
+    private Set<Issue> mEnabled = new HashSet<>();
 
     @Override
     protected Detector getDetector() {
@@ -78,16 +73,11 @@ public class AndroidAutoDetectorTest extends AbstractCheckTest {
     }
 
     @Override
-    protected TestConfiguration getConfiguration(LintClient client, Project project) {
-        return new TestConfiguration(client, project, null) {
-            @Override
-            public boolean isEnabled(@NonNull Issue issue) {
-                return super.isEnabled(issue) && mEnabled.contains(issue);
-            }
-        };
+    protected boolean isEnabled(Issue issue) {
+        return super.isEnabled(issue) && mEnabled.contains(issue);
     }
-
     public void testMissingIntentFilter() throws Exception {
+
         mEnabled = Collections.singleton(
                 AndroidAutoDetector.MISSING_MEDIA_BROWSER_SERVICE_ACTION_ISSUE);
         String expected = "AndroidManifest.xml:6: Error: Missing intent-filter for action android.media.browse.MediaBrowserService that is required for android auto support [MissingMediaBrowserServiceIntentFilter]\n"
@@ -192,7 +182,6 @@ public class AndroidAutoDetectorTest extends AbstractCheckTest {
                 + "1 errors, 0 warnings\n";
 
         String result = lintProject(
-                copy("bytecode/.classpath", ".classpath"),
                 mValidAutoAndroidXml,
                 mValidAutomotiveDescriptor,
                 java("src/com/example/android/uamp/MSessionCallback.java", ""
@@ -215,7 +204,6 @@ public class AndroidAutoDetectorTest extends AbstractCheckTest {
         String expected = "No warnings.";
 
         String result = lintProject(
-                copy("bytecode/.classpath", ".classpath"),
                 mValidAutoAndroidXml,
                 mValidAutomotiveDescriptor,
                 java("src/com/example/android/uamp/MSessionCallback.java", ""

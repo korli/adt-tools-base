@@ -31,7 +31,7 @@ import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.VariantManager;
 import com.android.build.gradle.internal.dependency.NativeDependencyResolveResult;
-import com.android.build.gradle.internal.model.ModelBuilder;
+import com.android.build.gradle.internal.ide.ModelBuilder;
 import com.android.build.gradle.managed.NdkAbiOptions;
 import com.android.build.gradle.model.internal.AndroidBinaryInternal;
 import com.android.build.gradle.model.internal.AndroidComponentSpecInternal;
@@ -127,6 +127,8 @@ public class ComponentModelBuilder implements ToolingModelBuilder {
                 new ModelPath(ModelConstants.JNILIBS_DEPENDENCIES),
                 multimapModelType(String.class, NativeDependencyResolveResult.class));
 
+        int projectType = isApplication ? AndroidProject.PROJECT_TYPE_APP
+                : AndroidProject.PROJECT_TYPE_LIBRARY;
         return new ModelBuilder(
                 androidBuilder,
                 variantManager,
@@ -136,7 +138,7 @@ public class ComponentModelBuilder implements ToolingModelBuilder {
                 ndkHandler,
                 new ComponentNativeLibraryFactory(
                         binaries, ndkHandler, abiOptions, nativeDependencies, jniLibsDependencies),
-                !isApplication,
+                projectType,
                 AndroidProject.GENERATION_COMPONENT);
     }
 }

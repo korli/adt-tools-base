@@ -26,15 +26,13 @@ import com.android.tools.lint.detector.api.Location.Handle;
 import com.android.tools.lint.detector.api.Position;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.PositionXmlParser;
-
+import java.io.File;
+import java.io.UnsupportedEncodingException;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.xml.sax.SAXException;
-
-import java.io.File;
-import java.io.UnsupportedEncodingException;
 
 /**
  * A customization of the {@link PositionXmlParser} which creates position
@@ -49,8 +47,8 @@ public class LintCliXmlParser extends XmlParser {
         String xml = null;
         try {
             // Do we need to provide an input stream for encoding?
-            xml = context.getContents();
-            if (xml != null) {
+            if (context.getContents() != null) {
+                xml = context.getContents().toString();
                 return PositionXmlParser.parse(xml);
             }
         } catch (UnsupportedEncodingException e) {
@@ -152,32 +150,38 @@ public class LintCliXmlParser extends XmlParser {
         return  PositionXmlParser.getPosition(node).getEndOffset();
     }
 
+    @Nullable
+    @Override
+    public Node findNodeAt(@NonNull XmlContext context, int offset) {
+        return PositionXmlParser.findNodeAtOffset(context.document, offset);
+    }
+
     /* Handle for creating DOM positions cheaply and returning full fledged locations later */
-    private class LocationHandle implements Handle {
-        private final File mFile;
-        private final Node mNode;
-        private Object mClientData;
+    private static class LocationHandle implements Handle {
+        private final File file;
+        private final Node node;
+        private Object clientData;
 
         public LocationHandle(File file, Node node) {
-            mFile = file;
-            mNode = node;
+            this.file = file;
+            this.node = node;
         }
 
         @NonNull
         @Override
         public Location resolve() {
-            return Location.create(mFile, PositionXmlParser.getPosition(mNode));
+            return Location.create(file, PositionXmlParser.getPosition(node));
         }
 
         @Override
         public void setClientData(@Nullable Object clientData) {
-            mClientData = clientData;
+            this.clientData = clientData;
         }
 
         @Override
         @Nullable
         public Object getClientData() {
-            return mClientData;
+            return clientData;
         }
     }
 }

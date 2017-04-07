@@ -16,6 +16,8 @@
 
 package com.android.tools.lint.psi;
 
+import static com.android.tools.lint.psi.EcjPsiManager.getTypeName;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.google.common.collect.Lists;
@@ -39,12 +41,14 @@ import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.PsiTypeParameterListOwner;
 import com.intellij.psi.javadoc.PsiDocComment;
-
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import org.eclipse.jdt.internal.compiler.ast.TypeParameter;
 import org.eclipse.jdt.internal.compiler.ast.TypeReference;
-
-import java.util.Collection;
-import java.util.List;
+import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
+import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
+import org.eclipse.jdt.internal.compiler.lookup.TypeVariableBinding;
 
 class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParameter {
 
@@ -52,10 +56,18 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
 
     private EcjPsiReferenceList mExtendsList;
 
-    EcjPsiTypeParameter(@NonNull EcjPsiManager manager,
-            @NonNull TypeParameter declaration) {
+    private String mQualifiedName;
+
+    private EcjPsiModifierList mModifierList;
+
+    EcjPsiTypeParameter(@NonNull EcjPsiManager manager, @NonNull TypeParameter declaration) {
         super(manager, declaration);
         mDeclaration = declaration;
+        if (declaration.binding != null && declaration.binding.compoundName != null) {
+            mQualifiedName = getTypeName(declaration.binding);
+        }
+
+        mManager.registerElement(declaration.binding, this);
     }
 
     @Override
@@ -70,11 +82,6 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
 
     void setExtendsList(EcjPsiReferenceList extendsList) {
         mExtendsList = extendsList;
-    }
-
-    @Override
-    public String getQualifiedName() {
-        return null;
     }
 
     @Override
@@ -137,20 +144,6 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
 
     @Override
     @NonNull
-    public PsiClassType[] getExtendsListTypes() {
-        return mExtendsList.getReferencedTypes();
-    }
-
-    @Override
-    public PsiReferenceList getImplementsList() {
-        // Can't generate lazily: won't work with visitors etc
-        //return new EcjPsiReferenceList(mManager, TypeReference.NO_TYPE_ARGUMENTS,
-        //        PsiReferenceList.Role.IMPLEMENTS_LIST);
-        throw new UnimplementedLintPsiApiException();
-    }
-
-    @Override
-    @NonNull
     public PsiClassType[] getImplementsListTypes() {
         return PsiClassType.EMPTY_ARRAY;
     }
@@ -201,16 +194,6 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
     }
 
     @Override
-    public boolean isInheritorDeep(PsiClass baseClass, PsiClass classToByPass) {
-        throw new UnimplementedLintPsiApiException();
-    }
-
-    @Override
-    public boolean isInheritor(@NonNull PsiClass baseClass, boolean checkDeep) {
-        throw new UnimplementedLintPsiApiException();
-    }
-
-    @Override
     @NonNull
     public PsiMethod[] getConstructors() {
         return PsiMethod.EMPTY_ARRAY;
@@ -219,11 +202,6 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
     @Override
     public PsiDocComment getDocComment() {
         return null;
-    }
-
-    @Override
-    public boolean isDeprecated() {
-        return false;
     }
 
     @Override
@@ -292,22 +270,6 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
     }
 
     @Override
-    @NonNull
-    public PsiClassType[] getSuperTypes() {
-        throw new UnimplementedLintPsiApiException();
-    }
-
-    @Override
-    public PsiClass getContainingClass() {
-        return null;
-    }
-
-    @Override
-    public PsiModifierList getModifierList() {
-        return null;
-    }
-
-    @Override
     public boolean hasModifierProperty(@NonNull String name) {
         return false;
     }
@@ -325,45 +287,145 @@ class EcjPsiTypeParameter extends EcjPsiSourceElement implements PsiTypeParamete
     @Override
     @NonNull
     public Collection<HierarchicalMethodSignature> getVisibleSignatures() {
-        throw new UnimplementedLintPsiApiException();
+        return Collections.emptyList();
     }
 
     @Override
     public PsiMethod findMethodBySignature(PsiMethod patternMethod, boolean checkBases) {
-        throw new UnimplementedLintPsiApiException();
+        return null;
     }
 
     @Override
     @NonNull
     public PsiMethod[] findMethodsBySignature(PsiMethod patternMethod, boolean checkBases) {
-        throw new UnimplementedLintPsiApiException();
+        return PsiMethod.EMPTY_ARRAY;
     }
 
     @Override
     public PsiField findFieldByName(String name, boolean checkBases) {
-        throw new UnimplementedLintPsiApiException();
+        return null;
     }
 
     @Override
     @NonNull
     public PsiMethod[] findMethodsByName(String name, boolean checkBases) {
-        throw new UnimplementedLintPsiApiException();
+        return PsiMethod.EMPTY_ARRAY;
     }
 
     @Override
     @NonNull
     public List<Pair<PsiMethod, PsiSubstitutor>> findMethodsAndTheirSubstitutorsByName(String name, boolean checkBases) {
-        throw new UnimplementedLintPsiApiException();
+        return Collections.emptyList();
     }
 
     @Override
     @NonNull
     public List<Pair<PsiMethod, PsiSubstitutor>> getAllMethodsAndTheirSubstitutors() {
-        throw new UnimplementedLintPsiApiException();
+        return Collections.emptyList();
     }
 
     @Override
     public PsiClass findInnerClassByName(String name, boolean checkBases) {
+        return null;
+    }
+
+    @Nullable
+    @Override
+    public String getQualifiedName() {
+        return mQualifiedName;
+    }
+
+    @Nullable
+    @Override
+    public PsiClass getContainingClass() {
+        return mParent instanceof PsiClass ? (PsiClass) mParent : null;
+    }
+
+    @Nullable
+    @Override
+    public PsiModifierList getModifierList() {
+        return mModifierList;
+    }
+
+    public void setModifierList(@Nullable EcjPsiModifierList modifierList) {
+        mModifierList = modifierList;
+    }
+
+    @Nullable
+    @Override
+    public PsiReferenceList getImplementsList() {
+        return null;
+    }
+
+    @NonNull
+    @Override
+    public PsiClassType[] getExtendsListTypes() {
+        return mExtendsList != null ? mExtendsList.getReferencedTypes() : PsiClassType.EMPTY_ARRAY;
+    }
+
+    @NonNull
+    @Override
+    public PsiClassType[] getSuperTypes() {
+        return mManager.getClassTypes(getSupers());
+    }
+
+    @Override
+    public boolean isInheritor(@NonNull PsiClass baseClass, boolean checkDeep) {
+        String qualifiedName = baseClass.getQualifiedName();
+        return qualifiedName != null && new EcjPsiJavaEvaluator(mManager)
+                .inheritsFrom(this, qualifiedName, false);
+    }
+
+    @Override
+    public boolean isInheritorDeep(PsiClass baseClass, @Nullable PsiClass classToByPass) {
         throw new UnimplementedLintPsiApiException();
+    }
+
+    @Override
+    public boolean isDeprecated() {
+        return false;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null) {
+            return false;
+        }
+        TypeParameter typeDeclaration = (TypeParameter) mNativeNode;
+        TypeVariableBinding binding = typeDeclaration.binding;
+        TypeBinding otherBinding;
+        if (o instanceof EcjPsiTypeParameter) {
+            TypeParameter otherTypeDeclaration =
+                    (TypeParameter) (((EcjPsiTypeParameter) o).getNativeNode());
+            assert otherTypeDeclaration != null;
+            otherBinding = otherTypeDeclaration.binding;
+            if (binding == null || otherBinding == null) {
+                return typeDeclaration.equals(otherTypeDeclaration);
+            }
+            return binding.equals(otherBinding);
+        } else if (o instanceof EcjPsiBinaryClass) {
+            otherBinding = (ReferenceBinding) (((EcjPsiBinaryClass) o).getBinding());
+            return binding != null && otherBinding != null && binding.equals(otherBinding);
+        }
+
+        return false;
+    }
+
+    @Override
+    public int hashCode() {
+        TypeVariableBinding binding = ((TypeParameter) mNativeNode).binding;
+        return binding != null ? binding.hashCode() : 0;
+    }
+
+    @Nullable
+    public ReferenceBinding getBinding() {
+        if (mNativeNode instanceof TypeParameter) {
+            return ((TypeParameter) mNativeNode).binding;
+        }
+
+        return null;
     }
 }

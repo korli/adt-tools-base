@@ -38,11 +38,10 @@ import com.android.tools.lint.checks.ByteOrderMarkDetector;
 import com.android.tools.lint.checks.CleanupDetector;
 import com.android.tools.lint.checks.CommentDetector;
 import com.android.tools.lint.checks.DetectMissingPrefix;
-import com.android.tools.lint.checks.DosLineEndingDetector;
 import com.android.tools.lint.checks.DuplicateResourceDetector;
 import com.android.tools.lint.checks.GradleDetector;
 import com.android.tools.lint.checks.GridLayoutDetector;
-import com.android.tools.lint.checks.HardcodedValuesDetector;
+import com.android.tools.lint.checks.IconDetector;
 import com.android.tools.lint.checks.IncludeDetector;
 import com.android.tools.lint.checks.InefficientWeightDetector;
 import com.android.tools.lint.checks.JavaPerformanceDetector;
@@ -63,10 +62,9 @@ import com.android.tools.lint.checks.SupportAnnotationDetector;
 import com.android.tools.lint.checks.TextFieldDetector;
 import com.android.tools.lint.checks.TextViewDetector;
 import com.android.tools.lint.checks.TitleDetector;
-import com.android.tools.lint.checks.TranslationDetector;
 import com.android.tools.lint.checks.TypoDetector;
 import com.android.tools.lint.checks.TypographyDetector;
-import com.android.tools.lint.checks.UseCompoundDrawableDetector;
+import com.android.tools.lint.checks.UnusedResourceDetector;
 import com.android.tools.lint.checks.UselessViewDetector;
 import com.android.tools.lint.checks.Utf8Detector;
 import com.android.tools.lint.checks.WrongCallDetector;
@@ -78,12 +76,12 @@ import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closer;
 import com.google.common.io.Files;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.io.Writer;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -100,31 +98,102 @@ import java.util.Set;
  */
 @Beta
 public abstract class Reporter {
-    protected final LintCliClient mClient;
-    protected final File mOutput;
-    protected String mTitle = "Lint Report";
-    protected boolean mSimpleFormat;
-    protected boolean mBundleResources;
-    protected Map<String, String> mUrlMap;
-    protected File mResources;
-    protected final Map<File, String> mResourceUrl = new HashMap<File, String>();
-    protected final Map<String, File> mNameToFile = new HashMap<String, File>();
-    protected boolean mDisplayEmpty = true;
+
+    public static final String NEW_FORMAT_PROPERTY = "lint.old-html-style";
+    public static final boolean USE_MATERIAL_HTML_STYLE = !Boolean.getBoolean(NEW_FORMAT_PROPERTY);
+
+    protected final LintCliClient client;
+    protected final File output;
+    protected String title = "Lint Report";
+    protected boolean simpleFormat;
+    protected boolean bundleResources;
+    protected Map<String, String> urlMap;
+    protected File resources;
+    protected final Map<File, String> resourceUrl = new HashMap<>();
+    protected final Map<String, File> nameToFile = new HashMap<>();
+    protected boolean displayEmpty = true;
+
+    /**
+     * Creates a new HTML {@link Reporter}
+     *
+     * @param client       the associated client
+     * @param output       the output file
+     * @param flags        the command line flags
+     * @param simpleFormat if true, use simple HTML format
+     * @throws IOException if an error occurs
+     */
+    @NonNull
+    public static Reporter createHtmlReporter(
+            @NonNull LintCliClient client,
+            @NonNull File output,
+            @NonNull LintCliFlags flags,
+            boolean simpleFormat) throws IOException {
+        if (USE_MATERIAL_HTML_STYLE) {
+            return new MaterialHtmlReporter(client, output, flags);
+        }
+        HtmlReporter reporter = new HtmlReporter(client, output, flags);
+        if (simpleFormat) {
+            reporter.setSimpleFormat(true);
+        }
+        return reporter;
+    }
+
+    /**
+     * Constructs a new text {@link Reporter}
+     *
+     * @param client the client
+     * @param flags the flags
+     * @param file the file corresponding to the writer, if any
+     * @param writer the writer to write into
+     * @param close whether the writer should be closed when done
+     */
+    @NonNull
+    public static Reporter createTextReporter(
+            @NonNull LintCliClient client,
+            @NonNull LintCliFlags flags,
+            @Nullable File file,
+            @NonNull Writer writer,
+            boolean close)  {
+        return new TextReporter(client, flags, file, writer, close);
+    }
+
+    /**
+     * Constructs a new {@link XmlReporter}
+     *
+     * @param client              the client
+     * @param output              the output file
+     * @param intendedForBaseline whether this XML report is used to write a baseline file
+     * @throws IOException if an error occurs
+     */
+    public static  Reporter createXmlReporter(
+            @NonNull LintCliClient client,
+            @NonNull File output,
+            boolean intendedForBaseline) throws IOException {
+        XmlReporter reporter = new XmlReporter(client, output);
+        reporter.setIntendedForBaseline(intendedForBaseline);
+        return reporter;
+    }
 
     /**
      * Write the given warnings into the report
-     *
-     * @param errorCount the number of errors
-     * @param warningCount the number of warnings
-     * @param issues the issues to be reported
-     * @throws IOException if an error occurs
+     * @param stats  the vital statistics for the lint report
+     * @param issues the issues to be reported  @throws IOException if an error occurs
      */
-    public abstract void write(int errorCount, int warningCount, List<Warning> issues)
-            throws IOException;
+    public abstract void write(@NonNull Stats stats, List<Warning> issues) throws IOException;
 
-    protected Reporter(LintCliClient client, File output) {
-        mClient = client;
-        mOutput = output;
+    /**
+     * Writes a project overview table
+     * @param stats  the vital statistics for the lint report
+     * @param projects the projects to write
+     */
+    public void writeProjectList(@NonNull Stats stats,
+            @NonNull List<MultiProjectHtmlReporter.ProjectEntry> projects) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    protected Reporter(@NonNull LintCliClient client, @NonNull File output) {
+        this.client = client;
+        this.output = output;
     }
 
     /**
@@ -133,12 +202,12 @@ public abstract class Reporter {
      * @param title the title of the report
      */
     public void setTitle(String title) {
-        mTitle = title;
+        this.title = title;
     }
 
     /** @return the title of the report */
     public String getTitle() {
-        return mTitle;
+        return title;
     }
 
     /**
@@ -149,8 +218,8 @@ public abstract class Reporter {
      *            the report
      */
     public void setBundleResources(boolean bundleResources) {
-        mBundleResources = bundleResources;
-        mSimpleFormat = false;
+        this.bundleResources = bundleResources;
+        simpleFormat = false;
     }
 
     /**
@@ -160,7 +229,7 @@ public abstract class Reporter {
      * @param simpleFormat whether the formatting should be simple
      */
     public void setSimpleFormat(boolean simpleFormat) {
-        mSimpleFormat = simpleFormat;
+        this.simpleFormat = simpleFormat;
     }
 
     /**
@@ -170,23 +239,23 @@ public abstract class Reporter {
      * @return whether the report should use simple formatting
      */
     public boolean isSimpleFormat() {
-        return mSimpleFormat;
+        return simpleFormat;
     }
 
 
     String getUrl(File file) {
-        if (mBundleResources && !mSimpleFormat) {
+        if (bundleResources && !simpleFormat) {
             String url = getRelativeResourceUrl(file);
             if (url != null) {
                 return url;
             }
         }
 
-        if (mUrlMap != null) {
+        if (urlMap != null) {
             String path = file.getAbsolutePath();
             // Perform the comparison using URLs such that we properly escape spaces etc.
             String pathUrl = encodeUrl(path);
-            for (Map.Entry<String, String> entry : mUrlMap.entrySet()) {
+            for (Map.Entry<String, String> entry : urlMap.entrySet()) {
                 String prefix = entry.getKey();
                 String prefixUrl = encodeUrl(prefix);
                 if (pathUrl.startsWith(prefixUrl)) {
@@ -197,7 +266,7 @@ public abstract class Reporter {
         }
 
         if (file.isAbsolute()) {
-            String relativePath = getRelativePath(mOutput.getParentFile(), file);
+            String relativePath = getRelativePath(output.getParentFile(), file);
             if (relativePath != null) {
                 relativePath = relativePath.replace(separatorChar, '/');
                 return encodeUrl(relativePath);
@@ -215,7 +284,7 @@ public abstract class Reporter {
     static String encodeUrl(String url) {
         try {
             url = url.replace('\\', '/');
-            return URLEncoder.encode(url, UTF_8).replace("%2F", "/");         //$NON-NLS-1$
+            return URLEncoder.encode(url, UTF_8).replace("%2F", "/");
         } catch (UnsupportedEncodingException e) {
             // This shouldn't happen for UTF-8
             System.err.println("Invalid string " + e.getLocalizedMessage());
@@ -225,30 +294,30 @@ public abstract class Reporter {
 
     /** Set mapping of path prefixes to corresponding URLs in the HTML report */
     public void setUrlMap(@Nullable Map<String, String> urlMap) {
-        mUrlMap = urlMap;
+        this.urlMap = urlMap;
     }
 
     /** Gets a pointer to the local resource directory, if any */
     File getResourceDir() {
-        if (mResources == null && mBundleResources) {
-            mResources = computeResourceDir();
-            if (mResources == null) {
-                mBundleResources = false;
+        if (resources == null && bundleResources) {
+            resources = computeResourceDir();
+            if (resources == null) {
+                bundleResources = false;
             }
         }
 
-        return mResources;
+        return resources;
     }
 
     /** Finds/creates the local resource directory, if possible */
     File computeResourceDir() {
-        String fileName = mOutput.getName();
+        String fileName = output.getName();
         int dot = fileName.indexOf('.');
         if (dot != -1) {
             fileName = fileName.substring(0, dot);
         }
 
-        File resources = new File(mOutput.getParentFile(), fileName + "_files"); //$NON-NLS-1$
+        File resources = new File(output.getParentFile(), fileName + "_files");
         if (!resources.exists() && !resources.mkdir()) {
             resources = null;
         }
@@ -258,7 +327,7 @@ public abstract class Reporter {
 
     /** Returns a URL to a local copy of the given file, or null */
     protected String getRelativeResourceUrl(File file) {
-        String resource = mResourceUrl.get(file);
+        String resource = resourceUrl.get(file);
         if (resource != null) {
             return resource;
         }
@@ -273,13 +342,13 @@ public abstract class Reporter {
         if (resourceDir != null) {
             String base = file.getName();
 
-            File path = mNameToFile.get(base);
+            File path = nameToFile.get(base);
             if (path != null && !path.equals(file)) {
                 // That filename already exists and is associated with a different path:
                 // make a new unique version
                 for (int i = 0; i < 100; i++) {
                     base = '_' + base;
-                    path = mNameToFile.get(base);
+                    path = nameToFile.get(base);
                     if (path == null || path.equals(file)) {
                         break;
                     }
@@ -305,7 +374,7 @@ public abstract class Reporter {
         if (resourceDir != null) {
             String base = url.getFile();
             base = base.substring(base.lastIndexOf('/') + 1);
-            mNameToFile.put(base, new File(url.toExternalForm()));
+            nameToFile.put(base, new File(url.toExternalForm()));
 
             File target = new File(resourceDir, base);
             Closer closer = Closer.create();
@@ -386,155 +455,164 @@ public abstract class Reporter {
     }
 
     /**
-     * Returns whether this report should display info (such as a path to the report) if
-     * no issues were found
+     * Returns whether this report should display info if no issues were found
      */
     public boolean isDisplayEmpty() {
-        return mDisplayEmpty;
+        return displayEmpty;
     }
 
     /**
-     * Sets whether this report should display info (such as a path to the report) if
-     * no issues were found
+     * Sets whether this report should display info if no issues were found
      */
     public void setDisplayEmpty(boolean displayEmpty) {
-        mDisplayEmpty = displayEmpty;
+        this.displayEmpty = displayEmpty;
     }
 
-    private static Set<Issue> sAdtFixes;
-    private static Set<Issue> sStudioFixes;
-
-    /** Tools known to have quickfixes for lint */
-    enum QuickfixHandler {
-        /** Android Studio or IntelliJ */
-        STUDIO,
-        /** Eclipse */
-        ADT;
-
-        public boolean hasAutoFix(Issue issue) {
-            return Reporter.hasAutoFix(this, issue);
-        }
-    }
+    private static Set<Issue> studioFixes;
 
     /**
      * Returns true if the given issue has an automatic IDE fix.
      *
-     * @param tool the name of the tool to be checked
      * @param issue the issue to be checked
      * @return true if the given tool is known to have an automatic fix for the
      *         given issue
      */
-    public static boolean hasAutoFix(@NonNull QuickfixHandler tool, Issue issue) {
-        if (tool == QuickfixHandler.ADT) {
-            if (sAdtFixes == null) {
-                sAdtFixes = Sets.newHashSet(
-                        InefficientWeightDetector.INEFFICIENT_WEIGHT,
-                        AccessibilityDetector.ISSUE,
-                        InefficientWeightDetector.BASELINE_WEIGHTS,
-                        HardcodedValuesDetector.ISSUE,
-                        UselessViewDetector.USELESS_LEAF,
-                        UselessViewDetector.USELESS_PARENT,
-                        PxUsageDetector.PX_ISSUE,
-                        TextFieldDetector.ISSUE,
-                        SecurityDetector.EXPORTED_SERVICE,
-                        DetectMissingPrefix.MISSING_NAMESPACE,
-                        ScrollViewChildDetector.ISSUE,
-                        ObsoleteLayoutParamsDetector.ISSUE,
-                        TypographyDetector.DASHES,
-                        TypographyDetector.ELLIPSIS,
-                        TypographyDetector.FRACTIONS,
-                        TypographyDetector.OTHER,
-                        TypographyDetector.QUOTES,
-                        UseCompoundDrawableDetector.ISSUE,
-                        ApiDetector.UNSUPPORTED,
-                        ApiDetector.INLINED,
-                        TypoDetector.ISSUE,
-                        ManifestDetector.ALLOW_BACKUP,
-                        MissingIdDetector.ISSUE,
-                        TranslationDetector.MISSING,
-                        DosLineEndingDetector.ISSUE
-                );
+    public static boolean hasAutoFix(Issue issue) {
+        // List generated by AndroidLintInspectionToolProviderTest in tools/adt/idea;
+        // set LIST_ISSUES_WITH_QUICK_FIXES to true
+        if (studioFixes == null) {
+            studioFixes = Sets.newHashSet(
+                    AccessibilityDetector.ISSUE,
+                    AlwaysShowActionDetector.ISSUE,
+                    AndroidAutoDetector.INVALID_USES_TAG_ISSUE,
+                    AndroidTvDetector.MISSING_BANNER,
+                    AndroidTvDetector.MISSING_LEANBACK_SUPPORT,
+                    AndroidTvDetector.PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE,
+                    AndroidTvDetector.UNSUPPORTED_TV_HARDWARE,
+                    AnnotationDetector.SWITCH_TYPE_DEF,
+                    ApiDetector.INLINED,
+                    ApiDetector.OVERRIDE,
+                    ApiDetector.UNSUPPORTED,
+                    ApiDetector.UNUSED,
+                    AppCompatCallDetector.ISSUE,
+                    AppIndexingApiDetector.ISSUE_APP_INDEXING,
+                    AppIndexingApiDetector.ISSUE_APP_INDEXING_API,
+                    AppIndexingApiDetector.ISSUE_URL_ERROR,
+                    ByteOrderMarkDetector.BOM,
+                    CleanupDetector.SHARED_PREF,
+                    CommentDetector.STOP_SHIP,
+                    DetectMissingPrefix.MISSING_NAMESPACE,
+                    DuplicateResourceDetector.TYPE_MISMATCH,
+                    GradleDetector.COMPATIBILITY,
+                    GradleDetector.DEPENDENCY,
+                    GradleDetector.DEPRECATED,
+                    GradleDetector.NOT_INTERPOLATED,
+                    GradleDetector.PLUS,
+                    GradleDetector.REMOTE_VERSION,
+                    GradleDetector.STRING_INTEGER,
+                    GridLayoutDetector.ISSUE,
+                    IconDetector.ICON_LAUNCHER_FORMAT,
+                    IconDetector.WEBP_ELIGIBLE,
+                    IconDetector.WEBP_UNSUPPORTED,
+                    IncludeDetector.ISSUE,
+                    InefficientWeightDetector.BASELINE_WEIGHTS,
+                    InefficientWeightDetector.INEFFICIENT_WEIGHT,
+                    InefficientWeightDetector.ORIENTATION,
+                    JavaPerformanceDetector.USE_VALUE_OF,
+                    ManifestDetector.ALLOW_BACKUP,
+                    ManifestDetector.APPLICATION_ICON,
+                    ManifestDetector.MIPMAP,
+                    ManifestDetector.MOCK_LOCATION,
+                    ManifestDetector.TARGET_NEWER,
+                    MissingClassDetector.INNERCLASS,
+                    MissingIdDetector.ISSUE,
+                    NamespaceDetector.RES_AUTO,
+                    ObsoleteLayoutParamsDetector.ISSUE,
+                    ParcelDetector.ISSUE,
+                    PropertyFileDetector.ESCAPE,
+                    PropertyFileDetector.HTTP,
+                    PxUsageDetector.DP_ISSUE,
+                    PxUsageDetector.PX_ISSUE,
+                    ReadParcelableDetector.ISSUE,
+                    RtlDetector.COMPAT,
+                    ScrollViewChildDetector.ISSUE,
+                    SecurityDetector.EXPORTED_SERVICE,
+                    SignatureOrSystemDetector.ISSUE,
+                    SupportAnnotationDetector.CHECK_PERMISSION,
+                    SupportAnnotationDetector.CHECK_RESULT,
+                    SupportAnnotationDetector.MISSING_PERMISSION,
+                    TextFieldDetector.ISSUE,
+                    TextViewDetector.SELECTABLE,
+                    TitleDetector.ISSUE,
+                    TypoDetector.ISSUE,
+                    TypographyDetector.DASHES,
+                    TypographyDetector.ELLIPSIS,
+                    TypographyDetector.FRACTIONS,
+                    TypographyDetector.OTHER,
+                    TypographyDetector.QUOTES,
+                    UnusedResourceDetector.ISSUE,
+                    UnusedResourceDetector.ISSUE_IDS,
+                    UselessViewDetector.USELESS_LEAF,
+                    Utf8Detector.ISSUE,
+                    WrongCallDetector.ISSUE,
+                    WrongCaseDetector.WRONG_CASE
+            );
+        }
+        return studioFixes.contains(issue);
+    }
+
+    private String stripPrefix;
+
+    protected String stripPath(@NonNull String path) {
+        if (stripPrefix != null && path.startsWith(stripPrefix)
+                && path.length() > stripPrefix.length()) {
+            int index = stripPrefix.length();
+            if (path.charAt(index) == File.separatorChar) {
+                index++;
             }
-            return sAdtFixes.contains(issue);
-        } else if (tool == QuickfixHandler.STUDIO) {
-            // List generated by AndroidLintInspectionToolProviderTest in tools/adt/idea;
-            // set LIST_ISSUES_WITH_QUICK_FIXES to true
-            if (sStudioFixes == null) {
-                sStudioFixes = Sets.newHashSet(
-                        AccessibilityDetector.ISSUE,
-                        AlwaysShowActionDetector.ISSUE,
-                        AndroidAutoDetector.INVALID_USES_TAG_ISSUE,
-                        AndroidTvDetector.MISSING_BANNER,
-                        AndroidTvDetector.MISSING_LEANBACK_SUPPORT,
-                        AndroidTvDetector.PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE,
-                        AndroidTvDetector.UNSUPPORTED_TV_HARDWARE,
-                        AnnotationDetector.SWITCH_TYPE_DEF,
-                        ApiDetector.INLINED,
-                        ApiDetector.OVERRIDE,
-                        ApiDetector.UNSUPPORTED,
-                        ApiDetector.UNUSED,
-                        AppCompatCallDetector.ISSUE,
-                        AppIndexingApiDetector.ISSUE_APP_INDEXING,
-                        AppIndexingApiDetector.ISSUE_APP_INDEXING_API,
-                        AppIndexingApiDetector.ISSUE_URL_ERROR,
-                        ByteOrderMarkDetector.BOM,
-                        CleanupDetector.SHARED_PREF,
-                        CommentDetector.STOP_SHIP,
-                        DetectMissingPrefix.MISSING_NAMESPACE,
-                        DuplicateResourceDetector.TYPE_MISMATCH,
-                        GradleDetector.COMPATIBILITY,
-                        GradleDetector.DEPENDENCY,
-                        GradleDetector.DEPRECATED,
-                        GradleDetector.NOT_INTERPOLATED,
-                        GradleDetector.PLUS,
-                        GradleDetector.REMOTE_VERSION,
-                        GradleDetector.STRING_INTEGER,
-                        GridLayoutDetector.ISSUE,
-                        IncludeDetector.ISSUE,
-                        InefficientWeightDetector.BASELINE_WEIGHTS,
-                        InefficientWeightDetector.INEFFICIENT_WEIGHT,
-                        InefficientWeightDetector.ORIENTATION,
-                        JavaPerformanceDetector.USE_VALUE_OF,
-                        ManifestDetector.ALLOW_BACKUP,
-                        ManifestDetector.APPLICATION_ICON,
-                        ManifestDetector.MIPMAP,
-                        ManifestDetector.MOCK_LOCATION,
-                        ManifestDetector.TARGET_NEWER,
-                        MissingClassDetector.INNERCLASS,
-                        MissingIdDetector.ISSUE,
-                        NamespaceDetector.RES_AUTO,
-                        ObsoleteLayoutParamsDetector.ISSUE,
-                        ParcelDetector.ISSUE,
-                        PropertyFileDetector.ESCAPE,
-                        PropertyFileDetector.HTTP,
-                        PxUsageDetector.DP_ISSUE,
-                        PxUsageDetector.PX_ISSUE,
-                        ReadParcelableDetector.ISSUE,
-                        RtlDetector.COMPAT,
-                        ScrollViewChildDetector.ISSUE,
-                        SecurityDetector.EXPORTED_SERVICE,
-                        SignatureOrSystemDetector.ISSUE,
-                        SupportAnnotationDetector.CHECK_PERMISSION,
-                        SupportAnnotationDetector.CHECK_RESULT,
-                        SupportAnnotationDetector.MISSING_PERMISSION,
-                        TextFieldDetector.ISSUE,
-                        TextViewDetector.SELECTABLE,
-                        TitleDetector.ISSUE,
-                        TypoDetector.ISSUE,
-                        TypographyDetector.DASHES,
-                        TypographyDetector.ELLIPSIS,
-                        TypographyDetector.FRACTIONS,
-                        TypographyDetector.OTHER,
-                        TypographyDetector.QUOTES,
-                        UselessViewDetector.USELESS_LEAF,
-                        Utf8Detector.ISSUE,
-                        WrongCallDetector.ISSUE,
-                        WrongCaseDetector.WRONG_CASE
-                );
-            }
-            return sStudioFixes.contains(issue);
+            return path.substring(index);
         }
 
-        return false;
+        return path;
+    }
+
+    /** Sets path prefix to strip from displayed file names */
+    public void setStripPrefix(@Nullable String prefix) {
+        stripPrefix = prefix;
+    }
+
+    /**
+     * Value object passed to {@link Reporter} instances providing statistics to include in
+     * the summary
+     */
+    public static final class Stats {
+        public final int errorCount;
+        public final int warningCount;
+        public final int baselineWarningCount;
+        public final int baselineErrorCount;
+        public final int baselineFixedCount;
+
+        public Stats(
+                int errorCount,
+                int warningCount,
+                int baselineErrorCount,
+                int baselineWarningCount,
+                int baselineFixedCount) {
+            this.errorCount = errorCount;
+            this.warningCount = warningCount;
+            this.baselineWarningCount = baselineWarningCount;
+            this.baselineErrorCount = baselineErrorCount;
+            this.baselineFixedCount = baselineFixedCount;
+        }
+
+        public Stats(
+                int errorCount,
+                int warningCount) {
+            this(errorCount, warningCount, 0, 0, 0);
+        }
+
+        public int count() {
+            return errorCount + warningCount;
+        }
     }
 }

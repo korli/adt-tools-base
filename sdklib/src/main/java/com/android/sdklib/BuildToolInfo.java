@@ -16,14 +16,63 @@
 
 package com.android.sdklib;
 
+import static com.android.SdkConstants.FD_LIB;
+import static com.android.SdkConstants.FN_AAPT;
+import static com.android.SdkConstants.FN_AAPT2;
+import static com.android.SdkConstants.FN_AIDL;
+import static com.android.SdkConstants.FN_BCC_COMPAT;
+import static com.android.SdkConstants.FN_DEXDUMP;
+import static com.android.SdkConstants.FN_DX;
+import static com.android.SdkConstants.FN_DX_JAR;
+import static com.android.SdkConstants.FN_JACK;
+import static com.android.SdkConstants.FN_JACK_COVERAGE_PLUGIN;
+import static com.android.SdkConstants.FN_JACK_JACOCO_REPORTER;
+import static com.android.SdkConstants.FN_JILL;
+import static com.android.SdkConstants.FN_LD_ARM;
+import static com.android.SdkConstants.FN_LD_ARM64;
+import static com.android.SdkConstants.FN_LD_MIPS;
+import static com.android.SdkConstants.FN_LD_X86;
+import static com.android.SdkConstants.FN_LD_X86_64;
+import static com.android.SdkConstants.FN_RENDERSCRIPT;
+import static com.android.SdkConstants.FN_SPLIT_SELECT;
+import static com.android.SdkConstants.FN_ZIPALIGN;
+import static com.android.SdkConstants.OS_FRAMEWORK_RS;
+import static com.android.SdkConstants.OS_FRAMEWORK_RS_CLANG;
+import static com.android.sdklib.BuildToolInfo.PathId.AAPT;
+import static com.android.sdklib.BuildToolInfo.PathId.AAPT2;
+import static com.android.sdklib.BuildToolInfo.PathId.AIDL;
+import static com.android.sdklib.BuildToolInfo.PathId.ANDROID_RS;
+import static com.android.sdklib.BuildToolInfo.PathId.ANDROID_RS_CLANG;
+import static com.android.sdklib.BuildToolInfo.PathId.BCC_COMPAT;
+import static com.android.sdklib.BuildToolInfo.PathId.DEXDUMP;
+import static com.android.sdklib.BuildToolInfo.PathId.DX;
+import static com.android.sdklib.BuildToolInfo.PathId.DX_JAR;
+import static com.android.sdklib.BuildToolInfo.PathId.JACK;
+import static com.android.sdklib.BuildToolInfo.PathId.JACK_COVERAGE_PLUGIN;
+import static com.android.sdklib.BuildToolInfo.PathId.JACK_JACOCO_REPORTER;
+import static com.android.sdklib.BuildToolInfo.PathId.JILL;
+import static com.android.sdklib.BuildToolInfo.PathId.LD_ARM;
+import static com.android.sdklib.BuildToolInfo.PathId.LD_ARM64;
+import static com.android.sdklib.BuildToolInfo.PathId.LD_MIPS;
+import static com.android.sdklib.BuildToolInfo.PathId.LD_X86;
+import static com.android.sdklib.BuildToolInfo.PathId.LD_X86_64;
+import static com.android.sdklib.BuildToolInfo.PathId.LLVM_RS_CC;
+import static com.android.sdklib.BuildToolInfo.PathId.SPLIT_SELECT;
+import static com.android.sdklib.BuildToolInfo.PathId.ZIP_ALIGN;
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.annotations.VisibleForTesting.Visibility;
 import com.android.repository.Revision;
+import com.android.repository.api.LocalPackage;
 import com.android.utils.ILogger;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Range;
 
 import java.io.File;
 import java.util.Map;
@@ -127,6 +176,46 @@ public class BuildToolInfo {
         }
     }
 
+    /** Jack API versions. */
+    public enum JackVersion {
+        V4(4, "24.0.3");
+
+        private final int version;
+        private Range<Revision> supportedBetween;
+
+        JackVersion(int version, @NonNull String lowerRevision) {
+            this.version = version;
+            this.supportedBetween = Range.atLeast(Revision.parseRevision(lowerRevision));
+        }
+
+        @SuppressWarnings("unused")
+        JackVersion(int version, @NonNull String lowerRevision, @NonNull String upperRevision) {
+            this.version= version;
+            this.supportedBetween =
+                    Range.closedOpen(
+                            Revision.parseRevision(lowerRevision),
+                            Revision.parseRevision(upperRevision));
+
+        }
+
+        /** Api version. */
+        public int getVersion() {
+            return version;
+        }
+
+        /** Minimum build tools version supporting this API. */
+        @NonNull
+        public Revision getMinRevision() {
+            return supportedBetween.lowerEndpoint();
+        }
+
+        /** The range of build tools supporting this as their highest API level. */
+        @NonNull
+        public Range<Revision> getSupportedBetween() {
+            return supportedBetween;
+        }
+    }
+
     /**
      * Creates a {@link BuildToolInfo} from a directory which follows the standard layout
      * convention.
@@ -136,6 +225,20 @@ public class BuildToolInfo {
             @NonNull Revision revision,
             @NonNull File path) {
         return new BuildToolInfo(revision, path);
+    }
+
+    /**
+     * Creates a {@link BuildToolInfo} from a {@link LocalPackage}.
+     */
+    @NonNull
+    public static BuildToolInfo fromLocalPackage(@NonNull LocalPackage localPackage) {
+        checkNotNull(localPackage, "localPackage");
+        checkArgument(
+                localPackage.getPath().contains(SdkConstants.FD_BUILD_TOOLS),
+                "%s package required.",
+                SdkConstants.FD_BUILD_TOOLS);
+
+        return fromStandardDirectoryLayout(localPackage.getVersion(), localPackage.getLocation());
     }
 
     /**
@@ -340,7 +443,19 @@ public class BuildToolInfo {
         return true;
     }
 
-    @VisibleForTesting(visibility=Visibility.PRIVATE)
+    /** Gets the supported Jack API version. This throws exception if no API is supported. */
+    @NonNull
+    public JackVersion getSupportedJackApi() {
+        for (JackVersion version : JackVersion.values()) {
+            if (version.getSupportedBetween().contains(getRevision())) {
+                return version;
+            }
+        }
+
+        throw new UnsupportedOperationException("Jack API unsupported; update the build tools.");
+    }
+
+    @VisibleForTesting(visibility = Visibility.PRIVATE)
     @Nullable
     static Revision getCurrentJvmVersion() throws NumberFormatException {
         String javav = System.getProperty("java.version");              //$NON-NLS-1$

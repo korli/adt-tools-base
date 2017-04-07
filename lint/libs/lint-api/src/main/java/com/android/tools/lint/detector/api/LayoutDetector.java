@@ -30,7 +30,6 @@ import static com.android.SdkConstants.VALUE_MATCH_PARENT;
 import com.android.annotations.NonNull;
 import com.android.resources.ResourceFolderType;
 import com.google.common.annotations.Beta;
-
 import org.w3c.dom.Element;
 
 /**
@@ -60,7 +59,7 @@ public abstract class LayoutDetector extends ResourceXmlDetector {
         return isFillParent(element, ATTR_LAYOUT_HEIGHT);
     }
 
-    protected boolean hasPadding(@NonNull Element root) {
+    protected static boolean hasPadding(@NonNull Element root) {
         return root.hasAttributeNS(ANDROID_URI, ATTR_PADDING)
                 || root.hasAttributeNS(ANDROID_URI, ATTR_PADDING_LEFT)
                 || root.hasAttributeNS(ANDROID_URI, ATTR_PADDING_RIGHT)

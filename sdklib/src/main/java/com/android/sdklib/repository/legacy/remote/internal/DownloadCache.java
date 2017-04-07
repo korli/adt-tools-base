@@ -24,21 +24,19 @@ import com.android.annotations.VisibleForTesting.Visibility;
 import com.android.prefs.AndroidLocation;
 import com.android.prefs.AndroidLocation.AndroidLocationException;
 import com.android.repository.api.RepoManager;
+import com.android.repository.api.SettingsController;
 import com.android.repository.io.FileOp;
 import com.android.repository.io.FileOpUtils;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.utils.Pair;
-import com.google.common.io.Closer;
 
 import org.apache.http.Header;
 import org.apache.http.HttpHeaders;
-import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.message.BasicHeader;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -144,6 +142,7 @@ public class DownloadCache {
     private final FileOp mFileOp;
     private final File mCacheRoot;
     private final Strategy mStrategy;
+    private final SettingsController mSettings;
 
     public File getCacheRoot() {
         return mCacheRoot;
@@ -176,15 +175,28 @@ public class DownloadCache {
         DIRECT
     }
 
-    /** Creates a default instance of the URL cache */
-    public DownloadCache(@NonNull Strategy strategy) {
-        this(FileOpUtils.create(), strategy);
+    public static DownloadCache inUserHome(
+            @NonNull FileOp fileOp,
+            @NonNull Strategy strategy,
+            @NonNull SettingsController settings) {
+        File androidFolder;
+        try {
+            androidFolder = new File(AndroidLocation.getFolder());
+        } catch (AndroidLocationException e) {
+            androidFolder = null;
+        }
+        return new DownloadCache(androidFolder, fileOp, strategy, settings);
     }
 
     /** Creates a default instance of the URL cache */
-    public DownloadCache(@NonNull FileOp fileOp, @NonNull Strategy strategy) {
+    public DownloadCache(
+            @Nullable File androidFolder,
+            @NonNull FileOp fileOp,
+            @NonNull Strategy strategy,
+            @NonNull SettingsController settings) {
         mFileOp = fileOp;
-        mCacheRoot = initCacheRoot();
+        mSettings = settings;
+        mCacheRoot = initCacheRoot(androidFolder);
 
         // If this is defined in the environment, never use the cache. Useful for testing.
         if (System.getenv("SDKMAN_DISABLE_CACHE") != null) {                 //$NON-NLS-1$
@@ -202,30 +214,26 @@ public class DownloadCache {
     /**
      * Returns the directory to be used as a cache.
      * Creates it if necessary.
-     * Makes it possible to disable or override the cache location in unit tests.
      *
      * @return An existing directory to use as a cache root dir,
      *   or null in case of error in which case the cache will be disabled.
+     * @param androidFolder
      */
-    @VisibleForTesting(visibility=Visibility.PRIVATE)
     @Nullable
-    protected File initCacheRoot() {
-        try {
-            File root = new File(AndroidLocation.getFolder());
-            root = new File(root, SdkConstants.FD_CACHE);
-            if (!mFileOp.exists(root)) {
-                mFileOp.mkdirs(root);
-            }
-            return root;
-        } catch (AndroidLocationException e) {
-            // No root? Disable the cache.
+    private File initCacheRoot(@Nullable File androidFolder) {
+        if (androidFolder == null) {
             return null;
         }
+
+        File cacheRoot = new File(androidFolder, SdkConstants.FD_CACHE);
+        if (!mFileOp.exists(cacheRoot)) {
+            mFileOp.mkdirs(cacheRoot);
+        }
+        return cacheRoot;
     }
 
     /**
-     * Calls {@link HttpConfigurable#openHttpConnection(String)}
-     * to actually perform a download.
+     * Calls {@link URL#openConnection()} to actually perform a download.
      * <p>
      * Isolated so that it can be overridden by unit tests.
      */
@@ -236,7 +244,7 @@ public class DownloadCache {
             boolean needsMarkResetSupport,
             @NonNull ITaskMonitor monitor,
             @Nullable Header[] headers) throws IOException {
-        URLConnection connection = new URL(url).openConnection();
+        URLConnection connection = new URL(url).openConnection(mSettings.getProxy());
         if (headers != null) {
             for (Header header : headers) {
                 connection.setRequestProperty(header.getName(), header.getValue());
@@ -344,6 +352,10 @@ public class DownloadCache {
         URLConnection connection = result.getSecond();
         if (connection instanceof HttpURLConnection) {
             response = ((HttpURLConnection)connection).getResponseCode();
+        }
+        else {
+            // Not an http connection, so just assume it worked.
+            response = 200;
         }
         return Pair.of(result.getFirst(), response);
     }

@@ -15,6 +15,8 @@
  */
 
 package com.android.build.gradle.integration.application
+
+import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.builder.model.AndroidArtifact
 import com.android.builder.model.AndroidProject
@@ -26,14 +28,14 @@ import org.junit.ClassRule
 import org.junit.Test
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 import static org.junit.Assert.assertEquals
 /**
  * MultiAPK test where densities are obtained automatically.
  */
 @CompileStatic
 class AutoDensitySplitTest {
-    static AndroidProject model
+    static GetAndroidModelAction.ModelContainer<AndroidProject> model
 
     @ClassRule
     static public GradleTestProject project = GradleTestProject.builder()
@@ -62,7 +64,7 @@ class AutoDensitySplitTest {
 
     @Test
     void testPackaging() {
-        for (Variant variant : model.getVariants()) {
+        for (Variant variant : model.getOnlyModel().getVariants()) {
             AndroidArtifact mainArtifact = variant.getMainArtifact()
             if (!variant.getBuildType().equalsIgnoreCase("Debug")) {
                 continue

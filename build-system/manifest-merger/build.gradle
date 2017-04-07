@@ -1,8 +1,6 @@
 apply plugin: 'java'
-apply plugin: 'jacoco'
+apply plugin: 'jacoco-tools-base'
 apply plugin: 'sdk-java-lib'
-
-evaluationDependsOn(':base:sdklib')
 
 group = 'com.android.tools.build'
 archivesBaseName = 'manifest-merger'
@@ -12,12 +10,12 @@ dependencies {
     compile project(':base:common')
     compile project(':base:sdklib')
     compile project(':base:sdk-common')
-    compile 'net.sf.kxml:kxml2:2.3.0'
-    compile 'com.google.code.gson:gson:2.2.4'
+    compile libs.kxml
+    compile libs.gson
 
-    testCompile project(':base:sdklib').sourceSets.test.output
-    testCompile 'junit:junit:4.12'
-    testCompile 'org.mockito:mockito-all:1.9.5'
+    testCompile libs.junit
+    testCompile libs.mockito_all
+    testCompile project(':base:testutils')
 }
 
 sourceSets {

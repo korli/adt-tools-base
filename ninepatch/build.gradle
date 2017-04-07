@@ -1,13 +1,12 @@
 apply plugin: 'java'
-apply plugin: 'jacoco'
-apply plugin: 'sdk-java-lib'
+apply plugin: 'jacoco-tools-base'
 
 group = 'com.android.tools'
 archivesBaseName = 'ninepatch'
 version = rootProject.ext.baseVersion
 
 dependencies {
-    testCompile 'junit:junit:4.12'
+    testCompile libs.junit
 }
 
 sourceSets {

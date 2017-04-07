@@ -17,38 +17,34 @@
 package com.android.builder.profile;
 
 import com.android.annotations.NonNull;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats.GradleBuildProfileSpan.ExecutionType;
-
+import com.google.common.jimfs.Jimfs;
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan.ExecutionType;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.Mockito;
-
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Tests for the {@link ThreadRecorder} class.
  */
 public class ThreadRecorderTest {
 
+    Recorder threadRecorder;
+    
     @Before
-    public void setUp() {
-
-        // reset for each test.
-        ProcessRecorderFactory.sINSTANCE = new ProcessRecorderFactory();
-        ProcessRecorderFactory.sINSTANCE.setRecordWriter(
-                Mockito.mock(ProcessRecorder.ExecutionRecordWriter.class));
+    public void setUp() throws IOException {
+        Path outputFile = Jimfs.newFileSystem().getPath("profile_proto");
+        ProcessProfileWriterFactory.initializeForTests(outputFile);
+        threadRecorder = ThreadRecorder.get();
     }
 
     @Test
     public void testBasicTracing() {
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                ":projectName", null, new Recorder.Block<Integer>() {
-                    @Override
-                    public Integer call() throws Exception{
-                        return 10;
-                    }
-                });
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
+                ":projectName", null, () -> 10);
 
         Assert.assertNotNull(value);
         Assert.assertEquals(10, value.intValue());
@@ -57,10 +53,10 @@ public class ThreadRecorderTest {
     @Test
     public void testBasicNoExceptionHandling() {
         final AtomicBoolean handlerCalled = new AtomicBoolean(false);
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                 ":projectName", null, new Recorder.Block<Integer>() {
                     @Override
-                    public Integer call() throws Exception{
+                    public Integer call() throws Exception {
                         return 10;
                     }
 
@@ -80,7 +76,7 @@ public class ThreadRecorderTest {
     public void testBasicExceptionHandling() {
         final Exception toBeThrown = new Exception("random");
         final AtomicBoolean handlerCalled = new AtomicBoolean(false);
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                 ":projectName", null, new Recorder.Block<Integer>() {
                     @Override
                     public Integer call() throws Exception {
@@ -100,19 +96,11 @@ public class ThreadRecorderTest {
 
     @Test
     public void testBlocks() {
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                ":projectName", null, new Recorder.Block<Integer>() {
-                    @Override
-                    public Integer call() throws Exception {
-                        return ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                                ":projectName", null, new Recorder.Block<Integer>() {
-                                    @Override
-                                    public Integer call() throws Exception {
-                                        return 10;
-                                    }
-                                });
-                    }
-                });
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
+                ":projectName", null, () ->
+                        threadRecorder.record(
+                                ExecutionType.SOME_RANDOM_PROCESSING,
+                                ":projectName", null, () -> 10));
 
         Assert.assertNotNull(value);
         Assert.assertEquals(10, value.intValue());
@@ -122,25 +110,21 @@ public class ThreadRecorderTest {
     public void testBlocksWithInnerException() {
         final Exception toBeThrown = new Exception("random");
         final AtomicBoolean handlerCalled = new AtomicBoolean(false);
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                ":projectName", null, new Recorder.Block<Integer>() {
-                    @Override
-                    public Integer call() throws Exception {
-                        return ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                                ":projectName", null, new Recorder.Block<Integer>() {
-                                    @Override
-                                    public Integer call() throws Exception {
-                                        throw toBeThrown;
-                                    }
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
+                ":projectName", null, () -> threadRecorder.record(
+                        ExecutionType.SOME_RANDOM_PROCESSING,
+                        ":projectName", null, new Recorder.Block<Integer>() {
+                            @Override
+                            public Integer call() throws Exception {
+                                throw toBeThrown;
+                            }
 
-                                    @Override
-                                    public void handleException(@NonNull Exception e) {
-                                        handlerCalled.set(true);
-                                        Assert.assertEquals(toBeThrown, e);
-                                    }
-                                });
-                    }
-                });
+                            @Override
+                            public void handleException(@NonNull Exception e) {
+                                handlerCalled.set(true);
+                                Assert.assertEquals(toBeThrown, e);
+                            }
+                        }));
         Assert.assertTrue(handlerCalled.get());
         Assert.assertNull(value);
     }
@@ -149,17 +133,12 @@ public class ThreadRecorderTest {
     public void testBlocksWithOuterException() {
         final Exception toBeThrown = new Exception("random");
         final AtomicBoolean handlerCalled = new AtomicBoolean(false);
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                 ":projectName", null, new Recorder.Block<Integer>() {
                     @Override
                     public Integer call() throws Exception {
-                        ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                                ":projectName", null, new Recorder.Block<Integer>() {
-                                    @Override
-                                    public Integer call() throws Exception {
-                                        return 10;
-                                    }
-                                });
+                        threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
+                                ":projectName", null, () -> 10);
                         throw toBeThrown;
                     }
 
@@ -177,11 +156,11 @@ public class ThreadRecorderTest {
     public void testBlocksWithInnerExceptionRepackaged() {
         final Exception toBeThrown = new Exception("random");
         final AtomicBoolean handlerCalled = new AtomicBoolean(false);
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                 ":projectName", null, new Recorder.Block<Integer>() {
                     @Override
                     public Integer call() throws Exception {
-                        return ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+                        return threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                                 ":projectName", null, new Recorder.Block<Integer>() {
                                     @Override
                                     public Integer call() throws Exception {
@@ -206,26 +185,23 @@ public class ThreadRecorderTest {
         final Exception toBeThrown = new Exception("random");
         final AtomicBoolean handlerCalled = new AtomicBoolean(false);
         // make three layers and throw an exception from the bottom layer, ensure the exception
-        // is not repackaged in a RuntimeException several time as it makes its way back up
+        // is not repackaged in a RuntimeException several times as it makes its way back up
         // to the handler.
-        Integer value = ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+        Integer value = threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                 ":projectName", null, new Recorder.Block<Integer>() {
                     @Override
                     public Integer call() throws Exception {
-                        return ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
-                                ":projectName", null, new Recorder.Block<Integer>() {
-                                    @Override
-                                    public Integer call() throws Exception {
-                                        return ThreadRecorder.get().record(
-                                                ExecutionType.SOME_RANDOM_PROCESSING,
-                                                ":projectName", null, new Recorder.Block<Integer>() {
-                                                    @Override
-                                                    public Integer call() throws Exception {
-                                                        throw toBeThrown;
-                                                    }
-                                                });
-                                    }
-                                });
+                        return threadRecorder.record(
+                                ExecutionType.SOME_RANDOM_PROCESSING,
+                                ":projectName",
+                                null,
+                                () -> threadRecorder.record(
+                                        ExecutionType.SOME_RANDOM_PROCESSING,
+                                        ":projectName",
+                                        null,
+                                        () -> {
+                                            throw toBeThrown;
+                                        }));
                     }
 
                     @Override
@@ -243,7 +219,7 @@ public class ThreadRecorderTest {
     public void testExceptionPropagation() {
         final Exception toBeThrown = new Exception("random");
         try {
-            ThreadRecorder.get().record(ExecutionType.SOME_RANDOM_PROCESSING,
+            threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                     ":projectName", null, new Recorder.Block<Integer>() {
                         @Override
                         public Integer call() throws Exception {
@@ -251,6 +227,20 @@ public class ThreadRecorderTest {
                         }
                     });
         } catch (Exception e) {
+            Assert.assertEquals(toBeThrown, e.getCause());
+            return;
+        }
+        Assert.fail("Exception not propagated.");
+    }
+
+
+    @Test
+    public void testVoidBlockExceptionPropagation() {
+        final IOException toBeThrown = new IOException("random");
+        try {
+            threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
+                    ":projectName", null, (Recorder.VoidBlock) () -> {throw toBeThrown;});
+        } catch (UncheckedIOException e) {
             Assert.assertEquals(toBeThrown, e.getCause());
             return;
         }

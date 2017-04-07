@@ -22,12 +22,13 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
+import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.core.Toolchain;
 import com.android.repository.Revision;
+import com.android.utils.Pair;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -35,6 +36,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.Collection;
 import java.util.Properties;
+import org.gradle.api.logging.Logging;
 
 /**
  * Handles NDK related information.
@@ -50,8 +52,11 @@ public class NdkHandler {
     private final File ndkDirectory;
     @Nullable
     private final NdkInfo ndkInfo;
+    @Nullable
+    private final Revision revision;
 
     private static final int LATEST_SUPPORTED_VERSION = 13;
+    public static final String NDK_BUNDLE_SUBPATH = "ndk-bundle";
 
     public NdkHandler(
             @NonNull File projectDir,
@@ -63,16 +68,20 @@ public class NdkHandler {
         this.platformVersion = platformVersion;
         ndkDirectory = findNdkDirectory(projectDir);
 
-        if (ndkDirectory == null) {
+        if (ndkDirectory == null || !ndkDirectory.exists()) {
             ndkInfo = null;
+            revision = null;
         } else {
-            Revision revision = findRevision(ndkDirectory);
+            revision = findRevision(ndkDirectory);
             if (revision == null) {
                 ndkInfo = new DefaultNdkInfo(ndkDirectory);
             } else if (revision.getMajor() > LATEST_SUPPORTED_VERSION) {
-                ndkInfo = new NdkR13Info(ndkDirectory);
+                ndkInfo = new NdkR14Info(ndkDirectory);
             } else {
                 switch (revision.getMajor()) {
+                    case 14:
+                        ndkInfo = new NdkR14Info(ndkDirectory);
+                        break;
                     case 13:
                         ndkInfo = new NdkR13Info(ndkDirectory);
                         break;
@@ -124,6 +133,12 @@ public class NdkHandler {
         }
     }
 
+
+    @Nullable
+    public Revision getRevision() {
+        return revision;
+    }
+
     @Nullable
     private String getPlatformVersion() {
         if (platformVersion == null && compileSdkVersion != null) {
@@ -145,32 +160,74 @@ public class NdkHandler {
         return toolchainVersion;
     }
 
+    @Nullable
+    private static File findNdkDirectory(@NonNull File projectDir) {
+        File localProperties = new File(projectDir, FN_LOCAL_PROPERTIES);
+        Properties properties = new Properties();
+        if (localProperties.isFile()) {
+            properties = readProperties(localProperties);
+        }
+
+        File ndkDir = findNdkDirectory(properties, projectDir);
+        if (ndkDir == null) {
+            return null;
+        }
+        return checkNdkDir(ndkDir) ? ndkDir : null;
+    }
+
+    /**
+     * Perform basic verification on the NDK directory.
+     */
+    private static boolean checkNdkDir(File ndkDir) {
+        if (!new File(ndkDir, "platforms").isDirectory()) {
+            invalidNdkWarning("NDK is missing a \"platforms\" directory.", ndkDir);
+            return false;
+        }
+        if (!new File(ndkDir, "toolchains").isDirectory()) {
+            invalidNdkWarning("NDK is missing a \"toolchains\" directory.", ndkDir);
+            return false;
+        }
+        return true;
+    }
+
+    private static void invalidNdkWarning(String message, File ndkDir) {
+        Logging.getLogger(NdkHandler.class).warn(
+                "{}\n"
+                        + "If you are using NDK, verify the ndk.dir is set to a valid NDK "
+                        + "directory.  It is currently set to {}.\n"
+                        + "If you are not using NDK, unset the NDK variable from ANDROID_NDK_HOME "
+                        + "or local.properties to remove this warning.\n",
+                message,
+                ndkDir.getAbsolutePath());
+    }
+
     /**
      * Determine the location of the NDK directory.
      *
-     * The NDK directory can be set in the local.properties file or using the ANDROID_NDK_HOME
-     * environment variable.
+     * The NDK directory can be set in the local.properties file, using the ANDROID_NDK_HOME
+     * environment variable or come bundled with the SDK.
      *
      * Return null if NDK directory is not found.
      */
     @Nullable
-    private static File findNdkDirectory(@NonNull File projectDir) {
-        File localProperties = new File(projectDir, FN_LOCAL_PROPERTIES);
-
-        if (localProperties.isFile()) {
-
-            Properties properties = readProperties(localProperties);
-            String ndkDirProp = properties.getProperty("ndk.dir");
-            if (ndkDirProp != null) {
-                return new File(ndkDirProp);
-            }
-
-        } else {
-            String envVar = System.getenv("ANDROID_NDK_HOME");
-            if (envVar != null) {
-                return new File(envVar);
-            }
+    public static File findNdkDirectory(@NonNull Properties properties, @NonNull File projectDir) {
+        String ndkDirProp = properties.getProperty("ndk.dir");
+        if (ndkDirProp != null) {
+            return new File(ndkDirProp);
         }
+
+        String ndkEnvVar = System.getenv("ANDROID_NDK_HOME");
+        if (ndkEnvVar != null) {
+            return new File(ndkEnvVar);
+        }
+
+        Pair<File, Boolean> sdkLocation = SdkHandler.findSdkLocation(properties, projectDir);
+        File sdkFolder = sdkLocation.getFirst();
+        if (sdkFolder != null) {
+            // Worth checking if the NDK came bundled with the SDK
+            return new File(sdkFolder, NDK_BUNDLE_SUBPATH);
+        }
+
         return null;
     }
 
@@ -186,7 +243,7 @@ public class NdkHandler {
      * Return true if NDK directory is configured.
      */
     public boolean isConfigured() {
-        return ndkDirectory != null;
+        return ndkDirectory != null && ndkDirectory.isDirectory();
     }
 
     /**
@@ -315,6 +372,23 @@ public class NdkHandler {
         return ndkInfo.getCppCompiler(toolchain, toolchainVersion, abi);
     }
 
+    /**
+     * Return the executable for linking binary files.
+     */
+    @NonNull
+    public File getLinker(@NonNull Abi abi) {
+        checkNotNull(ndkInfo);
+        return ndkInfo.getLinker(toolchain, toolchainVersion, abi);
+    }
+
+    /**
+     * Return the executable for assembling code.
+     */
+    @NonNull
+    public File getAssembler(@NonNull Abi abi) {
+        checkNotNull(ndkInfo);
+        return ndkInfo.getAssembler(toolchain, toolchainVersion, abi);
+    }
     /**
      * Return the static archiver.
      */

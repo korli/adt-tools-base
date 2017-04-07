@@ -16,24 +16,34 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.CONSTRUCTOR_NAME;
+import static org.objectweb.asm.Opcodes.ACC_PRIVATE;
+import static org.objectweb.asm.Opcodes.ACC_PROTECTED;
+import static org.objectweb.asm.Opcodes.ACC_PUBLIC;
+import static org.objectweb.asm.Opcodes.ACC_STATIC;
+
 import com.android.annotations.NonNull;
 import com.android.tools.lint.client.api.LintDriver;
-import com.android.tools.lint.detector.api.*;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Detector.ClassScanner;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.Location;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.MethodNode;
-
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-
-import static com.android.SdkConstants.CONSTRUCTOR_NAME;
-import static org.objectweb.asm.Opcodes.*;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodNode;
 
 /**
  * Checks for accidental overrides
@@ -41,7 +51,7 @@ import static org.objectweb.asm.Opcodes.*;
 public class OverrideDetector extends Detector implements ClassScanner {
     /** Accidental overrides */
     public static final Issue ISSUE = Issue.create(
-            "DalvikOverride", //$NON-NLS-1$
+            "DalvikOverride",
             "Method considered overridden by Dalvik",
 
             "The Android virtual machine will treat a package private method in one " +
@@ -77,12 +87,6 @@ public class OverrideDetector extends Detector implements ClassScanner {
 
     /** Constructs a new {@link OverrideDetector} */
     public OverrideDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.NORMAL;
     }
 
     @Override

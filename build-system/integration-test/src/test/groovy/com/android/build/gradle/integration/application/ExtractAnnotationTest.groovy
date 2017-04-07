@@ -24,14 +24,14 @@ import org.junit.BeforeClass
 import org.junit.ClassRule
 import org.junit.Test
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 /**
  * Integration test for extracting annotations.
  * <p>
  * Tip: To execute just this test after modifying the annotations extraction code:
  * <pre>
  *     $ cd tools
- *     $ ./gradlew :base:int:test --tests com.android.build.gradle.integration.application.ExtractAnnotationTest
+ *     $ ./gradlew :base:integration-test:test -D:base:integration-test:test.single=ExtractAnnotationTest
  * </pre>
  */
 @CompileStatic

@@ -28,7 +28,7 @@ import com.android.build.OutputFile.FilterType;
 import com.android.build.OutputFile.OutputType;
 import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.api.ApkOutputFile;
-import com.android.build.gradle.internal.model.FilterDataImpl;
+import com.android.build.gradle.internal.ide.FilterDataImpl;
 import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
@@ -81,8 +81,6 @@ public class SplitZipAlign extends SplitRelatedTask {
     private File outputDirectory;
 
     private File zipAlignExe;
-
-    private boolean useOldPackaging;
 
     @Nullable
     private File apkMetadataFile;
@@ -342,8 +340,7 @@ public class SplitZipAlign extends SplitRelatedTask {
         @Override
         public void execute(@NonNull SplitZipAlign zipAlign) {
             BaseVariantData<? extends BaseVariantOutputData> variantData = scope.getVariantData();
-            List<? extends BaseVariantOutputData> outputs = variantData.getOutputs();
-            final BaseVariantOutputData variantOutputData = outputs.get(0);
+            final BaseVariantOutputData variantOutputData = variantData.getMainOutput();
 
             final VariantConfiguration config = scope.getVariantConfiguration();
             Set<String> densityFilters = variantData.getFilters(DENSITY);
@@ -383,9 +380,6 @@ public class SplitZipAlign extends SplitRelatedTask {
                     "metadata");
             zipAlign.setApkMetadataFile(new File(metadataDirectory, config.getFullName() + ".mtd"));
             ((ApkVariantOutputData) variantOutputData).splitZipAlign = zipAlign;
-
-            zipAlign.useOldPackaging = AndroidGradleOptions.useOldPackaging(
-                    scope.getGlobalScope().getProject());
         }
     }
 }

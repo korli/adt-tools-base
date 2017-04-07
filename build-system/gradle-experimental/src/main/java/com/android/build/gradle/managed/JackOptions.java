@@ -21,7 +21,7 @@ import com.android.annotations.NonNull;
 import org.gradle.model.Managed;
 import org.gradle.model.ModelMap;
 
-import java.util.Map;
+import java.util.List;
 
 /**
  * Managed type for Jack options.
@@ -31,7 +31,7 @@ public interface JackOptions {
     /**
      * Returns whether to use Jack for compilation.
      *
-     * <p>See <a href="http://tools.android.com/tech-docs/jackandjill">Jack and Jill</a>
+     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
      */
     Boolean getEnabled();
 
@@ -49,4 +49,10 @@ public interface JackOptions {
      */
     @NonNull
     ModelMap<KeyValuePair> getAdditionalParameters();
+
+    /**
+     * Jack plugins that will be added to the Jack pipeline.
+     */
+    @NonNull
+    List<String> getPluginNames();
 }

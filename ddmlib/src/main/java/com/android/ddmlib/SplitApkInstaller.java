@@ -17,6 +17,7 @@ package com.android.ddmlib;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.sdklib.AndroidVersion;
 import com.google.common.base.CharMatcher;
 import com.google.common.base.Joiner;
 
@@ -37,24 +38,30 @@ public class SplitApkInstaller {
     @NonNull private final List<File> mApks;
     @NonNull private final String mOptions;
 
+    private final String mPrefix;
+
     private SplitApkInstaller(@NonNull IDevice device, @NonNull List<File> apks,
             @NonNull String options) {
         mDevice = device;
         mApks = apks;
         mOptions = options;
+
+        // Use "cmd package" when possible to avoid starting up a new VM
+        mPrefix = mDevice.getVersion().isGreaterOrEqualThan(
+                AndroidVersion.BINDER_CMD_AVAILABLE.getApiLevel()) ? "cmd package" : "pm";
     }
 
     public void install(long timeout, @NonNull TimeUnit unit) throws InstallException {
         // Installing multiple APK's is perfomed as follows:
         //  # First we create a install session passing in the total size of all APKs
-        //      $ pm install-create -S <total_size>
+        //      $ [pm|cmd package] install-create -S <total_size>
         //      Success: [integer-session-id]   # error if session-id < 0
         //  # Then for each APK, we perform the following. A unique id per APK is generated
         //  # as <index>_<name>, the - at the end means that the APK is streamed via stdin
-        //      $ pm install-write -S <session-id> <per_apk_unique_id> -
+        //      $ [pm|cmd package] install-write -S <session-id> <per_apk_unique_id> -
         //  # Finally, we close the session
-        //      $ pm install-commit <session-id>  (or)
-        //      $ pm install-abandon <session-id>
+        //      $ [pm|cmd package] install-commit <session-id>  (or)
+        //      $ [pm|cmd package] install-abandon <session-id>
 
         try {
             // create a installation session.
@@ -73,7 +80,7 @@ public class SplitApkInstaller {
             }
 
             // if all files were upload successfully, commit otherwise abandon the installation.
-            String command = "pm install-" +
+            String command = mPrefix + " install-" +
                     (allUploadSucceeded ? "commit " : "abandon ") +
                     sessionId;
             Device.InstallReceiver receiver = new Device.InstallReceiver();
@@ -106,8 +113,8 @@ public class SplitApkInstaller {
             totalFileSize += apkFile.length();
         }
 
-        MultiInstallReceiver receiver = new MultiInstallReceiver();
-        String cmd = String.format("pm install-create %1$s -S %2$d", pmOptions, totalFileSize);
+        InstallCreateReceiver receiver = new InstallCreateReceiver();
+        String cmd = String.format(mPrefix + " install-create %1$s -S %2$d", pmOptions, totalFileSize);
         mDevice.executeShellCommand(cmd, receiver, timeout, unit);
         return receiver.getSessionId();
     }
@@ -134,14 +141,14 @@ public class SplitApkInstaller {
 
         baseName = UNSAFE_PM_INSTALL_SESSION_SPLIT_NAME_CHARS.replaceFrom(baseName, '_');
 
-        String command = String.format("pm install-write -S %d %s %d_%s -",
+        String command = String.format(mPrefix + " install-write -S %d %s %d_%s -",
                 fileToUpload.length(), sessionId, uniqueId, baseName);
 
         Log.d(sessionId, String.format("Executing : %1$s", command));
         InputStream inputStream = null;
         try {
             inputStream = new BufferedInputStream(new FileInputStream(fileToUpload));
-            Device.InstallReceiver receiver = new Device.InstallReceiver();
+            InstallWriteReceiver receiver = new InstallWriteReceiver();
             AdbHelper.executeRemoteCommand(AndroidDebugBridge.getSocketAddress(),
                     AdbHelper.AdbService.EXEC, command, mDevice,
                     receiver, timeout, unit, inputStream);
@@ -187,7 +194,7 @@ public class SplitApkInstaller {
                         "Cannot do a partial install without knowing the application id");
             }
 
-            sb.append("-r ");
+            sb.append("-p ");
             sb.append(applicationId);
             sb.append(' ');
         }
@@ -209,11 +216,10 @@ public class SplitApkInstaller {
             }
         }
 
-        if (!device.getVersion().isGreaterOrEqualThan(21)) {
-            if (apks.size() > 1) {
-                throw new IllegalArgumentException(
-                  "Cannot install split APKs on device with API level < 21");
-            }
+        int apiWithSplitApk = AndroidVersion.ALLOW_SPLIT_APK_INSTALLATION.getApiLevel();
+        if (!device.getVersion().isGreaterOrEqualThan(apiWithSplitApk)) {
+            throw new IllegalArgumentException(
+              "Cannot install split APKs on device with API level < " + apiWithSplitApk);
         }
     }
 
@@ -238,8 +244,7 @@ public class SplitApkInstaller {
      * Implementation of {@link com.android.ddmlib.MultiLineReceiver} that can receive a
      * Success message from ADB followed by a session ID.
      */
-    private static class MultiInstallReceiver extends MultiLineReceiver {
-
+    private static class InstallCreateReceiver extends MultiLineReceiver {
         private static final Pattern successPattern = Pattern.compile("Success: .*\\[(\\d*)\\]");
 
         @Nullable String sessionId = null;
@@ -262,6 +267,45 @@ public class SplitApkInstaller {
         @Nullable
         public String getSessionId() {
             return sessionId;
+        }
+    }
+
+    static class InstallWriteReceiver extends MultiLineReceiver {
+        private boolean processedFirstLine;
+        private boolean success;
+        private StringBuffer errorBuffer;
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        @Override
+        public void processNewLines(String[] lines) {
+            if (!processedFirstLine) {
+                processedFirstLine = true;
+                success = lines[0].startsWith("Success");
+            }
+
+            if (!success) {
+                if (errorBuffer == null) {
+                    errorBuffer = new StringBuffer(100);
+                }
+
+                for (String line : lines) {
+                    errorBuffer.append(line);
+                    errorBuffer.append('\n');
+                }
+            }
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        @Nullable
+        public String getErrorMessage() {
+            return errorBuffer == null ? null : errorBuffer.toString();
         }
     }
 }

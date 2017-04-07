@@ -19,6 +19,7 @@ package com.android.build.gradle.model;
 import static com.android.builder.core.VariantType.ANDROID_TEST;
 import static com.android.builder.core.VariantType.UNIT_TEST;
 
+import com.android.SdkConstants;
 import com.android.build.gradle.internal.ProductFlavorCombo;
 import com.android.build.gradle.managed.AndroidConfig;
 import com.android.build.gradle.managed.BuildType;
@@ -27,8 +28,6 @@ import com.android.build.gradle.model.internal.AndroidBinaryInternal;
 import com.android.build.gradle.model.internal.AndroidComponentSpecInternal;
 import com.android.build.gradle.model.internal.DefaultAndroidBinary;
 import com.android.build.gradle.model.internal.DefaultAndroidComponentSpec;
-import com.android.build.gradle.model.internal.DefaultAndroidLanguageSourceSet;
-import com.android.build.gradle.model.internal.DefaultJniLibsSourceSet;
 import com.android.builder.Version;
 import com.android.builder.core.BuilderConstants;
 import com.android.repository.Revision;
@@ -71,7 +70,7 @@ public class AndroidComponentModelPlugin implements Plugin<Project> {
      */
     public static final String COMPONENT_NAME = "android";
 
-    public static final String GRADLE_ACCEPTABLE_VERSION = "2.14.1";
+    public static final String GRADLE_ACCEPTABLE_VERSION = "3.3";
 
     private static final String GRADLE_VERSION_CHECK_OVERRIDE_PROPERTY =
             "com.android.build.gradle.overrideVersionCheck";
@@ -89,17 +88,17 @@ public class AndroidComponentModelPlugin implements Plugin<Project> {
      * is compiled with.  Throw an error and suggest to update this plugin.
      */
     public static void checkPluginVersion() {
-        String actualGradlePluginVersion = Version.getAndroidGradleComponentPluginVersion();
+        String actualGradlePluginVersion = Version.ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION;
         if(!actualGradlePluginVersion.equals(
                 com.android.build.gradle.model.Version.ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION)) {
             throw new UnsupportedVersionException(String.format("Plugin version mismatch.  "
                             + "'com.android.tools.build:gradle:%s' was applied, and it "
                             + "requires 'com.android.tools.build:gradle-experimental:%s'.  Current "
                             + "version is '%s'.  Please update to version '%s'.",
-                    Version .getAndroidGradlePluginVersion(),
-                    Version .getAndroidGradleComponentPluginVersion(),
+                    Version.ANDROID_GRADLE_PLUGIN_VERSION,
+                    Version.ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION,
                     com.android.build.gradle.model.Version.ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION,
-                    Version .getAndroidGradleComponentPluginVersion()));
+                    Version.ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION));
         }
     }
 
@@ -168,13 +167,15 @@ public class AndroidComponentModelPlugin implements Plugin<Project> {
         @Model
         public static List<ProductFlavorCombo<ProductFlavor>> createProductFlavorCombo(
                 @Path("android.productFlavors") ModelMap<ProductFlavor> productFlavors) {
-            // TODO: Create custom product flavor container to manually configure flavor dimensions.
-            Set<String> flavorDimensionList = productFlavors.values().stream()
+            List<String> flavorDimensionList = productFlavors.values().stream()
                     .filter(flavor -> flavor.getDimension() != null)
-                    .map(ProductFlavor::getDimension).collect(Collectors.toSet());
+                    .map(ProductFlavor::getDimension)
+                    .distinct()
+                    .sorted()
+                    .collect(Collectors.toList());
 
             return ProductFlavorCombo.createCombinations(
-                    Lists.newArrayList(flavorDimensionList),
+                    flavorDimensionList,
                     productFlavors.values());
         }
 

@@ -16,14 +16,16 @@
 
 package com.android.tools.lint.client.api;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.ide.common.repository.GradleVersion;
 import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.checks.UnusedResourceDetector;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Severity;
-
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
@@ -38,18 +40,43 @@ public class ProjectTest extends AbstractCheckTest {
     public void testCycle() throws Exception {
         // Ensure that a cycle in library project dependencies doesn't cause
         // infinite directory traversal
+        //noinspection all // Sample code
         File master = getProjectDir("MasterProject",
                 // Master project
-                "multiproject/main-manifest.xml=>AndroidManifest.xml",
-                "multiproject/main.properties=>project.properties",
-                "multiproject/MainCode.java.txt=>src/foo/main/MainCode.java"
+                manifest().pkg("foo.master").minSdk(14),
+                projectProperties().property("android.library.reference.1", "../LibraryProject"),
+                java(""
+                            + "package foo.main;\n"
+                            + "\n"
+                            + "public class MainCode {\n"
+                            + "    static {\n"
+                            + "        System.out.println(R.string.string2);\n"
+                            + "    }\n"
+                            + "}\n")
         );
+        //noinspection all // Sample code
         File library = getProjectDir("LibraryProject",
                 // Library project
-                "multiproject/library-manifest.xml=>AndroidManifest.xml",
-                "multiproject/main.properties=>project.properties", // RECURSIVE - points to self
-                "multiproject/LibraryCode.java.txt=>src/foo/library/LibraryCode.java",
-                "multiproject/strings.xml=>res/values/strings.xml"
+                manifest().pkg("foo.library").minSdk(14),
+                projectProperties().property("android.library.reference.1", "../LibraryProject"), // RECURSIVE - points to self
+                java(""
+                            + "package foo.library;\n"
+                            + "\n"
+                            + "public class LibraryCode {\n"
+                            + "    static {\n"
+                            + "        System.out.println(R.string.string1);\n"
+                            + "    }\n"
+                            + "}\n"),
+                xml("res/values/strings.xml", ""
+                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                            + "<resources>\n"
+                            + "\n"
+                            + "    <string name=\"app_name\">LibraryProject</string>\n"
+                            + "    <string name=\"string1\">String 1</string>\n"
+                            + "    <string name=\"string2\">String 2</string>\n"
+                            + "    <string name=\"string3\">String 3</string>\n"
+                            + "\n"
+                            + "</resources>\n")
         );
 
         assertEquals(""
@@ -143,37 +170,37 @@ public class ProjectTest extends AbstractCheckTest {
         }
 
         public void setDirectLibraries(List<Project> libraries) {
-            mDirectLibraries = libraries;
+            directLibraries = libraries;
         }
     }
 
     public void testDependsOn1() throws Exception {
-        File dir = getProjectDir("MyProject",
-                "multiproject/main-manifest.xml=>AndroidManifest.xml",
-                "multiproject/main.properties=>project.properties",
-                "multiproject/MainCode.java.txt=>src/foo/main/MainCode.java",
-                "bytecode/classes.jar=>libs/android-support-v4.jar"
-        );
-        TestClient client = new TestClient();
-        TestProject project1 = new TestProject(client, dir);
-        client.registerProject(dir, project1);
+        List<Project> projects = lint().files(
+                projectProperties(),
+                manifest().minSdk(14),
+                jar("libs/android-support-v4.jar") // just a placeholder
+        ).createProjects(true);
+
+        assertThat(projects).hasSize(1);
+        Project project1 = projects.get(0);
         assertNull(project1.dependsOn("unknown:library"));
         assertTrue(project1.dependsOn("com.android.support:support-v4"));
     }
 
     public void testDependsOn2() throws Exception {
-        File dir = getProjectDir("MyProject",
-                "multiproject/main-manifest.xml=>AndroidManifest.xml",
-                "multiproject/main.properties=>project.properties",
-                "multiproject/MainCode.java.txt=>src/foo/main/MainCode.java",
-                "bytecode/classes.jar=>libs/support-v4-13.0.0-f5279ca6f213451a9dfb870f714ce6e6.jar"
-        );
-        TestClient client = new TestClient();
-        TestProject project1 = new TestProject(client, dir);
-        client.registerProject(dir, project1);
-        assertNull(project1.dependsOn("unknown:library"));
-        assertTrue(project1.dependsOn("com.android.support:support-v4"));
+        List<Project> projects = lint().files(
+                projectProperties(),
+                manifest().minSdk(14),
+                jar("libs/support-v4-13.0.0-f5279ca6f213451a9dfb870f714ce6e6.jar")
+                // just a placeholder
+        ).createProjects(true);
+
+        assertThat(projects).hasSize(1);
+        Project project = projects.get(0);
+        assertNull(project.dependsOn("unknown:library"));
+        assertTrue(project.dependsOn("com.android.support:support-v4"));
     }
+
     @Override
     protected Detector getDetector() {
         return new UnusedResourceDetector();

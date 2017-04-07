@@ -19,7 +19,7 @@ package com.android.build.gradle.internal.pipeline;
 import com.android.annotations.NonNull;
 import com.android.annotations.concurrency.Immutable;
 import com.android.build.api.transform.QualifiedContent;
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
 import java.io.File;
@@ -38,13 +38,13 @@ class QualifiedContentImpl implements QualifiedContent {
     @NonNull
     private final Set<ContentType> contentTypes;
     @NonNull
-    private final Set<Scope> scopes;
+    private final Set<? super Scope> scopes;
 
     protected QualifiedContentImpl(
             @NonNull String name,
             @NonNull File file,
             @NonNull Set<ContentType> contentTypes,
-            @NonNull Set<Scope> scopes) {
+            @NonNull Set<? super Scope> scopes) {
         this.name = name;
         this.file = file;
         this.contentTypes = ImmutableSet.copyOf(contentTypes);
@@ -78,13 +78,13 @@ class QualifiedContentImpl implements QualifiedContent {
 
     @NonNull
     @Override
-    public Set<Scope> getScopes() {
+    public Set<? super Scope> getScopes() {
         return scopes;
     }
 
     @Override
     public String toString() {
-        return Objects.toStringHelper(this)
+        return MoreObjects.toStringHelper(this)
                 .add("name", name)
                 .add("file", file)
                 .add("contentTypes", contentTypes)

@@ -22,6 +22,29 @@ package com.android.builder.dependency;
  */
 public class HashCodeUtils {
 
+    public static int hashCode(Object a) {
+        if (a == null)
+            return 0;
+
+        int result = 1;
+
+        result = 31 * result + a.hashCode();
+
+        return result;
+    }
+
+    public static int hashCode(Object a, Object b) {
+        if (a == null && b == null)
+            return 0;
+
+        int result = 1;
+
+        result = 31 * result + (a == null ? 0 : a.hashCode());
+        result = 31 * result + (b == null ? 0 : b.hashCode());
+
+        return result;
+    }
+
     public static int hashCode(Object a, Object b, Object c) {
         if (a == null && b == null && c == null)
             return 0;
@@ -31,6 +54,20 @@ public class HashCodeUtils {
         result = 31 * result + (a == null ? 0 : a.hashCode());
         result = 31 * result + (b == null ? 0 : b.hashCode());
         result = 31 * result + (c == null ? 0 : c.hashCode());
+
+        return result;
+    }
+
+    public static int hashCode(Object a, Object b, Object c, Object d) {
+        if (a == null && b == null && c == null && d == null)
+            return 0;
+
+        int result = 1;
+
+        result = 31 * result + (a == null ? 0 : a.hashCode());
+        result = 31 * result + (b == null ? 0 : b.hashCode());
+        result = 31 * result + (c == null ? 0 : c.hashCode());
+        result = 31 * result + (d == null ? 0 : d.hashCode());
 
         return result;
     }

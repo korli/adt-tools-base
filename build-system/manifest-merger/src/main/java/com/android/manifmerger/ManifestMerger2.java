@@ -24,7 +24,6 @@ import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.concurrency.Immutable;
-import com.android.builder.model.AndroidBundle;
 import com.android.utils.ILogger;
 import com.android.utils.Pair;
 import com.google.common.base.Optional;
@@ -35,6 +34,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 
 import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
 
 import java.io.BufferedInputStream;
 import java.io.File;
@@ -56,6 +56,9 @@ public class ManifestMerger2 {
     static final String BOOTSTRAP_APPLICATION
             = "com.android.tools.fd.runtime.BootstrapApplication";
 
+    static final String BOOTSTRAP_INSTANT_RUN_SERVICE
+            = "com.android.tools.fd.runtime.InstantRunService";
+
     @NonNull
     private final File mManifestFile;
 
@@ -76,6 +79,8 @@ public class ManifestMerger2 {
     @NonNull
     private final MergeType mMergeType;
     @NonNull
+    private final XmlDocument.Type mDocumentType;
+    @NonNull
     private final Optional<File> mReportFile;
     @NonNull
     private final FileStreamProvider mFileStreamProvider;
@@ -89,6 +94,7 @@ public class ManifestMerger2 {
             @NonNull Map<String, Object> placeHolderValues,
             @NonNull KeyBasedValueResolver<ManifestSystemProperty> systemPropertiesResolver,
             @NonNull MergeType mergeType,
+            @NonNull XmlDocument.Type documentType,
             @NonNull Optional<File> reportFile,
             @NonNull FileStreamProvider fileStreamProvider) {
         this.mSystemPropertyResolver = systemPropertiesResolver;
@@ -99,6 +105,7 @@ public class ManifestMerger2 {
         this.mFlavorsAndBuildTypeFiles = flavorsAndBuildTypeFiles;
         this.mOptionalFeatures = optionalFeatures;
         this.mMergeType = mergeType;
+        this.mDocumentType = documentType;
         this.mReportFile = reportFile;
         this.mFileStreamProvider = fileStreamProvider;
     }
@@ -127,7 +134,7 @@ public class ManifestMerger2 {
                 new ManifestInfo(
                         mManifestFile.getName(),
                         mManifestFile,
-                        XmlDocument.Type.MAIN,
+                        mDocumentType,
                         Optional.<String>absent() /* mainManifestPackageName */),
                 selectors,
                 mergingReportBuilder);
@@ -135,7 +142,7 @@ public class ManifestMerger2 {
         // first do we have a package declaration in the main manifest ?
         Optional<XmlAttribute> mainPackageAttribute =
                 loadedMainManifestInfo.getXmlDocument().getPackage();
-        if (!mainPackageAttribute.isPresent()) {
+        if (mDocumentType != XmlDocument.Type.OVERLAY && !mainPackageAttribute.isPresent()) {
             mergingReportBuilder.addMessage(
                     loadedMainManifestInfo.getXmlDocument().getSourceFile(),
                     MergingReport.Record.Severity.ERROR,
@@ -161,7 +168,7 @@ public class ManifestMerger2 {
         // merge in lower priority documents.
         Optional<XmlDocument> xmlDocumentOptional = Optional.absent();
         for (File inputFile : mFlavorsAndBuildTypeFiles) {
-            mLogger.info("Merging flavors and build manifest %s \n", inputFile.getPath());
+            mLogger.verbose("Merging flavors and build manifest %s \n", inputFile.getPath());
             LoadedManifestInfo overlayDocument = load(
                     new ManifestInfo(null, inputFile, XmlDocument.Type.OVERLAY,
                             Optional.of(mainPackageAttribute.get().getValue())),
@@ -217,7 +224,7 @@ public class ManifestMerger2 {
             }
         }
 
-        mLogger.info("Merging main manifest %s\n", mManifestFile.getPath());
+        mLogger.verbose("Merging main manifest %s\n", mManifestFile.getPath());
         xmlDocumentOptional =
                 merge(xmlDocumentOptional, loadedMainManifestInfo, mergingReportBuilder);
 
@@ -237,7 +244,7 @@ public class ManifestMerger2 {
             }
         }
         for (LoadedManifestInfo libraryDocument : loadedLibraryDocuments) {
-            mLogger.info("Merging library manifest " + libraryDocument.getLocation());
+            mLogger.verbose("Merging library manifest " + libraryDocument.getLocation());
             xmlDocumentOptional = merge(
                     xmlDocumentOptional, libraryDocument, mergingReportBuilder);
             if (!xmlDocumentOptional.isPresent()) {
@@ -258,7 +265,7 @@ public class ManifestMerger2 {
             // been overridden so the problem was transient. However, with the final document
             // ready, all placeholders values must have been provided.
             performPlaceHolderSubstitution(loadedMainManifestInfo, xmlDocumentOptional.get(),
-                    mergingReportBuilder);
+                    mergingReportBuilder, mMergeType);
             if (mergingReportBuilder.hasErrors()) {
                 return mergingReportBuilder.build();
             }
@@ -274,6 +281,9 @@ public class ManifestMerger2 {
                     MergingReport.Record.Severity.WARNING,
                     "Post merge validation failed");
         }
+
+        finalMergedDocument.clearNodeNamespaces();
+
         // finally optional features handling.
         processOptionalFeatures(finalMergedDocument, mergingReportBuilder);
 
@@ -309,6 +319,12 @@ public class ManifestMerger2 {
                   MergingReport.MergedManifestKind.MERGED, document.prettyPrint());
             }
 
+            if (mOptionalFeatures.contains(Invoker.Feature.TEST_ONLY)) {
+                mergingReport.setMergedDocument(
+                        MergingReport.MergedManifestKind.MERGED,
+                        addTestOnlyAttribute(document).prettyPrint());
+            }
+
             if (!mOptionalFeatures.contains(Invoker.Feature.SKIP_BLAME)) {
                 try {
                     mergingReport.setMergedDocument(MergingReport.MergedManifestKind.BLAME,
@@ -332,7 +348,24 @@ public class ManifestMerger2 {
                         MergingReport.MergedManifestKind.INSTANT_RUN,
                         instantRunReplacement(document).prettyPrint());
             }
+
         }
+    }
+
+    /**
+     * Set android:testOnly="true" to ensure APK will be rejected by the Play store.
+     */
+    @NonNull
+    private static XmlDocument addTestOnlyAttribute(XmlDocument document) {
+        Optional<XmlElement> applicationOptional = document
+                .getByTypeAndKey(ManifestModel.NodeTypes.APPLICATION, null /* keyValue */);
+        if (applicationOptional.isPresent()) {
+            XmlElement application = applicationOptional.get();
+            setAndroidAttribute(application.getXml(),
+                                SdkConstants.ATTR_TEST_ONLY,
+                                SdkConstants.VALUE_TRUE);
+        }
+        return document.reparse();
     }
 
     @NonNull
@@ -341,27 +374,91 @@ public class ManifestMerger2 {
                 .getByTypeAndKey(ManifestModel.NodeTypes.APPLICATION, null /* keyValue */);
         if (applicationOptional.isPresent()) {
             XmlElement application = applicationOptional.get();
-            Attr nameAttribute = application.getXml().getAttributeNodeNS(
-                    SdkConstants.ANDROID_URI, "name");
-
-            if (nameAttribute != null) {
-                String originalAppName = nameAttribute.getValue();
-                if (BOOTSTRAP_APPLICATION.equals(originalAppName)) {
-                    return document;
-                }
-                application.getXml().setAttribute(SdkConstants.ATTR_NAME, originalAppName);
-                application.getXml().setAttributeNS(
-                        SdkConstants.ANDROID_URI,
-                        nameAttribute.getName(),
-                        BOOTSTRAP_APPLICATION);
-            } else {
-                application.getXml().setAttributeNS(
-                        SdkConstants.ANDROID_URI,
-                        SdkConstants.ANDROID_NS_NAME_PREFIX + SdkConstants.ATTR_NAME,
-                        BOOTSTRAP_APPLICATION);
-            }
+            setAttributeToTrue(application.getXml(), SdkConstants.ATTR_ENABLED);
+            setAttributeToTrue(application.getXml(), SdkConstants.ATTR_HAS_CODE);
+            addService(document, application);
+        } else {
+            throw new RuntimeException("Application not defined in AndroidManifest.xml");
         }
         return document.reparse();
+    }
+
+    /**
+     * Sets the element's attribute value to True.
+     * @param element the xml element which attribute should be mutated.
+     * @param attributeName the android namespace attribute name.
+     */
+    private static void setAttributeToTrue(Element element, String attributeName) {
+
+        Attr enabledAttribute = element.getAttributeNodeNS(
+                SdkConstants.ANDROID_URI, attributeName);
+
+        // force it to be true.
+        if (enabledAttribute != null) {
+            element.setAttributeNS(
+                    SdkConstants.ANDROID_URI,
+                    enabledAttribute.getName(),
+                    SdkConstants.VALUE_TRUE);
+        }
+    }
+
+    private static void addService(XmlDocument document, XmlElement application ) {
+        // <service
+        //     android:name="com.android.tools.fd.runtime.InstantRunService"
+        //     android:exported="true"/>
+        Element service = document.getXml().createElement(SdkConstants.TAG_SERVICE);
+        setAndroidAttribute(service, SdkConstants.ATTR_NAME, BOOTSTRAP_INSTANT_RUN_SERVICE);
+        // Export it so we can start it with a shell command from adb.
+        setAndroidAttribute(service, SdkConstants.ATTR_EXPORTED, SdkConstants.VALUE_TRUE);
+        application.getXml().appendChild(service);
+    }
+
+    /**
+     * Find an appropriate namespace prefix to use for Android attributes.  If this
+     * element already has some prefix that points to ANDROID_URI, use that.  Otherwise,
+     * we need to find a prefix to use --- try variations of ANDROID_NS_NAME_PREFIX until
+     * we find one that's unused.
+     *
+     * The node must be part of some document.
+     *
+     * @param node Node where we want the Android namespace to be available
+     * @param namespace Namespace name (conventionally a URI)
+     * @param preferredPrefix Prefix we'd prefer to use
+     * @return String namespace prefix
+     */
+    private static String findOrInstallNamespacePrefix(Element node,
+            String namespace,
+            String preferredPrefix) {
+        String prefix = node.lookupPrefix(namespace);
+        if (prefix == null) {
+            prefix = preferredPrefix;
+            String existingMapping = node.lookupNamespaceURI(prefix);
+            // Seems prettier to start with "android2" if "android" is taken.
+            for (int i = 2; existingMapping != null && i >= 2; ++i) {
+                prefix = String.format("%s%d", preferredPrefix, i);
+                existingMapping = node.lookupNamespaceURI(prefix);
+            }
+            if (existingMapping != null) {
+                throw new IllegalStateException("could not allocate namespace prefix");
+            }
+            Element root = node.getOwnerDocument().getDocumentElement();
+            root.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:" + prefix, namespace);
+        }
+        return prefix;
+    }
+
+    /**
+     * Set an Android-namespaced XML attribute on the given node.
+     *
+     * @param node Node in which to set the attribute; must be part of a document
+     * @param localName Non-prefixed attribute name
+     * @param value value of the attribute
+     */
+    private static void setAndroidAttribute(Element node, String localName, String value) {
+        String prefix = findOrInstallNamespacePrefix(node,
+                SdkConstants.ANDROID_URI,
+                SdkConstants.ANDROID_NS_NAME);
+        node.setAttributeNS(SdkConstants.ANDROID_URI, prefix + ":" + localName, value);
     }
 
     /**
@@ -483,15 +580,17 @@ public class ManifestMerger2 {
 
         // perform place holder substitution, this is necessary to do so early in case placeholders
         // are used in key attributes.
-        performPlaceHolderSubstitution(manifestInfo, xmlDocument, builder);
+        performPlaceHolderSubstitution(manifestInfo, xmlDocument, builder, mMergeType);
 
         return new LoadedManifestInfo(manifestInfo,
                 Optional.fromNullable(originalPackageName), xmlDocument);
     }
 
-    private void performPlaceHolderSubstitution(@NonNull ManifestInfo manifestInfo,
+    private void performPlaceHolderSubstitution(
+            @NonNull ManifestInfo manifestInfo,
             @NonNull XmlDocument xmlDocument,
-            @NonNull MergingReport.Builder mergingReportBuilder) {
+            @NonNull MergingReport.Builder mergingReportBuilder,
+            @NonNull MergeType mergeType) {
 
         if (mOptionalFeatures.contains(Invoker.Feature.NO_PLACEHOLDER_REPLACEMENT)) {
             return;
@@ -516,7 +615,7 @@ public class ManifestMerger2 {
                 }
             }
             builder.put(PlaceholderHandler.PACKAGE_NAME, packageName);
-            if (mMergeType != MergeType.LIBRARY) {
+            if (mergeType != MergeType.LIBRARY) {
                 builder.put(PlaceholderHandler.APPLICATION_ID, packageName);
             }
             finalPlaceHolderValues = builder.build();
@@ -525,7 +624,7 @@ public class ManifestMerger2 {
         KeyBasedValueResolver<String> placeHolderValueResolver =
                 new MapBasedKeyBasedValueResolver<String>(finalPlaceHolderValues);
         PlaceholderHandler.visit(
-                mMergeType,
+                mergeType,
                 xmlDocument,
                 placeHolderValueResolver,
                 mergingReportBuilder);
@@ -570,7 +669,7 @@ public class ManifestMerger2 {
 
         ImmutableList.Builder<LoadedManifestInfo> loadedLibraryDocuments = ImmutableList.builder();
         for (Pair<String, File> libraryFile : Sets.newLinkedHashSet(mLibraryFiles)) {
-            mLogger.info("Loading library manifest " + libraryFile.getSecond().getPath());
+            mLogger.verbose("Loading library manifest " + libraryFile.getSecond().getPath());
             ManifestInfo manifestInfo = new ManifestInfo(libraryFile.getFirst(),
                     libraryFile.getSecond(),
                     XmlDocument.Type.LIBRARY, Optional.<String>absent());
@@ -600,7 +699,8 @@ public class ManifestMerger2 {
             // substitutions so feed it with a fake merging report.
             MergingReport.Builder builder = new MergingReport.Builder(mergingReportBuilder.getLogger());
             builder.getActionRecorder().recordDefaultNodeAction(libraryDocument.getRootNode());
-            performPlaceHolderSubstitution(manifestInfo, libraryDocument, builder);
+            performPlaceHolderSubstitution(
+                    manifestInfo, libraryDocument, builder, MergeType.LIBRARY);
             if (builder.hasErrors()) {
                 // we log the errors but continue, in case the error is of no consequence
                 // to the application consuming the library.
@@ -627,7 +727,7 @@ public class ManifestMerger2 {
     public static Invoker newMerger(@NonNull File mainManifestFile,
             @NonNull ILogger logger,
             @NonNull MergeType mergeType) {
-        return new Invoker(mainManifestFile, logger, mergeType);
+        return new Invoker(mainManifestFile, logger, mergeType, XmlDocument.Type.MAIN);
     }
 
     /**
@@ -642,7 +742,7 @@ public class ManifestMerger2 {
         APPLICATION,
 
         /**
-         * Library merging typee is used when packaging a library. The resulting android manifest
+         * Library merging type is used when packaging a library. The resulting android manifest
          * file will not merge in all the imported libraries this library depends on. Also the tools
          * annotations will not be removed as they can be useful when later importing the resulting
          * merged android manifest into an application.
@@ -752,6 +852,7 @@ public class ManifestMerger2 {
                 new ImmutableList.Builder<Feature>();
         @NonNull
         private final MergeType mMergeType;
+        @NonNull private  XmlDocument.Type mDocumentType;
         @Nullable private File mReportFile;
 
         @Nullable
@@ -841,6 +942,12 @@ public class ManifestMerger2 {
              * Clients will only request the merged XML documents, not XML pretty printed documents
              */
             SKIP_XML_STRING,
+
+            /**
+             * Add android:testOnly="true" attribute to prevent APK from being uploaded to Play
+             * store.
+             */
+            TEST_ONLY,
         }
 
         /**
@@ -851,10 +958,12 @@ public class ManifestMerger2 {
         private Invoker(
                 @NonNull File mainManifestFile,
                 @NonNull ILogger logger,
-                @NonNull MergeType mergeType) {
+                @NonNull MergeType mergeType,
+                @NonNull XmlDocument.Type documentType) {
             this.mMainManifestFile = Preconditions.checkNotNull(mainManifestFile);
             this.mLogger = logger;
             this.mMergeType = mergeType;
+            this.mDocumentType = documentType;
         }
 
         /**
@@ -877,32 +986,55 @@ public class ManifestMerger2 {
          */
         @NonNull
         public Invoker addLibraryManifest(@NonNull File file) {
+            addLibraryManifest(file.getName(), file);
+            return thisAsT();
+        }
+
+        /**
+         * Add one library file manifest, will be added last in the list of library files which will
+         * make the parameter the lowest priority library manifest file.
+         * @param file the library manifest file to add.
+         * @param name the library name.
+         * @return itself.
+         */
+        @NonNull
+        public Invoker addLibraryManifest(@NonNull String name, @NonNull File file) {
             if (mMergeType == MergeType.LIBRARY) {
                 throw new IllegalStateException(
-                        "Cannot add library dependencies manifests when creating a library");
+                  "Cannot add library dependencies manifests when creating a library");
             }
-            mLibraryFilesBuilder.add(Pair.of(file.getName(), file));
+            mLibraryFilesBuilder.add(Pair.of(name, file));
             return thisAsT();
         }
 
         /**
          * Sets library dependencies for this merging activity.
-         * @param libraries the list of library dependencies.
+         * @param namesAndFiles the list of library dependencies.
          * @return itself.
+         *
+         * @deprecated use addLibraryManifest or addAndroidBundleManifests
          */
         @NonNull
-        public Invoker addBundleManifests(@NonNull List<? extends AndroidBundle> libraries) {
-            for (AndroidBundle library : libraries) {
-                if (!library.isProvided()) {
-                    mLibraryFilesBuilder.add(Pair.of(library.getName(), library.getManifest()));
-                }
+        @Deprecated
+        public Invoker addBundleManifests(@NonNull List<Pair<String, File>> namesAndFiles) {
+            if (mMergeType == MergeType.LIBRARY && !namesAndFiles.isEmpty()) {
+                throw new IllegalStateException(
+                        "Cannot add library dependencies manifests when creating a library");
             }
+            mLibraryFilesBuilder.addAll(namesAndFiles);
             return thisAsT();
         }
 
+        /**
+         * Sets manifest providers for this merging activity.
+         * @param providers the list of manifest providers.
+         * @return itself.
+         */
         @NonNull
-        public Invoker addLibraryManifests(@NonNull List<Pair<String, File>> libraries) {
-            mLibraryFilesBuilder.addAll(libraries);
+        public Invoker addManifestProviders(@NonNull Iterable<? extends ManifestProvider> providers) {
+            for (ManifestProvider provider : providers) {
+                mLibraryFilesBuilder.add(Pair.of(provider.getName(), provider.getManifest()));
+            }
             return thisAsT();
         }
 
@@ -971,6 +1103,18 @@ public class ManifestMerger2 {
         }
 
         /**
+         * Specify if the file being merged is an overlay (flavor). If not called,
+         * the merging process will assume a master manifest merge. The master manifest needs
+         * to have a package and some other mandatory fields like "uses-sdk", etc.
+         * @return itself.
+         */
+        @NonNull
+        public Invoker asType(XmlDocument.Type type) {
+            mDocumentType = type;
+            return this;
+        }
+
+        /**
          * Perform the merging and return the result.
          *
          * @return an instance of {@link com.android.manifmerger.MergingReport} that will give
@@ -1009,6 +1153,7 @@ public class ManifestMerger2 {
                             mPlaceholders.build(),
                             new MapBasedKeyBasedValueResolver<ManifestSystemProperty>(systemProperties),
                             mMergeType,
+                            mDocumentType,
                             Optional.fromNullable(mReportFile),
                             fileStreamProvider);
             return manifestMerger.merge();

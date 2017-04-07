@@ -28,6 +28,7 @@ import com.android.build.api.transform.TransformInvocation;
 import com.android.build.api.transform.TransformOutputProvider;
 import com.android.build.gradle.ProguardFiles;
 import com.android.build.gradle.internal.CompileOptions;
+import com.android.build.gradle.internal.LoggerWrapper;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.CoreAnnotationProcessorOptions;
@@ -37,16 +38,14 @@ import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.tasks.JackPreDexTransform;
 import com.android.build.gradle.tasks.factory.AbstractCompilesUtil;
 import com.android.builder.core.AndroidBuilder;
+import com.android.builder.core.DexByteCodeConverter;
 import com.android.builder.core.JackProcessOptions;
+import com.android.builder.core.JackToolchain;
+import com.android.builder.model.SyncIssue;
 import com.android.ide.common.process.ProcessException;
-import com.android.jack.api.ConfigNotSupportedException;
-import com.android.jack.api.v01.CompilationException;
-import com.android.jack.api.v01.ConfigurationException;
-import com.android.jack.api.v01.UnrecoverableException;
-import com.android.repository.Revision;
 import com.android.sdklib.BuildToolInfo;
+import com.android.utils.ILogger;
 import com.android.utils.StringHelper;
-import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -55,9 +54,11 @@ import com.google.common.collect.Sets;
 
 import org.gradle.api.Project;
 import org.gradle.api.file.ConfigurableFileTree;
+import org.gradle.api.logging.LogLevel;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -90,6 +91,8 @@ import java.util.Set;
  * </ul>
  */
 public class JackTransform extends Transform {
+    private static final ILogger LOG = LoggerWrapper.getLogger(JackTransform.class);
+
     private Project project;
 
     private AndroidBuilder androidBuilder;
@@ -147,9 +150,9 @@ public class JackTransform extends Transform {
     public Map<String, Object> getParameterInputs() {
         Map<String, Object> params = Maps.newHashMap();
         params.put("javaResourcesFolder", options.getResourceDirectories());
-        params.put("isDebugLog", options.isDebugLog());
+        params.put("isDebuggable", options.isDebuggable());
         params.put("multiDexEnabled", options.isMultiDex());
-        params.put("minSdkVersion", options.getMinSdkVersion());
+        params.put("minSdkVersion", options.getMinSdkVersion().getApiString());
         params.put("javaMaxHeapSize", options.getJavaMaxHeapSize());
         params.put("sourceCompatibility", options.getSourceCompatibility());
         params.put("buildToolsRev",
@@ -193,17 +196,18 @@ public class JackTransform extends Transform {
             throws TransformException, InterruptedException, IOException {
         try {
             runJack(transformInvocation);
-        } catch (ProcessException | ConfigNotSupportedException | CompilationException
-                | ClassNotFoundException | UnrecoverableException | ConfigurationException e) {
+        } catch (ProcessException
+                | ClassNotFoundException
+                | JackToolchain.ToolchainException e) {
             throw new TransformException(e);
         }
     }
 
     private void runJack(@NonNull TransformInvocation transformInvocation)
-            throws ProcessException, IOException, ConfigNotSupportedException,
-            ClassNotFoundException, CompilationException, ConfigurationException,
-            UnrecoverableException {
-
+            throws ProcessException,
+            IOException,
+            JackToolchain.ToolchainException,
+            ClassNotFoundException {
         TransformOutputProvider outputProvider = transformInvocation.getOutputProvider();
         checkNotNull(outputProvider);
         final File outDirectory = outputProvider.getContentLocation(
@@ -218,7 +222,12 @@ public class JackTransform extends Transform {
         options.setImportFiles(TransformInputUtil.getAllFiles(transformInvocation.getInputs()));
         options.setInputFiles(getSourceFiles());
 
-        androidBuilder.convertByteCodeUsingJack(options, jackInProcess);
+        JackToolchain toolchain =
+                new JackToolchain(
+                        androidBuilder.getTargetInfo().getBuildTools(),
+                        androidBuilder.getLogger(),
+                        androidBuilder.getErrorReporter());
+        toolchain.convert(options, androidBuilder.getJavaProcessExecutor(), jackInProcess);
     }
 
     private Collection<File> getSourceFiles() {
@@ -239,12 +248,10 @@ public class JackTransform extends Transform {
 
     public JackTransform(
             final VariantScope scope,
-            final boolean isDebugLog,
             final boolean compileJavaSources) {
 
         options = new JackProcessOptions();
 
-        options.setDebugLog(isDebugLog);
         GlobalScope globalScope = scope.getGlobalScope();
 
         androidBuilder = globalScope.getAndroidBuilder();
@@ -253,46 +260,63 @@ public class JackTransform extends Transform {
         if (compileJavaSources) {
             sourceFileTrees.addAll(scope.getVariantData().getJavaSources());
         }
+
+        options.setDebugJackInternals(project.getLogger().isEnabled(LogLevel.DEBUG));
+        options.setVerboseProcessing(project.getLogger().isEnabled(LogLevel.INFO));
+
         final GradleVariantConfiguration config = scope.getVariantData().getVariantConfiguration();
         options.setJavaMaxHeapSize(globalScope.getExtension().getDexOptions().getJavaMaxHeapSize());
         options.setJumboMode(globalScope.getExtension().getDexOptions().getJumboMode());
         boolean isDebuggable = scope.getVariantConfiguration().getBuildType().isDebuggable();
         options.setDebuggable(isDebuggable);
-        options.setDexOptimize(
-                Objects.firstNonNull(
-                        globalScope.getExtension().getDexOptions().getOptimize(), !isDebuggable));
+        options.setDexOptimize(true);
         options.setMultiDex(config.isMultiDexEnabled());
-        options.setMinSdkVersion(config.getMinSdkVersion().getApiLevel());
-        if (!Boolean.FALSE.equals(globalScope.getExtension().getCompileOptions().getIncremental())
-                && androidBuilder.getTargetInfo().getBuildTools().getRevision().compareTo(
-                        new Revision(24, 0, 3), Revision.PreviewComparison.IGNORE) >= 0) {
-            String taskName = StringHelper.combineAsCamelCase(
-                    ImmutableList.of(
-                            "transformJackWith",
-                            getName(),
-                            "for",
-                            scope.getFullVariantName()));
-            options.setIncrementalDir(scope.getIncrementalDir(taskName));
-        }
+        options.setMinSdkVersion(config.getMinSdkVersion());
         options.setOutputFile(scope.getJackClassesZip());
         options.setResourceDirectories(ImmutableList.of(scope.getJavaResourcesDestinationDir()));
 
         CoreAnnotationProcessorOptions annotationProcessorOptions =
                 config.getJavaCompileOptions().getAnnotationProcessorOptions();
         checkNotNull(annotationProcessorOptions.getIncludeCompileClasspath());
-        options.setAnnotationProcessorClassPath(
-                Lists.newArrayList(
-                        scope.getVariantData().getVariantDependency()
-                                .resolveAndGetAnnotationProcessorClassPath(
-                                        annotationProcessorOptions.getIncludeCompileClasspath(),
-                                        androidBuilder.getErrorReporter())));
+        ArrayList<File> processorPath = Lists.newArrayList(
+                scope.getVariantData().getVariantDependency()
+                        .resolveAndGetAnnotationProcessorClassPath(
+                                annotationProcessorOptions.getIncludeCompileClasspath(),
+                                androidBuilder.getErrorReporter()));
+        options.setAnnotationProcessorClassPath(processorPath);
         options.setAnnotationProcessorNames(annotationProcessorOptions.getClassNames());
         options.setAnnotationProcessorOptions(annotationProcessorOptions.getArguments());
         options.setAnnotationProcessorOutputDirectory(scope.getAnnotationProcessorOutputDir());
         options.setEcjOptionFile(scope.getJackEcjOptionsFile());
         options.setAdditionalParameters(config.getJackOptions().getAdditionalParameters());
+        List<File> pluginClassPath =
+                Lists.newArrayList(
+                        scope.getVariantData()
+                                .getVariantDependency()
+                                .resolveAndGetJackPluginClassPath(
+                                        androidBuilder.getErrorReporter()));
+        options.setJackPluginClassPath(pluginClassPath);
+        options.setJackPluginNames(config.getJackOptions().getPluginNames());
 
-        jackInProcess = config.getJackOptions().isJackInProcess();
+        CompileOptions compileOptions = scope.getGlobalScope().getExtension().getCompileOptions();
+
+        boolean incremental =
+                AbstractCompilesUtil.isIncremental(
+                        project, scope, compileOptions, processorPath, LOG);
+
+        if (incremental) {
+            String taskName =
+                    StringHelper.combineAsCamelCase(
+                            ImmutableList.of(
+                                    "transformJackWith",
+                                    getName(),
+                                    "for",
+                                    scope.getFullVariantName()));
+            options.setIncrementalDir(scope.getIncrementalDir(taskName));
+        }
+
+        //noinspection ConstantConditions - it is never null
+        jackInProcess = isInProcess(config.getJackOptions().isJackInProcess());
 
         if (config.getBuildType().isTestCoverageEnabled()) {
             options.setCoverageMetadataFile(scope.getJackCoverageMetadataFile());
@@ -327,11 +351,44 @@ public class JackTransform extends Transform {
         }
         options.setJarJarRuleFiles(jarJarRuleFiles.build());
 
-        CompileOptions compileOptions = scope.getGlobalScope().getExtension().getCompileOptions();
+
         AbstractCompilesUtil.setDefaultJavaVersion(
                 compileOptions,
                 scope.getGlobalScope().getExtension().getCompileSdkVersion(),
                 true /*jackEnabled*/);
         options.setSourceCompatibility(compileOptions.getSourceCompatibility().toString());
+        options.setEncoding(compileOptions.getEncoding());
+    }
+
+    /** Check if Jack is in process. This is depends on the DSL flag and available memory. */
+    private boolean isInProcess(boolean originalValue) {
+        if (!originalValue) {
+            // no need to check memory, we are running out of process
+            return false;
+        }
+        final long DEFAULT_SUGGESTED_HEAP_SIZE = 1536 * 1024 * 1024; // 1.5 GiB
+        long maxMemory = DexByteCodeConverter.getUserDefinedHeapSize();
+
+        if (DEFAULT_SUGGESTED_HEAP_SIZE > maxMemory) {
+            androidBuilder
+                    .getLogger()
+                    .warning(
+                            "\nA larger heap for the Gradle daemon is recommended for running "
+                                    + "jack.\n\n"
+                                    + "It currently has %1$d MB.\n"
+                                    + "For faster builds, increase the maximum heap size for the "
+                                    + "Gradle daemon to at least %2$s MB.\n"
+                                    + "To do this set org.gradle.jvmargs=-Xmx%2$sM in the "
+                                    + "project gradle.properties.\n"
+                                    + "For more information see "
+                                    + "https://docs.gradle.org"
+                                    + "/current/userguide/build_environment.html\n",
+                            maxMemory / (1024 * 1024),
+                            // Add -1 and + 1 to round up the division
+                            ((DEFAULT_SUGGESTED_HEAP_SIZE - 1) / (1024 * 1024)) + 1);
+            return false;
+        } else {
+            return true;
+        }
     }
 }

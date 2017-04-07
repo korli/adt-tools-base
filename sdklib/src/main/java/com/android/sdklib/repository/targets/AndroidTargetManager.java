@@ -32,7 +32,6 @@ import com.android.sdklib.repository.meta.DetailsTypes;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
 import com.google.common.collect.Maps;
-
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.Map;
@@ -119,7 +118,7 @@ public class AndroidTargetManager {
                     PlatformTarget baseTarget = platformTargets.get(addonVersion);
                     if (baseTarget != null) {
                         tempTargetToPackage.put(new AddonTarget(p, baseTarget,
-                                mSdkHandler.getSystemImageManager(progress), progress, mFop), p);
+                          mSdkHandler.getSystemImageManager(progress), progress, mFop), p);
                     }
                 }
             }

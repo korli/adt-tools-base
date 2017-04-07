@@ -17,23 +17,17 @@
 package com.android.build.gradle.internal.incremental;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.when;
 
 import com.google.common.collect.ImmutableList;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats;
-
-import org.junit.Assert;
+import com.google.wireless.android.sdk.stats.InstantRunArtifact;
+import com.google.wireless.android.sdk.stats.InstantRunStatus;
+import java.io.File;
+import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-
-import java.io.File;
-import java.util.List;
-import java.util.Optional;
 
 public class InstantRunAnalyticsHelperTest {
 
@@ -53,27 +47,25 @@ public class InstantRunAnalyticsHelperTest {
         when(mInstantRunBuildContext.getBuildMode()).thenReturn(InstantRunBuildMode.HOT_WARM);
         when(mInstantRunBuildContext.getPatchingPolicy())
                 .thenReturn(InstantRunPatchingPolicy.MULTI_DEX);
-        when(mInstantRunBuildContext.getVerifierResult()).thenReturn(Optional.of(
-                InstantRunVerifierStatus.COMPATIBLE));
+        when(mInstantRunBuildContext.getVerifierResult())
+                .thenReturn(InstantRunVerifierStatus.COMPATIBLE);
         when(mBuild.getArtifacts()).thenReturn(ImmutableList.of(
-                new InstantRunBuildContext.Artifact(InstantRunBuildContext.FileType.RESOURCES,
+                new InstantRunBuildContext.Artifact(FileType.RESOURCES,
                         new File("resources.ap_")),
-                new InstantRunBuildContext.Artifact(InstantRunBuildContext.FileType.RELOAD_DEX,
+                new InstantRunBuildContext.Artifact(FileType.RELOAD_DEX,
                         new File("reload.dex"))
         ));
 
-        AndroidStudioStats.InstantRunStatus proto =
+        InstantRunStatus proto =
                 InstantRunAnalyticsHelper.generateAnalyticsProto(mInstantRunBuildContext);
 
-        assertEquals(AndroidStudioStats.InstantRunStatus.BuildMode.HOT_WARM, proto.getBuildMode());
-        assertEquals(AndroidStudioStats.InstantRunStatus.PatchingPolicy.MULTI_DEX,
-                proto.getPatchingPolicy());
-        assertEquals(AndroidStudioStats.InstantRunStatus.VerifierStatus.COMPATIBLE,
-                proto.getVerifierStatus());
+        assertEquals(InstantRunStatus.BuildMode.HOT_WARM, proto.getBuildMode());
+        assertEquals(InstantRunStatus.PatchingPolicy.MULTI_DEX, proto.getPatchingPolicy());
+        assertEquals(InstantRunStatus.VerifierStatus.COMPATIBLE, proto.getVerifierStatus());
 
         assertEquals(2, proto.getArtifactCount());
 
-        List<AndroidStudioStats.InstantRunArtifact> artifacts = proto.getArtifactList();
+        List<InstantRunArtifact> artifacts = proto.getArtifactList();
         assertEquals("RESOURCES", artifacts.get(0).getType().toString());
         assertEquals("RELOAD_DEX", artifacts.get(1).getType().toString());
     }
@@ -91,7 +83,8 @@ public class InstantRunAnalyticsHelperTest {
         for (InstantRunPatchingPolicy policy : InstantRunPatchingPolicy.values()) {
             assertEquals(policy.toString(), InstantRunAnalyticsHelper.convert(policy).toString());
         }
-        assertEquals(AndroidStudioStats.InstantRunStatus.PatchingPolicy.UNKNOWN_PATCHING_POLICY,
+        assertEquals(
+                InstantRunStatus.PatchingPolicy.UNKNOWN_PATCHING_POLICY,
                 InstantRunAnalyticsHelper.convert((InstantRunPatchingPolicy) null));
     }
 
@@ -100,7 +93,5 @@ public class InstantRunAnalyticsHelperTest {
         for (InstantRunVerifierStatus status : InstantRunVerifierStatus.values()) {
             assertEquals(status.toString(), InstantRunAnalyticsHelper.convert(status).toString());
         }
-        assertEquals(AndroidStudioStats.InstantRunStatus.VerifierStatus.UNKNOWN_VERIFIER_STATUS,
-                InstantRunAnalyticsHelper.convert((InstantRunVerifierStatus) null));
     }
 }

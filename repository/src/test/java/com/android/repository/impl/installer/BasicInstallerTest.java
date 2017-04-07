@@ -31,7 +31,6 @@ import com.android.repository.api.Uninstaller;
 import com.android.repository.impl.manager.RepoManagerImpl;
 import com.android.repository.impl.meta.RepositoryPackages;
 import com.android.repository.testframework.FakeDownloader;
-import com.android.repository.testframework.FakePackage;
 import com.android.repository.testframework.FakeProgressIndicator;
 import com.android.repository.testframework.FakeProgressRunner;
 import com.android.repository.testframework.FakeSettingsController;
@@ -62,9 +61,9 @@ public class BasicInstallerTest extends TestCase {
         MockFileOp fop = new MockFileOp();
         // Record package.xmls for two packages.
         fop.recordExistingFile("/repo/dummy/foo/package.xml", ByteStreams
-                .toByteArray(getClass().getResourceAsStream("../testData/testPackage.xml")));
+                .toByteArray(getClass().getResourceAsStream("/testPackage.xml")));
         fop.recordExistingFile("/repo/dummy/bar/package.xml", ByteStreams
-                .toByteArray(getClass().getResourceAsStream("../testData/testPackage2.xml")));
+                .toByteArray(getClass().getResourceAsStream("/testPackage2.xml")));
 
         // Set up a RepoManager.
         RepoManager mgr = new RepoManagerImpl(fop);
@@ -96,7 +95,7 @@ public class BasicInstallerTest extends TestCase {
         MockFileOp fop = new MockFileOp();
         // We have a different package installed already.
         fop.recordExistingFile("/repo/dummy/foo/package.xml", ByteStreams
-                .toByteArray(getClass().getResourceAsStream("../testData/testPackage.xml")));
+                .toByteArray(getClass().getResourceAsStream("/testPackage.xml")));
         RepoManager mgr = new RepoManagerImpl(fop);
         File root = new File("/repo");
         mgr.setLocalPath(root);
@@ -104,7 +103,7 @@ public class BasicInstallerTest extends TestCase {
         URL repoUrl = new URL("http://example.com/dummy.xml");
 
         // The repo we're going to download
-        downloader.registerUrl(repoUrl, getClass().getResourceAsStream("../testData/testRepo.xml"));
+        downloader.registerUrl(repoUrl, getClass().getResourceAsStream("/testRepo.xml"));
 
         // Create the archive and register the URL
         URL archiveUrl = new URL("http://example.com/2/arch1");
@@ -172,9 +171,9 @@ public class BasicInstallerTest extends TestCase {
         MockFileOp fop = new MockFileOp();
         // Record a couple existing packages.
         fop.recordExistingFile("/repo/dummy/foo/package.xml", ByteStreams
-                .toByteArray(getClass().getResourceAsStream("../testData/testPackage.xml")));
+                .toByteArray(getClass().getResourceAsStream("/testPackage.xml")));
         fop.recordExistingFile("/repo/dummy/bar/package.xml", ByteStreams.toByteArray(
-                getClass().getResourceAsStream("../testData/testPackage2-lowerVersion.xml")));
+                getClass().getResourceAsStream("/testPackage2-lowerVersion.xml")));
         RepoManager mgr = new RepoManagerImpl(fop);
         File root = new File("/repo");
         mgr.setLocalPath(root);
@@ -182,7 +181,7 @@ public class BasicInstallerTest extends TestCase {
         // Create the archive and register the repo to be downloaded.
         FakeDownloader downloader = new FakeDownloader(fop);
         URL repoUrl = new URL("http://example.com/dummy.xml");
-        downloader.registerUrl(repoUrl, getClass().getResourceAsStream("../testData/testRepo.xml"));
+        downloader.registerUrl(repoUrl, getClass().getResourceAsStream("/testRepo.xml"));
         URL archiveUrl = new URL("http://example.com/2/arch1");
         ByteArrayOutputStream baos = new ByteArrayOutputStream(1000);
         ZipOutputStream zos = new ZipOutputStream(baos);

@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.jack.api.v03;
 
 import com.android.jack.api.v01.ConfigurationException;
@@ -30,7 +29,7 @@ import javax.annotation.Nonnull;
 public interface Api03Config extends Api02Config {
   /**
    * Sets names of the Jack plugin to use.
-   * @param pluginNames Plugin names
+   * @param pluginNames Plugin names, each name must be unique
    * @throws ConfigurationException if something is wrong in Jack's configuration
    */
   void setPluginNames(@Nonnull List<String> pluginNames) throws ConfigurationException;

@@ -22,25 +22,24 @@ import com.android.build.gradle.internal.dsl.CoreProductFlavor;
 import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.internal.tasks.FileSupplier;
 import com.android.build.gradle.internal.variant.BaseVariantOutputData;
 import com.android.builder.core.VariantConfiguration;
-import com.android.builder.model.AndroidLibrary;
 import com.android.io.FileWrapper;
+import com.android.manifmerger.ManifestProvider;
 import com.android.xml.AndroidManifest;
-import com.google.common.collect.Lists;
-
+import com.google.common.collect.ImmutableList;
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.ParallelizableTask;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 
 /**
  * A task that processes the manifest for test modules and tests in androidTest.
@@ -50,8 +49,8 @@ import java.util.Map;
  *
  * <p>Tests in androidTest get that info form the
  * {@link VariantConfiguration#getTestedApplicationId()}, while the test modules get the info from
- * the {@link com.android.build.gradle.internal.publishing.ManifestPublishArtifact} of the
- * tested app.</p>
+ * the {@link com.android.build.gradle.internal.publishing.AndroidArtifacts#buildManifestArtifact(String, FileSupplier)}
+ * of the tested app.</p>
  */
 @ParallelizableTask
 public class ProcessTestManifest extends ManifestProcessorTask {
@@ -68,7 +67,7 @@ public class ProcessTestManifest extends ManifestProcessorTask {
     private Boolean handleProfiling;
     private Boolean functionalTest;
     private Map<String, Object> placeholdersValues;
-    private List<AndroidLibrary> libraries;
+    private List<ManifestProvider> providers;
 
     @Nullable
     private String testLabel;
@@ -85,7 +84,7 @@ public class ProcessTestManifest extends ManifestProcessorTask {
                 getFunctionalTest(),
                 getTestLabel(),
                 getTestManifestFile(),
-                getLibraries(),
+                getProviders(),
                 getPlaceholdersValues(),
                 getManifestOutputFile(),
                 getTmpDir());
@@ -192,36 +191,29 @@ public class ProcessTestManifest extends ManifestProcessorTask {
         this.placeholdersValues = placeholdersValues;
     }
 
-    public List<AndroidLibrary> getLibraries() {
-        return libraries;
+    public List<ManifestProvider> getProviders() {
+        return providers;
     }
 
-    public void setLibraries(
-            List<AndroidLibrary> libraries) {
-        this.libraries = libraries;
+    public void setProviders(List<ManifestProvider> providers) {
+        this.providers = providers;
     }
 
     /**
      * A synthetic input to allow gradle up-to-date checks to work.
      *
-     * Since List<AndroidLibrary> can't be used directly, as @Nested doesn't work on lists,
+     * Since {@code List<ManifestProvider>} can't be used directly, as @Nested doesn't work on lists,
      * this method gathers and returns the underlying manifest files.
      */
     @SuppressWarnings("unused")
     @InputFiles
-    List<File> getLibraryManifests() {
-        List<AndroidLibrary> libs = getLibraries();
-        if (libs == null || libs.isEmpty()) {
-            return Collections.emptyList();
+    public List<File> getLibraryManifests() {
+        List<ManifestProvider> manifestProviders = getProviders();
+        if (manifestProviders == null || manifestProviders.isEmpty()) {
+            return ImmutableList.of();
         }
 
-        // this is a graph of Android Library so need to get them recursively.
-        List<File> files = Lists.newArrayListWithCapacity(libs.size() * 2);
-        for (AndroidLibrary androidLibrary : libs) {
-            fillManifestList(androidLibrary, files);
-        }
-
-        return files;
+        return manifestProviders.stream().map(ManifestProvider::getManifest).collect(Collectors.toList());
     }
 
     public static class ConfigAction implements TaskConfigAction<ProcessTestManifest> {
@@ -266,8 +258,7 @@ public class ProcessTestManifest extends ManifestProcessorTask {
                     new File(scope.getGlobalScope().getIntermediatesDir(), "manifest/tmp"));
 
             // get single output for now.
-            final BaseVariantOutputData variantOutputData =
-                    scope.getVariantData().getOutputs().get(0);
+            final BaseVariantOutputData variantOutputData = scope.getVariantData().getMainOutput();
 
             variantOutputData.manifestProcessorTask = processTestManifestTask;
 
@@ -320,7 +311,7 @@ public class ProcessTestManifest extends ManifestProcessorTask {
             ConventionMappingHelper.map(
                     processTestManifestTask, "testLabel", config::getTestLabel);
             ConventionMappingHelper.map(
-                    processTestManifestTask, "libraries", config::getCompileAndroidLibraries);
+                    processTestManifestTask, "providers", config::getFlatPackageAndroidLibraries);
 
             processTestManifestTask.setManifestOutputFile(
                     variantOutputData.getScope().getManifestOutputFile());

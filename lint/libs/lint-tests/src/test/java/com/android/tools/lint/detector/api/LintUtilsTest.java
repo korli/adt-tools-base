@@ -43,6 +43,7 @@ import static com.android.tools.lint.detector.api.LintUtils.getPrimitiveType;
 import static com.android.tools.lint.detector.api.LintUtils.isImported;
 import static com.android.tools.lint.detector.api.LintUtils.splitPath;
 import static com.android.utils.SdkUtils.escapePropertyValue;
+import static com.google.common.truth.Truth.assertThat;
 import static java.io.File.separatorChar;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -51,19 +52,16 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.ApiVersion;
 import com.android.ide.common.repository.GradleVersion;
+import com.android.resources.ResourceFolderType;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
+import com.android.testutils.TestUtils;
 import com.android.tools.lint.LintCliClient;
 import com.android.tools.lint.checks.BuiltinIssueRegistry;
 import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.client.api.LintDriver;
 import com.google.common.collect.Iterables;
 import com.intellij.psi.PsiJavaFile;
-
-import junit.framework.TestCase;
-
-import org.intellij.lang.annotations.Language;
-
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -73,8 +71,9 @@ import java.util.Collections;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import junit.framework.TestCase;
 import lombok.ast.Node;
+import org.intellij.lang.annotations.Language;
 
 @SuppressWarnings("javadoc")
 public class LintUtilsTest extends TestCase {
@@ -92,6 +91,20 @@ public class LintUtilsTest extends TestCase {
                         Arrays.asList("foo", "bar", "baz", "4", "5", "6"), 1));
         assertEquals("foo, bar, baz",
                 LintUtils.formatList(Arrays.asList("foo", "bar", "baz"), 0));
+    }
+
+    public void testDescribeCounts() throws Exception {
+        assertThat(LintUtils.describeCounts(0, 0, true)).isEqualTo("No errors or warnings");
+        assertThat(LintUtils.describeCounts(0, 1, true)).isEqualTo("1 warning");
+        assertThat(LintUtils.describeCounts(1, 0, true)).isEqualTo("1 error");
+        assertThat(LintUtils.describeCounts(0, 2, true)).isEqualTo("2 warnings");
+        assertThat(LintUtils.describeCounts(2, 0, true)).isEqualTo("2 errors");
+        assertThat(LintUtils.describeCounts(2, 1, false)).isEqualTo("2 errors and 1 warning");
+        assertThat(LintUtils.describeCounts(1, 2, false)).isEqualTo("1 error and 2 warnings");
+        assertThat(LintUtils.describeCounts(5, 4, false)).isEqualTo("5 errors and 4 warnings");
+        assertThat(LintUtils.describeCounts(2, 1, true)).isEqualTo("2 errors, 1 warning");
+        assertThat(LintUtils.describeCounts(1, 2, true)).isEqualTo("1 error, 2 warnings");
+        assertThat(LintUtils.describeCounts(5, 4, true)).isEqualTo("5 errors, 4 warnings");
     }
 
     public void testEndsWith() throws Exception {
@@ -296,8 +309,14 @@ public class LintUtilsTest extends TestCase {
         writer.write(sb.toString());
         writer.close();
 
-        String s = LintUtils.getEncodedString(new LintCliClient(), file);
+        String s = LintUtils.getEncodedString(new LintCliClient(), file, true).toString();
         assertEquals(expected, s);
+
+        CharSequence seq = LintUtils.getEncodedString(new LintCliClient(), file, false);
+        if (encoding.equalsIgnoreCase("utf-8")) {
+            assertFalse(seq instanceof String);
+        }
+        assertEquals(expected, seq.toString());
     }
 
     public void testGetEncodedString() throws Exception {
@@ -382,11 +401,17 @@ public class LintUtilsTest extends TestCase {
     }
 
     public void testComputeResourceName() {
-        assertEquals("", computeResourceName("", ""));
-        assertEquals("foo", computeResourceName("", "foo"));
-        assertEquals("foo", computeResourceName("foo", ""));
-        assertEquals("prefix_name", computeResourceName("prefix_", "name"));
-        assertEquals("prefixName", computeResourceName("prefix", "name"));
+        assertEquals("", computeResourceName("", "", null));
+        assertEquals("foo", computeResourceName("", "foo", null));
+        assertEquals("foo", computeResourceName("foo", "", null));
+        assertEquals("prefix_name", computeResourceName("prefix_", "name", null));
+        assertEquals("prefixName", computeResourceName("prefix", "name", null));
+        assertEquals("PrefixName", computeResourceName("prefix", "Name", null));
+        assertEquals("PrefixName", computeResourceName("prefix_", "Name", null));
+        assertEquals("MyPrefixName", computeResourceName("myPrefix", "Name", null));
+        assertEquals("my_prefix_name", computeResourceName("myPrefix", "name", ResourceFolderType.LAYOUT));
+        assertEquals("UnitTestPrefixContentFrame", computeResourceName("unit_test_prefix_", "ContentFrame", ResourceFolderType.VALUES));
+        assertEquals("MyPrefixMyStyle", computeResourceName("myPrefix_", "MyStyle", ResourceFolderType.VALUES));
     }
 
     public static Node getCompilationUnit(@Language("JAVA") String javaSource) {
@@ -451,7 +476,7 @@ public class LintUtilsTest extends TestCase {
         LintCliClient client = new LintCliClient() {
             @NonNull
             @Override
-            public String readFile(@NonNull File file) {
+            public CharSequence readFile(@NonNull File file) {
                 if (file.getPath().equals(fullPath.getPath())) {
                     return javaSource;
                 }
@@ -470,6 +495,12 @@ public class LintUtilsTest extends TestCase {
                 }
 
                 return super.getCompileTarget(project);
+            }
+
+            @Nullable
+            @Override
+            public File getSdkHome() {
+                return TestUtils.getSdk();
             }
         };
         Project project = client.getProject(dir, dir);

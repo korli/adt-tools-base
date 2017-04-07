@@ -18,12 +18,11 @@ package com.android.build.gradle.internal.packaging;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.AndroidGradleOptions;
-import com.android.builder.internal.packaging.zfile.ApkZFileCreatorFactory;
-import com.android.builder.internal.packaging.zip.ZFileOptions;
-import com.android.builder.internal.packaging.zip.compress.BestAndDefaultDeflateExecutorCompressor;
-import com.android.builder.internal.packaging.zip.compress.DeflateExecutionCompressor;
-import com.android.builder.packaging.ApkCreatorFactory;
-import com.android.builder.signing.SignedJarApkCreatorFactory;
+import com.android.apkzlib.zfile.ApkZFileCreatorFactory;
+import com.android.apkzlib.zip.ZFileOptions;
+import com.android.apkzlib.zip.compress.BestAndDefaultDeflateExecutorCompressor;
+import com.android.apkzlib.zip.compress.DeflateExecutionCompressor;
+import com.android.apkzlib.zfile.ApkCreatorFactory;
 
 import org.gradle.api.Project;
 
@@ -57,7 +56,8 @@ public final class ApkCreatorFactories {
     }
 
     /**
-     * Creates an {@link ApkCreatorFactory} based on the definitions in the project.
+     * Creates an {@link ApkCreatorFactory} based on the definitions in the project. This is  only
+     * to be used with the incremental packager.
      *
      * @param project the project whose properties will be checked
      * @param debuggableBuild whether the {@link ApkCreatorFactory} will be used to create a
@@ -68,40 +68,40 @@ public final class ApkCreatorFactories {
     public static ApkCreatorFactory fromProjectProperties(
             @NonNull Project project,
             boolean debuggableBuild) {
-        boolean useOldPackaging = AndroidGradleOptions.useOldPackaging(project);
-        if (useOldPackaging) {
-            return new SignedJarApkCreatorFactory();
+        boolean keepTimestamps = AndroidGradleOptions.keepTimestampsInApk(project);
+
+        ZFileOptions options = new ZFileOptions();
+        options.setNoTimestamps(!keepTimestamps);
+        options.setCoverEmptySpaceUsingExtraField(true);
+
+        /*
+         * Work around proguard CRC corruption bug (http://b.android.com/221057).
+         */
+        options.setSkipDataDescriptionValidation(true);
+
+        ThreadPoolExecutor compressionExecutor =
+                new ThreadPoolExecutor(
+                        0, /* Number of always alive threads */
+                        MAXIMUM_COMPRESSION_THREADS,
+                        BACKGROUND_THREAD_DISCARD_TIME_MS,
+                        TimeUnit.MILLISECONDS,
+                        new LinkedBlockingDeque<>());
+
+        if (debuggableBuild) {
+            options.setCompressor(
+                    new DeflateExecutionCompressor(
+                            compressionExecutor,
+                            options.getTracker(),
+                            Deflater.BEST_SPEED));
         } else {
-            boolean keepTimestamps = AndroidGradleOptions.keepTimestampsInApk(project);
-
-            ZFileOptions options = new ZFileOptions();
-            options.setNoTimestamps(!keepTimestamps);
-            options.setCoverEmptySpaceUsingExtraField(true);
-
-            ThreadPoolExecutor compressionExecutor =
-                    new ThreadPoolExecutor(
-                            0, /* Number of always alive threads */
-                            MAXIMUM_COMPRESSION_THREADS,
-                            BACKGROUND_THREAD_DISCARD_TIME_MS,
-                            TimeUnit.MILLISECONDS,
-                            new LinkedBlockingDeque<>());
-
-            if (debuggableBuild) {
-                options.setCompressor(
-                        new DeflateExecutionCompressor(
-                                compressionExecutor,
-                                options.getTracker(),
-                                Deflater.BEST_SPEED));
-            } else {
-                options.setCompressor(
-                        new BestAndDefaultDeflateExecutorCompressor(
-                                compressionExecutor,
-                                options.getTracker(),
-                                1.0));
-                options.setAutoSortFiles(true);
-            }
-
-            return new ApkZFileCreatorFactory(options);
+            options.setCompressor(
+                    new BestAndDefaultDeflateExecutorCompressor(
+                            compressionExecutor,
+                            options.getTracker(),
+                            1.0));
+            options.setAutoSortFiles(true);
         }
+
+        return new ApkZFileCreatorFactory(options);
     }
 }

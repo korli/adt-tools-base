@@ -109,7 +109,7 @@ public class CheckManifestInInstantRunMode extends DefaultAndroidTask {
                     Files.asCharSource(previousManifestFile, Charsets.UTF_8).read();
             if (!currentManifest.equals(previousManifest)) {
                 // TODO: Deeper comparison, call out just a version change.
-                instantRunBuildContext.setVerifierResult(
+                instantRunBuildContext.setVerifierStatus(
                         InstantRunVerifierStatus.MANIFEST_FILE_CHANGE);
                 Files.copy(manifestFileToPackage, previousManifestFile);
             }
@@ -117,7 +117,7 @@ public class CheckManifestInInstantRunMode extends DefaultAndroidTask {
             Files.createParentDirs(previousManifestFile);
             Files.copy(manifestFileToPackage, previousManifestFile);
             // we don't have a back up of the manifest file, better be safe and force the APK build.
-            instantRunBuildContext.setVerifierResult(InstantRunVerifierStatus.INITIAL_BUILD);
+            instantRunBuildContext.setVerifierStatus(InstantRunVerifierStatus.INITIAL_BUILD);
         }
     }
 
@@ -142,12 +142,12 @@ public class CheckManifestInInstantRunMode extends DefaultAndroidTask {
             // compare its content with the new binary file crc.
             String previousIterationCRC = Files.readFirstLine(crcFile, Charsets.UTF_8);
             if (!currentIterationCRC.equals(previousIterationCRC)) {
-                instantRunBuildContext.setVerifierResult(
+                instantRunBuildContext.setVerifierStatus(
                         InstantRunVerifierStatus.BINARY_MANIFEST_FILE_CHANGE);
             }
         } else {
             // we don't have a back up of the crc file, better be safe and force the APK build.
-            instantRunBuildContext.setVerifierResult(InstantRunVerifierStatus.INITIAL_BUILD);
+            instantRunBuildContext.setVerifierStatus(InstantRunVerifierStatus.INITIAL_BUILD);
         }
 
         if (currentIterationCRC != null) {

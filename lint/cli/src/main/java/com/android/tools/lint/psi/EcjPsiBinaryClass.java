@@ -42,8 +42,10 @@ import com.intellij.psi.PsiSubstitutor;
 import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.javadoc.PsiDocComment;
-
-import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.AnnotationBinding;
 import org.eclipse.jdt.internal.compiler.lookup.FieldBinding;
@@ -52,11 +54,6 @@ import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
 import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
 import org.eclipse.jdt.internal.compiler.lookup.TypeConstants;
 import org.eclipse.jdt.internal.compiler.problem.AbortCompilation;
-
-import java.lang.reflect.Modifier;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
 
 /** PSI class wrapping a binary (non source) dependency, e.g. .class file, possibly in .jar */
 class EcjPsiBinaryClass extends EcjPsiBinaryElement implements PsiClass, PsiModifierList {
@@ -476,12 +473,14 @@ class EcjPsiBinaryClass extends EcjPsiBinaryElement implements PsiClass, PsiModi
     }
 
     @Override
-    public boolean isInheritor(@NonNull PsiClass psiClass, boolean b) {
-        throw new UnimplementedLintPsiApiException();
+    public boolean isInheritor(@NonNull PsiClass baseClass, boolean checkDeep) {
+        String qualifiedName = baseClass.getQualifiedName();
+        return qualifiedName != null && new EcjPsiJavaEvaluator(mManager)
+                .inheritsFrom(this, qualifiedName, false);
     }
 
     @Override
-    public boolean isInheritorDeep(PsiClass psiClass, PsiClass psiClass1) {
+    public boolean isInheritorDeep(PsiClass baseClass, @Nullable PsiClass classToByPass) {
         throw new UnimplementedLintPsiApiException();
     }
 
@@ -491,6 +490,18 @@ class EcjPsiBinaryClass extends EcjPsiBinaryElement implements PsiClass, PsiModi
         if (mTypeBinding.enclosingType() != null) {
             return mManager.findClass(mTypeBinding.enclosingType());
         }
+        return null;
+    }
+
+    @Override
+    public PsiElement getParent() {
+        if (mTypeBinding.enclosingType() != null) {
+            return mManager.findClass(mTypeBinding.enclosingType());
+        }
+        if (mTypeBinding.fPackage != null) {
+            return mManager.findPackage(mTypeBinding.fPackage);
+        }
+
         return null;
     }
 
@@ -630,14 +641,11 @@ class EcjPsiBinaryClass extends EcjPsiBinaryElement implements PsiClass, PsiModi
         ReferenceBinding binding = mTypeBinding;
         TypeBinding otherBinding;
         if (o instanceof EcjPsiClass) {
-            TypeDeclaration otherTypeDeclaration =
-                    (TypeDeclaration) (((EcjPsiClass) o).getNativeNode());
-            assert otherTypeDeclaration != null;
-            otherBinding = otherTypeDeclaration.binding;
+            otherBinding = ((EcjPsiClass) o).getBinding();
             return binding != null && otherBinding != null && binding.equals(otherBinding);
         } else if (o instanceof EcjPsiBinaryClass) {
-            otherBinding = ((EcjPsiBinaryClass) o).mTypeBinding;
-            return binding != null && otherBinding != null && binding.equals(otherBinding);
+            otherBinding = ((EcjPsiBinaryClass) o).getTypeBinding();
+            return binding != null && binding.equals(otherBinding);
         }
 
         return false;

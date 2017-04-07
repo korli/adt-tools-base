@@ -16,6 +16,7 @@
 
 package com.android.build.gradle.integration.component
 
+import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp
 import com.android.build.gradle.integration.common.fixture.app.EmptyAndroidTestApp
@@ -29,6 +30,7 @@ import com.android.build.gradle.internal.ndk.NdkHandler
 import com.android.builder.model.AndroidArtifact
 import com.android.builder.model.AndroidProject
 import com.android.builder.model.NativeAndroidProject
+import com.android.builder.model.NativeArtifact
 import com.android.builder.model.NativeLibrary
 import com.android.builder.model.NativeSettings
 import com.android.utils.FileUtils
@@ -43,7 +45,7 @@ import org.junit.Test
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatNativeLib
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatZip
+import static com.android.testutils.truth.MoreTruth.assertThatZip
 
 /**
  * Test for dependencies on NDK projects.
@@ -256,7 +258,9 @@ model {
         prebuiltProject.executor().run("assembleDebug")
 
         project.execute(":app:assembleDebug")
-        Map<String, AndroidProject> models = project.model().getMulti()
+        ModelContainer<AndroidProject> modelContainer = project.model().getMulti()
+        Map<String, AndroidProject> models = modelContainer.getModelMap();
+
         GradleTestProject app = project.getSubproject("app")
         GradleTestProject lib1 = project.getSubproject("lib1")
         GradleTestProject lib2 = project.getSubproject("lib2")
@@ -288,6 +292,19 @@ model {
                 assertThatNativeLib(lib).isStripped()
             }
         }
+
+        Map<String, NativeAndroidProject> nativeModels =
+                project.model().getMulti(NativeAndroidProject.class);
+        for (NativeArtifact artifact : nativeModels.get(":app").getArtifacts()) {
+            assertThat(artifact.getRuntimeFiles().collect{it.getName()}).containsExactly(
+                    "libstlport_shared.so",
+                    "libgetstring1.so",
+                    "libgetstring2.so",
+                    "libprebuilt.so")
+            for (File runtimeFile : artifact.getRuntimeFiles()) {
+                assertThat(runtimeFile.getPath()).contains(artifact.getAbi())
+            }
+        }
     }
 
     @Test
@@ -301,7 +318,7 @@ model {
     android {
         compileSdkVersion $GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
         ndk {
-            moduleName "hello-jni"
+            moduleName = "getstring1"
         }
         sources {
             main {
@@ -332,6 +349,15 @@ model {
             GradleTestProject lib2 = project.getSubproject("lib2")
             assertThat(lib2.file("build/intermediates/binaries/debug/obj/$abi/libgetstring2.a")).exists()
             assertThat(lib2.file("build/intermediates/binaries/debug/obj/$abi/libgetstring2.so")).doesNotExist()
+        }
+        for (NativeArtifact artifact : model.getArtifacts()) {
+            assertThat(artifact.getRuntimeFiles().collect{it.getName()}).containsExactly(
+                    "libstlport_shared.so",
+                    "libgetstring1.so",
+                    "libprebuilt.so")
+            for (File runtimeFile : artifact.getRuntimeFiles()) {
+                assertThat(runtimeFile.getPath()).contains(artifact.getAbi())
+            }
         }
         for (NativeSettings settings : model.getSettings()) {
             assertThat(settings.getCompilerFlags())

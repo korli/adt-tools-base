@@ -16,80 +16,77 @@
 
 package com.android.build.gradle.internal.profile;
 
-import static com.android.utils.NullLogger.getLogger;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.LibraryCache;
 import com.android.build.gradle.internal.LoggerWrapper;
-import com.android.builder.internal.compiler.JackConversionCache;
-import com.android.builder.internal.compiler.PreDexCache;
-import com.android.builder.profile.AsyncRecorder;
-import com.android.builder.profile.ProcessRecorderFactory;
-import com.android.builder.profile.Recorder;
-import com.android.builder.profile.ThreadRecorder;
-import com.android.dx.command.dexer.Main;
-import com.android.ide.common.internal.ExecutorSingleton;
-
-import org.gradle.BuildAdapter;
-import org.gradle.BuildListener;
-import org.gradle.BuildResult;
-import org.gradle.api.Project;
-import org.gradle.api.initialization.Settings;
-import org.gradle.api.invocation.Gradle;
-
+import com.android.builder.profile.ProcessProfileWriter;
+import com.android.builder.profile.ProcessProfileWriterFactory;
 import java.io.File;
+import org.gradle.api.Project;
+import org.gradle.initialization.BuildCompletionListener;
 
 /**
- * Initialize the {@link ProcessRecorderFactory} using a given project.
+ * Initialize the {@link ProcessProfileWriterFactory} using a given project.
  *
- * <p>Is separate from {@code ProcessRecorderFactory} as {@code ProcessRecorderFactory} does not
- * depend on gradle classes.
+ * <p>Is separate from {@code ProcessProfileWriterFactory} as {@code ProcessProfileWriterFactory}
+ * does not depend on gradle classes.
  */
 public final class ProfilerInitializer {
 
-    private static final Object sLOCK = new Object();
+    private static final Object LOCK = new Object();
 
-    @Nullable
-    private static RecordingBuildListener sRecordingBuildListener;
+    @Nullable private static volatile RecordingBuildListener recordingBuildListener;
 
     private ProfilerInitializer() {
         //Static singleton class.
     }
 
     /**
-     * Initialize the {@link ProcessRecorderFactory}. Idempotent.
+     * Initialize the {@link ProcessProfileWriterFactory}. Idempotent.
      *
      * @param project the current Gradle {@link Project}.
      */
     public static void init(@NonNull Project project) {
-        ProcessRecorderFactory.initialize(
-                project.getRootProject().getProjectDir(),
-                project.getGradle().getGradleVersion(),
-                new LoggerWrapper(project.getLogger()),
-                project.getRootProject().file("profiler" + System.currentTimeMillis() + ".json"));
-        synchronized (sLOCK) {
-            if (sRecordingBuildListener == null) {
-                sRecordingBuildListener = new RecordingBuildListener(AsyncRecorder.get());
-                project.getGradle().addListener(sRecordingBuildListener);
+        synchronized (LOCK) {
+            //noinspection VariableNotUsedInsideIf
+            if (recordingBuildListener != null) {
+                return;
             }
+            ProcessProfileWriterFactory.initialize(
+                    project.getRootProject().getProjectDir(),
+                    project.getGradle().getGradleVersion(),
+                    new LoggerWrapper(project.getLogger()),
+                    new File(project.getRootProject().getBuildDir(), "android-profile"));
+            recordingBuildListener = new RecordingBuildListener(ProcessProfileWriter.get());
+            project.getGradle().addListener(recordingBuildListener);
         }
 
-        project.getGradle().addBuildListener(new BuildAdapter() {
-            @Override
-            public void buildFinished(@NonNull BuildResult buildResult) {
-                try {
-                    synchronized (sLOCK) {
-                        if (sRecordingBuildListener != null) {
-                            project.getGradle().removeListener(sRecordingBuildListener);
-                            sRecordingBuildListener = null;
-                        }
+        project.getGradle().addListener(new ProfileShutdownListener(project));
+    }
+
+    private static final class ProfileShutdownListener implements BuildCompletionListener {
+
+        private final Project project;
+
+        ProfileShutdownListener(@NonNull Project project) {
+            this.project = project;
+        }
+
+        @Override
+        public void completed() {
+            try {
+                synchronized (LOCK) {
+                    if (recordingBuildListener != null) {
+                        project.getGradle().removeListener(recordingBuildListener);
+                        recordingBuildListener = null;
+                        ProcessProfileWriterFactory.shutdown();
                     }
-                    ProcessRecorderFactory.shutdown();
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
             }
-        });
+        }
     }
 }
+

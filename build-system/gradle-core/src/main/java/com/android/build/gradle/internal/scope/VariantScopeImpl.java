@@ -16,11 +16,22 @@
 
 package com.android.build.gradle.internal.scope;
 
+import static com.android.SdkConstants.DOT_ATOM;
+import static com.android.SdkConstants.FD_ASSETS;
+import static com.android.SdkConstants.FD_CLASSES_OUTPUT;
+import static com.android.SdkConstants.FD_DEX;
+import static com.android.SdkConstants.FD_MERGED;
+import static com.android.SdkConstants.FD_RES;
+import static com.android.SdkConstants.FD_RES_CLASS;
+import static com.android.SdkConstants.FD_SOURCE_GEN;
 import static com.android.SdkConstants.FN_ANDROID_MANIFEST_XML;
+import static com.android.build.gradle.internal.TaskManager.ATOM_SUFFIX;
+import static com.android.build.gradle.internal.TaskManager.DIR_ATOMBUNDLES;
 import static com.android.build.gradle.internal.TaskManager.DIR_BUNDLES;
 import static com.android.builder.model.AndroidProject.FD_GENERATED;
 import static com.android.builder.model.AndroidProject.FD_OUTPUTS;
 
+import android.databinding.tool.DataBindingBuilder;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.AndroidGradleOptions;
@@ -39,7 +50,7 @@ import com.android.build.gradle.internal.pipeline.TransformTask;
 import com.android.build.gradle.internal.tasks.CheckManifest;
 import com.android.build.gradle.internal.tasks.GenerateApkDataTask;
 import com.android.build.gradle.internal.tasks.PrepareDependenciesTask;
-import com.android.build.gradle.internal.tasks.databinding.DataBindingExportBuildInfoTask;
+import com.android.build.gradle.internal.tasks.ResolveDependenciesTask;
 import com.android.build.gradle.internal.tasks.databinding.DataBindingProcessLayoutsTask;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.BaseVariantOutputData;
@@ -57,6 +68,10 @@ import com.android.build.gradle.tasks.RenderscriptCompile;
 import com.android.build.gradle.tasks.ShaderCompile;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.BootClasspathBuilder;
+import com.android.builder.core.BuilderConstants;
+import com.android.builder.core.VariantType;
+import com.android.builder.dependency.level2.AtomDependency;
+import com.android.builder.model.AndroidAtom;
 import com.android.builder.model.ApiVersion;
 import com.android.repository.api.ProgressIndicator;
 import com.android.sdklib.AndroidTargetHash;
@@ -65,7 +80,6 @@ import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.sdklib.repository.LoggerProgressIndicatorWrapper;
-import com.android.sdklib.repository.targets.AndroidTargetManager;
 import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.android.utils.StringHelper;
@@ -75,19 +89,17 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
-import org.gradle.api.DefaultTask;
-import org.gradle.api.Task;
-import org.gradle.api.file.FileCollection;
-import org.gradle.api.tasks.Sync;
-import org.gradle.api.tasks.compile.JavaCompile;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.gradle.api.DefaultTask;
+import org.gradle.api.Task;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.tasks.Sync;
+import org.gradle.api.tasks.compile.JavaCompile;
 
 /**
  * A scope containing data for a specific variant.
@@ -118,6 +130,8 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     private AndroidTask<DefaultTask> assembleTask;
     private AndroidTask<DefaultTask> preBuildTask;
     private AndroidTask<PrepareDependenciesTask> prepareDependenciesTask;
+    @Nullable
+    private AndroidTask<ResolveDependenciesTask> resolveDependenciesTask;
     private AndroidTask<ProcessAndroidResources> generateRClassTask;
 
     private AndroidTask<Task> sourceGenTask;
@@ -141,9 +155,9 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     private AndroidTask<MergeSourceSetFolders> mergeJniLibsFolderTask;
 
     @Nullable
-    private AndroidTask<DataBindingExportBuildInfoTask> dataBindingExportInfoTask;
-    @Nullable
     private AndroidTask<DataBindingProcessLayoutsTask> dataBindingProcessLayoutsTask;
+    @Nullable
+    private AndroidTask<TransformTask> dataBindingMergeBindingArtifactsTask;
 
     /** @see BaseVariantData#javaCompilerTask */
     @Nullable
@@ -259,6 +273,8 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     @Override
     @NonNull
     public String getTaskName(@NonNull String prefix, @NonNull String suffix) {
+        if (getVariantData().getType() == VariantType.ATOM)
+            suffix = ATOM_SUFFIX + suffix;
         return prefix + StringHelper.capitalize(getVariantConfiguration().getFullName()) + suffix;
     }
 
@@ -275,18 +291,6 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
 
     @Nullable
     @Override
-    public AndroidTask<DataBindingExportBuildInfoTask> getDataBindingExportInfoTask() {
-        return dataBindingExportInfoTask;
-    }
-
-    @Override
-    public void setDataBindingExportInfoTask(
-            @Nullable AndroidTask<DataBindingExportBuildInfoTask> dataBindingExportInfoTask) {
-        this.dataBindingExportInfoTask = dataBindingExportInfoTask;
-    }
-
-    @Nullable
-    @Override
     public AndroidTask<DataBindingProcessLayoutsTask> getDataBindingProcessLayoutsTask() {
         return dataBindingProcessLayoutsTask;
     }
@@ -295,6 +299,18 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     public void setDataBindingProcessLayoutsTask(
             @Nullable AndroidTask<DataBindingProcessLayoutsTask> dataBindingProcessLayoutsTask) {
         this.dataBindingProcessLayoutsTask = dataBindingProcessLayoutsTask;
+    }
+
+    @Override
+    public void setDataBindingMergeArtifactsTask(
+            @Nullable AndroidTask<TransformTask> mergeArtifactsTask) {
+        this.dataBindingMergeBindingArtifactsTask = mergeArtifactsTask;
+    }
+
+    @Nullable
+    @Override
+    public AndroidTask<TransformTask> getDataBindingMergeArtifactsTask() {
+        return dataBindingMergeBindingArtifactsTask;
     }
 
     @Override
@@ -347,6 +363,14 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
         return new File(globalScope.getIntermediatesDir(), "/dex/" + getVariantConfiguration().getDirName());
     }
 
+    @NonNull
+    @Override
+    public File getDexOutputFolder(@NonNull AtomDependency androidAtom) {
+        return FileUtils.join(globalScope.getIntermediatesDir(),
+                FD_DEX,
+                androidAtom.getAtomName() + "-" + getVariantConfiguration().getDirName());
+    }
+
     @Override
     @NonNull
     public File getReloadDexOutputFolder() {
@@ -386,6 +410,16 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     public File getJavaOutputDir() {
         return new File(globalScope.getIntermediatesDir(), "/classes/" +
                 variantData.getVariantConfiguration().getDirName());
+    }
+
+    @Override
+    @NonNull
+    public File getJavaOutputDir(@NonNull AtomDependency androidAtom) {
+        return FileUtils.join(
+                globalScope.getIntermediatesDir(),
+                FD_CLASSES_OUTPUT,
+                androidAtom.getAtomName() + "-" +
+                        variantData.getVariantConfiguration().getDirName());
     }
 
     @NonNull
@@ -435,18 +469,7 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     @Override
     @NonNull
     public Iterable<File> getJavaOutputs() {
-        return Iterables.concat(
-                getJavaClasspath(),
-                ImmutableList.of(
-                        getJavaOutputDir(),
-                        getJavaDependencyCache()));
-    }
-
-    @Override
-    @NonNull
-    public File getJavaDependencyCache() {
-        return new File(globalScope.getIntermediatesDir(), "/dependency-cache/" +
-                variantData.getVariantConfiguration().getDirName());
+        return Iterables.concat(getJavaClasspath(), ImmutableList.of(getJavaOutputDir()));
     }
 
     @Override
@@ -529,8 +552,14 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     @Override
     @NonNull
     public File getDefaultMergeResourcesOutputDir() {
-        return new File(globalScope.getIntermediatesDir(),
-                "/res/merged/" + getVariantConfiguration().getDirName());
+        if (getVariantData().getType() == VariantType.ATOM) {
+            return FileUtils.join(getBaseBundleDir(), FD_RES);
+        } else {
+            return FileUtils.join(getGlobalScope().getIntermediatesDir(),
+                    FD_RES,
+                    FD_MERGED,
+                    getVariantConfiguration().getDirName());
+        }
     }
 
     @Override
@@ -556,13 +585,22 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
                         "blame", "res", getDirectorySegments()));
     }
 
+    @NonNull
+    @Override
+    public File getResourceBlameLogDir(@NonNull AtomDependency androidAtom) {
+        return FileUtils.join(
+                globalScope.getIntermediatesDir(),
+                StringHelper.toStrings(
+                        "blame", "res", androidAtom.getAtomName(), getDirectorySegments()));
+    }
+
     @Override
     @NonNull
     public File getMergeAssetsOutputDir() {
         return getVariantConfiguration().isBundled() ?
-                new File(getBaseBundleDir(), "assets") :
-                new File(globalScope.getIntermediatesDir(),
-                        "/assets/" + getVariantConfiguration().getDirName());
+                new File(getBaseBundleDir(), FD_ASSETS) :
+                FileUtils.join(globalScope.getIntermediatesDir(),
+                        FD_ASSETS, getVariantConfiguration().getDirName());
     }
 
     @NonNull
@@ -671,6 +709,16 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
 
     @Override
     @NonNull
+    public File getRClassSourceOutputDir(@NonNull AtomDependency atomDependency) {
+        return FileUtils.join(
+                globalScope.getGeneratedDir(),
+                FD_SOURCE_GEN,
+                FD_RES_CLASS,
+                atomDependency.getAtomName() + "-" + getVariantConfiguration().getDirName());
+    }
+
+    @Override
+    @NonNull
     public File getAidlSourceOutputDir() {
         return new File(globalScope.getGeneratedDir(),
                 "source/aidl/" + getVariantConfiguration().getDirName());
@@ -746,8 +794,21 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
 
     @Override
     @NonNull
+    public File getBuildFolderForDataBindingCompiler() {
+        return new File(globalScope.getIntermediatesDir() + "/data-binding-compiler/" +
+                getVariantConfiguration().getDirName());
+    }
+
+    @Override
+    @NonNull
     public File getGeneratedClassListOutputFileForDataBinding() {
         return new File(getLayoutInfoOutputForDataBinding(), "_generated.txt");
+    }
+
+    @NonNull
+    @Override
+    public File getBundleFolderForDataBinding() {
+        return new File(getBaseBundleDir(), DataBindingBuilder.DATA_BINDING_ROOT_FOLDER_IN_AAR);
     }
 
     @Override
@@ -823,6 +884,13 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
 
     @NonNull
     @Override
+    public File getPackageAtom(@NonNull AtomDependency androidAtom) {
+        return new File(getMergeAssetsOutputDir(),
+                androidAtom.getAtomName() + DOT_ATOM);
+    }
+
+    @NonNull
+    @Override
     public File getAaptFriendlyManifestOutputFile() {
         return FileUtils.join(
                 globalScope.getIntermediatesDir(),
@@ -875,9 +943,51 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     @NonNull
     @Override
     public File getBaseBundleDir() {
+        // The base bundle dir must be recomputable from outside of this project.
+        // DirName is a set for folders (flavor1/flavor2/buildtype) which is difficult to
+        // recompute if all you have is the fullName (flavor1Flavor2Buildtype) as it would
+        // require string manipulation which could break if a flavor is using camelcase in
+        // its name (myFlavor).
+        // So here we use getFullName directly. It's a direct match with the externally visible
+        // variant name (which is == to getFullName), and set as the published artifact's
+        // classifier.
+        // However if there is only a single published artifact, then the bundle is set to a
+        // standard name ('default', which cannot be a variant name anyway), since the consuming
+        // side doesn't know what the variant name is (no coordinate classifier in this case). Note
+        // that this only applies to the published artifact. Non published artifact always use their
+        // name no matter what (necessary for testing)
+        // See DependencyManager.addDependency
+
+        String leaf;
+        String variantName = getVariantConfiguration().getFullName();
+        if (globalScope.getExtension().getPublishNonDefault() ||
+                !variantName.equals(globalScope.getExtension().getDefaultPublishConfig())) {
+            leaf = variantName;
+        } else {
+            leaf = "default";
+        }
         return FileUtils.join(
                 globalScope.getIntermediatesDir(),
-                DIR_BUNDLES, getVariantConfiguration().getDirName());
+                getVariantConfiguration().getType() == VariantType.ATOM ?
+                        DIR_ATOMBUNDLES : DIR_BUNDLES,
+                leaf);
+    }
+
+    @NonNull
+    @Override
+    public File getOutputBundleFile() {
+        String extension =
+                getVariantConfiguration().getType() == VariantType.ATOM
+                        ? BuilderConstants.EXT_ATOMBUNDLE_ARCHIVE
+                        : BuilderConstants.EXT_LIB_ARCHIVE;
+        return FileUtils.join(
+                globalScope.getOutputsDir(),
+                extension,
+                globalScope.getProjectBaseName()
+                        + "-"
+                        + getVariantConfiguration().getBaseName()
+                        + "."
+                        + extension);
     }
 
     @NonNull
@@ -888,6 +998,17 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
                 "source",
                 "apt",
                 getVariantConfiguration().getDirName());
+    }
+
+    @Override
+    @NonNull
+    public File getMainJarOutputDir() {
+        if (getVariantConfiguration().getType() == VariantType.ATOM)
+            return getBaseBundleDir();
+        else
+            return FileUtils.join(globalScope.getIntermediatesDir(),
+                    "packaged",
+                    getVariantConfiguration().getDirName());
     }
 
     // Tasks getters/setters.
@@ -922,6 +1043,17 @@ public class VariantScopeImpl extends GenericVariantScopeImpl implements Variant
     public void setPrepareDependenciesTask(
             AndroidTask<PrepareDependenciesTask> prepareDependenciesTask) {
         this.prepareDependenciesTask = prepareDependenciesTask;
+    }
+
+    @Override
+    public AndroidTask<ResolveDependenciesTask> getResolveDependenciesTask() {
+        return resolveDependenciesTask;
+    }
+
+    @Override
+    public void setResolveDependenciesTask(
+            AndroidTask<ResolveDependenciesTask> resolveDependenciesTask) {
+        this.resolveDependenciesTask = resolveDependenciesTask;
     }
 
     @Override

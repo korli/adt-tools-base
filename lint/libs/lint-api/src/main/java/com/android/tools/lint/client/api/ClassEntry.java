@@ -16,15 +16,16 @@
 
 package com.android.tools.lint.client.api;
 
+import static com.android.SdkConstants.DOT_CLASS;
+import static com.android.SdkConstants.DOT_JAR;
+import static org.objectweb.asm.Opcodes.ASM5;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.google.common.collect.Maps;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closeables;
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -34,10 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
-
-import static com.android.SdkConstants.DOT_CLASS;
-import static com.android.SdkConstants.DOT_JAR;
-import static org.objectweb.asm.Opcodes.ASM5;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
 
 /** A class, present either as a .class file on disk, or inside a .jar file. */
 @VisibleForTesting
@@ -117,7 +116,7 @@ class ClassEntry implements Comparable<ClassEntry> {
             @NonNull List<File> classPath,
             boolean sort) {
         if (!classPath.isEmpty()) {
-            List<ClassEntry> libraryEntries = new ArrayList<ClassEntry>(64);
+            List<ClassEntry> libraryEntries = new ArrayList<>(64);
             addEntries(client, libraryEntries, classPath);
             if (sort) {
                 Collections.sort(libraryEntries);
@@ -144,7 +143,7 @@ class ClassEntry implements Comparable<ClassEntry> {
             @NonNull LintClient client,
             @NonNull List<File> classFiles, @NonNull List<File> classFolders,
             boolean sort) {
-        List<ClassEntry> entries = new ArrayList<ClassEntry>(classFiles.size());
+        List<ClassEntry> entries = new ArrayList<>(classFiles.size());
 
         if (!classFolders.isEmpty()) {
             for (File file : classFiles) {
@@ -225,7 +224,7 @@ class ClassEntry implements Comparable<ClassEntry> {
             } else if (classPathEntry.isDirectory()) {
                 //noinspection UnnecessaryLocalVariable
                 File binDir = classPathEntry;
-                List<File> classFiles = new ArrayList<File>();
+                List<File> classFiles = new ArrayList<>();
                 addClassFiles(binDir, classFiles);
 
                 for (File file : classFiles) {

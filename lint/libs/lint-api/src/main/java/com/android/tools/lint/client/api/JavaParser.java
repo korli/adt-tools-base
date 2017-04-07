@@ -27,6 +27,7 @@ import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Position;
+import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.annotations.Beta;
 import com.google.common.base.Splitter;
 import com.intellij.openapi.util.TextRange;
@@ -34,12 +35,10 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiType;
-
 import java.io.File;
 import java.lang.reflect.Modifier;
 import java.util.Collections;
 import java.util.List;
-
 import lombok.ast.Catch;
 import lombok.ast.For;
 import lombok.ast.Identifier;
@@ -94,8 +93,9 @@ public abstract class JavaParser {
      * file
      *
      * @param contexts a list of contexts to be parsed
+     * @return true if the preparation succeeded; false if there were errors
      */
-    public abstract void prepareJavaParse(@NonNull List<JavaContext> contexts);
+    public abstract boolean prepareJavaParse(@NonNull List<JavaContext> contexts);
 
     /**
      * Parse the file pointed to by the given context.
@@ -162,20 +162,44 @@ public abstract class JavaParser {
         TextRange range = element.getTextRange();
         PsiFile containingFile = element.getContainingFile();
         File file = context.file;
+        CharSequence contents = context.getContents();
         if (containingFile != context.getJavaFile()) {
             // Reporting an error in a different file.
             if (context.getDriver().getScope().size() == 1) {
                 // Don't bother with this error if it's in a different file during single-file analysis
                 return Location.NONE;
             }
-            File ioFile = context.getEvaluator().getFile(containingFile);
+            File ioFile = getFile(containingFile);
             if (ioFile == null) {
                 return Location.NONE;
             }
             file = ioFile;
+            contents = getFileContents(containingFile);
         }
-        return Location.create(file, context.getContents(), range.getStartOffset(),
+        return Location.create(file, contents, range.getStartOffset(),
                                range.getEndOffset());
+    }
+
+    @Nullable
+    public abstract File getFile(@NonNull PsiFile file);
+
+    @NonNull
+    public CharSequence getFileContents(@NonNull PsiFile file) {
+        return file.getText();
+    }
+
+    @NonNull
+    public Location createLocation(@NonNull PsiElement element) {
+        TextRange range = element.getTextRange();
+        PsiFile containingFile = element.getContainingFile();
+        CharSequence contents;
+        File file = getFile(containingFile);
+        if (file == null) {
+            return Location.NONE;
+        }
+        contents = getFileContents(containingFile);
+        return Location.create(file, contents, range.getStartOffset(),
+                range.getEndOffset());
     }
 
     /**
@@ -219,10 +243,15 @@ public abstract class JavaParser {
             int fromDelta,
             @NonNull PsiElement to,
             int toDelta) {
-        String contents = context.getContents();
-        int start = Math.max(0, from.getTextRange().getStartOffset() + fromDelta);
+        CharSequence contents = context.getContents();
+        TextRange fromRange = from.getTextRange();
+        int start = Math.max(0, fromRange.getStartOffset() + fromDelta);
         int end = Math.min(contents == null ? Integer.MAX_VALUE : contents.length(),
                 to.getTextRange().getEndOffset() + toDelta);
+        if (end <= start) {
+            // Some AST nodes don't have proper bounds, such as empty parameter lists
+            return Location.create(context.file, contents, start, fromRange.getEndOffset());
+        }
         return Location.create(context.file, contents, start, end);
     }
 
@@ -289,6 +318,16 @@ public abstract class JavaParser {
 
         return getLocation(context, node);
     }
+
+    /**
+     * Returns the leaf element at the given offset (biased towards the right), or null if
+     * not found
+     *
+     * @param offset the offset to search at
+     * @return the leaf element, if any
+     */
+    @Nullable
+    public abstract PsiElement findElementAt(@NonNull JavaContext context, int offset);
 
     /**
      * Returns a {@link Location} for the given node. This attempts to pick a shorter
@@ -392,7 +431,7 @@ public abstract class JavaParser {
     public List<TypeDescriptor> getCatchTypes(@NonNull JavaContext context,
             @NonNull Catch catchBlock) {
         TypeReference typeReference = catchBlock.astExceptionDeclaration().astTypeReference();
-        return Collections.<TypeDescriptor>singletonList(new DefaultTypeDescriptor(
+        return Collections.singletonList(new DefaultTypeDescriptor(
                 typeReference.getTypeName()));
     }
 
@@ -409,13 +448,6 @@ public abstract class JavaParser {
     public TypeDescriptor getType(@NonNull JavaContext context, @NonNull Node node) {
         return null;
     }
-
-    /**
-     * Runs the given runnable under a readlock such that it can access the PSI
-     *
-     * @param runnable the runnable to be run
-     */
-    public abstract void runReadAction(@NonNull Runnable runnable);
 
     /**
      * A description of a type, such as a primitive int or the android.app.Activity class
@@ -508,16 +540,16 @@ public abstract class JavaParser {
     @Deprecated
     public static class DefaultTypeDescriptor extends TypeDescriptor {
 
-        private String mName;
+        private final String name;
 
         public DefaultTypeDescriptor(String name) {
-            mName = name;
+            this.name = name;
         }
 
         @NonNull
         @Override
         public String getName() {
-            return mName;
+            return name;
         }
 
         @NonNull
@@ -528,17 +560,17 @@ public abstract class JavaParser {
 
         @Override
         public boolean matchesName(@NonNull String name) {
-            return mName.equals(name);
+            return this.name.equals(name);
         }
 
         @Override
         public boolean isArray() {
-            return mName.endsWith("[]");
+            return name.endsWith("[]");
         }
 
         @Override
         public boolean isPrimitive() {
-            return mName.indexOf('.') != -1;
+            return name.indexOf('.') != -1;
         }
 
         @Override
@@ -568,13 +600,13 @@ public abstract class JavaParser {
 
             DefaultTypeDescriptor that = (DefaultTypeDescriptor) o;
 
-            return !(mName != null ? !mName.equals(that.mName) : that.mName != null);
+            return !(name != null ? !name.equals(that.name) : that.name != null);
 
         }
 
         @Override
         public int hashCode() {
-            return mName != null ? mName.hashCode() : 0;
+            return name != null ? name.hashCode() : 0;
         }
     }
 

@@ -22,6 +22,7 @@ import static com.android.SdkConstants.APOS_ENTITY;
 import static com.android.SdkConstants.APP_PREFIX;
 import static com.android.SdkConstants.GT_ENTITY;
 import static com.android.SdkConstants.LT_ENTITY;
+import static com.android.SdkConstants.NEWLINE_ENTITY;
 import static com.android.SdkConstants.QUOT_ENTITY;
 import static com.android.SdkConstants.XMLNS;
 import static com.android.SdkConstants.XMLNS_PREFIX;
@@ -38,16 +39,6 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.google.common.base.CharMatcher;
 import com.google.common.io.Files;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
-
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -60,13 +51,20 @@ import java.io.StringReader;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
-
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 
 /** XML Utilities */
 public class XmlUtils {
@@ -182,6 +180,18 @@ public class XmlUtils {
                         return nsPrefix;
                     }
                     visited.add(nsPrefix);
+                } else if (attr.getPrefix() == null
+                        && attr.getNodeName().startsWith(XMLNS_PREFIX)) {
+                    // It seems to be possible for the attribute to not have the namespace prefix
+                    // i.e. attr.getPrefix() returns null and getLocalName returns null, but the
+                    // node name is xmlns:foo. This is a ugly workaround, but it works.
+                    String uri = attr.getNodeValue();
+                    nsPrefix = attr.getNodeName().substring(XMLNS_PREFIX.length());
+                    // Is this the URI we are looking for? If yes, we found its prefix.
+                    if (nsUri.equals(uri)) {
+                        return nsPrefix;
+                    }
+                    visited.add(nsPrefix);
                 }
             }
         }
@@ -239,7 +249,7 @@ public class XmlUtils {
     public static String toXmlAttributeValue(@NonNull String attrValue) {
         for (int i = 0, n = attrValue.length(); i < n; i++) {
             char c = attrValue.charAt(i);
-            if (c == '"' || c == '\'' || c == '<' || c == '&') {
+            if (c == '"' || c == '\'' || c == '<' || c == '>' || c == '&' || c == '\n') {
                 StringBuilder sb = new StringBuilder(2 * attrValue.length());
                 appendXmlAttributeValue(sb, attrValue);
                 return sb.toString();
@@ -257,11 +267,16 @@ public class XmlUtils {
      */
     @NonNull
     public static String fromXmlAttributeValue(@NonNull String escapedAttrValue) {
+        // See https://www.w3.org/TR/2000/WD-xml-c14n-20000119.html#charescaping
+        if (escapedAttrValue.indexOf('&') == -1) {
+            return escapedAttrValue;
+        }
         String workingString = escapedAttrValue.replace(QUOT_ENTITY, "\"");
         workingString = workingString.replace(LT_ENTITY, "<");
         workingString = workingString.replace(APOS_ENTITY, "'");
         workingString = workingString.replace(AMP_ENTITY, "&");
         workingString = workingString.replace(GT_ENTITY, ">");
+        workingString = workingString.replace(NEWLINE_ENTITY, "\n");
 
         return workingString;
     }
@@ -296,10 +311,12 @@ public class XmlUtils {
      */
     public static void appendXmlAttributeValue(@NonNull StringBuilder sb,
             @NonNull String attrValue) {
+        // See https://www.w3.org/TR/2000/WD-xml-c14n-20000119.html#charescaping
         int n = attrValue.length();
         // &, ", ' and < are illegal in attributes; see http://www.w3.org/TR/REC-xml/#NT-AttValue
         // (' legal in a " string and " is legal in a ' string but here we'll stay on the safe
         // side)
+        char prev = 0;
         for (int i = 0; i < n; i++) {
             char c = attrValue.charAt(i);
             if (c == '"') {
@@ -310,9 +327,16 @@ public class XmlUtils {
                 sb.append(APOS_ENTITY);
             } else if (c == '&') {
                 sb.append(AMP_ENTITY);
+            } else if (c == '\n') {
+                sb.append(NEWLINE_ENTITY);
+            } else if (c == '>' && prev == ']') {
+                // '>' doesn't have to be escaped in attributes, but it can be, and it *must*
+                // be if it's the end of the character sequence ]]>. (See b.android.com/231003)
+                sb.append(GT_ENTITY);
             } else {
                 sb.append(c);
             }
+            prev = c;
         }
     }
 

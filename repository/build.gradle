@@ -1,5 +1,5 @@
 apply plugin: 'java'
-apply plugin: 'jacoco'
+apply plugin: 'jacoco-tools-base'
 apply plugin: 'sdk-java-lib'
 
 group = 'com.android.tools'
@@ -8,10 +8,12 @@ version = rootProject.ext.baseVersion
 
 dependencies {
     compile project(':base:common')
-    compile 'org.apache.commons:commons-compress:1.8.1'
-    compile 'com.google.jimfs:jimfs:1.1'
+    compile libs.apache_compress
+    compile libs.jimfs
 
-    testCompile 'junit:junit:4.12'
+    testCompile libs.junit
+    testCompile libs.truth
+    testCompile libs.mockito_all
 }
 
 test {

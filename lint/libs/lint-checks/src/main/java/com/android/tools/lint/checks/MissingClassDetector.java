@@ -16,27 +16,62 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.ANDROID_PKG_PREFIX;
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.ATTR_CLASS;
+import static com.android.SdkConstants.ATTR_FRAGMENT;
+import static com.android.SdkConstants.ATTR_NAME;
+import static com.android.SdkConstants.CONSTRUCTOR_NAME;
+import static com.android.SdkConstants.DOT_JAVA;
+import static com.android.SdkConstants.TAG_ACTIVITY;
+import static com.android.SdkConstants.TAG_APPLICATION;
+import static com.android.SdkConstants.TAG_HEADER;
+import static com.android.SdkConstants.TAG_PROVIDER;
+import static com.android.SdkConstants.TAG_RECEIVER;
+import static com.android.SdkConstants.TAG_SERVICE;
+import static com.android.SdkConstants.TAG_STRING;
+import static com.android.SdkConstants.VIEW_FRAGMENT;
+import static com.android.SdkConstants.VIEW_TAG;
+import static com.android.resources.ResourceFolderType.LAYOUT;
+import static com.android.resources.ResourceFolderType.VALUES;
+import static com.android.resources.ResourceFolderType.XML;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.resources.ResourceFolderType;
-import com.android.tools.lint.detector.api.*;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector.ClassScanner;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.LayoutDetector;
+import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Location.Handle;
+import com.android.tools.lint.detector.api.Project;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.TextFormat;
+import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.SdkUtils;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-
-import java.io.File;
-import java.util.*;
-
-import static com.android.SdkConstants.*;
-import static com.android.resources.ResourceFolderType.*;
 
 /**
  * Checks to ensure that classes referenced in the manifest actually exist and are included
@@ -45,7 +80,7 @@ import static com.android.resources.ResourceFolderType.*;
 public class MissingClassDetector extends LayoutDetector implements ClassScanner {
     /** Manifest-referenced classes missing from the project or libraries */
     public static final Issue MISSING = Issue.create(
-            "MissingRegistered", //$NON-NLS-1$
+            "MissingRegistered",
             "Missing registered class",
 
             "If a class is referenced in the manifest or in a layout file, it must also exist " +
@@ -60,15 +95,13 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
                     MissingClassDetector.class,
                     EnumSet.of(Scope.MANIFEST, Scope.CLASS_FILE,
                             Scope.JAVA_LIBRARIES, Scope.RESOURCE_FILE)))
-            // There are a number of problems with this lint check when run from Gradle
-            // (due to the fact that not all libraries are analyzed correctly; this is
-            // discussed in issue 194092, which fixed in master but not in 2.2.)
-            .setEnabledByDefault(false)
-            .addMoreInfo("http://developer.android.com/guide/topics/manifest/manifest-intro.html"); //$NON-NLS-1$
+            .addMoreInfo("http://developer.android.com/guide/topics/manifest/manifest-intro.html")
+            // Until http://b.android.com/229868 is fixed
+            .setEnabledByDefault(false);
 
     /** Are activity, service, receiver etc subclasses instantiatable? */
     public static final Issue INSTANTIATABLE = Issue.create(
-            "Instantiatable", //$NON-NLS-1$
+            "Instantiatable",
             "Registered class is not instantiatable",
 
             "Activities, services, broadcast receivers etc. registered in the manifest file " +
@@ -86,7 +119,7 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
 
     /** Is the right character used for inner class separators? */
     public static final Issue INNERCLASS = Issue.create(
-            "InnerclassSeparator", //$NON-NLS-1$
+            "InnerclassSeparator",
             "Inner classes should use `$` rather than `.`",
 
             "When you reference an inner class in a manifest file, you must use '$' instead of " +
@@ -109,12 +142,6 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
 
     /** Constructs a new {@link MissingClassDetector} */
     public MissingClassDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     // ---- Implements XmlScanner ----
@@ -186,7 +213,7 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
                 }
                 className = attr.getValue();
                 classNameNode = attr;
-                pkg = context.getMainProject().getPackage();
+                pkg = context.getProject().getPackage();
             } else {
                 return;
             }
@@ -214,7 +241,7 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
             fqcn = className;
             // Only look for fully qualified tracker names in analytics files
             if (folderType == VALUES
-                    && !SdkUtils.endsWith(context.file.getPath(), "analytics.xml")) { //$NON-NLS-1$
+                    && !SdkUtils.endsWith(context.file.getPath(), "analytics.xml")) {
                 return;
             }
         }
@@ -299,12 +326,14 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
 
     @Override
     public void afterCheckProject(@NonNull Context context) {
-        if (context.getProject() == context.getMainProject() && mHaveClasses
-                && !context.getMainProject().isLibrary()
+        Project mainProject = context.getMainProject();
+        if (context.getProject() == mainProject && mHaveClasses
+                && !mainProject.isLibrary()
                 && mReferencedClasses != null && !mReferencedClasses.isEmpty()
                 && context.getDriver().getScope().contains(Scope.CLASS_FILE)) {
-            List<String> classes = new ArrayList<String>(mReferencedClasses.keySet());
+            List<String> classes = new ArrayList<>(mReferencedClasses.keySet());
             Collections.sort(classes);
+            classLoop:
             for (String owner : classes) {
                 Location.Handle handle = mReferencedClasses.get(owner);
                 String fqcn = ClassContext.getFqcn(owner);
@@ -323,8 +352,24 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
                 mReferencedClasses.remove(owner);
 
                 // Ignore usages of platform libraries
-                if (owner.startsWith("android/")) { //$NON-NLS-1$
+                if (owner.startsWith("android/")) {
                     continue;
+                }
+
+                // Last sanity check: make sure we can't find the missing class as source
+                // anywhere either. This is relevant for example if we're running lint
+                // from Gradle across all variants but the source code hasn't been
+                // compiled for all the variants we're checking.
+                List<Project> all = Lists.newArrayList(mainProject.getAllLibraries());
+                all.add(mainProject);
+                for (Project project : all) {
+                    for (File root : project.getJavaSourceFolders()) {
+                        File source = new File(root, owner.replace('/', File.separatorChar)
+                                + DOT_JAVA);
+                        if (source.exists()) {
+                            continue classLoop;
+                        }
+                    }
                 }
 
                 String message = String.format(
@@ -391,7 +436,7 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
             for (Object m : methodList) {
                 MethodNode method = (MethodNode) m;
                 if (method.name.equals(CONSTRUCTOR_NAME)) {
-                    if (method.desc.equals("()V")) { //$NON-NLS-1$
+                    if (method.desc.equals("()V")) {
                         // The constructor must be public
                         if ((method.access & Opcodes.ACC_PUBLIC) != 0) {
                             hasDefaultConstructor = true;

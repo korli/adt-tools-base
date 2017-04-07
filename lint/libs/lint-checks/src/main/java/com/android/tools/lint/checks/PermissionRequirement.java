@@ -26,7 +26,6 @@ import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.sdklib.AndroidVersion;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
-import com.android.tools.lint.detector.api.JavaContext;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.intellij.psi.JavaTokenType;
@@ -34,7 +33,6 @@ import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiAnnotationMemberValue;
 import com.intellij.psi.PsiArrayInitializerMemberValue;
 import com.intellij.psi.tree.IElementType;
-
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -45,8 +43,8 @@ import java.util.Set;
  * caller must satisfy for a given Android API.
  */
 public abstract class PermissionRequirement {
-    public static final String ATTR_PROTECTION_LEVEL = "protectionLevel"; //$NON-NLS-1$
-    public static final String VALUE_DANGEROUS = "dangerous"; //$NON-NLS-1$
+    public static final String ATTR_PROTECTION_LEVEL = "protectionLevel";
+    public static final String VALUE_DANGEROUS = "dangerous";
 
     protected final PsiAnnotation annotation;
     private int firstApi;
@@ -108,7 +106,6 @@ public abstract class PermissionRequirement {
 
     @NonNull
     public static PermissionRequirement create(
-            @NonNull JavaContext context,
             @NonNull PsiAnnotation annotation) {
 
         String value = getAnnotationStringValue(annotation, ATTR_VALUE);
@@ -267,14 +264,6 @@ public abstract class PermissionRequirement {
     }
 
     /**
-     * Returns false if this permission does not apply given the specified minimum and
-     * target sdk versions
-     *
-     * @param minSdkVersion the minimum SDK version
-     * @param targetSdkVersion the target SDK version
-     * @return true if this permission requirement applies for the given versions
-     */
-    /**
      * Returns false if this permission does not apply given the specified minimum and target
      * sdk versions
      *
@@ -282,8 +271,50 @@ public abstract class PermissionRequirement {
      * @return true if this permission requirement applies for the given versions
      */
     protected boolean appliesTo(@NonNull PermissionHolder available) {
-        if (firstApi == 0) { // initialized?
+        initializeRange();
+
+        if (firstApi != -1) {
+            AndroidVersion minSdkVersion = available.getMinSdkVersion();
+            if (minSdkVersion.getFeatureLevel() > lastApi) {
+                return false;
+            }
+
+            AndroidVersion targetSdkVersion = available.getTargetSdkVersion();
+            if (targetSdkVersion.getFeatureLevel() < firstApi) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns the level of the last applicable API level for this permission requirement,
+     * if the requirement no longer applies. Returns {@link Integer#MAX_VALUE} if the permission
+     * is not specific to a range and applies for all current API levels.
+     *
+     * @return the last applicable API level, or {@link Integer#MAX_VALUE} if applies anywhere.
+     */
+    public int getLastApplicableApi() {
+        initializeRange();
+        return lastApi;
+    }
+
+    /**
+     * Returns the level of the first applicable API level, or 1 if the requirement does
+     * not have a specific API range.
+     *
+     * @return the first applicable API level
+     */
+    public int getFirstApplicableApi() {
+        initializeRange();
+
+        return firstApi >= 1 ? firstApi : 1;
+    }
+
+    private void initializeRange() {
+        if (firstApi == 0) { // not initialized?
             firstApi = -1; // initialized, not specified
+            lastApi = Integer.MAX_VALUE;
 
             // Not initialized
             String range = getAnnotationStringValue(annotation, "apis");
@@ -308,19 +339,6 @@ public abstract class PermissionRequirement {
                 }
             }
         }
-
-        if (firstApi != -1) {
-            AndroidVersion minSdkVersion = available.getMinSdkVersion();
-            if (minSdkVersion.getFeatureLevel() > lastApi) {
-                return false;
-            }
-
-            AndroidVersion targetSdkVersion = available.getTargetSdkVersion();
-            if (targetSdkVersion.getFeatureLevel() < firstApi) {
-                return false;
-            }
-        }
-        return true;
     }
 
     /**

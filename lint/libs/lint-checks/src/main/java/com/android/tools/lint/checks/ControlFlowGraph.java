@@ -20,17 +20,31 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.*;
-import org.objectweb.asm.tree.analysis.*;
-
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FrameNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.LineNumberNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
+import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.analysis.Analyzer;
+import org.objectweb.asm.tree.analysis.AnalyzerException;
+import org.objectweb.asm.tree.analysis.BasicInterpreter;
 
-//import org.jetbrains.org.objectweb.asm.util.Printer;
+//import org.objectweb.asm.util.Printer;
 
 /**
  * A {@linkplain ControlFlowGraph} is a graph containing a node for each
@@ -146,7 +160,7 @@ public class ControlFlowGraph {
      * destination node
      */
     public boolean isConnected(@NonNull Node from, @NonNull Node to) {
-        return isConnected(from, to, Sets.<Node>newIdentityHashSet());
+        return isConnected(from, to, Sets.newIdentityHashSet());
     }
 
     /**
@@ -163,9 +177,9 @@ public class ControlFlowGraph {
         /** The instruction */
         public final AbstractInsnNode instruction;
         /** Any normal successors (e.g. following instruction, or goto or conditional flow) */
-        public final List<Node> successors = new ArrayList<Node>(2);
+        public final List<Node> successors = new ArrayList<>(2);
         /** Any abnormal successors (e.g. the handler to go to following an exception) */
-        public final List<Node> exceptions = new ArrayList<Node>(1);
+        public final List<Node> exceptions = new ArrayList<>(1);
 
         /** A tag for use during depth-first-search iteration of the graph etc */
         public int visit;

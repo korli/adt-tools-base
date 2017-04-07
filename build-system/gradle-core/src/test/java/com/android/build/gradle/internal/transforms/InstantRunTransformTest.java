@@ -46,6 +46,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Files;
 
+import org.gradle.api.Project;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -77,6 +78,9 @@ public class InstantRunTransformTest {
     @Mock
     InstantRunBuildContext instantRunBuildContext;
 
+    @Mock
+    Project project;
+
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
@@ -84,8 +88,9 @@ public class InstantRunTransformTest {
     public void setUpMock() {
         MockitoAnnotations.initMocks(this);
         AndroidBuilder mockBuilder = Mockito.mock(AndroidBuilder.class);
-        when(mockBuilder.getBootClasspath(true)).thenReturn(ImmutableList.<File>of());
+        when(mockBuilder.getBootClasspath(true)).thenReturn(ImmutableList.of());
         when(globalScope.getAndroidBuilder()).thenReturn(mockBuilder);
+        when(globalScope.getProject()).thenReturn(project);
         when(variantScope.getGlobalScope()).thenReturn(globalScope);
         when(variantScope.getInstantRunBuildContext()).thenReturn(instantRunBuildContext);
         when(variantScope.getInstantRunBootClasspath()).thenReturn(ImmutableList.of());
@@ -127,7 +132,7 @@ public class InstantRunTransformTest {
             @NonNull
             @Override
             public Collection<DirectoryInput> getDirectoryInputs() {
-                return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                return ImmutableList.of(new DirectoryInputForTests() {
                     @NonNull
                     @Override
                     public Map<File, Status> getChangedFiles() {
@@ -162,7 +167,7 @@ public class InstantRunTransformTest {
             @Override
             public File getContentLocation(@NonNull String name,
                     @NonNull Set<ContentType> types,
-                    @NonNull Set<Scope> scopes, @NonNull Format format) {
+                    @NonNull Set<? super Scope> scopes, @NonNull Format format) {
                 assertThat(types).hasSize(1);
                 if (types.iterator().next().equals(QualifiedContent.DefaultContentType.CLASSES)) {
                     return new File("out");
@@ -246,7 +251,7 @@ public class InstantRunTransformTest {
             @NonNull
             @Override
             public Collection<DirectoryInput> getDirectoryInputs() {
-                return ImmutableList.<DirectoryInput>of(new DirectoryInputForTests() {
+                return ImmutableList.of(new DirectoryInputForTests() {
                     @NonNull
                     @Override
                     public Map<File, Status> getChangedFiles() {
@@ -280,7 +285,7 @@ public class InstantRunTransformTest {
             @Override
             public File getContentLocation(@NonNull String name,
                     @NonNull Set<ContentType> types,
-                    @NonNull Set<Scope> scopes, @NonNull Format format) {
+                    @NonNull Set<? super Scope> scopes, @NonNull Format format) {
                 assertThat(types).hasSize(1);
                 if (types.iterator().next().equals(QualifiedContent.DefaultContentType.CLASSES)) {
                     return outputFolder;
@@ -290,7 +295,7 @@ public class InstantRunTransformTest {
             }
         };
         // delete the "deleted" file.
-        originalFile.delete();
+        FileUtils.delete(originalFile);
 
         transform.transform(new TransformInvocationBuilder(context)
                 .addOutputProvider(transformOutputProvider)
@@ -326,7 +331,7 @@ public class InstantRunTransformTest {
         @NonNull
         @Override
         public Set<ContentType> getContentTypes() {
-            return ImmutableSet.<ContentType>of(DefaultContentType.CLASSES);
+            return ImmutableSet.of(DefaultContentType.CLASSES);
         }
 
         @NonNull

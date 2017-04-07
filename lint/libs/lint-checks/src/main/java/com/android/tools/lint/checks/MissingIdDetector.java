@@ -28,13 +28,10 @@ import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.LayoutDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
-
-import org.w3c.dom.Element;
-
 import java.util.Collection;
 import java.util.Collections;
+import org.w3c.dom.Element;
 
 /**
  * Check which looks for missing id's in views where they are probably needed
@@ -42,7 +39,7 @@ import java.util.Collections;
 public class MissingIdDetector extends LayoutDetector {
     /** The main issue discovered by this detector */
     public static final Issue ISSUE = Issue.create(
-            "MissingId", //$NON-NLS-1$
+            "MissingId",
             "Fragments should specify an `id` or `tag`",
 
             "If you do not specify an android:id or an android:tag attribute on a " +
@@ -65,16 +62,10 @@ public class MissingIdDetector extends LayoutDetector {
             new Implementation(
                     MissingIdDetector.class,
                     Scope.RESOURCE_FILE_SCOPE))
-            .addMoreInfo("http://developer.android.com/guide/components/fragments.html"); //$NON-NLS-1$
+            .addMoreInfo("http://developer.android.com/guide/components/fragments.html");
 
     /** Constructs a new {@link MissingIdDetector} */
     public MissingIdDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     @Override

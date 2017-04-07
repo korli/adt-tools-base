@@ -2,10 +2,10 @@
 
 #include "profiler_file.h"
 #include "sys/wait.h"
+#include "utils/trace.h"
 #include "utils/log.h"
 
 using std::string;
-using profiler::Log;
 
 namespace {
 const char *const kRunAsExecutable = "/system/bin/run-as";
@@ -35,19 +35,27 @@ bool BashCommandRunner::RunAs(const string &parameters,
 bool BashCommandRunner::Run(const string &parameters, string *output) const {
   string cmd;
   cmd.append(executable_path_);
-  cmd.append(" ");
-  cmd.append(parameters);
+  if (!parameters.empty()) {
+    cmd.append(" ");
+    cmd.append(parameters);
+  }
   return RunAndReadOutput(cmd, output);
 }
 
 bool BashCommandRunner::RunAndReadOutput(const string &cmd,
                                          string *output) const {
-  Log::I("Running '%s'.\n", cmd.c_str());
+  Trace trace(executable_path_);
   char buffer[1024];
   FILE *pipe = popen(cmd.c_str(), "r");
+  if (pipe == nullptr) {
+    return false;
+  }
+
   while (!feof(pipe)) {
     if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-      output->append(buffer);
+      if (output != nullptr) {
+        output->append(buffer);
+      }
     }
   }
   int ret = pclose(pipe);
@@ -64,4 +72,4 @@ bool BashCommandRunner::IsRunAsCapable() {
   // See bug report: https://code.google.com/p/android/issues/detail?id=187955
   return run_as.Exists();
 }
-}
+}  // namespace profiler

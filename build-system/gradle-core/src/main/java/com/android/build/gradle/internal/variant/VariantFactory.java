@@ -26,7 +26,7 @@ import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
 import com.android.builder.core.VariantType;
-
+import com.android.builder.profile.Recorder;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
 
@@ -34,14 +34,15 @@ import org.gradle.api.Project;
  * Interface for Variant Factory.
  *
  * While VariantManager is the general variant management, implementation of this interface
- * provides variant type (app, lib) specific implementation.
+ * provides variant type (app, lib, atom) specific implementation.
  */
 public interface VariantFactory {
 
     @NonNull
     BaseVariantData createVariantData(
             @NonNull GradleVariantConfiguration variantConfiguration,
-            @NonNull TaskManager taskManager);
+            @NonNull TaskManager taskManager,
+            @NonNull Recorder recorder);
 
     @NonNull
     BaseVariant createVariantApi(

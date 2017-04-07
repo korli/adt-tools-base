@@ -19,6 +19,7 @@ package com.android.tools.lint.psi;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.EcjSourceFile;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiClass;
@@ -31,12 +32,10 @@ import com.intellij.psi.PsiInvalidElementAccessException;
 import com.intellij.psi.PsiJavaCodeReferenceElement;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiPackageStatement;
-
+import java.io.File;
 import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 
-import java.io.File;
-
-class EcjPsiJavaFile extends EcjPsiSourceElement implements PsiJavaFile {
+public class EcjPsiJavaFile extends EcjPsiSourceElement implements PsiJavaFile {
 
     private final EcjSourceFile mSource;
 
@@ -65,9 +64,36 @@ class EcjPsiJavaFile extends EcjPsiSourceElement implements PsiJavaFile {
         mClasses = classes;
     }
 
+    @NonNull
+    public String getText(@NonNull TextRange range) {
+        char[] contents = mSource.getContents();
+        int end = range.getEndOffset();
+        if (end <= contents.length) {
+            int start = range.getStartOffset();
+            return new String(contents, start, end - start);
+        }
+
+        return "";
+    }
+
     @Override
     public String getText() {
         return mSource.getSource();
+    }
+
+    @Override
+    public boolean textMatches(@NonNull CharSequence charSequence) {
+        return getText().equals(charSequence.toString());
+    }
+
+    @Override
+    public boolean textMatches(@NonNull PsiElement psiElement) {
+        return getText().equals(psiElement.getText());
+    }
+
+    @NonNull
+    public char[] getFileContents() {
+        return mSource.getContents();
     }
 
     @Override
@@ -189,5 +215,25 @@ class EcjPsiJavaFile extends EcjPsiSourceElement implements PsiJavaFile {
 
     public File getIoFile() {
         return mSource.getFile();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        EcjPsiJavaFile that = (EcjPsiJavaFile) o;
+
+        return mSource.equals(that.mSource);
+
+    }
+
+    @Override
+    public int hashCode() {
+        return mSource.hashCode();
     }
 }

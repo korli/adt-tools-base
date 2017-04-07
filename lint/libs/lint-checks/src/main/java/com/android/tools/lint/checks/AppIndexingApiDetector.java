@@ -15,6 +15,24 @@
  */
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.ATTR_EXPORTED;
+import static com.android.SdkConstants.ATTR_HOST;
+import static com.android.SdkConstants.ATTR_PATH;
+import static com.android.SdkConstants.ATTR_PATH_PREFIX;
+import static com.android.SdkConstants.ATTR_SCHEME;
+import static com.android.SdkConstants.CLASS_ACTIVITY;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_MIME_TYPE;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_NAME;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_PORT;
+import static com.android.xml.AndroidManifest.NODE_ACTION;
+import static com.android.xml.AndroidManifest.NODE_ACTIVITY;
+import static com.android.xml.AndroidManifest.NODE_APPLICATION;
+import static com.android.xml.AndroidManifest.NODE_CATEGORY;
+import static com.android.xml.AndroidManifest.NODE_DATA;
+import static com.android.xml.AndroidManifest.NODE_INTENT;
+import static com.android.xml.AndroidManifest.NODE_MANIFEST;
+
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -26,19 +44,39 @@ import com.android.resources.ResourceType;
 import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.client.api.XmlParser;
-import com.android.tools.lint.detector.api.*;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
 import com.android.tools.lint.detector.api.Detector.XmlScanner;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.Project;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.intellij.psi.*;
-import org.w3c.dom.*;
-
+import com.intellij.psi.JavaRecursiveElementVisitor;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiMethodCallExpression;
 import java.io.File;
-import java.util.*;
-
-import static com.android.SdkConstants.*;
-import static com.android.xml.AndroidManifest.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
 
 
 /**
@@ -57,7 +95,7 @@ public class AppIndexingApiDetector extends Detector implements XmlScanner, Java
                     Scope.JAVA_FILE_SCOPE, Scope.MANIFEST_SCOPE);
 
     public static final Issue ISSUE_URL_ERROR = Issue.create(
-            "GoogleAppIndexingUrlError", //$NON-NLS-1$
+            "GoogleAppIndexingUrlError",
             "URL not supported by app for Firebase App Indexing",
             "Ensure the URL is supported by your app, to get installs and traffic to your"
                     + " app from Google Search.",
@@ -66,7 +104,7 @@ public class AppIndexingApiDetector extends Detector implements XmlScanner, Java
 
     public static final Issue ISSUE_APP_INDEXING =
       Issue.create(
-        "GoogleAppIndexingWarning", //$NON-NLS-1$
+        "GoogleAppIndexingWarning",
         "Missing support for Firebase App Indexing",
         "Adds URLs to get your app into the Google index, to get installs"
           + " and traffic to your app from Google Search.",
@@ -75,7 +113,7 @@ public class AppIndexingApiDetector extends Detector implements XmlScanner, Java
 
     public static final Issue ISSUE_APP_INDEXING_API =
             Issue.create(
-                    "GoogleAppIndexingApiWarning", //$NON-NLS-1$
+                    "GoogleAppIndexingApiWarning",
                     "Missing support for Firebase App Indexing Api",
                     "Adds URLs to get your app into the Google index, to get installs"
                             + " and traffic to your app from Google Search.",
@@ -92,13 +130,13 @@ public class AppIndexingApiDetector extends Detector implements XmlScanner, Java
             = "Activity supporting ACTION_VIEW is not set as BROWSABLE";
     private static final String ILLEGAL_NUMBER = "android:port is not a legal number";
 
-    private static final String APP_INDEX_START = "start"; //$NON-NLS-1$
-    private static final String APP_INDEX_END = "end"; //$NON-NLS-1$
-    private static final String APP_INDEX_VIEW = "view"; //$NON-NLS-1$
-    private static final String APP_INDEX_VIEW_END = "viewEnd"; //$NON-NLS-1$
-    private static final String CLIENT_CONNECT = "connect"; //$NON-NLS-1$
-    private static final String CLIENT_DISCONNECT = "disconnect"; //$NON-NLS-1$
-    private static final String ADD_API = "addApi"; //$NON-NLS-1$
+    private static final String APP_INDEX_START = "start";
+    private static final String APP_INDEX_END = "end";
+    private static final String APP_INDEX_VIEW = "view";
+    private static final String APP_INDEX_VIEW_END = "viewEnd";
+    private static final String CLIENT_CONNECT = "connect";
+    private static final String CLIENT_DISCONNECT = "disconnect";
+    private static final String ADD_API = "addApi";
 
     private static final String APP_INDEXING_API_CLASS
             = "com.google.android.gms.appindexing.AppIndexApi";
@@ -649,7 +687,7 @@ public class AppIndexingApiDetector extends Detector implements XmlScanner, Java
             PsiExpression[] expressions = call.getArgumentList().getExpressions();
             if (expressions.length > 0) {
                 PsiExpression argument2 = expressions[0];
-                if (argument.getText().equals(argument2.getText())) {
+                if (argument.textMatches(argument2)) {
                     return true;
                 }
             }
@@ -667,7 +705,7 @@ public class AppIndexingApiDetector extends Detector implements XmlScanner, Java
     private static boolean hasOperand(PsiExpression operand, List<PsiMethodCallExpression> list) {
         for (PsiMethodCallExpression method : list) {
             PsiElement operand2 = method.getMethodExpression().getQualifier();
-            if (operand2 != null && operand.getText().equals(operand2.getText())) {
+            if (operand2 != null && operand.textMatches(operand2)) {
                 return true;
             }
         }

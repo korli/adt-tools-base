@@ -31,7 +31,6 @@ import com.intellij.psi.PsiMember;
 import com.intellij.psi.PsiReferenceExpression;
 import com.intellij.psi.PsiReferenceParameterList;
 import com.intellij.psi.PsiType;
-
 import org.eclipse.jdt.internal.compiler.ast.Expression;
 import org.eclipse.jdt.internal.compiler.ast.QualifiedNameReference;
 import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
@@ -180,5 +179,16 @@ class EcjPsiReferenceExpression extends EcjPsiExpression implements PsiReference
     @Override
     public boolean isSoft() {
         return false;
+    }
+
+    @Override
+    public String getText() {
+        // We often look up the text contents of a leaf reference expression;
+        // optimize to not compute a new string for this
+        if (mQualifier == null && mIdentifier != null &&
+                mIdentifier.getTextRange().equals(getTextRange())) {
+            return mIdentifier.getText();
+        }
+        return super.getText();
     }
 }

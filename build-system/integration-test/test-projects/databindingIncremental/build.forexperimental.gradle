@@ -13,17 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 apply from: "../commonHeader.gradle"
 buildscript { apply from: "../commonBuildScript.gradle" }
-apply plugin: 'com.android.library'
+apply plugin: 'com.android.model.application'
 
 apply from: "../commonLocalRepo.gradle"
 
-android {
-    compileSdkVersion 23
-    buildToolsVersion = rootProject.buildToolsVersion
-    dataBinding {
+model {
+    android {
+        compileSdkVersion = rootProject.latestCompileSdk
+        buildToolsVersion = rootProject.buildToolsVersion
+    }
+
+    android.dataBinding {
         enabled = true
         addDefaultAdapters = true
     }
+}
+
+dependencies {
+    compile "com.android.support:support-v4:${rootProject.supportLibVersion}"
 }

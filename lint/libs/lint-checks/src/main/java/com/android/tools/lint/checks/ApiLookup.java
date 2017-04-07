@@ -34,7 +34,6 @@ import com.google.common.collect.Lists;
 import com.google.common.io.ByteSink;
 import com.google.common.io.Files;
 import com.google.common.primitives.UnsignedBytes;
-
 import java.io.File;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
@@ -76,9 +75,9 @@ import java.util.Set;
  */
 public class ApiLookup {
     /** Relative path to the api-versions.xml database file within the Lint installation */
-    private static final String XML_FILE_PATH = "platform-tools/api/api-versions.xml"; //$NON-NLS-1$
+    private static final String XML_FILE_PATH = "platform-tools/api/api-versions.xml";
     private static final String FILE_HEADER = "API database used by Android lint\000";
-    private static final int BINARY_FORMAT_VERSION = 8;
+    private static final int BINARY_FORMAT_VERSION = 9;
     private static final boolean DEBUG_SEARCH = false;
     private static final boolean WRITE_STATS = false;
 
@@ -96,7 +95,7 @@ public class ApiLookup {
     private byte[] mData;
     private int[] mIndices;
 
-    private static WeakReference<ApiLookup> sInstance = new WeakReference<ApiLookup>(null);
+    private static WeakReference<ApiLookup> sInstance = new WeakReference<>(null);
 
     private int mPackageCount;
 
@@ -126,9 +125,9 @@ public class ApiLookup {
                 }
                 if (file == null) {
                     // AOSP build environment?
-                    String build = System.getenv("ANDROID_BUILD_TOP");   //$NON-NLS-1$
+                    String build = System.getenv("ANDROID_BUILD_TOP");
                     if (build != null) {
-                        file = new File(build, "development/sdk/api-versions.xml" //$NON-NLS-1$
+                        file = new File(build, "development/sdk/api-versions.xml"
                                 .replace('/', File.separatorChar));
                     }
                 }
@@ -138,7 +137,7 @@ public class ApiLookup {
                 } else {
                     db = get(client, file);
                 }
-                sInstance = new WeakReference<ApiLookup>(db);
+                sInstance = new WeakReference<>(db);
             }
 
             return db;
@@ -177,7 +176,7 @@ public class ApiLookup {
             sb.append('-').append(platformVersion);
         }
 
-        sb.append(".bin"); //$NON-NLS-1$
+        sb.append(".bin");
         return sb.toString();
     }
 
@@ -425,7 +424,7 @@ public class ApiLookup {
                 // database needs to answer queries about whether a method is public
                 // or not, then we'd need to put this data back in.
                 int clsSince = apiClass.getSince();
-                List<String> members = new ArrayList<String>(allMethods.size() + allFields.size());
+                List<String> members = new ArrayList<>(allMethods.size() + allFields.size());
                 for (String member : allMethods) {
                     if (apiClass.getMethod(member, info) != clsSince
                             || apiClass.getMemberDeprecatedIn(member, info) > 0) {
@@ -721,7 +720,7 @@ public class ApiLookup {
 
             return sb.toString();
         } else {
-            return "<disabled>"; //$NON-NLS-1$
+            return "<disabled>";
         }
     }
 
@@ -772,18 +771,6 @@ public class ApiLookup {
         }
 
         return -1;
-    }
-
-    /**
-     * Returns true if the given owner class is known in the API database.
-     *
-     * @param className the internal name of the class, e.g. its fully qualified name (as returned
-     *                  by Class.getName(), but with '.' replaced by '/' (and '$' for inner
-     *                  classes)
-     * @return true if this is a class found in the API database
-     */
-    public boolean isKnownClass(@NonNull String className) {
-        return findClass(className) != -1;
     }
 
     private int getClassVersion(int classNumber) {
@@ -877,6 +864,24 @@ public class ApiLookup {
         }
 
         return -1;
+    }
+
+    /**
+     * Returns true if the given owner class is known in the API database.
+     *
+     * @param className the internal name of the class, e.g. its fully qualified name (as returned
+     *                  by Class.getName(), but with '.' replaced by '/' (and '$' for inner
+     *                  classes)
+     * @return true if this is a class found in the API database
+     */
+    public boolean containsClass(@NonNull String className) {
+        if (mData != null) {
+            return findClass(className) != -1;
+        }  else if (mInfo != null) {
+            return mInfo.getClass(className) != null;
+        }
+
+        return false;
     }
 
     /**
@@ -1045,25 +1050,25 @@ public class ApiLookup {
      * @return true if the owner might be relevant to the API database
      */
     public static boolean isRelevantOwner(@NonNull String owner) {
-        if (owner.startsWith("java")) {                   //$NON-NLS-1$ // includes javax/
+        if (owner.startsWith("java")) {                    // includes javax/
             return true;
         }
         if (owner.startsWith(ANDROID_PKG)) {
             return !owner.startsWith("/support/", 7);
-        } else if (owner.startsWith("org/")) {            //$NON-NLS-1$
-            if (owner.startsWith("xml", 4)                //$NON-NLS-1$
-                    || owner.startsWith("w3c/", 4)        //$NON-NLS-1$
-                    || owner.startsWith("json/", 4)       //$NON-NLS-1$
-                    || owner.startsWith("apache/", 4)) {  //$NON-NLS-1$
+        } else if (owner.startsWith("org/")) {
+            if (owner.startsWith("xml", 4)
+                    || owner.startsWith("w3c/", 4)
+                    || owner.startsWith("json/", 4)
+                    || owner.startsWith("apache/", 4)) {
                 return true;
             }
-        } else if (owner.startsWith("com/")) {            //$NON-NLS-1$
-            if (owner.startsWith("google/", 4)            //$NON-NLS-1$
-                    || owner.startsWith("android/", 4)) { //$NON-NLS-1$
+        } else if (owner.startsWith("com/")) {
+            if (owner.startsWith("google/", 4)
+                    || owner.startsWith("android/", 4)) {
                 return true;
             }
-        } else if (owner.startsWith("junit")              //$NON-NLS-1$
-                    || owner.startsWith("dalvik")) {      //$NON-NLS-1$
+        } else if (owner.startsWith("junit")
+                    || owner.startsWith("dalvik")) {
             return true;
         }
 

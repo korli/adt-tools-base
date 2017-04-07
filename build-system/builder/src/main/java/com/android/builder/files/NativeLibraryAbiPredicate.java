@@ -18,10 +18,10 @@ package com.android.builder.files;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
-import com.google.common.base.Predicate;
 import com.google.common.collect.Sets;
 
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,12 +49,12 @@ public class NativeLibraryAbiPredicate implements Predicate<String> {
      * Set of ABIs accepted by the predicate. If empty, then all ABIs are accepted.
      */
     @NonNull
-    private Set<String> mAcceptedAbis;
+    private Set<String> acceptedAbis;
 
     /**
      * Is JNI debug mode enabled?
      */
-    private final boolean mJniDebugMode;
+    private final boolean jniDebugMode;
 
     /**
      * Creates a new predicate.
@@ -63,12 +63,12 @@ public class NativeLibraryAbiPredicate implements Predicate<String> {
      * @param jniDebugMode is JNI debug mode enabled?
      */
     public NativeLibraryAbiPredicate(@NonNull Set<String> acceptedAbis, boolean jniDebugMode) {
-        mAcceptedAbis = Sets.newHashSet(acceptedAbis);
-        mJniDebugMode = jniDebugMode;
+        this.acceptedAbis = Sets.newHashSet(acceptedAbis);
+        this.jniDebugMode = jniDebugMode;
     }
 
     @Override
-    public boolean apply(String input) {
+    public boolean test(String input) {
         Matcher AbiMatcher = ABI_PATTERN.matcher(input);
         if (!AbiMatcher.matches()) {
             return false;
@@ -80,7 +80,7 @@ public class NativeLibraryAbiPredicate implements Predicate<String> {
         /*
          * See if we accept the ABI.
          */
-        if (!mAcceptedAbis.isEmpty() && !mAcceptedAbis.contains(abi)) {
+        if (!acceptedAbis.isEmpty() && !acceptedAbis.contains(abi)) {
             return false;
         }
 
@@ -95,7 +95,7 @@ public class NativeLibraryAbiPredicate implements Predicate<String> {
          * If it is not a shared library, then, if debug is enabled, we may accept a few special
          * files.
          */
-        if (mJniDebugMode && (SdkConstants.FN_GDBSERVER.equals(fileName) ||
+        if (jniDebugMode && (SdkConstants.FN_GDBSERVER.equals(fileName) ||
                 SdkConstants.FN_GDB_SETUP.equals(fileName))) {
             return true;
         }

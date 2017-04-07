@@ -16,12 +16,14 @@
 
 package com.android.repository.impl.installer;
 
+import static com.android.repository.testframework.FakePackage.FakeRemotePackage;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertSame;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.repository.Revision;
 import com.android.repository.api.Downloader;
 import com.android.repository.api.ProgressIndicator;
 import com.android.repository.api.RemotePackage;
@@ -30,13 +32,10 @@ import com.android.repository.impl.manager.RepoManagerImpl;
 import com.android.repository.io.FileOp;
 import com.android.repository.io.FileOpUtils;
 import com.android.repository.testframework.FakeDownloader;
-import com.android.repository.testframework.FakePackage;
 import com.android.repository.testframework.FakeProgressIndicator;
 import com.android.repository.testframework.MockFileOp;
-
-import org.junit.Test;
-
 import java.io.File;
+import org.junit.Test;
 
 /**
  * Tests for {@link AbstractInstaller}
@@ -62,7 +61,7 @@ public class AbstractInstallerTest {
         FakeProgressIndicator progress = new FakeProgressIndicator();
         mgr.loadSynchronously(0, progress, null, null);
 
-        FakePackage remote = new FakePackage("foo;bar", new Revision(1), null);
+        FakeRemotePackage remote = new FakeRemotePackage("foo;bar");
         remote.setCompleteUrl("http://www.example.com/package.zip");
         FakeDownloader downloader = new FakeDownloader(fop);
 
@@ -90,7 +89,7 @@ public class AbstractInstallerTest {
         FakeProgressIndicator progress = new FakeProgressIndicator();
         mgr.loadSynchronously(0, progress, null, null);
 
-        FakePackage remote = new FakePackage("foo", new Revision(1), null);
+        FakeRemotePackage remote = new FakeRemotePackage("foo");
         remote.setCompleteUrl("http://www.example.com/package.zip");
         FakeDownloader downloader = new FakeDownloader(fop);
 
@@ -104,7 +103,7 @@ public class AbstractInstallerTest {
         RepoManager mgr = new RepoManagerImpl(fop);
         mgr.setLocalPath(new File("/sdk"));
         FakeProgressIndicator progress = new FakeProgressIndicator();
-        FakePackage remote = new FakePackage("foo;bar", new Revision(1), null);
+        FakeRemotePackage remote = new FakeRemotePackage("foo;bar");
         remote.setCompleteUrl("http://www.example.com/package.zip");
         FakeDownloader downloader = new FakeDownloader(fop);
         // Consume temp dir 1
@@ -116,7 +115,7 @@ public class AbstractInstallerTest {
         do {
             tempDir = FileOpUtils.getNewTempDir(AbstractPackageOperation.TEMP_DIR_PREFIX, fop);
         } while (tempDir != null);
-        FakePackage remote2 = new FakePackage("foo;baz", new Revision(1), null);
+        FakeRemotePackage remote2 = new FakeRemotePackage("foo;baz");
         TestInstaller installer = new TestInstaller(remote2, mgr, downloader, fop);
         // This will cause the unreferenced temp dirs to be GCd (and a new one created)
         installer.prepare(progress);
@@ -127,6 +126,20 @@ public class AbstractInstallerTest {
             // Only temp dir 2 should remain, since it's still referenced by the incomplete install.
             assertTrue(fop.exists(dir) == (i == 2));
         }
+    }
+
+    @Test
+    public void installerProperties() throws Exception {
+        MockFileOp fop = new MockFileOp();
+        RepoManager mgr = new RepoManagerImpl(fop);
+        mgr.setLocalPath(new File("/sdk"));
+        RemotePackage remote = new FakeRemotePackage("foo;bar");
+        FakeDownloader downloader = new FakeDownloader(fop);
+        AbstractInstaller installer = new TestInstaller(remote, mgr, downloader, fop);
+        assertSame(installer.getPackage(), remote);
+        assertEquals(installer.getName(), String.format("Install %1$s (revision: %2$s)",
+                                                        remote.getDisplayName(),
+                                                        remote.getVersion().toString()));
     }
 
     private static class TestInstaller extends AbstractInstaller {

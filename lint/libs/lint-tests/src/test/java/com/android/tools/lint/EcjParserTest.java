@@ -36,22 +36,12 @@ import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LintUtilsTest;
 import com.android.tools.lint.detector.api.Project;
 import com.google.common.collect.Lists;
-import com.intellij.psi.JavaRecursiveElementVisitor;
-import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiElementVisitor;
-import com.intellij.psi.PsiJavaFile;
-
-import org.intellij.lang.annotations.Language;
-import org.junit.Assert;
-
 import java.io.File;
 import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-
 import lombok.ast.AnnotationElement;
 import lombok.ast.BinaryExpression;
 import lombok.ast.Block;
@@ -73,6 +63,8 @@ import lombok.ast.VariableReference;
 import lombok.ast.printer.SourceFormatter;
 import lombok.ast.printer.SourcePrinter;
 import lombok.ast.printer.TextFormatter;
+import org.intellij.lang.annotations.Language;
+import org.junit.Assert;
 
 // Disable code warnings that are applied to injected languages in ECJ sample code: these
 // are deliberately doing dodgy things to test parser scenarios
@@ -90,7 +82,33 @@ public class EcjParserTest extends AbstractCheckTest {
         assertEquals(
                 "No warnings.",
 
-                lintProject("src/test/pkg/TryCatchHang.java.txt=>src/test/pkg/TryCatchHang.java"));
+                lintProject(java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "public final class TryCatchHang {\n"
+                        + "    public void foo() {\n"
+                        + "        try {\n"
+                        + "            getClass().getField(\"\").getInt(null);\n"
+                        + "        }\n"
+                        + "        catch(IllegalAccessException | NoSuchFieldException xc) {\n"
+                        + "                throw new RuntimeException( xc );\n"
+                        + "        }\n"
+                        + "\n"
+                        + "        try {\n"
+                        + "                getClass().getField(\"\").getInt(null);\n"
+                        + "        }\n"
+                        + "        catch (NoSuchFieldException | IllegalAccessException xc) {\n"
+                        + "            throw new RuntimeException( xc );\n"
+                        + "        }\n"
+                        + "\n"
+                        + "        try {\n"
+                        + "            getClass().getField(\"\").getInt(null);\n"
+                        + "        }\n"
+                        + "        catch (IllegalAccessException | NoSuchFieldException xc) {\n"
+                        + "            throw new RuntimeException(xc);\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}")));
     }
 
     public void testKitKatLanguageFeatures() throws Exception {
@@ -893,7 +911,7 @@ public class EcjParserTest extends AbstractCheckTest {
         assertNotNull(compilationUnit);
 
         // null means OK
-        final AtomicReference<String> result = new AtomicReference<String>();
+        final AtomicReference<String> result = new AtomicReference<>();
 
         compilationUnit.accept(new ForwardingAstVisitor() {
             @Override
@@ -963,7 +981,7 @@ public class EcjParserTest extends AbstractCheckTest {
 
     @Override
     protected TestLintClient createClient() {
-        return new TestLintClient() {
+        return new ToolsBaseTestLintClient() {
             @NonNull
             @Override
             protected ClassPathInfo getClassPath(@NonNull Project project) {

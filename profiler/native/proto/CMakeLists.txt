@@ -1,7 +1,12 @@
-set(PROTO_FILES cpu_profiler_data.proto
-                cpu_profiler_service.proto
-                network_profiler.proto
+set(PROTO_FILES cpu.proto
+                energy.proto
+                event.proto
+                internal_energy.proto
+                internal_event.proto
+                internal_memory.proto
+                internal_network.proto
                 memory.proto
+                network.proto
                 perfa_service.proto
                 profiler.proto
                 profiler_service.proto)
@@ -27,8 +32,8 @@ if(ANDROID)
                         gnustl_static)
 endif()
 
-add_library(ProfilerProtos
+add_library(profiler_protos
             ${PROTO_DEPENDENCIES})
 
-target_link_libraries(ProfilerProtos
+target_link_libraries(profiler_protos
                       ${LINK_DEPENDENCIES})

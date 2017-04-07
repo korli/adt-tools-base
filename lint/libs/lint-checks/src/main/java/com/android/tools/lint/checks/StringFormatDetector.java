@@ -21,7 +21,6 @@ import static com.android.SdkConstants.CLASS_CONTEXT;
 import static com.android.SdkConstants.CLASS_FRAGMENT;
 import static com.android.SdkConstants.CLASS_RESOURCES;
 import static com.android.SdkConstants.CLASS_V4_FRAGMENT;
-import static com.android.SdkConstants.DOT_JAVA;
 import static com.android.SdkConstants.FORMAT_METHOD;
 import static com.android.SdkConstants.GET_STRING_METHOD;
 import static com.android.SdkConstants.TAG_STRING;
@@ -35,6 +34,7 @@ import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG_WRAPPER;
 import static com.android.tools.lint.client.api.JavaParser.TYPE_OBJECT;
 import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
 import static com.android.tools.lint.client.api.JavaParser.TYPE_STRING;
+import static com.android.tools.lint.detector.api.CharSequences.indexOf;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -80,11 +80,6 @@ import com.intellij.psi.PsiParameterList;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiVariable;
-
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -98,6 +93,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Check which looks for problems with formatting strings such as inconsistencies between
@@ -119,7 +117,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
 
     /** Whether formatting strings are invalid */
     public static final Issue INVALID = Issue.create(
-            "StringFormatInvalid", //$NON-NLS-1$
+            "StringFormatInvalid",
             "Invalid format string",
 
             "If a string contains a '%' character, then the string may be a formatting string " +
@@ -146,7 +144,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
 
     /** Whether formatting argument types are consistent across translations */
     public static final Issue ARG_COUNT = Issue.create(
-            "StringFormatCount", //$NON-NLS-1$
+            "StringFormatCount",
             "Formatting argument types incomplete or inconsistent",
 
             "When a formatted string takes arguments, it usually needs to reference the " +
@@ -163,7 +161,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
 
     /** Whether the string format supplied in a call to String.format matches the format string */
     public static final Issue ARG_TYPES = Issue.create(
-            "StringFormatMatches", //$NON-NLS-1$
+            "StringFormatMatches",
             "`String.format` string doesn't match the XML format string",
 
             "This lint check ensures the following:\n" +
@@ -179,7 +177,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
 
     /** This plural does not use the quantity value */
     public static final Issue POTENTIAL_PLURAL = Issue.create(
-            "PluralsCandidate", //$NON-NLS-1$
+            "PluralsCandidate",
             "Potential Plurals",
 
             "This lint check looks for potential errors in internationalization where you have " +
@@ -216,7 +214,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
     /**
      * Map of strings that do not contain any formatting.
      */
-    private final Map<String, Handle> mNotFormatStrings = new HashMap<String, Handle>();
+    private final Map<String, Handle> mNotFormatStrings = new HashMap<>();
 
     /**
      * Set of strings that have an unknown format such as date formatting; we should not
@@ -231,15 +229,6 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
     @Override
     public boolean appliesTo(@NonNull ResourceFolderType folderType) {
         return folderType == ResourceFolderType.VALUES;
-    }
-
-    @Override
-    public boolean appliesTo(@NonNull Context context, @NonNull File file) {
-        if (LintUtils.endsWith(file.getName(), DOT_JAVA)) {
-            return mFormatStrings != null;
-        }
-
-        return super.appliesTo(context, file);
     }
 
     @Override
@@ -327,7 +316,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
             }
             if (c == '%') {
                 // Also make sure this String isn't an unformatted String
-                String formatted = element.getAttribute("formatted"); //$NON-NLS-1$
+                String formatted = element.getAttribute("formatted");
                 if (!formatted.isEmpty() && !Boolean.parseBoolean(formatted)) {
                     if (!mNotFormatStrings.containsKey(name)) {
                         Handle handle = context.createLocationHandle(element);
@@ -355,7 +344,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
                 int conversionClass = getConversionClass(conversion.charAt(0));
                 if (conversionClass == CONVERSION_CLASS_UNKNOWN || matcher.group(5) != null) {
                     if (mIgnoreStrings == null) {
-                        mIgnoreStrings = new HashSet<String>();
+                        mIgnoreStrings = new HashSet<>();
                     }
                     mIgnoreStrings.add(name);
 
@@ -395,12 +384,12 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
             if (found) {
                 // Record it for analysis when seen in Java code
                 if (mFormatStrings == null) {
-                    mFormatStrings = new HashMap<String, List<Pair<Handle, String>>>();
+                    mFormatStrings = new HashMap<>();
                 }
 
                 List<Pair<Handle, String>> list = mFormatStrings.get(name);
                 if (list == null) {
-                    list = new ArrayList<Pair<Handle, String>>();
+                    list = new ArrayList<>();
                     mFormatStrings.put(name, list);
                 }
                 list.add(Pair.of(handle, text));
@@ -526,8 +515,8 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
 
     private static void checkTypes(Context context, boolean checkValid,
             boolean checkTypes, String name, List<Pair<Handle, String>> list) {
-        Map<Integer, String> types = new HashMap<Integer, String>();
-        Map<Integer, Handle> typeDefinition = new HashMap<Integer, Handle>();
+        Map<Integer, String> types = new HashMap<>();
+        Map<Integer, Handle> typeDefinition = new HashMap<>();
         for (Pair<Handle, String> pair : list) {
             Handle handle = pair.getFirst();
             String formatString = pair.getSecond();
@@ -555,7 +544,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
 
                     index = matcher.end(); // Ensure loop proceeds
                     String str = formatString.substring(matchStart, matcher.end());
-                    if (str.equals("%%") || str.equals("%n")) { //$NON-NLS-1$ //$NON-NLS-2$
+                    if (str.equals("%%") || str.equals("%n")) {
                         // Just an escaped %
                         continue;
                     }
@@ -753,9 +742,9 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
             int startOffset = startLocation.getOffset();
             int endOffset = endLocation.getOffset();
             if (startOffset >= 0) {
-                String contents = context.getClient().readFile(location.getFile());
+                CharSequence contents = context.getClient().readFile(location.getFile());
                 if (endOffset <= contents.length() && startOffset < endOffset) {
-                    int formatOffset = contents.indexOf(formatString, startOffset);
+                    int formatOffset = indexOf(contents, formatString, startOffset);
                     if (formatOffset != -1 && formatOffset <= endOffset) {
                         return Location.create(location.getFile(), contents,
                                 formatOffset + substringStart, formatOffset + substringEnd);
@@ -775,7 +764,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
         // Check to make sure that the argument counts and types are consistent
         int prevCount = -1;
         for (Pair<Handle, String> pair : list) {
-            Set<Integer> indices = new HashSet<Integer>();
+            Set<Integer> indices = new HashSet<>();
             int count = getFormatArgumentCount(pair.getSecond(), indices);
             Handle handle = pair.getFirst();
             if (prevCount != -1 && prevCount != count) {
@@ -806,12 +795,12 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
                         }
                     }
 
-                    Set<Integer> all = new HashSet<Integer>();
+                    Set<Integer> all = new HashSet<>();
                     for (int j = 1; j < count; j++) {
                         all.add(j);
                     }
                     all.removeAll(indices);
-                    List<Integer> sorted = new ArrayList<Integer>(all);
+                    List<Integer> sorted = new ArrayList<>(all);
                     Collections.sort(sorted);
                     Location location = handle.resolve();
                     String message = String.format(
@@ -831,24 +820,24 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
             // Generic format:
             //   %[argument_index$][flags][width][.precision]conversion
             //
-            "%" +                                                               //$NON-NLS-1$
+            "%" +
             // Argument Index
-            "(\\d+\\$)?" +                                                      //$NON-NLS-1$
+            "(\\d+\\$)?" +
             // Flags
-            "([-+#, 0(<]*)?" +                                                  //$NON-NLS-1$
+            "([-+#, 0(<]*)?" +
             // Width
-            "(\\d+)?" +                                                         //$NON-NLS-1$
+            "(\\d+)?" +
             // Precision
-            "(\\.\\d+)?" +                                                      //$NON-NLS-1$
+            "(\\.\\d+)?" +
             // Conversion. These are all a single character, except date/time conversions
             // which take a prefix of t/T:
-            "([tT])?" +                                                         //$NON-NLS-1$
+            "([tT])?" +
             // The current set of conversion characters are
             // b,h,s,c,d,o,x,e,f,g,a,t (as well as all those as upper-case characters), plus
             // n for newlines and % as a literal %. And then there are all the time/date
             // characters: HIKLm etc. Just match on all characters here since there should
             // be at least one.
-            "([a-zA-Z%])");                                                     //$NON-NLS-1$
+            "([a-zA-Z%])");
 
     /** Given a format string returns the format type of the given argument */
     @VisibleForTesting
@@ -861,7 +850,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
         while (true) {
             if (matcher.find(index)) {
                 String value = matcher.group(6);
-                if ("%".equals(value) || "n".equals(value)) { //$NON-NLS-1$ //$NON-NLS-2$
+                if ("%".equals(value) || "n".equals(value)) {
                     index = matcher.end();
                     continue;
                 }
@@ -918,7 +907,7 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
         while (true) {
             if (matcher.find(index)) {
                 String value = matcher.group(6);
-                if ("%".equals(value) || "n".equals(value)) { //$NON-NLS-1$ //$NON-NLS-2$
+                if ("%".equals(value) || "n".equals(value)) {
                     index = matcher.end();
                     continue;
                 }
@@ -1235,7 +1224,36 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
                         ResourceValue v = item.getResourceValue(false);
                         if (v != null) {
                             String value = v.getRawXmlValue();
-                            if (value != null) {
+                            // Attempt to resolve indirection
+                            if (value == null) {
+                                continue;
+                            }
+                            if (isReference(value)) {
+                                // Only resolve a few indirections
+                                for (int i = 0; i < 3; i++) {
+                                    ResourceUrl url = ResourceUrl.parse(value);
+                                    if (url == null || url.framework) {
+                                        break;
+                                    }
+                                    List<ResourceItem> l = resources.getResourceItem(url.type,
+                                            url.name);
+                                    if (l != null && !l.isEmpty()) {
+                                        v = l.get(0).getResourceValue(false);
+                                        if (v != null) {
+                                            value = v.getValue();
+                                            if (value == null || !isReference(value)) {
+                                                break;
+                                            }
+                                        } else {
+                                            break;
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (value != null && !isReference(value)) {
                                 // Make sure it's really a formatting string,
                                 // not for example "Battery remaining: 90%"
                                 boolean isFormattingString = value.indexOf('%') != -1;
@@ -1363,6 +1381,13 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
                                     break;
                                 case 'h':
                                 case 'H': // Hex print of hash code of objects
+                                    // From https://developer.android.com/reference/java/util/Formatter.html
+                                    // """The following general conversions may be applied to any
+                                    // argument type: 'b', 'B', 'h', 'H', 's', 'S' """
+                                    // We'll still warn about %s since you may have intended
+                                    // numeric formatting, but hex printing seems pretty well
+                                    // intended.
+                                    continue;
                                 case 's':
                                 case 'S':
                                     // String. Can pass anything, but warn about
@@ -1424,6 +1449,16 @@ public class StringFormatDetector extends ResourceXmlDetector implements JavaPsi
                                         "(argument #%5$d in method call)%6$s",
                                         i, name, formatType, canonicalText,
                                         argumentIndex + 1, suggestion);
+
+                                if ((last == 's' || last == 'S') && isNumericType(type, false)) {
+                                    message = String.format(
+                                        "Suspicious argument type for formatting argument #%1$d " +
+                                        "in `%2$s`: conversion is `%3$s`, received `%4$s` " +
+                                        "(argument #%5$d in method call)%6$s",
+                                        i, name, formatType, canonicalText,
+                                        argumentIndex + 1, suggestion);
+                                }
+
                                 context.report(ARG_TYPES, call, location, message);
                                 if (reported == null) {
                                     reported = Sets.newHashSet();

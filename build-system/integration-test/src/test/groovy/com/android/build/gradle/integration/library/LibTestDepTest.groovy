@@ -16,13 +16,15 @@
 
 package com.android.build.gradle.integration.library
 import com.android.build.gradle.integration.common.category.DeviceTests
+import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer
 import com.android.build.gradle.integration.common.fixture.GradleTestProject
+import com.android.build.gradle.integration.common.utils.LibraryGraphHelper
 import com.android.build.gradle.integration.common.utils.ModelHelper
 import com.android.builder.model.AndroidArtifact
 import com.android.builder.model.AndroidProject
-import com.android.builder.model.Dependencies
-import com.android.builder.model.JavaLibrary
 import com.android.builder.model.Variant
+import com.android.builder.model.level2.Library
+import com.android.builder.model.level2.DependencyGraphs
 import groovy.transform.CompileStatic
 import org.junit.AfterClass
 import org.junit.BeforeClass
@@ -30,10 +32,10 @@ import org.junit.ClassRule
 import org.junit.Test
 import org.junit.experimental.categories.Category
 
+import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.JAVA
 import static com.android.builder.core.BuilderConstants.DEBUG
 import static com.android.builder.model.AndroidProject.ARTIFACT_ANDROID_TEST
 import static org.junit.Assert.assertEquals
-import static org.junit.Assert.assertNotNull
 import static org.junit.Assert.assertTrue
 /**
  * Assemble tests for libTestDep.
@@ -44,7 +46,7 @@ class LibTestDepTest {
     static public GradleTestProject project = GradleTestProject.builder()
             .fromTestProject("libTestDep")
             .create()
-    static AndroidProject model
+    static ModelContainer<AndroidProject> model
 
     @BeforeClass
     static void setUp() {
@@ -64,26 +66,27 @@ class LibTestDepTest {
 
     @Test
     public void "check test variant inherits deps from main variant"() {
-        Collection<Variant> variants = model.getVariants()
+        LibraryGraphHelper helper = new LibraryGraphHelper(model);
+
+        Collection<Variant> variants = model.getOnlyModel().getVariants()
         Variant debugVariant = ModelHelper.getVariant(variants, DEBUG)
 
         Collection<AndroidArtifact> extraAndroidArtifact = debugVariant.getExtraAndroidArtifacts()
         AndroidArtifact testArtifact = ModelHelper.getAndroidArtifact(extraAndroidArtifact,
                 ARTIFACT_ANDROID_TEST)
-        assertNotNull(testArtifact)
 
-        Dependencies testDependencies = testArtifact.getCompileDependencies()
-        Collection<JavaLibrary> javaLibraries = testDependencies.getJavaLibraries()
+        DependencyGraphs testGraph = testArtifact.getDependencyGraphs();
+        List<Library> javaLibraries = helper.on(testGraph).withType(JAVA).asLibraries();
         assertEquals(2, javaLibraries.size())
-        for (JavaLibrary lib : javaLibraries) {
-            File f = lib.getJarFile()
+        for (Library lib : javaLibraries) {
+            File f = lib.getArtifact()
             assertTrue(f.getName().equals("guava-15.0.jar") || f.getName().equals("jsr305-1.3.9.jar"))
         }
     }
 
     @Test
     void "check debug and release output have different names"() {
-        ModelHelper.compareDebugAndReleaseOutput(model)
+        ModelHelper.compareDebugAndReleaseOutput(model.getOnlyModel())
     }
 
     @Test

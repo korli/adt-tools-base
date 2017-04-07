@@ -22,12 +22,12 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.model.NativeAndroidProjectImpl;
-import com.android.build.gradle.internal.model.NativeArtifactImpl;
-import com.android.build.gradle.internal.model.NativeFileImpl;
-import com.android.build.gradle.internal.model.NativeFolderImpl;
-import com.android.build.gradle.internal.model.NativeSettingsImpl;
-import com.android.build.gradle.internal.model.NativeToolchainImpl;
+import com.android.build.gradle.internal.ide.NativeAndroidProjectImpl;
+import com.android.build.gradle.internal.ide.NativeArtifactImpl;
+import com.android.build.gradle.internal.ide.NativeFileImpl;
+import com.android.build.gradle.internal.ide.NativeFolderImpl;
+import com.android.build.gradle.internal.ide.NativeSettingsImpl;
+import com.android.build.gradle.internal.ide.NativeToolchainImpl;
 import com.android.build.gradle.managed.NativeBuildConfig;
 import com.android.build.gradle.managed.NativeLibrary;
 import com.android.build.gradle.ndk.internal.NativeCompilerArgsUtil;
@@ -42,6 +42,7 @@ import com.android.utils.StringHelper;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
@@ -149,6 +150,7 @@ public class NativeComponentModelBuilder implements ToolingModelBuilder {
                     files,
                     ImmutableList.copyOf(lib.getExportedHeaders()),
                     lib.getOutput(),
+                    ImmutableSet.copyOf(lib.getRuntimeFiles()),
                     lib.getAbi(),
                     lib.getArtifactName());
             artifacts.add(artifact);

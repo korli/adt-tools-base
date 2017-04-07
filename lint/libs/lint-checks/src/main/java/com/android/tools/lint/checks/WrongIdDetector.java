@@ -52,19 +52,12 @@ import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Location.Handle;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.Pair;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -73,6 +66,10 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
 
 /**
  * Checks for duplicate ids within a layout and within an included layout
@@ -83,7 +80,7 @@ public class WrongIdDetector extends LayoutDetector {
             Scope.RESOURCE_FILE_SCOPE);
 
     /** Ids bound to widgets in any of the layout files */
-    private final Set<String> mGlobalIds = new HashSet<String>(100);
+    private final Set<String> mGlobalIds = new HashSet<>(100);
 
     /** Ids bound to widgets in the current layout file */
     private Set<String> mFileIds;
@@ -108,7 +105,7 @@ public class WrongIdDetector extends LayoutDetector {
     /** Reference to an unknown id */
     @SuppressWarnings("unchecked")
     public static final Issue UNKNOWN_ID = Issue.create(
-            "UnknownId", //$NON-NLS-1$
+            "UnknownId",
             "Reference to an unknown id",
             "The `@+id/` syntax refers to an existing id, or creates a new one if it has " +
             "not already been defined elsewhere. However, this means that if you have a " +
@@ -126,7 +123,7 @@ public class WrongIdDetector extends LayoutDetector {
 
     /** Reference to an id that is not a sibling */
     public static final Issue NOT_SIBLING = Issue.create(
-            "NotSibling", //$NON-NLS-1$
+            "NotSibling",
             "RelativeLayout Invalid Constraints",
             "Layout constraints in a given `RelativeLayout` should reference other views " +
             "within the same relative layout (but not itself!)",
@@ -137,7 +134,7 @@ public class WrongIdDetector extends LayoutDetector {
 
     /** An ID declaration which is not valid */
     public static final Issue INVALID = Issue.create(
-            "InvalidId", //$NON-NLS-1$
+            "InvalidId",
             "Invalid ID declaration",
             "An id definition *must* be of the form `@+id/yourname`. The tools have not " +
             "rejected strings of the form `@+foo/bar` in the past, but that was an error, " +
@@ -152,7 +149,7 @@ public class WrongIdDetector extends LayoutDetector {
 
     /** Reference to an id that is not in the current layout */
     public static final Issue UNKNOWN_ID_LAYOUT = Issue.create(
-            "UnknownIdInLayout", //$NON-NLS-1$
+            "UnknownIdInLayout",
             "Reference to an id that is not in the current layout",
 
             "The `@+id/` syntax refers to an existing id, or creates a new one if it has " +
@@ -181,12 +178,6 @@ public class WrongIdDetector extends LayoutDetector {
         return folderType == ResourceFolderType.LAYOUT || folderType == ResourceFolderType.VALUES;
     }
 
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
-    }
-
     @Override
     public Collection<String> getApplicableAttributes() {
         return Collections.singletonList(ATTR_ID);
@@ -200,7 +191,7 @@ public class WrongIdDetector extends LayoutDetector {
 
     @Override
     public void beforeCheckFile(@NonNull Context context) {
-        mFileIds = new HashSet<String>();
+        mFileIds = new HashSet<>();
         mRelativeLayouts = null;
     }
 
@@ -233,6 +224,7 @@ public class WrongIdDetector extends LayoutDetector {
                         String value = attr.getValue();
                         if ((value.startsWith(NEW_ID_PREFIX) ||
                                 value.startsWith(ID_PREFIX))
+                                && attr.getLocalName() != null
                                 && attr.getLocalName().startsWith(ATTR_LAYOUT_RESOURCE_PREFIX)
                                 && (ANDROID_URI.equals(attr.getNamespaceURI()) ||
                                    AUTO_URI.equals(attr.getNamespaceURI()))) {
@@ -246,7 +238,7 @@ public class WrongIdDetector extends LayoutDetector {
                                 handle.setClientData(attr);
 
                                 if (mHandles == null) {
-                                    mHandles = new ArrayList<Pair<String,Handle>>();
+                                    mHandles = new ArrayList<>();
                                 }
                                 mHandles.add(Pair.of(value, handle));
                             } else {
@@ -406,7 +398,7 @@ public class WrongIdDetector extends LayoutDetector {
                     || tagName.equals(PERCENT_RELATIVE_LAYOUT)
                     || tagName.equals(SdkConstants.CLASS_CONSTRAINT_LAYOUT);
             if (mRelativeLayouts == null) {
-                mRelativeLayouts = new ArrayList<Element>();
+                mRelativeLayouts = new ArrayList<>();
             }
             mRelativeLayouts.add(element);
         }
@@ -422,8 +414,8 @@ public class WrongIdDetector extends LayoutDetector {
         if (id.equals(NEW_ID_PREFIX) || id.equals(ID_PREFIX) || "@+id".equals(ID_PREFIX)) {
             String message = "Invalid id: missing value";
             context.report(INVALID, attribute, context.getLocation(attribute), message);
-        } else if (id.startsWith("@+") && !id.startsWith(NEW_ID_PREFIX) //$NON-NLS-1$
-                && !id.startsWith("@+android:id/")  //$NON-NLS-1$
+        } else if (id.startsWith("@+") && !id.startsWith(NEW_ID_PREFIX)
+                && !id.startsWith("@+android:id/")
                 || id.startsWith(NEW_ID_PREFIX)
                 && id.indexOf('/', NEW_ID_PREFIX.length()) != -1) {
             int nameStart = id.startsWith(NEW_ID_PREFIX) ? NEW_ID_PREFIX.length() : 2;
@@ -511,7 +503,7 @@ public class WrongIdDetector extends LayoutDetector {
         for (int i = 0; i < maxDistance; i++) {
             Collection<String> strings = matches.get(i);
             if (strings != null && !strings.isEmpty()) {
-                List<String> suggestions = new ArrayList<String>(strings);
+                List<String> suggestions = new ArrayList<>(strings);
                 Collections.sort(suggestions);
                 return suggestions;
             }

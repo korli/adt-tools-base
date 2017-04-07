@@ -206,7 +206,7 @@ public final class Message {
     @Override
     public String toString() {
         MoreObjects.ToStringHelper toStringHelper =
-          MoreObjects.toStringHelper(this).add("kind", mKind).add("text", mText)
+                MoreObjects.toStringHelper(this).add("kind", mKind).add("text", mText)
                 .add("sources", mSourceFilePositions);
         if (!mText.equals(mRawMessage)) {
             toStringHelper.add("original message", mRawMessage);

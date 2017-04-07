@@ -16,6 +16,8 @@
 
 package com.android.build.gradle.internal.externalBuild;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.api.transform.QualifiedContent;
@@ -25,10 +27,10 @@ import com.android.build.gradle.internal.InstantRunTaskManager;
 import com.android.build.gradle.internal.TaskContainerAdaptor;
 import com.android.build.gradle.internal.dsl.DexOptions;
 import com.android.build.gradle.internal.dsl.SigningConfig;
+import com.android.build.gradle.internal.ide.AaptOptionsImpl;
 import com.android.build.gradle.internal.incremental.BuildInfoLoaderTask;
+import com.android.build.gradle.internal.incremental.BuildInfoWriterTask;
 import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
-import com.android.build.gradle.internal.incremental.InstantRunWrapperTask;
-import com.android.build.gradle.internal.model.AaptOptionsImpl;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
 import com.android.build.gradle.internal.pipeline.OriginalStream;
 import com.android.build.gradle.internal.pipeline.StreamFilter;
@@ -42,22 +44,23 @@ import com.android.build.gradle.internal.scope.SupplierTask;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.transforms.DexTransform;
 import com.android.build.gradle.internal.transforms.ExtractJarsTransform;
-import com.android.build.gradle.internal.transforms.InstantRunSplitApkBuilder;
+import com.android.build.gradle.internal.transforms.InstantRunSliceSplitApkBuilder;
 import com.android.build.gradle.tasks.PackageApplication;
 import com.android.build.gradle.tasks.PreColdSwapTask;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.core.DefaultDexOptions;
 import com.android.builder.core.DefaultManifestParser;
+import com.android.builder.profile.Recorder;
+import com.android.builder.signing.DefaultSigningConfig;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.io.Files;
-
+import java.io.File;
+import java.util.EnumSet;
+import java.util.Optional;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
-
-import java.io.File;
-import java.util.EnumSet;
+import org.gradle.api.logging.Logging;
 
 /**
  * Task Manager for External Build system integration.
@@ -67,10 +70,12 @@ class ExternalBuildTaskManager {
     private final Project project;
     private final AndroidTaskRegistry androidTasks = new AndroidTaskRegistry();
     private final TaskContainerAdaptor tasks;
+    private final Recorder recorder;
 
-    ExternalBuildTaskManager(@NonNull Project project) {
+    ExternalBuildTaskManager(@NonNull Project project, @NonNull Recorder recorder) {
         this.project = project;
         this.tasks = new TaskContainerAdaptor(project.getTasks());
+        this.recorder = recorder;
     }
 
     void createTasks(@NonNull ExternalBuildExtension externalBuildExtension) throws Exception {
@@ -87,8 +92,8 @@ class ExternalBuildTaskManager {
                 new File(externalBuildExtension.getExecutionRoot()),
                 file, project, externalBuildContext);
 
-        ExtraModelInfo modelInfo = new ExtraModelInfo(project, false /* isLibrary */);
-        TransformManager transformManager = new TransformManager(androidTasks, modelInfo);
+        ExtraModelInfo modelInfo = new ExtraModelInfo(project);
+        TransformManager transformManager = new TransformManager(androidTasks, modelInfo, recorder);
 
         transformManager.addStream(OriginalStream.builder()
                 .addContentType(QualifiedContent.DefaultContentType.CLASSES)
@@ -97,17 +102,21 @@ class ExternalBuildTaskManager {
                 .build());
 
         // add an empty java resources directory for now.
+        // the folder itself doesn't actually matter, but it has to be consistent
+        // for gradle's up-to-date check
         transformManager.addStream(OriginalStream.builder()
                 .addContentType(QualifiedContent.DefaultContentType.RESOURCES)
                 .addScope(QualifiedContent.Scope.PROJECT)
-                .setFolder(Files.createTempDir())
+                .setFolder(new File(project.getBuildDir(), "temp/streams/resources"))
                 .build());
 
         // add an empty native libraries resources directory for now.
+        // the folder itself doesn't actually matter, but it has to be consistent
+        // for gradle's up-to-date check
         transformManager.addStream(OriginalStream.builder()
                 .addContentType(ExtendedContentType.NATIVE_LIBS)
                 .addScope(QualifiedContent.Scope.PROJECT)
-                .setFolder(Files.createTempDir())
+                .setFolder(new File(project.getBuildDir(), "temp/streams/native_libs"))
                 .build());
 
         ExternalBuildGlobalScope globalScope = new ExternalBuildGlobalScope(project);
@@ -134,18 +143,23 @@ class ExternalBuildTaskManager {
         ExtractJarsTransform extractJarsTransform = new ExtractJarsTransform(
                 ImmutableSet.of(QualifiedContent.DefaultContentType.CLASSES),
                 ImmutableSet.of(QualifiedContent.Scope.PROJECT));
-        AndroidTask<TransformTask> extractJarsTask = transformManager
-                .addTransform(tasks, variantScope, extractJarsTransform);
-        assert extractJarsTask != null;
+        Optional<AndroidTask<TransformTask>> extractJarsTask =
+                transformManager.addTransform(tasks, variantScope, extractJarsTransform);
 
-        InstantRunTaskManager instantRunTaskManager = new InstantRunTaskManager(project.getLogger(),
-                variantScope, transformManager, androidTasks, tasks);
+        InstantRunTaskManager instantRunTaskManager =
+                new InstantRunTaskManager(
+                        project.getLogger(),
+                        variantScope,
+                        transformManager,
+                        androidTasks,
+                        tasks,
+                        recorder);
 
         AndroidTask<BuildInfoLoaderTask> buildInfoLoaderTask =
                 instantRunTaskManager.createInstantRunAllTasks(
                         new DexOptions(modelInfo),
                         externalBuildContext.getAndroidBuilder()::getDexByteCodeConverter,
-                        extractJarsTask,
+                        extractJarsTask.orElse(null),
                         externalBuildAnchorTask,
                         EnumSet.of(QualifiedContent.Scope.PROJECT),
                         new SupplierTask<File>() {
@@ -178,7 +192,7 @@ class ExternalBuildTaskManager {
                         },
                         false /* addResourceVerifier */);
 
-        extractJarsTask.dependsOn(tasks, buildInfoLoaderTask);
+        extractJarsTask.ifPresent(t -> t.dependsOn(tasks, buildInfoLoaderTask));
 
         AndroidTask<PreColdSwapTask> preColdswapTask = instantRunTaskManager
                 .createPreColdswapTask(project);
@@ -205,13 +219,12 @@ class ExternalBuildTaskManager {
 
         transformManager.addTransform(tasks, variantScope, dexTransform);
 
-        // for now always use the debug key.
-        SigningConfig debugSigningConfig = new SigningConfig(BuilderConstants.DEBUG);
+        SigningConfig manifestSigningConfig = createManifestSigningConfig(externalBuildContext);
 
         PackagingScope packagingScope =
                 new ExternalBuildPackagingScope(
                         project, externalBuildContext, variantScope, transformManager,
-                        debugSigningConfig);
+                        manifestSigningConfig);
 
         // TODO: Where should assets come from?
         AndroidTask<Task> createAssetsDirectory =
@@ -238,15 +251,21 @@ class ExternalBuildTaskManager {
                             }
                         });
 
-        // TODO: dependencies
 
-        AndroidTask<InstantRunSplitApkBuilder> splitApk =
-                androidTasks.create(tasks,
-                        new InstantRunSplitApkBuilder.ConfigAction(packagingScope));
+        InstantRunSliceSplitApkBuilder slicesApkBuilder =
+                new InstantRunSliceSplitApkBuilder(
+                        Logging.getLogger(ExternalBuildTaskManager.class),
+                        project,
+                        variantScope.getInstantRunBuildContext(),
+                        externalBuildContext.getAndroidBuilder(),
+                        packagingScope,
+                        packagingScope.getSigningConfig(),
+                        packagingScope.getAaptOptions(),
+                        packagingScope.getInstantRunSplitApkOutputFolder(),
+                        packagingScope.getInstantRunSupportDir());
 
-        for (TransformStream stream : transformManager.getStreams(StreamFilter.DEX)) {
-            splitApk.dependsOn(tasks, stream.getDependencies());
-        }
+        Optional<AndroidTask<TransformTask>> transformTaskAndroidTask =
+                transformManager.addTransform(tasks, variantScope, slicesApkBuilder);
 
         AndroidTask<PackageApplication> packageApp =
                 androidTasks.create(
@@ -254,6 +273,10 @@ class ExternalBuildTaskManager {
                         new PackageApplication.StandardConfigAction(
                                 packagingScope,
                                 variantScope.getInstantRunBuildContext().getPatchingPolicy()));
+
+        if (transformTaskAndroidTask.isPresent()) {
+            packageApp.dependsOn(tasks, transformTaskAndroidTask.get());
+        }
 
         variantScope.setPackageApplicationTask(packageApp);
         packageApp.dependsOn(tasks, createAssetsDirectory);
@@ -270,14 +293,37 @@ class ExternalBuildTaskManager {
         }
 
         // finally, generate the build-info.xml
-        AndroidTask<InstantRunWrapperTask> buildInfoGeneratorTask =
-                instantRunTaskManager.createBuildInfoGeneratorTask(packageApp);
+        AndroidTask<BuildInfoWriterTask>buildInfoWriterTask =
+                instantRunTaskManager.createBuildInfoWriterTask(packageApp);
 
-        buildInfoGeneratorTask.dependsOn(tasks, packageApp);
-        externalBuildAnchorTask.dependsOn(tasks, buildInfoGeneratorTask);
+        externalBuildAnchorTask.dependsOn(tasks, packageApp);
+        externalBuildAnchorTask.dependsOn(tasks, buildInfoWriterTask);
 
         for (AndroidTask<? extends DefaultTask> task : variantScope.getColdSwapBuildTasks()) {
             task.dependsOn(tasks, preColdswapTask);
         }
+    }
+
+    private static SigningConfig createManifestSigningConfig(
+            ExternalBuildContext externalBuildContext) {
+        SigningConfig config = new SigningConfig(BuilderConstants.EXTERNAL_BUILD);
+        config.setStorePassword(DefaultSigningConfig.DEFAULT_PASSWORD);
+        config.setKeyAlias(DefaultSigningConfig.DEFAULT_ALIAS);
+        config.setKeyPassword(DefaultSigningConfig.DEFAULT_PASSWORD);
+
+        File keystore =
+                new File(
+                        externalBuildContext.getExecutionRoot(),
+                        externalBuildContext
+                                .getBuildManifest()
+                                .getDebugKeystore()
+                                .getExecRootPath());
+        checkState(
+                keystore.isFile(),
+                "Keystore file from the manifest (%s) does not exist.",
+                keystore.getAbsolutePath());
+        config.setStoreFile(keystore);
+
+        return config;
     }
 }

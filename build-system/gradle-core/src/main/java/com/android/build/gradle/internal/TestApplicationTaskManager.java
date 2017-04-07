@@ -16,6 +16,7 @@
 
 package com.android.build.gradle.internal;
 
+import android.databinding.tool.DataBindingBuilder;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.AndroidConfig;
@@ -35,20 +36,17 @@ import com.android.build.gradle.tasks.ProcessTestManifest;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.core.VariantType;
+import com.android.builder.profile.Recorder;
 import com.android.builder.testing.ConnectedDeviceProvider;
 import com.android.manifmerger.ManifestMerger2;
 import com.android.utils.StringHelper;
 import com.google.common.collect.ImmutableMap;
-
+import java.util.List;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
-
-import android.databinding.tool.DataBindingBuilder;
-
-import java.util.List;
 
 /**
  * TaskManager for standalone test application that lives in a separate module from the tested
@@ -69,7 +67,8 @@ public class TestApplicationTaskManager extends ApplicationTaskManager {
             @NonNull SdkHandler sdkHandler,
             @NonNull NdkHandler ndkHandler,
             @NonNull DependencyManager dependencyManager,
-            @NonNull ToolingModelBuilderRegistry toolingRegistry) {
+            @NonNull ToolingModelBuilderRegistry toolingRegistry,
+            @NonNull Recorder recorder) {
         super(
                 project,
                 androidBuilder,
@@ -78,7 +77,8 @@ public class TestApplicationTaskManager extends ApplicationTaskManager {
                 sdkHandler,
                 ndkHandler,
                 dependencyManager,
-                toolingRegistry);
+                toolingRegistry,
+                recorder);
     }
 
     @Override
@@ -97,6 +97,8 @@ public class TestApplicationTaskManager extends ApplicationTaskManager {
 
         TestApplicationTestData testData = new TestApplicationTestData(
                 variantData, testTarget, testTargetMetadata, androidBuilder);
+
+        configureTestData(testData);
 
         // create the test connected check task.
         AndroidTask<DeviceProviderInstrumentTestTask> instrumentTestTask =
@@ -117,7 +119,7 @@ public class TestApplicationTaskManager extends ApplicationTaskManager {
                         });
 
         AndroidTask manifestProcessorTask =
-                variantData.getOutputs().get(0).getScope().getManifestProcessorTask();
+                variantData.getMainOutput().getScope().getManifestProcessorTask();
         manifestProcessorTask.dependsOn(tasks, getTargetManifestConfiguration());
 
         // assemble of the test module depends on getting the configurations
@@ -156,8 +158,7 @@ public class TestApplicationTaskManager extends ApplicationTaskManager {
                     getTestTargetConfiguration(VariantDependencies.CONFIGURATION_MAPPING);
         }
 
-        if (mTestTargetMapping.getFiles().isEmpty()
-                || variantScope.getVariantConfiguration().getProvidedOnlyJars().isEmpty()){
+        if (mTestTargetMapping.getFiles().isEmpty()){
             return null;
         }
         else {

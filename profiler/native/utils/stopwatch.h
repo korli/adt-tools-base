@@ -37,7 +37,7 @@ class Stopwatch final {
   Stopwatch();
 
   // Constructor which can take a custom clock, useful for testing
-  Stopwatch(std::shared_ptr<Clock> clock);
+  explicit Stopwatch(const std::shared_ptr<Clock>& clock);
 
   // Start counting time from now.
   //
@@ -46,13 +46,13 @@ class Stopwatch final {
 
   // Returns number of nanoseconds elapsed since either the stopwatch was
   // created or since the last call to Start was made.
-  uint64_t GetElapsed() const;
- private:
+  int64_t GetElapsed() const;
 
+ private:
   std::shared_ptr<Clock> clock_;
-  uint64_t start_time_;
+  int64_t start_time_;
 };
 
-} // namespace profiler
+}  // namespace profiler
 
-#endif //STOPWATCH_H_
+#endif  // STOPWATCH_H_

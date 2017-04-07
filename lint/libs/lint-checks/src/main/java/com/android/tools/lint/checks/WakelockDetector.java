@@ -19,25 +19,38 @@ package com.android.tools.lint.checks;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.checks.ControlFlowGraph.Node;
-import com.android.tools.lint.detector.api.*;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Detector.ClassScanner;
-import org.objectweb.asm.tree.analysis.AnalyzerException;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.*;
-
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import java.util.Arrays;
 import java.util.List;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LdcInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.analysis.AnalyzerException;
 
 /**
  * Checks for problems with wakelocks (such as failing to release them)
  * which can lead to unnecessary battery usage.
  */
 public class WakelockDetector extends Detector implements ClassScanner {
-    public static final String ANDROID_APP_ACTIVITY = "android/app/Activity";        //$NON-NLS-1$
+    public static final String ANDROID_APP_ACTIVITY = "android/app/Activity";
 
     /** Problems using wakelocks */
     public static final Issue ISSUE = Issue.create(
-            "Wakelock", //$NON-NLS-1$
+            "Wakelock",
             "Incorrect `WakeLock` usage",
 
             "Failing to release a wakelock properly can keep the Android device in " +
@@ -59,12 +72,12 @@ public class WakelockDetector extends Detector implements ClassScanner {
                     WakelockDetector.class,
                     Scope.CLASS_FILE_SCOPE));
 
-    private static final String WAKELOCK_OWNER = "android/os/PowerManager$WakeLock"; //$NON-NLS-1$
-    private static final String RELEASE_METHOD = "release"; //$NON-NLS-1$
-    private static final String ACQUIRE_METHOD = "acquire"; //$NON-NLS-1$
-    private static final String IS_HELD_METHOD = "isHeld"; //$NON-NLS-1$
-    private static final String POWER_MANAGER = "android/os/PowerManager"; //$NON-NLS-1$
-    private static final String NEW_WAKE_LOCK_METHOD = "newWakeLock"; //$NON-NLS-1$
+    private static final String WAKELOCK_OWNER = "android/os/PowerManager$WakeLock";
+    private static final String RELEASE_METHOD = "release";
+    private static final String ACQUIRE_METHOD = "acquire";
+    private static final String IS_HELD_METHOD = "isHeld";
+    private static final String POWER_MANAGER = "android/os/PowerManager";
+    private static final String NEW_WAKE_LOCK_METHOD = "newWakeLock";
 
     /** Print diagnostics during analysis (display flow control graph etc).
      * Make sure you add the asm-debug or asm-util jars to the runtime classpath
@@ -100,7 +113,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
 
     @Override
     public void checkCall(@NonNull ClassContext context, @NonNull ClassNode classNode,
-                          @NonNull MethodNode method, @NonNull MethodInsnNode call) {
+            @NonNull MethodNode method, @NonNull MethodInsnNode call) {
         if (!context.getProject().getReportIssues()) {
             // If this is a library project not being analyzed, ignore it
             return;
@@ -131,7 +144,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
 
                 // See if the release is happening in an onDestroy method, in an
                 // activity.
-                if ("onDestroy".equals(method.name) //$NON-NLS-1$
+                if ("onDestroy".equals(method.name)
                         && context.getDriver().isSubclassOf(
                                 classNode, ANDROID_APP_ACTIVITY)) {
                     context.report(ISSUE, method, call, context.getLocation(call),
@@ -296,7 +309,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
                     || opcode == Opcodes.DRETURN || opcode == Opcodes.FRETURN
                     || opcode == Opcodes.ATHROW) {
                 if (DEBUG) {
-                    System.out.println("Found exit via explicit return: " //$NON-NLS-1$
+                    System.out.println("Found exit via explicit return: "
                             + node.toString(false));
                 }
                 return SEEN_RETURN;
@@ -344,7 +357,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
 
                     if (!foundFrame) {
                         if (DEBUG) {
-                            System.out.println("Found exit via unguarded method call: " //$NON-NLS-1$
+                            System.out.println("Found exit via unguarded method call: "
                                     + node.toString(false));
                         }
                         return SEEN_RETURN;
@@ -369,7 +382,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
                 status = dfs(successor) | status;
                 if ((status & SEEN_RETURN) != 0) {
                     if (DEBUG) {
-                        System.out.println("Found exit via exception: " //$NON-NLS-1$
+                        System.out.println("Found exit via exception: "
                                 + node.toString(false));
                     }
                     return status;
@@ -392,7 +405,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
                 status = dfs(successor) | status;
                 if ((status & SEEN_RETURN) != 0) {
                     if (DEBUG) {
-                        System.out.println("Found exit via branches: " //$NON-NLS-1$
+                        System.out.println("Found exit via branches: "
                                 + node.toString(false));
                     }
                     return status;
@@ -403,7 +416,7 @@ public class WakelockDetector extends Detector implements ClassScanner {
         if (implicitReturn) {
             status |= SEEN_RETURN;
             if (DEBUG) {
-                System.out.println("Found exit: via implicit return: " //$NON-NLS-1$
+                System.out.println("Found exit: via implicit return: "
                         + node.toString(false));
             }
         }

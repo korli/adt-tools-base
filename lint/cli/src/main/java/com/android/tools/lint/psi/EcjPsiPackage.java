@@ -16,30 +16,44 @@
 
 package com.android.tools.lint.psi;
 
+import static com.android.tools.lint.psi.EcjPsiBuilder.PACKAGE_INFO;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.ExternalAnnotationRepository;
 import com.google.common.collect.Lists;
 import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiModifier;
 import com.intellij.psi.PsiModifierList;
 import com.intellij.psi.PsiPackage;
-import com.intellij.psi.PsiQualifiedNamedElement;
-
-import org.eclipse.jdt.internal.compiler.lookup.AnnotationBinding;
-import org.eclipse.jdt.internal.compiler.lookup.PackageBinding;
-
 import java.util.Collection;
 import java.util.List;
+import org.eclipse.jdt.internal.compiler.lookup.AnnotationBinding;
+import org.eclipse.jdt.internal.compiler.lookup.Binding;
+import org.eclipse.jdt.internal.compiler.lookup.PackageBinding;
+import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
 
 class EcjPsiPackage extends EcjPsiBinaryElement implements PsiPackage, PsiModifierList {
 
     private final PackageBinding mPackageBinding;
+    private final PsiModifierList mModifierList;
 
     public EcjPsiPackage(@NonNull EcjPsiManager manager,
-            @Nullable PackageBinding binding) {
+            @NonNull PackageBinding binding) {
         super(manager, binding);
         mPackageBinding = binding;
+
+        PsiModifierList modifierList = this;
+        Binding pkgInfoBinding = binding.getTypeOrPackage(PACKAGE_INFO);
+        if (pkgInfoBinding instanceof ReferenceBinding) {
+            PsiClass pkgInfoClass = manager.findClass(pkgInfoBinding);
+            if (pkgInfoClass != null) {
+                modifierList = pkgInfoClass.getModifierList();
+            }
+        }
+
+        mModifierList = modifierList;
     }
 
     @NonNull
@@ -64,12 +78,6 @@ class EcjPsiPackage extends EcjPsiBinaryElement implements PsiPackage, PsiModifi
 
     @Nullable
     @Override
-    public PsiQualifiedNamedElement getContainer() {
-        return null;
-    }
-
-    @Nullable
-    @Override
     public PsiModifierList getAnnotationList() {
         return getModifierList();
     }
@@ -79,7 +87,7 @@ class EcjPsiPackage extends EcjPsiBinaryElement implements PsiPackage, PsiModifi
     @NonNull
     @Override
     public PsiModifierList getModifierList() {
-        return this;
+        return mModifierList;
     }
 
     @Override
@@ -146,5 +154,26 @@ class EcjPsiPackage extends EcjPsiBinaryElement implements PsiPackage, PsiModifi
     @Nullable
     public PackageBinding getPackageBinding() {
         return mPackageBinding;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        EcjPsiPackage that = (EcjPsiPackage) o;
+
+        return mPackageBinding != null ? mPackageBinding.equals(that.mPackageBinding)
+                : that.mPackageBinding == null;
+
+    }
+
+    @Override
+    public int hashCode() {
+        return mPackageBinding != null ? mPackageBinding.hashCode() : 0;
     }
 }

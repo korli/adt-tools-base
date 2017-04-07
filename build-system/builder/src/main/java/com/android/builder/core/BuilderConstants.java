@@ -27,12 +27,19 @@ public class BuilderConstants {
     public static final String EXT_LIB_ARCHIVE = "aar";
 
     /**
+     * Extension for atom bundles.
+     */
+    public static final String EXT_ATOMBUNDLE_ARCHIVE = "atombundle";
+
+    /**
      * The name of the default config.
      */
     public static final String MAIN = "main";
 
     public static final String DEBUG = "debug";
     public static final String RELEASE = "release";
+
+    public static final String EXTERNAL_BUILD = "externalBuild";
 
     public static final String LINT = "lint";
 

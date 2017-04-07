@@ -19,16 +19,20 @@ package com.android.tools.lint.checks;
 import static com.android.SdkConstants.TAG_USES_PERMISSION;
 import static com.android.SdkConstants.TAG_USES_PERMISSION_SDK_23;
 import static com.android.SdkConstants.TAG_USES_PERMISSION_SDK_M;
+import static com.android.tools.lint.checks.AnnotationDetectorTest.SUPPORT_ANNOTATIONS_JAR_BASE64_GZIP;
 import static com.android.tools.lint.checks.SupportAnnotationDetector.PERMISSION_ANNOTATION;
 
 import com.android.tools.lint.ExternalAnnotationRepository;
 import com.android.tools.lint.ExternalAnnotationRepositoryTest;
+import com.android.tools.lint.checks.infrastructure.ProjectDescription;
 import com.android.tools.lint.client.api.JavaParser.ResolvedAnnotation;
 import com.android.tools.lint.client.api.JavaParser.ResolvedMethod;
 import com.android.tools.lint.detector.api.Detector;
+import java.io.IOException;
 
 @SuppressWarnings("all") // Lots of test sample projects with faulty code
 public class SupportAnnotationDetectorTest extends AbstractCheckTest {
+
     private static final boolean SDK_ANNOTATIONS_AVAILABLE =
             new SupportAnnotationDetectorTest().createClient().findResource(
             ExternalAnnotationRepository.SDK_ANNOTATIONS_PATH) != null;
@@ -39,6 +43,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
     }
 
     public void testRange() throws Exception {
+        //noinspection all // Sample code
         assertEquals(""
                 + "src/test/pkg/RangeTest.java:32: Error: Expected length 5 (was 4) [Range]\n"
                 + "        printExact(\"1234\"); // ERROR\n"
@@ -46,16 +51,16 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:34: Error: Expected length 5 (was 6) [Range]\n"
                 + "        printExact(\"123456\"); // ERROR\n"
                 + "                   ~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:36: Error: Expected length ≥ 5 (was 4) [Range]\n"
+                + "src/test/pkg/RangeTest.java:36: Error: Expected length \u2265 5 (was 4) [Range]\n"
                 + "        printMin(\"1234\"); // ERROR\n"
                 + "                 ~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:43: Error: Expected length ≤ 8 (was 9) [Range]\n"
+                + "src/test/pkg/RangeTest.java:43: Error: Expected length \u2264 8 (was 9) [Range]\n"
                 + "        printMax(\"123456789\"); // ERROR\n"
                 + "                 ~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:45: Error: Expected length ≥ 4 (was 3) [Range]\n"
+                + "src/test/pkg/RangeTest.java:45: Error: Expected length \u2265 4 (was 3) [Range]\n"
                 + "        printRange(\"123\"); // ERROR\n"
                 + "                   ~~~~~\n"
-                + "src/test/pkg/RangeTest.java:49: Error: Expected length ≤ 6 (was 7) [Range]\n"
+                + "src/test/pkg/RangeTest.java:49: Error: Expected length \u2264 6 (was 7) [Range]\n"
                 + "        printRange(\"1234567\"); // ERROR\n"
                 + "                   ~~~~~~~~~\n"
                 + "src/test/pkg/RangeTest.java:53: Error: Expected size 5 (was 4) [Range]\n"
@@ -64,16 +69,16 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:55: Error: Expected size 5 (was 6) [Range]\n"
                 + "        printExact(new int[]{1, 2, 3, 4, 5, 6}); // ERROR\n"
                 + "                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:57: Error: Expected size ≥ 5 (was 4) [Range]\n"
+                + "src/test/pkg/RangeTest.java:57: Error: Expected size \u2265 5 (was 4) [Range]\n"
                 + "        printMin(new int[]{1, 2, 3, 4}); // ERROR\n"
                 + "                 ~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:65: Error: Expected size ≤ 8 (was 9) [Range]\n"
+                + "src/test/pkg/RangeTest.java:65: Error: Expected size \u2264 8 (was 9) [Range]\n"
                 + "        printMax(new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9}); // ERROR\n"
                 + "                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:67: Error: Expected size ≥ 4 (was 3) [Range]\n"
+                + "src/test/pkg/RangeTest.java:67: Error: Expected size \u2265 4 (was 3) [Range]\n"
                 + "        printRange(new int[] {1,2,3}); // ERROR\n"
                 + "                   ~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:71: Error: Expected size ≤ 6 (was 7) [Range]\n"
+                + "src/test/pkg/RangeTest.java:71: Error: Expected size \u2264 6 (was 7) [Range]\n"
                 + "        printRange(new int[] {1,2,3,4,5,6,7}); // ERROR\n"
                 + "                   ~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/RangeTest.java:74: Error: Expected size to be a multiple of 3 (was 4 and should be either 3 or 6) [Range]\n"
@@ -85,22 +90,22 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:77: Error: Expected size to be a multiple of 3 (was 7 and should be either 6 or 9) [Range]\n"
                 + "        printMultiple(new int[] {1,2,3,4,5,6,7}); // ERROR\n"
                 + "                      ~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:80: Error: Expected size ≥ 4 (was 3) [Range]\n"
+                + "src/test/pkg/RangeTest.java:80: Error: Expected size \u2265 4 (was 3) [Range]\n"
                 + "        printMinMultiple(new int[]{1, 2, 3}); // ERROR\n"
                 + "                         ~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:84: Error: Value must be ≥ 4 (was 3) [Range]\n"
+                + "src/test/pkg/RangeTest.java:84: Error: Value must be \u2265 4 (was 3) [Range]\n"
                 + "        printAtLeast(3); // ERROR\n"
                 + "                     ~\n"
-                + "src/test/pkg/RangeTest.java:91: Error: Value must be ≤ 7 (was 8) [Range]\n"
+                + "src/test/pkg/RangeTest.java:91: Error: Value must be \u2264 7 (was 8) [Range]\n"
                 + "        printAtMost(8); // ERROR\n"
                 + "                    ~\n"
-                + "src/test/pkg/RangeTest.java:93: Error: Value must be ≥ 4 (was 3) [Range]\n"
+                + "src/test/pkg/RangeTest.java:93: Error: Value must be \u2265 4 (was 3) [Range]\n"
                 + "        printBetween(3); // ERROR\n"
                 + "                     ~\n"
-                + "src/test/pkg/RangeTest.java:98: Error: Value must be ≤ 7 (was 8) [Range]\n"
+                + "src/test/pkg/RangeTest.java:98: Error: Value must be \u2264 7 (was 8) [Range]\n"
                 + "        printBetween(8); // ERROR\n"
                 + "                     ~\n"
-                + "src/test/pkg/RangeTest.java:102: Error: Value must be ≥ 2.5 (was 2.49) [Range]\n"
+                + "src/test/pkg/RangeTest.java:102: Error: Value must be \u2265 2.5 (was 2.49) [Range]\n"
                 + "        printAtLeastInclusive(2.49f); // ERROR\n"
                 + "                              ~~~~~\n"
                 + "src/test/pkg/RangeTest.java:106: Error: Value must be > 2.5 (was 2.49) [Range]\n"
@@ -109,7 +114,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:107: Error: Value must be > 2.5 (was 2.5) [Range]\n"
                 + "        printAtLeastExclusive(2.5f); // ERROR\n"
                 + "                              ~~~~\n"
-                + "src/test/pkg/RangeTest.java:113: Error: Value must be ≤ 7.0 (was 7.1) [Range]\n"
+                + "src/test/pkg/RangeTest.java:113: Error: Value must be \u2264 7.0 (was 7.1) [Range]\n"
                 + "        printAtMostInclusive(7.1f); // ERROR\n"
                 + "                             ~~~~\n"
                 + "src/test/pkg/RangeTest.java:117: Error: Value must be < 7.0 (was 7.0) [Range]\n"
@@ -118,10 +123,10 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:118: Error: Value must be < 7.0 (was 7.1) [Range]\n"
                 + "        printAtMostExclusive(7.1f); // ERROR\n"
                 + "                             ~~~~\n"
-                + "src/test/pkg/RangeTest.java:120: Error: Value must be ≥ 2.5 (was 2.4) [Range]\n"
+                + "src/test/pkg/RangeTest.java:120: Error: Value must be \u2265 2.5 (was 2.4) [Range]\n"
                 + "        printBetweenFromInclusiveToInclusive(2.4f); // ERROR\n"
                 + "                                             ~~~~\n"
-                + "src/test/pkg/RangeTest.java:124: Error: Value must be ≤ 5.0 (was 5.1) [Range]\n"
+                + "src/test/pkg/RangeTest.java:124: Error: Value must be \u2264 5.0 (was 5.1) [Range]\n"
                 + "        printBetweenFromInclusiveToInclusive(5.1f); // ERROR\n"
                 + "                                             ~~~~\n"
                 + "src/test/pkg/RangeTest.java:126: Error: Value must be > 2.5 (was 2.4) [Range]\n"
@@ -130,10 +135,10 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:127: Error: Value must be > 2.5 (was 2.5) [Range]\n"
                 + "        printBetweenFromExclusiveToInclusive(2.5f); // ERROR\n"
                 + "                                             ~~~~\n"
-                + "src/test/pkg/RangeTest.java:129: Error: Value must be ≤ 5.0 (was 5.1) [Range]\n"
+                + "src/test/pkg/RangeTest.java:129: Error: Value must be \u2264 5.0 (was 5.1) [Range]\n"
                 + "        printBetweenFromExclusiveToInclusive(5.1f); // ERROR\n"
                 + "                                             ~~~~\n"
-                + "src/test/pkg/RangeTest.java:131: Error: Value must be ≥ 2.5 (was 2.4) [Range]\n"
+                + "src/test/pkg/RangeTest.java:131: Error: Value must be \u2265 2.5 (was 2.4) [Range]\n"
                 + "        printBetweenFromInclusiveToExclusive(2.4f); // ERROR\n"
                 + "                                             ~~~~\n"
                 + "src/test/pkg/RangeTest.java:135: Error: Value must be < 5.0 (was 5.0) [Range]\n"
@@ -148,16 +153,16 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/RangeTest.java:141: Error: Value must be < 5.0 (was 5.0) [Range]\n"
                 + "        printBetweenFromExclusiveToExclusive(5.0f); // ERROR\n"
                 + "                                             ~~~~\n"
-                + "src/test/pkg/RangeTest.java:145: Error: Value must be ≥ 4 (was -7) [Range]\n"
+                + "src/test/pkg/RangeTest.java:145: Error: Value must be \u2265 4 (was -7) [Range]\n"
                 + "        printBetween(-7); // ERROR\n"
                 + "                     ~~\n"
                 + "src/test/pkg/RangeTest.java:146: Error: Value must be > 2.5 (was -10.0) [Range]\n"
                 + "        printAtLeastExclusive(-10.0f); // ERROR\n"
                 + "                              ~~~~~~\n"
-                + "src/test/pkg/RangeTest.java:156: Error: Value must be ≥ -1 (was -2) [Range]\n"
+                + "src/test/pkg/RangeTest.java:156: Error: Value must be \u2265 -1 (was -2) [Range]\n"
                 + "        printIndirect(-2); // ERROR\n"
                 + "                      ~~\n"
-                + "src/test/pkg/RangeTest.java:157: Error: Value must be ≤ 42 (was 43) [Range]\n"
+                + "src/test/pkg/RangeTest.java:157: Error: Value must be \u2264 42 (was 43) [Range]\n"
                 + "        printIndirect(43); // ERROR\n"
                 + "                      ~~\n"
                 + "src/test/pkg/RangeTest.java:158: Error: Expected length 5 (was 7) [Range]\n"
@@ -165,14 +170,174 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "                          ~~~~~~~~~\n"
                 + "41 errors, 0 warnings\n",
 
-                lintProject("src/test/pkg/RangeTest.java.txt=>src/test/pkg/RangeTest.java",
-                        "src/android/support/annotation/Size.java.txt=>src/android/support/annotation/Size.java",
-                        "src/android/support/annotation/IntRange.java.txt=>src/android/support/annotation/IntRange.java",
-                        "src/android/support/annotation/FloatRange.java.txt=>src/android/support/annotation/FloatRange.java"
+                lintProject(java(""
+                            + "package test.pkg;\n"
+                            + "\n"
+                            + "import android.support.annotation.FloatRange;\n"
+                            + "import android.support.annotation.IntRange;\n"
+                            + "import android.support.annotation.Size;\n"
+                            + "\n"
+                            + "@SuppressWarnings(\"UnusedDeclaration\")\n"
+                            + "public class RangeTest {\n"
+                            + "    public void printExact(@Size(5) String arg) { System.out.println(arg); }\n"
+                            + "    public void printMin(@Size(min=5) String arg) { }\n"
+                            + "    public void printMax(@Size(max=8) String arg) { }\n"
+                            + "    public void printRange(@Size(min=4,max=6) String arg) { }\n"
+                            + "    public void printExact(@Size(5) int[] arg) { }\n"
+                            + "    public void printMin(@Size(min=5) int[] arg) { }\n"
+                            + "    public void printMax(@Size(max=8) int[] arg) { }\n"
+                            + "    public void printRange(@Size(min=4,max=6) int[] arg) { }\n"
+                            + "    public void printMultiple(@Size(multiple=3) int[] arg) { }\n"
+                            + "    public void printMinMultiple(@Size(min=4,multiple=3) int[] arg) { }\n"
+                            + "    public void printAtLeast(@IntRange(from=4) int arg) { }\n"
+                            + "    public void printAtMost(@IntRange(to=7) int arg) { }\n"
+                            + "    public void printBetween(@IntRange(from=4,to=7) int arg) { }\n"
+                            + "    public void printAtLeastInclusive(@FloatRange(from=2.5) float arg) { }\n"
+                            + "    public void printAtLeastExclusive(@FloatRange(from=2.5,fromInclusive=false) float arg) { }\n"
+                            + "    public void printAtMostInclusive(@FloatRange(to=7) double arg) { }\n"
+                            + "    public void printAtMostExclusive(@FloatRange(to=7,toInclusive=false) double arg) { }\n"
+                            + "    public void printBetweenFromInclusiveToInclusive(@FloatRange(from=2.5,to=5.0) float arg) { }\n"
+                            + "    public void printBetweenFromExclusiveToInclusive(@FloatRange(from=2.5,to=5.0,fromInclusive=false) float arg) { }\n"
+                            + "    public void printBetweenFromInclusiveToExclusive(@FloatRange(from=2.5,to=5.0,toInclusive=false) float arg) { }\n"
+                            + "    public void printBetweenFromExclusiveToExclusive(@FloatRange(from=2.5,to=5.0,fromInclusive=false,toInclusive=false) float arg) { }\n"
+                            + "\n"
+                            + "    public void testLength() {\n"
+                            + "        printExact(\"1234\"); // ERROR\n"
+                            + "        printExact(\"12345\"); // OK\n"
+                            + "        printExact(\"123456\"); // ERROR\n"
+                            + "\n"
+                            + "        printMin(\"1234\"); // ERROR\n"
+                            + "        printMin(\"12345\"); // OK\n"
+                            + "        printMin(\"123456\"); // OK\n"
+                            + "\n"
+                            + "        printMax(\"123456\"); // OK\n"
+                            + "        printMax(\"1234567\"); // OK\n"
+                            + "        printMax(\"12345678\"); // OK\n"
+                            + "        printMax(\"123456789\"); // ERROR\n"
+                            + "\n"
+                            + "        printRange(\"123\"); // ERROR\n"
+                            + "        printRange(\"1234\"); // OK\n"
+                            + "        printRange(\"12345\"); // OK\n"
+                            + "        printRange(\"123456\"); // OK\n"
+                            + "        printRange(\"1234567\"); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testSize() {\n"
+                            + "        printExact(new int[]{1, 2, 3, 4}); // ERROR\n"
+                            + "        printExact(new int[]{1, 2, 3, 4, 5}); // OK\n"
+                            + "        printExact(new int[]{1, 2, 3, 4, 5, 6}); // ERROR\n"
+                            + "\n"
+                            + "        printMin(new int[]{1, 2, 3, 4}); // ERROR\n"
+                            + "        printMin(new int[]{1, 2, 3, 4, 5}); // OK\n"
+                            + "        printMin(new int[]{1, 2, 3, 4, 5, 6}); // OK\n"
+                            + "\n"
+                            + "        printMax(new int[]{1, 2, 3, 4, 5, 6}); // OK\n"
+                            + "        printMax(new int[]{1, 2, 3, 4, 5, 6, 7}); // OK\n"
+                            + "        printMax(new int[]{1, 2, 3, 4, 5, 6, 7, 8}); // OK\n"
+                            + "        printMax(new int[]{1, 2, 3, 4, 5, 6, 7, 8}); // OK\n"
+                            + "        printMax(new int[]{1, 2, 3, 4, 5, 6, 7, 8, 9}); // ERROR\n"
+                            + "\n"
+                            + "        printRange(new int[] {1,2,3}); // ERROR\n"
+                            + "        printRange(new int[] {1,2,3,4}); // OK\n"
+                            + "        printRange(new int[] {1,2,3,4,5}); // OK\n"
+                            + "        printRange(new int[] {1,2,3,4,5,6}); // OK\n"
+                            + "        printRange(new int[] {1,2,3,4,5,6,7}); // ERROR\n"
+                            + "\n"
+                            + "        printMultiple(new int[] {1,2,3}); // OK\n"
+                            + "        printMultiple(new int[] {1,2,3,4}); // ERROR\n"
+                            + "        printMultiple(new int[] {1,2,3,4,5}); // ERROR\n"
+                            + "        printMultiple(new int[] {1,2,3,4,5,6}); // OK\n"
+                            + "        printMultiple(new int[] {1,2,3,4,5,6,7}); // ERROR\n"
+                            + "\n"
+                            + "        printMinMultiple(new int[] {1,2,3,4,5,6}); // OK\n"
+                            + "        printMinMultiple(new int[]{1, 2, 3}); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testIntRange() {\n"
+                            + "        printAtLeast(3); // ERROR\n"
+                            + "        printAtLeast(4); // OK\n"
+                            + "        printAtLeast(5); // OK\n"
+                            + "\n"
+                            + "        printAtMost(5); // OK\n"
+                            + "        printAtMost(6); // OK\n"
+                            + "        printAtMost(7); // OK\n"
+                            + "        printAtMost(8); // ERROR\n"
+                            + "\n"
+                            + "        printBetween(3); // ERROR\n"
+                            + "        printBetween(4); // OK\n"
+                            + "        printBetween(5); // OK\n"
+                            + "        printBetween(6); // OK\n"
+                            + "        printBetween(7); // OK\n"
+                            + "        printBetween(8); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testFloatRange() {\n"
+                            + "        printAtLeastInclusive(2.49f); // ERROR\n"
+                            + "        printAtLeastInclusive(2.5f); // OK\n"
+                            + "        printAtLeastInclusive(2.6f); // OK\n"
+                            + "\n"
+                            + "        printAtLeastExclusive(2.49f); // ERROR\n"
+                            + "        printAtLeastExclusive(2.5f); // ERROR\n"
+                            + "        printAtLeastExclusive(2.501f); // OK\n"
+                            + "\n"
+                            + "        printAtMostInclusive(6.8f); // OK\n"
+                            + "        printAtMostInclusive(6.9f); // OK\n"
+                            + "        printAtMostInclusive(7.0f); // OK\n"
+                            + "        printAtMostInclusive(7.1f); // ERROR\n"
+                            + "\n"
+                            + "        printAtMostExclusive(6.9f); // OK\n"
+                            + "        printAtMostExclusive(6.99f); // OK\n"
+                            + "        printAtMostExclusive(7.0f); // ERROR\n"
+                            + "        printAtMostExclusive(7.1f); // ERROR\n"
+                            + "\n"
+                            + "        printBetweenFromInclusiveToInclusive(2.4f); // ERROR\n"
+                            + "        printBetweenFromInclusiveToInclusive(2.5f); // OK\n"
+                            + "        printBetweenFromInclusiveToInclusive(3f); // OK\n"
+                            + "        printBetweenFromInclusiveToInclusive(5.0f); // OK\n"
+                            + "        printBetweenFromInclusiveToInclusive(5.1f); // ERROR\n"
+                            + "\n"
+                            + "        printBetweenFromExclusiveToInclusive(2.4f); // ERROR\n"
+                            + "        printBetweenFromExclusiveToInclusive(2.5f); // ERROR\n"
+                            + "        printBetweenFromExclusiveToInclusive(5.0f); // OK\n"
+                            + "        printBetweenFromExclusiveToInclusive(5.1f); // ERROR\n"
+                            + "\n"
+                            + "        printBetweenFromInclusiveToExclusive(2.4f); // ERROR\n"
+                            + "        printBetweenFromInclusiveToExclusive(2.5f); // OK\n"
+                            + "        printBetweenFromInclusiveToExclusive(3f); // OK\n"
+                            + "        printBetweenFromInclusiveToExclusive(4.99f); // OK\n"
+                            + "        printBetweenFromInclusiveToExclusive(5.0f); // ERROR\n"
+                            + "\n"
+                            + "        printBetweenFromExclusiveToExclusive(2.4f); // ERROR\n"
+                            + "        printBetweenFromExclusiveToExclusive(2.5f); // ERROR\n"
+                            + "        printBetweenFromExclusiveToExclusive(2.51f); // OK\n"
+                            + "        printBetweenFromExclusiveToExclusive(4.99f); // OK\n"
+                            + "        printBetweenFromExclusiveToExclusive(5.0f); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testNegative() {\n"
+                            + "        printBetween(-7); // ERROR\n"
+                            + "        printAtLeastExclusive(-10.0f); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public static final int MINIMUM = -1;\n"
+                            + "    public static final int MAXIMUM = 42;\n"
+                            + "    public void printIndirect(@IntRange(from = MINIMUM, to = MAXIMUM) int arg) { }\n"
+                            + "    public static final int SIZE = 5;\n"
+                            + "    public static void printIndirectSize(@Size(SIZE) String foo) { }\n"
+                            + "\n"
+                            + "    public void testIndirect() {\n"
+                            + "        printIndirect(-2); // ERROR\n"
+                            + "        printIndirect(43); // ERROR\n"
+                            + "        printIndirectSize(\"1234567\"); // ERROR\n"
+                            + "    }\n"
+                            + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
     public void testTypeDef() throws Exception {
+        //noinspection all // Sample code
         assertEquals(""
                 + "src/test/pkg/IntDefTest.java:31: Error: Must be one of: IntDefTest.STYLE_NORMAL, IntDefTest.STYLE_NO_TITLE, IntDefTest.STYLE_NO_FRAME, IntDefTest.STYLE_NO_INPUT [WrongConstant]\n"
                 + "        setStyle(0, 0); // ERROR\n"
@@ -232,15 +397,120 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/IntDefTest.java:101: Error: Flag not allowed here [WrongConstant]\n"
                 + "        view.setLayoutDirection(View.LAYOUT_DIRECTION_LTR|View.LAYOUT_DIRECTION_RTL); // ERROR\n"
                 + "                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/IntDefTest.java:102: Error: Must be one of: Context.POWER_SERVICE, Context.WINDOW_SERVICE, Context.LAYOUT_INFLATER_SERVICE, Context.ACCOUNT_SERVICE, Context.ACTIVITY_SERVICE, Context.ALARM_SERVICE, Context.NOTIFICATION_SERVICE, Context.ACCESSIBILITY_SERVICE, Context.CAPTIONING_SERVICE, Context.KEYGUARD_SERVICE, Context.LOCATION_SERVICE, Context.SEARCH_SERVICE, Context.SENSOR_SERVICE, Context.STORAGE_SERVICE, Context.WALLPAPER_SERVICE, Context.VIBRATOR_SERVICE, Context.CONNECTIVITY_SERVICE, Context.NETWORK_STATS_SERVICE, Context.WIFI_SERVICE, Context.WIFI_P2P_SERVICE, Context.NSD_SERVICE, Context.AUDIO_SERVICE, Context.FINGERPRINT_SERVICE, Context.MEDIA_ROUTER_SERVICE, Context.TELEPHONY_SERVICE, Context.TELEPHONY_SUBSCRIPTION_SERVICE, Context.CARRIER_CONFIG_SERVICE, Context.TELECOM_SERVICE, Context.CLIPBOARD_SERVICE, Context.INPUT_METHOD_SERVICE, Context.TEXT_SERVICES_MANAGER_SERVICE, Context.APPWIDGET_SERVICE, Context.DROPBOX_SERVICE, Context.DEVICE_POLICY_SERVICE, Context.UI_MODE_SERVICE, Context.DOWNLOAD_SERVICE, Context.NFC_SERVICE, Context.BLUETOOTH_SERVICE, Context.USB_SERVICE, Context.LAUNCHER_APPS_SERVICE, Context.INPUT_SERVICE, Context.DISPLAY_SERVICE, Context.USER_SERVICE, Context.RESTRICTIONS_SERVICE, Context.APP_OPS_SERVICE, Context.CAMERA_SERVICE, Context.PRINT_SERVICE, Context.CONSUMER_IR_SERVICE, Context.TV_INPUT_SERVICE, Context.USAGE_STATS_SERVICE, Context.MEDIA_SESSION_SERVICE, Context.BATTERY_SERVICE, Context.JOB_SCHEDULER_SERVICE, Context.MEDIA_PROJECTION_SERVICE, Context.MIDI_SERVICE, Context.HARDWARE_PROPERTIES_SERVICE [WrongConstant]\n"
-                + "        context.getSystemService(TYPE_1); // ERROR\n"
-                + "                                 ~~~~~~\n"
-                + "20 errors, 0 warnings\n" :
+                // Unstable (since the set of constants keep changing for each release; hidden for now
+                //+ "src/test/pkg/IntDefTest.java:102: Error: Must be one of: Context.POWER_SERVICE, Context.WINDOW_SERVICE, Context.LAYOUT_INFLATER_SERVICE, Context.ACCOUNT_SERVICE, Context.ACTIVITY_SERVICE, Context.ALARM_SERVICE, Context.NOTIFICATION_SERVICE, Context.ACCESSIBILITY_SERVICE, Context.CAPTIONING_SERVICE, Context.KEYGUARD_SERVICE, Context.LOCATION_SERVICE, Context.SEARCH_SERVICE, Context.SENSOR_SERVICE, Context.STORAGE_SERVICE, Context.WALLPAPER_SERVICE, Context.VIBRATOR_SERVICE, Context.CONNECTIVITY_SERVICE, Context.NETWORK_STATS_SERVICE, Context.WIFI_SERVICE, Context.WIFI_P2P_SERVICE, Context.NSD_SERVICE, Context.AUDIO_SERVICE, Context.FINGERPRINT_SERVICE, Context.MEDIA_ROUTER_SERVICE, Context.TELEPHONY_SERVICE, Context.TELEPHONY_SUBSCRIPTION_SERVICE, Context.CARRIER_CONFIG_SERVICE, Context.TELECOM_SERVICE, Context.CLIPBOARD_SERVICE, Context.INPUT_METHOD_SERVICE, Context.TEXT_SERVICES_MANAGER_SERVICE, Context.APPWIDGET_SERVICE, Context.DROPBOX_SERVICE, Context.DEVICE_POLICY_SERVICE, Context.UI_MODE_SERVICE, Context.DOWNLOAD_SERVICE, Context.NFC_SERVICE, Context.BLUETOOTH_SERVICE, Context.USB_SERVICE, Context.LAUNCHER_APPS_SERVICE, Context.INPUT_SERVICE, Context.DISPLAY_SERVICE, Context.USER_SERVICE, Context.RESTRICTIONS_SERVICE, Context.APP_OPS_SERVICE, Context.CAMERA_SERVICE, Context.PRINT_SERVICE, Context.CONSUMER_IR_SERVICE, Context.TV_INPUT_SERVICE, Context.USAGE_STATS_SERVICE, Context.MEDIA_SESSION_SERVICE, Context.BATTERY_SERVICE, Context.JOB_SCHEDULER_SERVICE, Context.MEDIA_PROJECTION_SERVICE, Context.MIDI_SERVICE, Context.HARDWARE_PROPERTIES_SERVICE [WrongConstant]\n"
+                //+ "        context.getSystemService(TYPE_1); // ERROR\n"
+                //+ "                                 ~~~~~~\n"
+                + "19 errors, 0 warnings\n" :
                 "16 errors, 0 warnings\n"),
 
-                lintProject("src/test/pkg/IntDefTest.java.txt=>src/test/pkg/IntDefTest.java",
-                        "src/android/support/annotation/IntDef.java.txt=>src/android/support/annotation/IntDef.java",
-                        "src/android/support/annotation/StringDef.java.txt=>src/android/support/annotation/StringDef.java"
+                lintProject(java(""
+                            + "package test.pkg;\n"
+                            + "\n"
+                            + "import android.content.Context;\n"
+                            + "import android.support.annotation.IntDef;\n"
+                            + "import android.support.annotation.StringDef;\n"
+                            + "import android.view.View;\n"
+                            + "\n"
+                            + "import java.lang.annotation.Retention;\n"
+                            + "import java.lang.annotation.RetentionPolicy;\n"
+                            + "\n"
+                            + "@SuppressWarnings(\"UnusedDeclaration\")\n"
+                            + "public class IntDefTest {\n"
+                            + "    @IntDef({STYLE_NORMAL, STYLE_NO_TITLE, STYLE_NO_FRAME, STYLE_NO_INPUT})\n"
+                            + "    @Retention(RetentionPolicy.SOURCE)\n"
+                            + "    private @interface DialogStyle {}\n"
+                            + "\n"
+                            + "    public static final int STYLE_NORMAL = 0;\n"
+                            + "    public static final int STYLE_NO_TITLE = 1;\n"
+                            + "    public static final int STYLE_NO_FRAME = 2;\n"
+                            + "    public static final int STYLE_NO_INPUT = 3;\n"
+                            + "    public static final int UNRELATED = 3;\n"
+                            + "\n"
+                            + "    public void setStyle(@DialogStyle int style, int theme) {\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testIntDef(int arg) {\n"
+                            + "        setStyle(STYLE_NORMAL, 0); // OK\n"
+                            + "        setStyle(IntDefTest.STYLE_NORMAL, 0); // OK\n"
+                            + "        setStyle(arg, 0); // OK (not sure)\n"
+                            + "\n"
+                            + "        setStyle(0, 0); // ERROR\n"
+                            + "        setStyle(-1, 0); // ERROR\n"
+                            + "        setStyle(UNRELATED, 0); // ERROR\n"
+                            + "        setStyle(IntDefTest.UNRELATED, 0); // ERROR\n"
+                            + "        setStyle(IntDefTest.STYLE_NORMAL|STYLE_NO_FRAME, 0); // ERROR: Not a flag\n"
+                            + "        setStyle(~STYLE_NO_FRAME, 0); // ERROR: Not a flag\n"
+                            + "    }\n"
+                            + "    @IntDef(value = {STYLE_NORMAL, STYLE_NO_TITLE, STYLE_NO_FRAME, STYLE_NO_INPUT}, flag=true)\n"
+                            + "    @Retention(RetentionPolicy.SOURCE)\n"
+                            + "    private @interface DialogFlags {}\n"
+                            + "\n"
+                            + "    public void setFlags(Object first, @DialogFlags int flags) {\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testFlags(int arg) {\n"
+                            + "        setFlags(\"\", -1); // OK\n"
+                            + "        setFlags(\"\", 0); // OK\n"
+                            + "        setFlags(\"\", STYLE_NORMAL); // OK\n"
+                            + "        setFlags(arg, 0); // OK (not sure)\n"
+                            + "        setFlags(\"\", IntDefTest.STYLE_NORMAL); // OK\n"
+                            + "        setFlags(\"\", STYLE_NORMAL|STYLE_NO_TITLE); // OK\n"
+                            + "        setFlags(\"\", STYLE_NORMAL|STYLE_NO_TITLE|STYLE_NO_INPUT); // OK\n"
+                            + "        setFlags(\"\", arg < 0 ? STYLE_NORMAL : STYLE_NO_TITLE); // OK\n"
+                            + "\n"
+                            + "        setFlags(\"\", UNRELATED); // ERROR\n"
+                            + "        setFlags(\"\", UNRELATED|STYLE_NO_TITLE); // ERROR\n"
+                            + "        setFlags(\"\", STYLE_NORMAL|STYLE_NO_TITLE|UNRELATED); // ERROR\n"
+                            + "        setFlags(\"\", 1); // ERROR\n"
+                            + "        setFlags(\"\", arg < 0 ? STYLE_NORMAL : UNRELATED); // ERROR\n"
+                            + "        setFlags(\"\", arg < 0 ? UNRELATED : STYLE_NORMAL); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public static final String TYPE_1 = \"type1\";\n"
+                            + "    public static final String TYPE_2 = \"type2\";\n"
+                            + "    public static final String UNRELATED_TYPE = \"other\";\n"
+                            + "\n"
+                            + "    @StringDef({TYPE_1, TYPE_2})\n"
+                            + "    @Retention(RetentionPolicy.SOURCE)\n"
+                            + "    private @interface DialogType {}\n"
+                            + "\n"
+                            + "    public void setTitle(String title, @DialogType String type) {\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testStringDef(String typeArg) {\n"
+                            + "        setTitle(\"\", TYPE_1); // OK\n"
+                            + "        setTitle(\"\", TYPE_2); // OK\n"
+                            + "        setTitle(\"\", null); // OK\n"
+                            + "        setTitle(\"\", typeArg); // OK (unknown)\n"
+                            + "        setTitle(\"\", UNRELATED_TYPE); // ERROR\n"
+                            + "        setTitle(\"\", \"type2\"); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testFlow() {\n"
+                            + "        String type = TYPE_1;\n"
+                            + "        setTitle(\"\", type); // OK\n"
+                            + "        type = UNRELATED_TYPE;\n"
+                            + "        setTitle(\"\", type); // ERROR\n"
+                            + "        int flag = 0;\n"
+                            + "        flag |= STYLE_NORMAL;\n"
+                            + "        setFlags(\"\", flag); // OK\n"
+                            + "        flag = UNRELATED;\n"
+                            + "        setFlags(\"\", flag); // ERROR\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    public void testExternalAnnotations(View view, Context context) {\n"
+                            + "        view.setLayoutDirection(View.LAYOUT_DIRECTION_LTR); // OK\n"
+                            + "        context.getSystemService(Context.ALARM_SERVICE); // OK\n"
+                            + "\n"
+                            + "        view.setLayoutDirection(View.TEXT_DIRECTION_LTR); // ERROR\n"
+                            + "        view.setLayoutDirection(0); // ERROR\n"
+                            + "        view.setLayoutDirection(View.LAYOUT_DIRECTION_LTR|View.LAYOUT_DIRECTION_RTL); // ERROR\n"
+                            + "        //context.getSystemService(TYPE_1); // ERROR\n"
+                            + "    }\n"
+                            + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -271,9 +541,46 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + (SDK_ANNOTATIONS_AVAILABLE ? "7 errors, 0 warnings\n" : "2 errors, 0 warnings\n"),
 
                 lintProject(
-                        copy("src/test/pkg/WrongColor.java.txt", "src/test/pkg/WrongColor.java"),
-                        copy("src/android/support/annotation/ColorInt.java.txt", "src/android/support/annotation/ColorInt.java"),
-                        mColorResAnnotation
+                        java("src/test/pkg/WrongColor.java", ""
+                                + "package test.pkg;\n"
+                                + "import android.app.Activity;\n"
+                                + "import android.graphics.Paint;\n"
+                                + "import android.widget.TextView;\n"
+                                + "\n"
+                                + "public class WrongColor extends Activity {\n"
+                                + "    public void foo(TextView textView, int foo) {\n"
+                                + "        Paint paint2 = new Paint();\n"
+                                + "        paint2.setColor(R.color.blue);\n"
+                                + "        // Wrong\n"
+                                + "        textView.setTextColor(R.color.red);\n"
+                                + "        textView.setTextColor(android.R.color.black);\n"
+                                + "        textView.setTextColor(foo > 0 ? R.color.green : R.color.blue);\n"
+                                + "        // OK\n"
+                                + "        textView.setTextColor(getResources().getColor(R.color.red));\n"
+                                + "        // OK\n"
+                                + "        foo1(R.color.blue);\n"
+                                + "        foo2(0xffff0000);\n"
+                                + "        // Wrong\n"
+                                + "        foo1(0xffff0000);\n"
+                                + "        foo2(R.color.blue);\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void foo1(@android.support.annotation.ColorRes int c) {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void foo2(@android.support.annotation.ColorInt int c) {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private static class R {\n"
+                                + "        private static class color {\n"
+                                + "            public static final int red=0x7f060000;\n"
+                                + "            public static final int green=0x7f060001;\n"
+                                + "            public static final int blue=0x7f060002;\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -321,8 +628,8 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        setColor2(getColor2()); // OK\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mColorResAnnotation,
-                        mColorIntAnnotation
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -333,10 +640,10 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
             return;
         }
         assertEquals(""
-                        + "src/test/pkg/ColorTest.java:11: Error: Expected a color resource id (R.color.) but received an RGB integer [ResourceType]\n"
-                        + "        setColor(actualColor);\n"
-                        + "                 ~~~~~~~~~~~\n"
-                        + "1 errors, 0 warnings\n",
+                + "src/test/pkg/ColorTest.java:11: Error: Expected a color resource id (R.color.) but received an RGB integer [ResourceType]\n"
+                + "        setColor(actualColor);\n"
+                + "                 ~~~~~~~~~~~\n"
+                + "1 errors, 0 warnings\n",
 
                 lintProject(
                         java("src/test/pkg/ColorTest.java", ""
@@ -353,7 +660,8 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        setColor(actualColor);\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mColorResAnnotation
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -401,8 +709,8 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        setDimension2(getDimension2()); // OK\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mPxAnnotation,
-                        mDimenResAnnotation
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -435,11 +743,134 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + (SDK_ANNOTATIONS_AVAILABLE ? "8 errors, 0 warnings\n" : "5 errors, 0 warnings\n"),
 
                 lintProject(
-                        copy("src/p1/p2/Flow.java.txt", "src/p1/p2/Flow.java"),
-                        mDrawableResAnnotation,
-                        mStringResAnnotation,
-                        mStyleResAnnotation,
-                        mAnyResAnnotation
+                        java("src/p1/p2/Flow.java", ""
+                                + "import android.content.res.Resources;\n"
+                                + "import android.support.annotation.DrawableRes;\n"
+                                + "import android.support.annotation.StringRes;\n"
+                                + "import android.support.annotation.StyleRes;\n"
+                                + "\n"
+                                + "import java.util.Random;\n"
+                                + "\n"
+                                + "@SuppressWarnings(\"UnusedDeclaration\")\n"
+                                + "public class Flow {\n"
+                                + "    public void testLiterals(Resources resources) {\n"
+                                + "        resources.getDrawable(0); // OK\n"
+                                + "        resources.getDrawable(-1); // OK\n"
+                                + "        resources.getDrawable(10); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public void testConstants(Resources resources) {\n"
+                                + "        resources.getDrawable(R.drawable.my_drawable); // OK\n"
+                                + "        resources.getDrawable(R.string.my_string); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public void testLocalAnnotation() {\n"
+                                + "        myMethod(R.string.my_string, null); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void myMethod(@DrawableRes int arg, Resources resources) {\n"
+                                + "        resources.getDrawable(R.string.my_string); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void testAnyRes() {\n"
+                                + "        myAnyResMethod(R.drawable.my_drawable); // OK\n"
+                                + "        myAnyResMethod(R.string.my_string); // OK\n"
+                                + "        myAnyResMethod(50); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void myAnyResMethod(@android.support.annotation.AnyRes int arg) {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public void testFields(String fileExt, Resources resources) {\n"
+                                + "        int mimeIconId = MimeTypes.styleAndDrawable;\n"
+                                + "        resources.getDrawable(mimeIconId); // OK\n"
+                                + "\n"
+                                + "        int s1 = MimeTypes.style;\n"
+                                + "        resources.getDrawable(s1); // ERROR\n"
+                                + "        int s2 = MimeTypes.styleAndDrawable;\n"
+                                + "        resources.getDrawable(s2); // OK\n"
+                                + "        int w3 = MimeTypes.drawable;\n"
+                                + "        resources.getDrawable(w3); // OK\n"
+                                + "\n"
+                                + "        // Direct reference\n"
+                                + "        resources.getDrawable(MimeTypes.style); // ERROR\n"
+                                + "        resources.getDrawable(MimeTypes.styleAndDrawable); // OK\n"
+                                + "        resources.getDrawable(MimeTypes.drawable); // OK\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public void testCalls(String fileExt, Resources resources) {\n"
+                                + "        int mimeIconId = MimeTypes.getIconForExt(fileExt);\n"
+                                + "        resources.getDrawable(mimeIconId); // OK\n"
+                                + "        resources.getDrawable(MimeTypes.getInferredString()); // OK (wrong but can't infer type)\n"
+                                + "        resources.getDrawable(MimeTypes.getInferredDrawable()); // OK\n"
+                                + "        resources.getDrawable(MimeTypes.getAnnotatedString()); // Error\n"
+                                + "        resources.getDrawable(MimeTypes.getAnnotatedDrawable()); // OK\n"
+                                + "        resources.getDrawable(MimeTypes.getUnknownType()); // OK (unknown/uncertain)\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public void testFlow() {\n"
+                                + "        int x = R.string.my_string;\n"
+                                + "        int z = x;\n"
+                                + "        myMethod(z, null); // ERROR\n"
+                                + "\n"
+                                + "        int w = MY_RESOURCE;\n"
+                                + "        myMethod(w, null); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private static final int MY_RESOURCE = R.string.my_string;\n"
+                                + "\n"
+                                + "    private static class MimeTypes {\n"
+                                + "        @android.support.annotation.StyleRes\n"
+                                + "        @android.support.annotation.DrawableRes\n"
+                                + "        public static int styleAndDrawable;\n"
+                                + "\n"
+                                + "        @android.support.annotation.StyleRes\n"
+                                + "        public static int style;\n"
+                                + "\n"
+                                + "        @android.support.annotation.DrawableRes\n"
+                                + "        public static int drawable;\n"
+                                + "\n"
+                                + "        @android.support.annotation.DrawableRes\n"
+                                + "        public static int getIconForExt(String ext) {\n"
+                                + "            return R.drawable.my_drawable;\n"
+                                + "        }\n"
+                                + "\n"
+                                + "        public static int getInferredString() {\n"
+                                + "            // Implied string - can we handle this?\n"
+                                + "            return R.string.my_string;\n"
+                                + "        }\n"
+                                + "\n"
+                                + "        public static int getInferredDrawable() {\n"
+                                + "            // Implied drawable - can we handle this?\n"
+                                + "            return R.drawable.my_drawable;\n"
+                                + "        }\n"
+                                + "\n"
+                                + "        @android.support.annotation.StringRes\n"
+                                + "        public static int getAnnotatedString() {\n"
+                                + "            return R.string.my_string;\n"
+                                + "        }\n"
+                                + "\n"
+                                + "        @android.support.annotation.DrawableRes\n"
+                                + "        public static int getAnnotatedDrawable() {\n"
+                                + "            return R.drawable.my_drawable;\n"
+                                + "        }\n"
+                                + "\n"
+                                + "        public static int getUnknownType() {\n"
+                                + "            return new Random(1000).nextInt();\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public static final class R {\n"
+                                + "        public static final class drawable {\n"
+                                + "            public static final int my_drawable =0x7f020057;\n"
+                                + "        }\n"
+                                + "        public static final class string {\n"
+                                + "            public static final int my_string =0x7f0a000e;\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -468,7 +899,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        mIconResId = iconResId;\n"
                                 + "    }\n"
                                 + "}"),
-                        mDrawableResAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     // Temporarily disabled; TypedArray.getResourceId has now been annotated with @StyleRes
@@ -497,7 +930,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/ConstructorTest.java:14: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        new ConstructorTest(1, 3);\n"
                 + "                            ~\n"
-                + "src/test/pkg/ConstructorTest.java:14: Error: Value must be ≥ 5 (was 3) [Range]\n"
+                + "src/test/pkg/ConstructorTest.java:14: Error: Value must be \u2265 5 (was 3) [Range]\n"
                 + "        new ConstructorTest(1, 3);\n"
                 + "                               ~\n"
                 + "src/test/pkg/ConstructorTest.java:19: Error: Constructor ConstructorTest must be called from the UI thread, currently inferred thread is worker thread [WrongThread]\n"
@@ -528,19 +961,28 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        new ConstructorTest(res, range);\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mWorkerThread,
-                        mUiThread,
-                        mDrawableResAnnotation,
-                        copy("src/android/support/annotation/IntRange.java.txt",
-                                "src/android/support/annotation/IntRange.java")
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
     public void testColorAsDrawable() throws Exception {
+        //noinspection all // Sample code
         assertEquals(
                 "No warnings.",
 
-                lintProject("src/p1/p2/ColorAsDrawable.java.txt=>src/p1/p2/ColorAsDrawable.java"));
+                lintProject(java(""
+                            + "package p1.p2;\n"
+                            + "\n"
+                            + "import android.content.Context;\n"
+                            + "import android.view.View;\n"
+                            + "\n"
+                            + "public class ColorAsDrawable {\n"
+                            + "    static void test(Context context) {\n"
+                            + "        View separator = new View(context);\n"
+                            + "        separator.setBackgroundResource(android.R.color.black);\n"
+                            + "    }\n"
+                            + "}\n")));
     }
 
     public void testCheckResult() throws Exception {
@@ -563,7 +1005,43 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "0 errors, 4 warnings\n",
 
-                lintProject(copy("src/test/pkg/CheckPermissions.java.txt", "src/test/pkg/CheckPermissions.java"),
+                lintProject(
+                        java(""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "import android.Manifest;\n"
+                                + "import android.content.Context;\n"
+                                + "import android.content.pm.PackageManager;\n"
+                                + "import android.graphics.Bitmap;\n"
+                                + "\n"
+                                + "public class CheckPermissions {\n"
+                                + "    private void foo(Context context) {\n"
+                                + "        context.checkCallingOrSelfPermission(Manifest.permission.INTERNET); // WRONG\n"
+                                + "        context.checkPermission(Manifest.permission.INTERNET, 1, 1);\n"
+                                + "        check(context.checkCallingOrSelfPermission(Manifest.permission.INTERNET)); // OK\n"
+                                + "        int check = context.checkCallingOrSelfPermission(Manifest.permission.INTERNET); // OK\n"
+                                + "        if (context.checkCallingOrSelfPermission(Manifest.permission.INTERNET) // OK\n"
+                                + "                != PackageManager.PERMISSION_GRANTED) {\n"
+                                + "            showAlert(context, \"Error\",\n"
+                                + "                    \"Application requires permission to access the Internet\");\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private Bitmap checkResult(Bitmap bitmap) {\n"
+                                + "        bitmap.extractAlpha(); // WARNING\n"
+                                + "        Bitmap bitmap2 = bitmap.extractAlpha(); // OK\n"
+                                + "        call(bitmap.extractAlpha()); // OK\n"
+                                + "        return bitmap.extractAlpha(); // OK\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void showAlert(Context context, String error, String s) {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void check(int i) {\n"
+                                + "    }\n"
+                                + "    private void call(Bitmap bitmap) {\n"
+                                + "    }\n"
+                                + "}"),
                         java("src/test/pkg/Intersect.java", ""
                                 + "package test.pkg;\n"
                                 + "\n"
@@ -617,211 +1095,36 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        }\n"
                                 + "    }\n"
                                 + "}"),
-                        mDrawableResAnnotation,
-                        mLayoutResAnnotation,
-                        mIdResAnnotation,
-                        mStringResAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
-
-    private final TestFile mPermissionTest = java("src/test/pkg/PermissionTest.java", ""
-                + "package test.pkg;\n"
-                + "\n"
-                + "import android.location.LocationManager;\n"
-                + "\n"
-                + "public class PermissionTest {\n"
-                + "    public static void test(LocationManager locationManager, String provider) {\n"
-                + "        LocationManager.Location location = locationManager.myMethod(provider);\n"
-                + "    }\n"
-                + "}\n");
 
     private final TestFile mLocationManagerStub = java("src/android/location/LocationManager.java", ""
-                + "package android.location;\n"
-                + "\n"
-                + "import android.support.annotation.RequiresPermission;\n"
-                + "\n"
-                + "import static android.Manifest.permission.ACCESS_COARSE_LOCATION;\n"
-                + "import static android.Manifest.permission.ACCESS_FINE_LOCATION;\n"
-                + "\n"
-                + "@SuppressWarnings(\"UnusedDeclaration\")\n"
-                + "public abstract class LocationManager {\n"
-                + "    @RequiresPermission(anyOf = {ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION})\n"
-                + "    public abstract Location myMethod(String provider);\n"
-                + "    public static class Location {\n"
-                + "    }\n"
-                + "}\n");
-
-        private final TestFile mRequirePermissionAnnotation = java("src/android/support/annotation/RequiresPermission.java", ""
-                + "/*\n"
-                + " * Copyright (C) 2015 The Android Open Source Project\n"
-                + " *\n"
-                + " * Licensed under the Apache License, Version 2.0 (the \"License\");\n"
-                + " * you may not use this file except in compliance with the License.\n"
-                + " * You may obtain a copy of the License at\n"
-                + " *\n"
-                + " *      http://www.apache.org/licenses/LICENSE-2.0\n"
-                + " *\n"
-                + " * Unless required by applicable law or agreed to in writing, software\n"
-                + " * distributed under the License is distributed on an \"AS IS\" BASIS,\n"
-                + " * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n"
-                + " * See the License for the specific language governing permissions and\n"
-                + " * limitations under the License.\n"
-                + " */\n"
-                + "package android.support.annotation;\n"
-                + "\n"
-                + "import java.lang.annotation.Retention;\n"
-                + "import java.lang.annotation.Target;\n"
-                + "\n"
-                + "import static java.lang.annotation.ElementType.*;\n"
-                + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-                + "@Retention(CLASS)\n"
-                + "@Target({METHOD,CONSTRUCTOR,FIELD,PARAMETER,ANNOTATION_TYPE})\n"
-                + "public @interface RequiresPermission {\n"
-                + "    String value() default \"\";\n"
-                + "    String[] allOf() default {};\n"
-                + "    String[] anyOf() default {};\n"
-                + "    boolean conditional() default false;\n"
-                + "    String notes() default \"\";\n"
-                + "    @Target({FIELD,METHOD,PARAMETER})\n"
-                + "    @interface Read {\n"
-                + "        RequiresPermission value();\n"
-                + "    }\n"
-                + "    @Target({FIELD,METHOD,PARAMETER})\n"
-                + "    @interface Write {\n"
-                + "        RequiresPermission value();\n"
-                + "    }\n"
-                + "}");
-
-    private final TestFile mUiThread = java("src/android/support/annotation/UiThread.java", ""
-            + "package android.support.annotation;\n"
+            + "package android.location;\n"
             + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
+            + "import android.support.annotation.RequiresPermission;\n"
             + "\n"
-            + "import static java.lang.annotation.ElementType.CONSTRUCTOR;\n"
-            + "import static java.lang.annotation.ElementType.METHOD;\n"
-            + "import static java.lang.annotation.ElementType.TYPE;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
+            + "import static android.Manifest.permission.ACCESS_COARSE_LOCATION;\n"
+            + "import static android.Manifest.permission.ACCESS_FINE_LOCATION;\n"
             + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD,CONSTRUCTOR,TYPE})\n"
-            + "public @interface UiThread {\n"
+            + "@SuppressWarnings(\"UnusedDeclaration\")\n"
+            + "public abstract class LocationManager {\n"
+            + "    @RequiresPermission(anyOf = {ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION})\n"
+            + "    public abstract Location myMethod(String provider);\n"
+            + "    public static class Location {\n"
+            + "    }\n"
             + "}\n");
 
-    private final TestFile mMainThread = java("src/android/support/annotation/MainThread.java", ""
-            + "package android.support.annotation;\n"
+    private final TestFile mPermissionTest = java("src/test/pkg/PermissionTest.java", ""
+            + "package test.pkg;\n"
             + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
+            + "import android.location.LocationManager;\n"
             + "\n"
-            + "import static java.lang.annotation.ElementType.CONSTRUCTOR;\n"
-            + "import static java.lang.annotation.ElementType.METHOD;\n"
-            + "import static java.lang.annotation.ElementType.TYPE;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-            + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD,CONSTRUCTOR,TYPE})\n"
-            + "public @interface MainThread {\n"
-            + "}\n");
-
-    private final TestFile mWorkerThread = java("src/android/support/annotation/WorkerThread.java", ""
-            + "package android.support.annotation;\n"
-            + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
-            + "\n"
-            + "import static java.lang.annotation.ElementType.CONSTRUCTOR;\n"
-            + "import static java.lang.annotation.ElementType.METHOD;\n"
-            + "import static java.lang.annotation.ElementType.TYPE;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-            + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD,CONSTRUCTOR,TYPE})\n"
-            + "public @interface WorkerThread {\n"
-            + "}\n");
-
-    private final TestFile mBinderThread = java("src/android/support/annotation/BinderThread.java", ""
-            + "package android.support.annotation;\n"
-            + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
-            + "\n"
-            + "import static java.lang.annotation.ElementType.CONSTRUCTOR;\n"
-            + "import static java.lang.annotation.ElementType.METHOD;\n"
-            + "import static java.lang.annotation.ElementType.TYPE;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-            + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD,CONSTRUCTOR,TYPE})\n"
-            + "public @interface BinderThread {\n"
-            + "}\n");
-
-    private final TestFile mAnyThread = java("src/android/support/annotation/AnyThread.java", ""
-            + "package android.support.annotation;\n"
-            + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
-            + "\n"
-            + "import static java.lang.annotation.ElementType.CONSTRUCTOR;\n"
-            + "import static java.lang.annotation.ElementType.METHOD;\n"
-            + "import static java.lang.annotation.ElementType.TYPE;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-            + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD,CONSTRUCTOR,TYPE})\n"
-            + "public @interface AnyThread {\n"
-            + "}\n");
-
-    private TestFile createResAnnotation(String prefix) {
-        return java("src/android/support/annotation/" + prefix + "Res.java", ""
-                + "package android.support.annotation;\n"
-                + "\n"
-                + "import java.lang.annotation.Retention;\n"
-                + "import java.lang.annotation.Target;\n"
-                + "\n"
-                + "import static java.lang.annotation.ElementType.*;\n"
-                + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-                + "\n"
-                + "@Retention(CLASS)\n"
-                + "@Target({METHOD, PARAMETER, FIELD, LOCAL_VARIABLE})\n"
-                + "public @interface " + prefix + "Res {\n"
-                + "}\n");
-    }
-
-    private final TestFile mColorResAnnotation = createResAnnotation("Color");
-    private final TestFile mStringResAnnotation = createResAnnotation("String");
-    private final TestFile mStyleResAnnotation = createResAnnotation("Style");
-    private final TestFile mDimenResAnnotation = createResAnnotation("Dimen");
-    private final TestFile mIdResAnnotation = createResAnnotation("Id");
-    private final TestFile mLayoutResAnnotation = createResAnnotation("Layout");
-    private final TestFile mDrawableResAnnotation = createResAnnotation("Drawable");
-    private final TestFile mAnyResAnnotation = createResAnnotation("Any");
-
-    private final TestFile mColorIntAnnotation = java("src/android/support/annotation/ColorInt.java", ""
-            + "package android.support.annotation;\n"
-            + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
-            + "\n"
-            + "import static java.lang.annotation.ElementType.*;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-            + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD, PARAMETER, FIELD, LOCAL_VARIABLE})\n"
-            + "public @interface ColorInt {\n"
-            + "}\n");
-
-    private final TestFile mPxAnnotation = java("src/android/support/annotation/Px.java", ""
-            + "package android.support.annotation;\n"
-            + "\n"
-            + "import java.lang.annotation.Retention;\n"
-            + "import java.lang.annotation.Target;\n"
-            + "\n"
-            + "import static java.lang.annotation.ElementType.*;\n"
-            + "import static java.lang.annotation.RetentionPolicy.CLASS;\n"
-            + "\n"
-            + "@Retention(CLASS)\n"
-            + "@Target({METHOD, PARAMETER, FIELD, LOCAL_VARIABLE})\n"
-            + "public @interface Px {\n"
+            + "public class PermissionTest {\n"
+            + "    public static void test(LocationManager locationManager, String provider) {\n"
+            + "        LocationManager.Location location = locationManager.myMethod(provider);\n"
+            + "    }\n"
             + "}\n");
 
     private TestFile getManifestWithPermissions(int targetSdk, String... permissions) {
@@ -965,7 +1268,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         getManifestWithPermissions(14),
                         mPermissionTest,
                         mLocationManagerStub,
-                        mRequirePermissionAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testHasPermission() throws Exception {
@@ -974,7 +1279,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         getManifestWithPermissions(14, "android.permission.ACCESS_FINE_LOCATION"),
                         mPermissionTest,
                         mLocationManagerStub,
-                        mRequirePermissionAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testRevokePermissions() throws Exception {
@@ -1004,8 +1311,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 lintProject(
                         getManifestWithPermissions(23, "android.permission.ACCESS_FINE_LOCATION"),
                         mLocationManagerStub,
-                        mRequirePermissionAnnotation,
-                        mRevokeTest
+                        mRevokeTest,
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -1041,7 +1349,8 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        method1(); // OK\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mRequirePermissionAnnotation
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -1050,8 +1359,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 lintProject(
                         getManifestWithPermissions(14, "android.permission.ACCESS_FINE_LOCATION"),
                         mLocationManagerStub,
-                        mRequirePermissionAnnotation,
-                        mRevokeTest
+                        mRevokeTest,
+                        mSupportClasspath,
+                        mSupportJar
                 ));
     }
 
@@ -1068,7 +1378,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         manifest,
                         mPermissionTest,
                         mLocationManagerStub,
-                        mRequirePermissionAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testUsesPermissionSdkM() throws Exception {
@@ -1084,7 +1396,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         manifest,
                         mPermissionTest,
                         mLocationManagerStub,
-                        mRequirePermissionAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testPermissionAnnotation() throws Exception {
@@ -1121,7 +1435,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        Location location = manager.getLastKnownLocation(\"provider\");\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mRequirePermissionAnnotation));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testThreading() throws Exception {
@@ -1203,9 +1519,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         + "        }\n"
                         + "    }\n"
                         + "}\n"),
-                    mUiThread,
-                    mMainThread,
-                    mWorkerThread));
+                    mSupportClasspath,
+                    mSupportJar
+            ));
     }
 
     @SuppressWarnings("all") // Sample code, warts and all
@@ -1271,8 +1587,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        o.g();    // correct WrongThread: must be called from the worker thread currently inferred thread is UI\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mUiThread,
-                        mWorkerThread));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     @SuppressWarnings("all") // Sample code
@@ -1299,7 +1616,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        });\n"
                                 + "    }\n"
                                 + "}"),
-                        mWorkerThread));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     @SuppressWarnings("all") // Sample code
@@ -1328,9 +1647,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        threadSafe(); // OK\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mAnyThread,
-                        mUiThread,
-                        mWorkerThread));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     @SuppressWarnings("all") // Sample code
@@ -1380,9 +1699,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        calleee(); // Not ok: thread could be binder thread, not supported by target\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mUiThread,
-                        mBinderThread,
-                        mWorkerThread));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testStaticMethod() throws Exception {
@@ -1418,7 +1737,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        return true;\n"
                                 + "    }\n"
                                 + "}"),
-                        mWorkerThread));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testIntentPermission() throws Exception {
@@ -1606,16 +1927,18 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        myWriteResolverMethod(BOOKMARKS_URI);\n"
                                 + "    }\n"
                                 + "}\n"),
-                        mRequirePermissionAnnotation
+                        mSupportClasspath,
+                        mSupportJar
+
                 ));
     }
 
     public void testCombinedIntDefAndIntRange() throws Exception {
         assertEquals(""
-                + "src/test/pkg/X.java:28: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be ≥ 10 (was -5) [WrongConstant]\n"
+                + "src/test/pkg/X.java:28: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be \u2265 10 (was -5) [WrongConstant]\n"
                 + "        setDuration(-5); // ERROR (not right int def or value\n"
                 + "                    ~~\n"
-                + "src/test/pkg/X.java:29: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be ≥ 10 (was 8) [WrongConstant]\n"
+                + "src/test/pkg/X.java:29: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be \u2265 10 (was 8) [WrongConstant]\n"
                 + "        setDuration(8); // ERROR (not matching number range)\n"
                 + "                    ~\n"
                 + "2 errors, 0 warnings\n",
@@ -1657,8 +1980,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        setDuration(LENGTH_SHORT); // OK (@IntDef)\n"
                                 + "    }\n"
                                 + "}\n"),
-                        copy("src/android/support/annotation/IntDef.java.txt", "src/android/support/annotation/IntDef.java"),
-                        copy("src/android/support/annotation/IntRange.java.txt", "src/android/support/annotation/IntRange.java")
+                        mSupportClasspath,
+                        mSupportJar
+
                 ));
     }
 
@@ -1666,10 +1990,10 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
         // Regression test for https://code.google.com/p/android/issues/detail?id=182179
         // 182179: Lint gives erroneous @StringDef errors in androidTests
         assertEquals(""
-                        + "src/test/zpkg/SomeClassTest.java:10: Error: Must be one of: SomeClass.MY_CONSTANT [WrongConstant]\n"
-                        + "        SomeClass.doSomething(\"error\");\n"
-                        + "                              ~~~~~~~\n"
-                        + "1 errors, 0 warnings\n",
+                + "src/test/zpkg/SomeClassTest.java:10: Error: Must be one of: SomeClass.MY_CONSTANT [WrongConstant]\n"
+                + "        SomeClass.doSomething(\"error\");\n"
+                + "                              ~~~~~~~\n"
+                + "1 errors, 0 warnings\n",
 
                 lintProject(
                         getManifestWithPermissions(14, 23),
@@ -1719,8 +2043,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        SomeClass.doSomething(\"error\");\n"
                                 + "    }\n"
                                 + "}"),
-                        copy("src/android/support/annotation/StringDef.java.txt",
-                                "src/android/support/annotation/StringDef.java")
+                        mSupportClasspath,
+                        mSupportJar
+
                 ));
     }
 
@@ -1766,8 +2091,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        }\n"
                                 + "    }"
                                 + "}"),
-                        mDrawableResAnnotation,
-                        mStringResAnnotation
+                        mSupportClasspath,
+                        mSupportJar
+
                 ));
     }
 
@@ -1811,7 +2137,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        }\n"
                                 + "    }"
                                 + "}"),
-                        mAnyResAnnotation
+                        mSupportClasspath,
+                        mSupportJar
+
                 ));
     }
 
@@ -1873,8 +2201,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "\n"
                                 + "    private void restrictedArray(@MyIntDef int[] test) {}\n"
                                 + "}"),
-                        copy("src/android/support/annotation/IntDef.java.txt",
-                                "src/android/support/annotation/IntDef.java")));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     /**
@@ -1882,14 +2211,14 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
      */
     public void testRangesMultiple() throws Exception {
         assertEquals(""
-                + "src/test/pkg/RangesMultiple.java:22: Error: Value must be ≥ 10.0 (was 5.0) [Range]\n"
-                + "        varargsFloat(15.0f, 10.0f, /*Value must be ≥ 10.0 and ≤ 15.0 (was 5.0f)*/5.0f/**/); // ERROR\n"
+                + "src/test/pkg/RangesMultiple.java:22: Error: Value must be \u2265 10.0 (was 5.0) [Range]\n"
+                + "        varargsFloat(15.0f, 10.0f, /*Value must be \u2265 10.0 and \u2264 15.0 (was 5.0f)*/5.0f/**/); // ERROR\n"
                 + "                                                                                 ~~~~\n"
-                + "src/test/pkg/RangesMultiple.java:32: Error: Value must be ≤ 500 (was 510) [Range]\n"
-                + "        varargsInt(15, 10, /*Value must be ≥ 10 and ≤ 500 (was 510)*/510/**/); // ERROR\n"
+                + "src/test/pkg/RangesMultiple.java:32: Error: Value must be \u2264 500 (was 510) [Range]\n"
+                + "        varargsInt(15, 10, /*Value must be \u2265 10 and \u2264 500 (was 510)*/510/**/); // ERROR\n"
                 + "                                                                     ~~~\n"
-                + "src/test/pkg/RangesMultiple.java:36: Error: Value must be ≥ 10 (was 0) [Range]\n"
-                + "        restrictedIntArray(/*Value must be ≥ 10 and ≤ 500*/new int[]{0, 500}/**/); // ERROR\n"
+                + "src/test/pkg/RangesMultiple.java:36: Error: Value must be \u2265 10 (was 0) [Range]\n"
+                + "        restrictedIntArray(/*Value must be \u2265 10 and \u2264 500*/new int[]{0, 500}/**/); // ERROR\n"
                 + "                                                           ~~~~~~~~~~~~~~~~~\n"
                 + "3 errors, 0 warnings\n",
                 lintProject(
@@ -1945,8 +2274,43 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "    }\n"
                                 + "}\n"
                                 + "\n"),
-                        copy("src/android/support/annotation/IntRange.java.txt", "src/android/support/annotation/IntRange.java"),
-                        copy("src/android/support/annotation/FloatRange.java.txt", "src/android/support/annotation/FloatRange.java")));
+                        mSupportClasspath,
+                        mSupportJar
+                ));
+    }
+
+    public void testNegativeFloatRange() throws Exception {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=219246
+        // Make sure we correctly handle negative ranges for floats
+        assertEquals(""
+                + "src/test/pkg/FloatRangeTest.java:8: Error: Value must be \u2265 -90.0 (was -150.0) [Range]\n"
+                + "        call(-150.0); // ERROR\n"
+                + "             ~~~~~~\n"
+                + "src/test/pkg/FloatRangeTest.java:10: Error: Value must be \u2264 -5.0 (was -3.0) [Range]\n"
+                + "        call(-3.0); // ERROR\n"
+                + "             ~~~~\n"
+                + "2 errors, 0 warnings\n",
+
+                lintProject(
+                        java("src/test/pkg/FloatRangeTest.java", ""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "import android.support.annotation.FloatRange;\n"
+                                + "\n"
+                                + "@SuppressWarnings(\"unused\")\n"
+                                + "public class FloatRangeTest {\n"
+                                + "    public void test() {\n"
+                                + "        call(-150.0); // ERROR\n"
+                                + "        call(-45.0); // OK\n"
+                                + "        call(-3.0); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private void call(@FloatRange(from=-90.0, to=-5.0) double arg) {\n"
+                                + "    }\n"
+                                + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
+                ));
     }
 
     public void testIntDefInBuilder() throws Exception {
@@ -2011,7 +2375,9 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "        }\n"
                                 + "    }\n"
                                 + "}\n"),
-                        copy("src/android/support/annotation/IntDef.java.txt", "src/android/support/annotation/IntDef.java"))
+                        mSupportClasspath,
+                        mSupportJar
+                )
         );
     }
 
@@ -2102,9 +2468,365 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 ));
     }
 
-    public void testSnackbarDuration() throws Exception {
+    @SuppressWarnings("ALL") // sample code with warnings
+    public void testRestrictToSubClass() throws Exception {
         assertEquals(""
-                + "src/test/pkg/SnackbarTest.java:13: Error: Must be one of: Snackbar.LENGTH_INDEFINITE, Snackbar.LENGTH_SHORT, Snackbar.LENGTH_LONG or value must be ≥ 1 (was -100) [WrongConstant]\n"
+                + "src/test/pkg/RestrictToSubclassTest.java:20: Error: Class1.onSomething can only be called from subclasses [RestrictedApi]\n"
+                + "            cls.onSomething(); // ERROR: Not from subclass\n"
+                + "                ~~~~~~~~~~~\n"
+                + "1 errors, 0 warnings\n",
+                lintProject(
+                        java(""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "import android.support.annotation.RestrictTo;\n"
+                                + "\n"
+                                + "public class RestrictToSubclassTest {\n"
+                                + "    public static class Class1 {\n"
+                                + "        @RestrictTo(RestrictTo.Scope.SUBCLASSES)\n"
+                                + "        public void onSomething() {\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public static class SubClass extends Class1 {\n"
+                                + "        public void test1() {\n"
+                                + "            onSomething(); // OK: Call from subclass\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public static class NotSubClass {\n"
+                                + "        public void test2(Class1 cls) {\n"
+                                + "            cls.onSomething(); // ERROR: Not from subclass\n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
+                ));
+    }
+
+    public void testRestrictToGroupId() {
+        ProjectDescription project = project().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import library.pkg.internal.InternalClass;\n"
+                        + "import library.pkg.Library;\n"
+                        + "import library.pkg.PrivateClass;\n"
+                        + "\n"
+                        + "public class TestLibrary {\n"
+                        + "    public void test() {\n"
+                        + "        Library.method(); // OK\n"
+                        + "        Library.privateMethod(); // ERROR\n"
+                        + "        PrivateClass.method(); // ERROR\n"
+                        + "        InternalClass.method(); // ERROR\n"
+                        + "    }\n"
+                        + "}\n"),
+
+                        /*
+                        Compiled version of these 5 files (and the RestrictTo annotation);
+                        we need to use a compiled version of these to mimic the Gradle artifact
+                        layout (which is relevant for this lint check which enforces restrictions
+                        across library compilation units) :
+
+                        Library.java:
+                            package library.pkg;
+
+                            import android.support.annotation.RestrictTo;
+
+                            public class Library {
+                                public static void method() {
+                                }
+
+                                @RestrictTo(RestrictTo.Scope.GROUP_ID)
+                                public static void privateMethod() {
+                                }
+                            }
+
+                        PrivateClass.java:
+                            package library.pkg;
+
+                            import android.support.annotation.RestrictTo;
+
+                            @RestrictTo(RestrictTo.Scope.GROUP_ID)
+                            public class PrivateClass {
+                                public static void method() {
+                                }
+                            }
+
+                        package-info.java:
+                            @RestrictTo(RestrictTo.Scope.GROUP_ID)
+                            package library.pkg.internal;
+
+                            import android.support.annotation.RestrictTo;
+
+                        InternalClass.java:
+                            package library.pkg.internal;
+
+                            public class InternalClass {
+                                public static void method() {
+                                }
+                            }
+                         */
+                base64gzip("libs/exploded-aar/my.group.id/mylib/25.0.0-SNAPSHOT/jars/classes.jar",
+                        ""
+                                + "H4sIAAAAAAAAAJVXB1RT2RYNxdBCMQSQXpQS6eWLCogBiXTpMhQNhCIQEghF"
+                                + "iqJIkSYd6dXQJnRHRIpSIjXggChSVFAQEAQElCb4wfF/Ez4w829Wsl5Wzt65"
+                                + "b5/zzrnbQIeKGgKgpaUFXDvLqwUgWXQAaoCehglMUksfLr3VCQBQAQx0aGh3"
+                                + "fqL8GWKwLxiy/f4vWA+mrwXXMDaR0oMv6RG7dHUkpXoZdSSP9xCf3TeS6Zcf"
+                                + "ncBKaetJaOn1ev1OTWc+xUlI54ZeWeUQFpnEHT85ycE2ziF8F5Dksoj9jKX4"
+                                + "sQnd2Nvu6tt/ce7nJugBgO2NWe/axM5eUU62WBusr/T+USCSKDcXxwMi2XZF"
+                                + "OqE97bFoG5T0Lx12Q8T2g2j9vFBH2Xh4SCF3PkMuVOq3yEDqB3B0jIHsJ+As"
+                                + "VDKjgYf788FG+UWgnDl95wdS6Fs8HOHPbNVsR6lWxQj3LQVTfFoy367NSdwI"
+                                + "aLgBqGmGhdJuQNehwOBx+MAQI13v4FoiS0xaqtAygzW+w8/0+IaATkunTa9J"
+                                + "n27+i4C3EZWWU3fdLI5YWzhdJjx/bzU1BLXUOdo63NLeXt3wodCsUzKNU7AO"
+                                + "87La6OFpyPdKa6mJ+8TD93ROrj1JklmgsLFT4bg6YWTK1Da1QLPpefZxuOyY"
+                                + "ngyrx8o7xmWuMuPWY2GHvY8s3aFQsSOqzG4Fx1SksuAuwzDt6oNvFHdyaGHH"
+                                + "7jqzLY8tBWkh7RZQdD8B3WyQLjaO9pJOaAfMX/olXVDRoYKxXMe3Rjr2R4YI"
+                                + "mN2yFXRn6FKIyOOhjYs0Y6+6ytkiMjNbWXd19PL9BZrVewRTmMR7UMu1+tSV"
+                                + "lJWYAUVA4Sv9ijiEsQDvcKupZz4j3bKLafeLRGBa9myH7gNtRPmVk1OOnY9e"
+                                + "XEoO7Ul1NYBZfqU8rxgh2vMxfFnP2pIDtx5iDztz0jpESQky9UenQqJA5ERN"
+                                + "lVfizARxXCpqMUtoACFbFjQ/0/6qQQq+8jBmLb/xcW++8ZzGy6Xifp72SrnF"
+                                + "eUXKwQHVPrGsTsNT944fm2Lg+a5uPOqW+4n3LIJOtZqHt9ISJvpBQggvG09D"
+                                + "23zaT/O9wp0EqeoK7+oNuh1J23U9i7e2Bcs7UFLOXZLq/nX9U0TDDu0dETNd"
+                                + "FaK5kotk/Vggip5MfGyGQtoIq7Cup0GeIneq9WtvZ2XdzJ7QWhilWTW01QMT"
+                                + "gjRRU79ffDHfUGx75szbNxSziMowCQde4qkiGchXXLx3tmBddUBLLH76LuLI"
+                                + "Sj7YUasOSmTDhPanLns1tnCj7SxW0k9tCCBDq/g7C8Y+DEZmzak8uX21o05y"
+                                + "NggtGwWHe9ewFW7WDmkmJrkaXuTl1Kk6baJtic43s3v40eOFnEV1/clwIdeS"
+                                + "tifZDaFhpXGBDX3Lgddu3w53MxD24ZwKg2NntOmMGXx5GBaHuIguj/AibbkJ"
+                                + "rWtfnlpvhuX6FLOyhiFT0R+/PhwKGOedE7qt3NIvbSmfaBTKgfWaz1Tk10Dw"
+                                + "SsigtpCg0KTAV+ZqoQH2flWIaV0Ig4lvIufEt1bxVwyBIJ6IkEus6pDXZ/jg"
+                                + "cYsy8MdP2Zb1L7YH0PLmPTrX9U2Pu0nsKXhMtvb9QwSlcYrIb4+UOkAiUI7p"
+                                + "0mBfXR6Txz+6Ws9dmWKf7dSlUh6UPr6900fSSJS+YAbOAIFAJJBCCugAvOQN"
+                                + "POMNDIADT6QT64lgJTjQgbFbBg5kn/yWaAIHBmQT602e9I3g+vNiCTienLDY"
+                                + "CwFYW31zW0ORMGY2O2hHu4SDXexiR4fucW2J3/ul2/UHVgIrMj3AkZGlnJw1"
+                                + "t5Z0IuONX8vBuKjjhL9UgbvAvkfMj5hzch5zS21sFwAYFWQnpCSXzWcnJqVZ"
+                                + "Nee0N1IvU9LKUAoaqMbaUS0uN10DAs1KP4GiuANBIkBvgQ4gu53DKCBemeUQ"
+                                + "KANkhfg0gjBV/qGOzrXuw33b9857YHHvVscA6+Rt42lPok6SYZc2lSxEpTLG"
+                                + "yeUB89tSbtjnkJ7mfCFtDShEsrTWXXBa4Y/i5zg7uUOqXUmjzcwL9whKxlA0"
+                                + "dUOsf0KCf0+HMH82Zh4QXZGlTtnFZMZTIoe7gIv/mihYed//WWzJdBlCTAEH"
+                                + "HhirOEqUnF8NTuQeer+loih3+kaQ1nAyhXr+WFf0doHzqnwZKYhDojW6J2Fu"
+                                + "ukB1m43arliXmT993hnBiX3Pyloo+D1CncVNzJg0rO/YC3SMWkFdHyVZxHV4"
+                                + "B+HLeqtmgGNXcHe81paHXMMbuaYHLfWii2VX1Mdy1IarC8/bJZeLC+uiRDRn"
+                                + "RjEW6bLpEPmLpel1H5CbQjHHjED4J91dBlEO7tfL/Ob0HAWUZ3I6K74zq4aW"
+                                + "qnohqeSXEwyJNzWY72UUJOgkGep9arjVQBhgmvAEFcTlZmQrCETyvJBwKBz/"
+                                + "l66QSBU/AeQ7gaw8RTSWBFvkmF4DsJoTwOy03YeNhOIWB4c4drI2uGr81Xk7"
+                                + "Y+6UpJO6Wvl/J7UN2g6LcbKT3j+KhSTKw8vNDYP1PCCae49oGzQa42nj6YRB"
+                                + "k8zs1/rcZEDZg4FG9h6eWCekpwnmmDES42b/s6qM5y88N4CoxHi5XKxlbDtH"
+                                + "s8rtSfVb6s00VJNeRqjdYXUaus9BvokRwq9n+ry+WcuBZbkYszfvRa0kaQiC"
+                                + "39eOv8m8Oq+yMjIwzK/65BpNRXChlpjYx5SW+gg6NobTfWJaSOf2KYiCfWte"
+                                + "qPt0Fxe2T9WokpDTMDTyym8JvXlIfaRqM7oFUcIwRu3CN++dKdWilhDZ0Hh1"
+                                + "hYguf/456M9xtVVBZuvLKen6iiArJdSavKFXyBULRry97NTLl0sPHF5XcVH3"
+                                + "p37y89DZEm/gjZd2b2/IglSZizFZ4kvW/BUMC6bpJ73KG2aoJR/P9IZzxaHr"
+                                + "HYs40mi+xabzcWwUaFDbPjHiqdKrnh4eGf4QKD5IIwlpGo6O2tS4IG9qPRaK"
+                                + "B7Eme16WRht7rTblpybcrZP2ecUQBjWLpSh19g965zjpzJ03UMYk7P9A6G3c"
+                                + "WwbUZL74IcctXOKxykA8NlMEJIHUeIoMXRNcZdQdCw8crkEKBJUEujth2+Vw"
+                                + "0p0FSZUql2NvWeX6oHF3XlO1MWlNzN54YG9+6kZq75aZlP9DjrqLzvbrR/qW"
+                                + "haEP6k3oY/n5VzOWkQmLInbA+JrQGUQ7a63OpTN+/LOscP3DG5phNvEooYh8"
+                                + "6A3650Hf7KPOFfqZpW5ErUIhqapYwe/A395LMCi6i0c8Z4tPAtkTpmiKPJae"
+                                + "i2rybN6zEvY9xruSl8F5JUXYX4SQCxs3/k5vL4pv1c/hPcpJYR3eeIU6yofa"
+                                + "KBwTbHvdopU3P8bQRfTN+c7TQKV1FcyJPKJAiGzzxYWbBAKwe541/vHZSayU"
+                                + "BVqZYC75nWHnScoYcKS/tP0UNVOT9r/dxSv+T4v3Z9kaDWu3nGXJ/CRpgS+9"
+                                + "ig8TsoA00a5/iBQssIjScjKDrQsMe0Kh02itEyFbacwBN/mF9Y+bB99al3Fk"
+                                + "uu8opVQ3z1+OAbhRKHGhnCvyYaZBrpS+z5LV9XP6WW6dd2h/l9J2hK9Spmlh"
+                                + "7bPWsEMed0cOvq3DTexovrwgzvZ4rBrms7lGYHmRcgakVshg2Q68Vs8XnHI5"
+                                + "i75nHUWgNbEMN2i6qXrI/U+6R5+tGermhovhzKlTm6i8Gk1Os/JNIadOmYU2"
+                                + "MWJ69ZgvtbejqAH7lxq1102zHuLjVCWabQlKSYxt7sUw7rIltex09sCRZHFl"
+                                + "8+WeBsEKRG30ecsYES/LV/VvKlBRznot9YpoQ5/lQmFwkW6hu9L1OXFKf3ma"
+                                + "DKnoxmnVS0Xwm2eBkpFvA8fd4Cnqd0N8CSCIDcWmcBXYWYEpsoJ6IrE6tzGX"
+                                + "sgtagqtIa7agn4GizlLIR4p1506U47N3Evcw00sLsd0CPX60QApKCIDcM/3H"
+                                + "Te0YLvJFZr92Q0k9EIQMpgLY23ztMNAD9vdKv1YzgNQ57Y8CkaGmALud1P5I"
+                                + "NjIkmGJfZ/XrpncoSE2DGBmFxn4Uezit3ayk52ZRMtZQyn9sP3aTkp7mOMlI"
+                                + "B6kOOIDvpiE99vCR0aQc+ruD4G4u0mFMzlUN/LtjE2ky9xrfvxaKlnSY749i"
+                                + "IUPF0+413PdHc5OhG/dAkw37X0LsdEzSXipLRrR2MNHew383PekTL06uM8P/"
+                                + "1Z4NdA4Bd2DM2y/p7b1iGHe+/RsdMTpPtBEAAA=="
+                ),
+                classpath(SUPPORT_JAR_PATH,
+                        "libs/exploded-aar/my.group.id/mylib/25.0.0-SNAPSHOT/jars/classes.jar"),
+                mSupportJar,
+                gradle(""
+                        + "apply plugin: 'com.android.application'\n"
+                        + "\n"
+                        + "dependencies {\n"
+                        + "    compile 'my.group.id:mylib:25.0.0-SNAPSHOT'\n"
+                        + "}")
+
+        );
+        lint().projects(project).run().expect(""
+                + "src/main/java/test/pkg/TestLibrary.java:10: Error: Library.privateMethod can only be called from within the same library group (groupId=my.group.id) [RestrictedApi]\n"
+                + "        Library.privateMethod(); // ERROR\n"
+                + "                ~~~~~~~~~~~~~\n"
+                + "src/main/java/test/pkg/TestLibrary.java:11: Error: PrivateClass can only be called from within the same library group (groupId=my.group.id) [RestrictedApi]\n"
+                + "        PrivateClass.method(); // ERROR\n"
+                + "        ~~~~~~~~~~~~\n"
+                + "src/main/java/test/pkg/TestLibrary.java:12: Error: InternalClass.method can only be called from within the same library group (groupId=my.group.id) [RestrictedApi]\n"
+                + "        InternalClass.method(); // ERROR\n"
+                + "                      ~~~~~~\n"
+                + "3 errors, 0 warnings\n");
+    }
+
+    @SuppressWarnings("ALL") // sample code with warnings
+    public void testRestrictToTests() throws Exception {
+        assertEquals(""
+                + "src/test/pkg/ProductionCode.java:9: Error: ProductionCode.testHelper2 can only be called from tests [RestrictedApi]\n"
+                + "        testHelper2(); // ERROR\n"
+                + "        ~~~~~~~~~~~\n"
+                + "1 errors, 0 warnings\n",
+                lintProject(
+                        java(""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "import android.support.annotation.RestrictTo;\n"
+                                + "import android.support.annotation.VisibleForTesting;\n"
+                                + "\n"
+                                + "public class ProductionCode {\n"
+                                + "    public void code() {\n"
+                                + "        testHelper1(); // ERROR? (We currently don't flag @VisibleForTesting; it deals with *visibility*)\n"
+                                + "        testHelper2(); // ERROR\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    @VisibleForTesting\n"
+                                + "    public void testHelper1() {\n"
+                                + "        testHelper1(); // OK\n"
+                                + "        code(); // OK\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    @RestrictTo(RestrictTo.Scope.TESTS)\n"
+                                + "    public void testHelper2() {\n"
+                                + "        testHelper1(); // OK\n"
+                                + "        code(); // OK\n"
+                                + "    }\n"
+                                + "}\n"),
+                        // test/ prefix makes it a test folder entry:
+                        java("test/test/pkg/UnitTest.java", ""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "public class UnitTest {\n"
+                                + "    public void test() {\n"
+                                + "        new ProductionCode().code(); // OK\n"
+                                + "        new ProductionCode().testHelper1(); // OK\n"
+                                + "        new ProductionCode().testHelper2(); // OK\n"
+                                + "        \n"
+                                + "    }\n"
+                                + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
+                ));
+    }
+
+    public void testVisibleForTesting() throws Exception {
+        assertEquals(""
+                + "src/test/otherpkg/OtherPkg.java:11: Error: ProductionCode.testHelper6 can only be called from tests [RestrictedApi]\n"
+                + "        new ProductionCode().testHelper6(); // ERROR\n"
+                + "                             ~~~~~~~~~~~\n"
+                + "src/test/pkg/ProductionCode.java:27: Error: ProductionCode.testHelper6 can only be called from tests [RestrictedApi]\n"
+                + "            testHelper6(); // ERROR: should only be called from tests\n"
+                + "            ~~~~~~~~~~~\n"
+                + "src/test/otherpkg/OtherPkg.java:8: Warning: This method should only be accessed from tests or within protected scope [VisibleForTests]\n"
+                + "        new ProductionCode().testHelper3(); // ERROR\n"
+                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "src/test/otherpkg/OtherPkg.java:9: Warning: This method should only be accessed from tests or within private scope [VisibleForTests]\n"
+                + "        new ProductionCode().testHelper4(); // ERROR\n"
+                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "src/test/otherpkg/OtherPkg.java:10: Warning: This method should only be accessed from tests or within package private scope [VisibleForTests]\n"
+                + "        new ProductionCode().testHelper5(); // ERROR\n"
+                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "2 errors, 3 warnings\n",
+                lintProject(
+                        java(""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "import android.support.annotation.VisibleForTesting;\n"
+                                + "\n"
+                                + "public class ProductionCode {\n"
+                                + "    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)\n"
+                                + "    public void testHelper3() {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)\n"
+                                + "    public void testHelper4() {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)\n"
+                                + "    public void testHelper5() {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    @VisibleForTesting(otherwise = VisibleForTesting.NONE)\n"
+                                + "    public void testHelper6() {\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    private class Local {\n"
+                                + "        private void localProductionCode() {\n"
+                                + "            testHelper3();\n"
+                                + "            testHelper4();\n"
+                                + "            testHelper5();\n"
+                                + "            testHelper6(); // ERROR: should only be called from tests\n"
+                                + "            \n"
+                                + "        }\n"
+                                + "    }\n"
+                                + "}\n"),
+                        java(""
+                                + "package test.otherpkg;\n"
+                                + "\n"
+                                + "import android.support.annotation.VisibleForTesting;\n"
+                                + "import test.pkg.ProductionCode;\n"
+                                + "\n"
+                                + "public class OtherPkg {\n"
+                                + "    public void test() {\n"
+                                + "        new ProductionCode().testHelper3(); // ERROR\n"
+                                + "        new ProductionCode().testHelper4(); // ERROR\n"
+                                + "        new ProductionCode().testHelper5(); // ERROR\n"
+                                + "        new ProductionCode().testHelper6(); // ERROR\n"
+                                + "        \n"
+                                + "    }\n"
+                                + "}\n"),
+                        // test/ prefix makes it a test folder entry:
+                        java("test/test/pkg/UnitTest.java", ""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "public class UnitTest {\n"
+                                + "    public void test() {\n"
+                                + "        new ProductionCode().testHelper3(); // OK\n"
+                                + "        new ProductionCode().testHelper4(); // OK\n"
+                                + "        new ProductionCode().testHelper5(); // OK\n"
+                                + "        new ProductionCode().testHelper6(); // OK\n"
+                                + "        \n"
+                                + "    }\n"
+                                + "}\n"),
+                        mSupportClasspath,
+                        mSupportJar
+
+                ));
+    }
+
+    public void testRequiresPermissionWithinRequires() throws Exception {
+        assertEquals("No warnings.",
+                lintProject(
+                        java(""
+                                + "package com.example.mylibrary1;\n"
+                                + "\n"
+                                + "import android.Manifest;\n"
+                                + "import android.content.Context;\n"
+                                + "import android.net.wifi.WifiInfo;\n"
+                                + "import android.net.wifi.WifiManager;\n"
+                                + "import android.support.annotation.RequiresPermission;\n"
+                                + "\n"
+                                + "public class WifiInfoUtil {\n"
+                                + "    @RequiresPermission(Manifest.permission.ACCESS_WIFI_STATE)\n"
+                                + "    public static WifiInfo getWifiInfo(Context context) {\n"
+                                + "        WifiManager wm = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);\n"
+                                + "        return wm.getConnectionInfo();\n"
+                                + "    }\n"
+                                + "}"),
+                        mSupportClasspath,
+                        mSupportJar
+                ));
+    }
+
+    // TODO: http://b.android.com/220686
+    public void ignore_testSnackbarDuration() throws Exception {
+        assertEquals(""
+                + "src/test/pkg/SnackbarTest.java:13: Error: Must be one of: Snackbar.LENGTH_INDEFINITE, Snackbar.LENGTH_SHORT, Snackbar.LENGTH_LONG or value must be \u2265 1 (was -100) [WrongConstant]\n"
                 + "        makeSnackbar(-100); // ERROR\n"
                 + "                     ~~~~\n"
                 + "1 errors, 0 warnings\n",
@@ -2150,8 +2872,112 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "    public static final int LENGTH_SHORT = -1;\n"
                                 + "    public static final int LENGTH_LONG = 0;\n"
                                 + "}\n"),
-                        copy("src/android/support/annotation/IntDef.java.txt", "src/android/support/annotation/IntDef.java"),
-                        copy("src/android/support/annotation/IntRange.java.txt", "src/android/support/annotation/IntRange.java")
+                        mSupportClasspath,
+                        mSupportJar
+
                 ));
     }
+
+    public void testThreadingWithinLambdas() throws Exception {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=223101
+        assertEquals("No warnings.",
+                lintProject(
+                        java(""
+                                + "package test.pkg;\n"
+                                + "\n"
+                                + "import android.app.Activity;\n"
+                                + "import android.os.Bundle;\n"
+                                + "import android.support.annotation.WorkerThread;\n"
+                                + "\n"
+                                + "public class LambdaThreadTest extends Activity {\n"
+                                + "    @WorkerThread\n"
+                                + "    static void doSomething() {}\n"
+                                + "\n"
+                                + "    static void doInBackground(Runnable r) {}\n"
+                                + "\n"
+                                + "    @Override protected void onCreate(Bundle savedInstanceState) {\n"
+                                + "        super.onCreate(savedInstanceState);\n"
+                                + "        doInBackground(new Runnable() {\n"
+                                + "            @Override public void run() {\n"
+                                + "                doSomething();\n"
+                                + "            }\n"
+                                + "        });\n"
+                                + "        doInBackground(() -> doSomething());\n"
+                                + "        doInBackground(LambdaThreadTest::doSomething);\n"
+                                + "    }\n"
+                                + "}\n"
+                        ),
+                        mSupportClasspath,
+                        mSupportJar
+                ));
+    }
+
+    public void testRestrictedInheritedAnnotation() {
+        // Regression test for http://b.android.com/230387
+        // Ensure that when we perform the @RestrictTo check, we don't incorrectly
+        // inherit annotations from the base classes of AppCompatActivity and treat
+        // those as @RestrictTo on the whole AppCompatActivity class itself.
+        lint().files(
+                /*
+                Compiled version of these two classes:
+                    package test.pkg;
+                    import android.support.annotation.RestrictTo;
+                    @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+                    public class RestrictedParent {
+                    }
+                and
+                    package test.pkg;
+                    public class Parent extends RestrictedParent {
+                        public void myMethod() {
+                        }
+                    }
+                 */
+                base64gzip("libs/exploded-aar/my.group.id/mylib/25.0.0-SNAPSHOT/jars/classes.jar", ""
+                        + "H4sIAAAAAAAAAAvwZmYRYeDg4GB4VzvRkwEJcDKwMPi6hjjqevq56f87xcDA"
+                        + "zBDgzc4BkmKCKgnAqVkEiOGafR39PN1cg0P0fN0++5457eOtq3eR11tX69yZ"
+                        + "85uDDK4YP3hapOflq+Ppe7F0FQtnxAvJI9JSUi/Flj5boia2XCujYuk0C1HV"
+                        + "tGei2iKvRV8+zf5U9LGIEeyWNZtvhngBbfJCcYspmlvkgbgktbhEvyA7XT8I"
+                        + "yCjKTC5JTQlILErNK9FLzkksLp4aGOvN5Chi+/j6tMxZqal2rK7xV+y+RLio"
+                        + "iRyatGmWgO2RHdY3blgp7978b/28JrlfjH9XvMh66Cxwg6fY/tze73Mknz3+"
+                        + "/Fb2gOaqSJXAbRvyEpsVi/WmmojznPzbrOe8al3twYCCJULbP25QP8T3nrVl"
+                        + "iszbjwtOO1uerD8wpXKSoPNVQyWjby925u8WablkfCj/Y4BG8bEJua8tvhzZ"
+                        + "OsdnSr35HJ4fM4RbpbWV2xctPGY0ySUu2Es6b0mYyobnBU/bo36VifS7WZmY"
+                        + "zZ+aPknWN+mlIX9S4kKnxNuXlSedMZ0ilGj7IFCl43WF3bq5L00Mn809NjW6"
+                        + "+L18/p1nsdrtIpd4ptrLnwmYs+cE345Xt8/ec6g4dkjs8EX7EMmy56+OmQl9"
+                        + "mT75aMblsyfSNDYvt5xgV8NavVCBsTsnjSttg4PZ97sNrikn1TeavD2l6L/P"
+                        + "Y2uqVSu7QWPomoUuGdMmKJltLIr8yQSKpPpfEa8iGBkYfJjwRZIociQhR01q"
+                        + "n7//IQeBo/cv1AesjsiX2cmp9u1B4OOjLcGmbpzfl949oFRytszwY3Kl0cMD"
+                        + "7B+cJZetzex5l3hvj/nn0+euf8/jf8BVyMGuzviL0Y/zX6/WlL2qFs8XSx7c"
+                        + "e3mnypfg0BPtb9P0zoacuT5nzlIr4dczDVZ9sl+YPX2VypGVU5f6xsWLnVxs"
+                        + "sGnD9ZZ3z/7G3Vp6jvPh5nuzfPxCWmVMpadrf1RT2vHhx2Z7k8QLav53JKZG"
+                        + "zjQ35rn48PPq64yhNuHzYw95rbn3Q/hLYD/zujpZqxdFvbNYvwhs+qSpWxNY"
+                        + "/Yd9b7zC1oSQfFl5cErewhTw/BEwCIIYQYHEyCTCgJqvYDkOlClRAUoWRdeK"
+                        + "nEFEULTZ4sigyCaA4gg59uRRTDhJOFuhG4bsS1EUw/KYcER/gDcrG0gBCxDy"
+                        + "ArVNZgbxABAMMsu2BAAA"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "public class Cls extends Parent {\n"
+                        + "    @Override\n"
+                        + "    public void myMethod() {\n"
+                        + "        super.myMethod();\n"
+                        + "    }\n"
+                        + "}\n"),
+                gradle(""
+                        + "apply plugin: 'com.android.application'\n"
+                        + "\n"
+                        + "dependencies {\n"
+                        + "    compile 'my.group.id:mylib:25.0.0-SNAPSHOT'\n"
+                        + "}"),
+                classpath(SUPPORT_JAR_PATH,
+                        "libs/exploded-aar/my.group.id/mylib/25.0.0-SNAPSHOT/jars/classes.jar"),
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public static final String SUPPORT_JAR_PATH = "libs/support-annotations.jar";
+    private TestFile mSupportJar = base64gzip(SUPPORT_JAR_PATH,
+            SUPPORT_ANNOTATIONS_JAR_BASE64_GZIP);
+    private TestFile mSupportClasspath = classpath(SUPPORT_JAR_PATH);
 }

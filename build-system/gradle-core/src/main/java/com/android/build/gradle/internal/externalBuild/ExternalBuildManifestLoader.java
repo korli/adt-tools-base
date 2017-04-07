@@ -16,6 +16,7 @@
 
 package com.android.build.gradle.internal.externalBuild;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.LoggerWrapper;
@@ -28,9 +29,6 @@ import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.rules.android.apkmanifest.ExternalBuildApkManifest;
-
-import org.gradle.api.Project;
-
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -39,6 +37,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.gradle.api.Project;
 
 /**
  * Reads the manifest file produced by an external build system.
@@ -85,13 +84,20 @@ public class ExternalBuildManifestLoader {
             @NonNull ExternalBuildApkManifest.ApkManifest manifest) {
         ExternalBuildApkManifest.AndroidSdk sdk = manifest.getAndroidSdk();
 
+        File zipAlign = sdk.getZipalign().isEmpty()
+            ? new File(getAbsoluteFile(executionRoot, sdk.getAapt()).getParentFile(),
+                SdkConstants.FN_ZIPALIGN)
+            : getAbsoluteFile(executionRoot, sdk.getZipalign());
+
         BuildToolInfo buildToolInfo = BuildToolInfo.partial(
-                new Revision(23, 0, 2),
+                new Revision(25, 0, 0),
                 project.getProjectDir(),
                 ImmutableMap.of(
                         // TODO: Put dx.jar in the proto
                         BuildToolInfo.PathId.DX_JAR,
                         getAbsoluteFile(executionRoot, sdk.getDx()),
+                        BuildToolInfo.PathId.ZIP_ALIGN,
+                        zipAlign,
                         BuildToolInfo.PathId.AAPT,
                         getAbsoluteFile(executionRoot, sdk.getAapt())));
 
@@ -101,14 +107,15 @@ public class ExternalBuildManifestLoader {
 
         TargetInfo targetInfo = new TargetInfo(androidTarget, buildToolInfo);
 
-        AndroidBuilder androidBuilder = new AndroidBuilder(
-                project.getPath(),
-                "Android Studio + external build system",
-                new GradleProcessExecutor(project),
-                new GradleJavaProcessExecutor(project),
-                new ExtraModelInfo(project, false),
-                new LoggerWrapper(project.getLogger()),
-                false);
+        AndroidBuilder androidBuilder =
+                new AndroidBuilder(
+                        project.getPath(),
+                        "Android Studio + external build system",
+                        new GradleProcessExecutor(project),
+                        new GradleJavaProcessExecutor(project),
+                        new ExtraModelInfo(project),
+                        new LoggerWrapper(project.getLogger()),
+                        false);
 
         androidBuilder.setTargetInfo(targetInfo);
         return androidBuilder;

@@ -29,25 +29,18 @@ import com.android.tools.lint.detector.api.TextFormat;
 import com.android.utils.PositionXmlParser;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 @SuppressWarnings("javadoc")
 public class XmlReporterTest extends AbstractCheckTest {
     public void test() throws Exception {
         File file = new File(getTargetDir(), "report");
         try {
-            LintCliClient client = new LintCliClient() {
-                @Override
-                String getRevision() {
-                    return "unittest"; // Hardcode version to keep unit test output stable
-                }
-            };
+            LintCliClient client = createClient();
             //noinspection ResultOfMethodCallIgnored
             file.getParentFile().mkdirs();
             XmlReporter reporter = new XmlReporter(client, file);
@@ -77,58 +70,52 @@ public class XmlReporterTest extends AbstractCheckTest {
             warning2.location = Location.create(warning2.file,
                     new DefaultPosition(11, 8, 377), new DefaultPosition(11, 27, 396));
 
-            List<Warning> warnings = new ArrayList<Warning>();
+            List<Warning> warnings = new ArrayList<>();
             warnings.add(warning1);
             warnings.add(warning2);
 
-            reporter.write(0, 2, warnings);
+            reporter.write(new Reporter.Stats(0, 2), warnings);
 
             String report = Files.toString(file, Charsets.UTF_8);
-            assertEquals(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                "<issues format=\"4\" by=\"lint unittest\">\n" +
-                "\n" +
-                "    <issue\n" +
-                "        id=\"UsesMinSdkAttributes\"\n" +
-                "        severity=\"Warning\"\n" +
-                "        message=\"&lt;uses-sdk> tag should specify a target API level (the highest verified version; when running on later versions, compatibility behaviors may be enabled) with android:targetSdkVersion=&quot;?&quot;\"\n" +
-                "        category=\"Correctness\"\n" +
-                "        priority=\"9\"\n" +
-                "        summary=\"Minimum SDK and target SDK attributes not defined\"\n" +
-                "        explanation=\"The manifest should contain a `&lt;uses-sdk>` element which defines the minimum API Level required for the application to run, as well as the target version (the highest API level you have tested the version for.)\"\n" +
-                "        url=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n" +
-                "        urls=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n" +
-                "        errorLine1=\"    &lt;uses-sdk android:minSdkVersion=&quot;8&quot; />\"\n" +
-                "        errorLine2=\"    ^\">\n" +
-                "        <location\n" +
-                "            file=\"AndroidManifest.xml\"\n" +
-                "            line=\"7\"\n" +
-                "            column=\"5\"/>\n" +
-                "    </issue>\n" +
-                "\n" +
-                "    <issue\n" +
-                "        id=\"HardcodedText\"\n" +
-                "        severity=\"Warning\"\n" +
-                "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n" +
-                "        category=\"Internationalization\"\n" +
-                "        priority=\"5\"\n" +
-                "        summary=\"Hardcoded text\"\n" +
-                "        explanation=\"Hardcoding text attributes directly in layout files is bad for several reasons:\n" +
-                "\n" +
-                "* When creating configuration variations (for example for landscape or portrait)you have to repeat the actual text (and keep it up to date when making changes)\n" +
-                "\n" +
-                "* The application cannot be translated to other languages by just adding new translations for existing string resources.\n" +
-                "\n" +
-                "There are quickfixes to automatically extract this hardcoded string into a resource lookup.\"\n" +
-                "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n" +
-                "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n" +
-                "        <location\n" +
-                "            file=\"res/layout/main.xml\"\n" +
-                "            line=\"12\"\n" +
-                "            column=\"9\"/>\n" +
-                "    </issue>\n" +
-                "\n" +
-                "</issues>\n",
+            assertEquals(""
+                    + "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                    + "<issues format=\"4\" by=\"lint unittest\">\n"
+                    + "\n"
+                    + "    <issue\n"
+                    + "        id=\"UsesMinSdkAttributes\"\n"
+                    + "        severity=\"Warning\"\n"
+                    + "        message=\"&lt;uses-sdk> tag should specify a target API level (the highest verified version; when running on later versions, compatibility behaviors may be enabled) with android:targetSdkVersion=&quot;?&quot;\"\n"
+                    + "        category=\"Correctness\"\n"
+                    + "        priority=\"9\"\n"
+                    + "        summary=\"Minimum SDK and target SDK attributes not defined\"\n"
+                    + "        explanation=\"The manifest should contain a `&lt;uses-sdk>` element which defines the minimum API Level required for the application to run, as well as the target version (the highest API level you have tested the version for.)\"\n"
+                    + "        url=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n"
+                    + "        urls=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n"
+                    + "        errorLine1=\"    &lt;uses-sdk android:minSdkVersion=&quot;8&quot; />\"\n"
+                    + "        errorLine2=\"    ^\">\n"
+                    + "        <location\n"
+                    + "            file=\"AndroidManifest.xml\"\n"
+                    + "            line=\"7\"\n"
+                    + "            column=\"5\"/>\n"
+                    + "    </issue>\n"
+                    + "\n"
+                    + "    <issue\n"
+                    + "        id=\"HardcodedText\"\n"
+                    + "        severity=\"Warning\"\n"
+                    + "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
+                    + "        category=\"Internationalization\"\n"
+                    + "        priority=\"5\"\n"
+                    + "        summary=\"Hardcoded text\"\n"
+                    + "        explanation=\"Hardcoding text attributes directly in layout files is bad for several reasons:&#xA;&#xA;* When creating configuration variations (for example for landscape or portrait)you have to repeat the actual text (and keep it up to date when making changes)&#xA;&#xA;* The application cannot be translated to other languages by just adding new translations for existing string resources.&#xA;&#xA;There are quickfixes to automatically extract this hardcoded string into a resource lookup.\"\n"
+                    + "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n"
+                    + "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n"
+                    + "        <location\n"
+                    + "            file=\"res/layout/main.xml\"\n"
+                    + "            line=\"12\"\n"
+                    + "            column=\"9\"/>\n"
+                    + "    </issue>\n"
+                    + "\n"
+                    + "</issues>\n",
                 report);
 
             // Make sure the XML is valid
@@ -144,13 +131,8 @@ public class XmlReporterTest extends AbstractCheckTest {
     public void testFullPaths() throws Exception {
         File file = new File(getTargetDir(), "report");
         try {
-            LintCliClient client = new LintCliClient() {
-                @Override
-                String getRevision() {
-                    return "unittest"; // Hardcode version to keep unit test output stable
-                }
-            };
-            client.mFlags.setFullPath(true);
+            LintCliClient client = createClient();
+            client.flags.setFullPath(true);
 
             //noinspection ResultOfMethodCallIgnored
             file.getParentFile().mkdirs();
@@ -181,58 +163,52 @@ public class XmlReporterTest extends AbstractCheckTest {
             warning2.location = Location.create(warning2.file,
                     new DefaultPosition(11, 8, 377), new DefaultPosition(11, 27, 396));
 
-            List<Warning> warnings = new ArrayList<Warning>();
+            List<Warning> warnings = new ArrayList<>();
             warnings.add(warning1);
             warnings.add(warning2);
 
-            reporter.write(0, 2, warnings);
+            reporter.write(new Reporter.Stats(0, 2), warnings);
 
             String report = Files.toString(file, Charsets.UTF_8);
-            assertEquals(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-                "<issues format=\"4\" by=\"lint unittest\">\n" +
-                "\n" +
-                "    <issue\n" +
-                "        id=\"UsesMinSdkAttributes\"\n" +
-                "        severity=\"Warning\"\n" +
-                "        message=\"&lt;uses-sdk> tag should specify a target API level (the highest verified version; when running on later versions, compatibility behaviors may be enabled) with android:targetSdkVersion=&quot;?&quot;\"\n" +
-                "        category=\"Correctness\"\n" +
-                "        priority=\"9\"\n" +
-                "        summary=\"Minimum SDK and target SDK attributes not defined\"\n" +
-                "        explanation=\"The manifest should contain a `&lt;uses-sdk>` element which defines the minimum API Level required for the application to run, as well as the target version (the highest API level you have tested the version for.)\"\n" +
-                "        url=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n" +
-                "        urls=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n" +
-                "        errorLine1=\"    &lt;uses-sdk android:minSdkVersion=&quot;8&quot; />\"\n" +
-                "        errorLine2=\"    ^\">\n" +
-                "        <location\n" +
-                "            file=\"/foo/Foo/AndroidManifest.xml\"\n" +
-                "            line=\"7\"\n" +
-                "            column=\"5\"/>\n" +
-                "    </issue>\n" +
-                "\n" +
-                "    <issue\n" +
-                "        id=\"HardcodedText\"\n" +
-                "        severity=\"Warning\"\n" +
-                "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n" +
-                "        category=\"Internationalization\"\n" +
-                "        priority=\"5\"\n" +
-                "        summary=\"Hardcoded text\"\n" +
-                "        explanation=\"Hardcoding text attributes directly in layout files is bad for several reasons:\n" +
-                "\n" +
-                "* When creating configuration variations (for example for landscape or portrait)you have to repeat the actual text (and keep it up to date when making changes)\n" +
-                "\n" +
-                "* The application cannot be translated to other languages by just adding new translations for existing string resources.\n" +
-                "\n" +
-                "There are quickfixes to automatically extract this hardcoded string into a resource lookup.\"\n" +
-                "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n" +
-                "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n" +
-                "        <location\n" +
-                "            file=\"/foo/bar/Foo/res/layout/main.xml\"\n" +
-                "            line=\"12\"\n" +
-                "            column=\"9\"/>\n" +
-                "    </issue>\n" +
-                "\n" +
-                "</issues>\n",
+            assertEquals(""
+                    + "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                    + "<issues format=\"4\" by=\"lint unittest\">\n"
+                    + "\n"
+                    + "    <issue\n"
+                    + "        id=\"UsesMinSdkAttributes\"\n"
+                    + "        severity=\"Warning\"\n"
+                    + "        message=\"&lt;uses-sdk> tag should specify a target API level (the highest verified version; when running on later versions, compatibility behaviors may be enabled) with android:targetSdkVersion=&quot;?&quot;\"\n"
+                    + "        category=\"Correctness\"\n"
+                    + "        priority=\"9\"\n"
+                    + "        summary=\"Minimum SDK and target SDK attributes not defined\"\n"
+                    + "        explanation=\"The manifest should contain a `&lt;uses-sdk>` element which defines the minimum API Level required for the application to run, as well as the target version (the highest API level you have tested the version for.)\"\n"
+                    + "        url=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n"
+                    + "        urls=\"http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\"\n"
+                    + "        errorLine1=\"    &lt;uses-sdk android:minSdkVersion=&quot;8&quot; />\"\n"
+                    + "        errorLine2=\"    ^\">\n"
+                    + "        <location\n"
+                    + "            file=\"/foo/Foo/AndroidManifest.xml\"\n"
+                    + "            line=\"7\"\n"
+                    + "            column=\"5\"/>\n"
+                    + "    </issue>\n"
+                    + "\n"
+                    + "    <issue\n"
+                    + "        id=\"HardcodedText\"\n"
+                    + "        severity=\"Warning\"\n"
+                    + "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
+                    + "        category=\"Internationalization\"\n"
+                    + "        priority=\"5\"\n"
+                    + "        summary=\"Hardcoded text\"\n"
+                    + "        explanation=\"Hardcoding text attributes directly in layout files is bad for several reasons:&#xA;&#xA;* When creating configuration variations (for example for landscape or portrait)you have to repeat the actual text (and keep it up to date when making changes)&#xA;&#xA;* The application cannot be translated to other languages by just adding new translations for existing string resources.&#xA;&#xA;There are quickfixes to automatically extract this hardcoded string into a resource lookup.\"\n"
+                    + "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n"
+                    + "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n"
+                    + "        <location\n"
+                    + "            file=\"/foo/bar/Foo/res/layout/main.xml\"\n"
+                    + "            line=\"12\"\n"
+                    + "            column=\"9\"/>\n"
+                    + "    </issue>\n"
+                    + "\n"
+                    + "</issues>\n",
                 report);
 
             // Make sure the XML is valid
@@ -249,12 +225,7 @@ public class XmlReporterTest extends AbstractCheckTest {
         // See https://code.google.com/p/android/issues/detail?id=56205
         File file = new File(getTargetDir(), "report");
         try {
-            LintCliClient client = new LintCliClient() {
-                @Override
-                String getRevision() {
-                    return "unittest"; // Hardcode version to keep unit test output stable
-                }
-            };
+            LintCliClient client = createClient();
             //noinspection ResultOfMethodCallIgnored
             file.getParentFile().mkdirs();
             XmlReporter reporter = new XmlReporter(client, file);
@@ -273,10 +244,10 @@ public class XmlReporterTest extends AbstractCheckTest {
             warning1.location = Location.create(warning1.file,
                     new DefaultPosition(592, 46, -1), null);
 
-            List<Warning> warnings = new ArrayList<Warning>();
+            List<Warning> warnings = new ArrayList<>();
             warnings.add(warning1);
 
-            reporter.write(0, 2, warnings);
+            reporter.write(new Reporter.Stats(0, 2), warnings);
 
             String report = Files.toString(file, Charsets.UTF_8);
             assertEquals(""
@@ -310,6 +281,88 @@ public class XmlReporterTest extends AbstractCheckTest {
                     getAttribute("explanation");
             assertEquals(TypographyDetector.FRACTIONS.getExplanation(TextFormat.RAW),
                     explanation);
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            file.delete();
+        }
+    }
+
+    public void testBaselineFile() throws Exception {
+        File file = new File(getTargetDir(), "report");
+        try {
+            LintCliClient client = createClient();
+            client.flags.setFullPath(true);
+
+            //noinspection ResultOfMethodCallIgnored
+            file.getParentFile().mkdirs();
+            XmlReporter reporter = new XmlReporter(client, file);
+            reporter.setIntendedForBaseline(true);
+            Project project = Project.create(client, new File("/foo/bar/Foo"),
+                    new File("/foo/bar/Foo"));
+
+            Warning warning1 = new Warning(ManifestDetector.USES_SDK,
+                    "<uses-sdk> tag should specify a target API level (the highest verified " +
+                            "version; when running on later versions, compatibility behaviors may " +
+                            "be enabled) with android:targetSdkVersion=\"?\"",
+                    Severity.WARNING, project);
+            warning1.line = 6;
+            warning1.file = new File("/foo/bar/../Foo/AndroidManifest.xml");
+            warning1.errorLine = "    <uses-sdk android:minSdkVersion=\"8\" />\n    ^\n";
+            warning1.path = "AndroidManifest.xml";
+            warning1.location = Location.create(warning1.file,
+                    new DefaultPosition(6, 4, 198), new DefaultPosition(6, 42, 236));
+
+            Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
+                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    Severity.WARNING, project);
+            warning2.line = 11;
+            warning2.file = new File("/foo/bar/Foo/res/layout/main.xml");
+            warning2.errorLine = "        android:text=\"Fooo\" />\n" +
+                    "        ~~~~~~~~~~~~~~~~~~~\n";
+            warning2.path = "res/layout/main.xml";
+            warning2.location = Location.create(warning2.file,
+                    new DefaultPosition(11, 8, 377), new DefaultPosition(11, 27, 396));
+
+            List<Warning> warnings = new ArrayList<>();
+            warnings.add(warning1);
+            warnings.add(warning2);
+
+            reporter.write(new Reporter.Stats(0, 2), warnings);
+
+            String report = Files.toString(file, Charsets.UTF_8);
+            assertEquals(""
+                            + "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                            + "<issues format=\"4\" by=\"lint unittest\">\n"
+                            + "\n"
+                            + "    <issue\n"
+                            + "        id=\"UsesMinSdkAttributes\"\n"
+                            + "        message=\"&lt;uses-sdk> tag should specify a target API level (the highest verified version; when running on later versions, compatibility behaviors may be enabled) with android:targetSdkVersion=&quot;?&quot;\"\n"
+                            + "        errorLine1=\"    &lt;uses-sdk android:minSdkVersion=&quot;8&quot; />\"\n"
+                            + "        errorLine2=\"    ^\">\n"
+                            + "        <location\n"
+                            + "            file=\"/foo/bar/../Foo/AndroidManifest.xml\"\n"
+                            + "            line=\"7\"\n"
+                            + "            column=\"5\"/>\n"
+                            + "    </issue>\n"
+                            + "\n"
+                            + "    <issue\n"
+                            + "        id=\"HardcodedText\"\n"
+                            + "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
+                            + "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n"
+                            + "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n"
+                            + "        <location\n"
+                            + "            file=\"res/layout/main.xml\"\n"
+                            + "            line=\"12\"\n"
+                            + "            column=\"9\"/>\n"
+                            + "    </issue>\n"
+                            + "\n"
+                            + "</issues>\n",
+                    report);
+
+            // Make sure the XML is valid
+            Document document = PositionXmlParser.parse(report);
+            assertNotNull(document);
+            assertEquals(2, document.getElementsByTagName("issue").getLength());
         } finally {
             //noinspection ResultOfMethodCallIgnored
             file.delete();

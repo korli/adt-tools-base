@@ -1,5 +1,5 @@
 apply plugin: 'java'
-apply plugin: 'jacoco'
+apply plugin: 'jacoco-tools-base'
 apply plugin: 'clone-artifacts'
 
 configurations {
@@ -8,11 +8,11 @@ configurations {
 
 dependencies {
     compile project(':base:builder-model')
-    compile 'com.google.guava:guava:17.0'
+    compile libs.guava
 
     provided gradleApi()
 
-    testCompile 'junit:junit:4.12'
+    testCompile libs.junit
     testRuntime gradleApi()
 }
 

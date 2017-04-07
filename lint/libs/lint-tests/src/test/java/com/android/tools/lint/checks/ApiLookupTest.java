@@ -46,13 +46,6 @@ import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closeables;
 import com.google.common.io.Files;
-
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.MethodNode;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -68,10 +61,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarInputStream;
 import java.util.zip.ZipEntry;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 @SuppressWarnings({"javadoc", "ConstantConditions"})
 public class ApiLookupTest extends AbstractCheckTest {
-    private final ApiLookup mDb = ApiLookup.get(new TestLintClient());
+    private final ApiLookup mDb = ApiLookup.get(createClient());
 
     public void test1() {
         assertEquals(5, mDb.getFieldVersion("android/Manifest$permission", "AUTHENTICATE_ACCOUNTS"));
@@ -201,7 +199,7 @@ public class ApiLookupTest extends AbstractCheckTest {
 
     private File mCacheDir;
     @SuppressWarnings("StringBufferField")
-    private StringBuilder mLogBuffer = new StringBuilder();
+    private final StringBuilder mLogBuffer = new StringBuilder();
 
     @SuppressWarnings({"ConstantConditions", "IOResourceOpenedButNotSafelyClosed",
             "ResultOfMethodCallIgnored"})
@@ -214,7 +212,7 @@ public class ApiLookupTest extends AbstractCheckTest {
         ApiLookup lookup;
 
         // Real cache:
-        mCacheDir = new TestLintClient().getCacheDir(true);
+        mCacheDir = createClient().getCacheDir(true);
         mLogBuffer.setLength(0);
         lookup = ApiLookup.get(new LookupTestClient());
         assertEquals(11, lookup.getFieldVersion("android/R$attr", "actionMenuTextAppearance"));
@@ -235,7 +233,7 @@ public class ApiLookupTest extends AbstractCheckTest {
         // Now truncate cache file
         File cacheFile = new File(mCacheDir,
                 ApiLookup.getCacheFileName("api-versions.xml",
-                        ApiLookup.getPlatformVersion(new LookupTestClient()))); //$NON-NLS-1$
+                        ApiLookup.getPlatformVersion(new LookupTestClient())));
         mLogBuffer.setLength(0);
         assertTrue(cacheFile.exists());
         RandomAccessFile raf = new RandomAccessFile(cacheFile, "rw");
@@ -259,13 +257,8 @@ public class ApiLookupTest extends AbstractCheckTest {
         raf.close();
         lookup = ApiLookup.get(new LookupTestClient());
         // This data is now truncated: lookup returns the wrong size.
-        try {
-            assertNotNull(lookup);
-            lookup.getFieldVersion("android/R$attr", "actionMenuTextAppearance");
-            fail("Can't look up bogus data");
-        } catch (Throwable t) {
-            // Expected this: the database is corrupted.
-        }
+        assertNotNull(lookup);
+        lookup.getFieldVersion("android/R$attr", "actionMenuTextAppearance");
         assertTrue(message.contains("Please delete the file and restart the IDE/lint:"));
         assertTrue(message.contains(mCacheDir.getPath()));
         ApiLookup.dispose();
@@ -296,7 +289,9 @@ public class ApiLookupTest extends AbstractCheckTest {
         assertEquals(desc, expected, actual);
     }
 
-    public void testFindEverything() throws Exception {
+    // Flaky test - http://b.android.com/225879
+    @SuppressWarnings("unused")
+    public void ignoredTestFindEverything() throws Exception {
         // Load the API versions file and look up every single method/field/class in there
         // (provided since != 1) and also check the deprecated calls.
 
@@ -378,13 +373,14 @@ public class ApiLookupTest extends AbstractCheckTest {
             return;
         }
         //196925: Incorrect Lint NewApi error on FloatingActionButton#setBackgroundTintList()
-        assertEquals(7, mDb.getCallVersion("android/support/design/widget/FloatingActionButton",
+        assertEquals(9, mDb.getClassVersion("android/support/design/widget/FloatingActionButton"));
+        assertEquals(9, mDb.getCallVersion("android/support/design/widget/FloatingActionButton",
                 "getBackgroundTintList", "()"));
-        assertEquals(7, mDb.getCallVersion("android/support/design/widget/FloatingActionButton",
+        assertEquals(9, mDb.getCallVersion("android/support/design/widget/FloatingActionButton",
                 "setBackgroundTintList", "(Landroid/content/res/ColorStateList;)"));
     }
 
-    private final class LookupTestClient extends TestLintClient {
+    private final class LookupTestClient extends ToolsBaseTestLintClient {
         @SuppressWarnings("ResultOfMethodCallIgnored")
         @Override
         public File getCacheDir(boolean create) {
@@ -458,8 +454,10 @@ public class ApiLookupTest extends AbstractCheckTest {
 
         @SuppressWarnings("SpellCheckingInspection")
         String[] artifacts = new String[] {
+                "animated-vector-drawable",
                 "appcompat-v7",
                 "cardview-v7",
+                "constraint",
                 "customtabs",
                 "design",
                 "gridlayout-v7",
@@ -475,9 +473,16 @@ public class ApiLookupTest extends AbstractCheckTest {
                 "recommendation",
                 "recyclerview-v7",
                 "support-annotations",
+                "support-compat",
+                "support-core-ui",
+                "support-core-utils",
+                "support-fragment",
+                "support-media-compat",
                 "support-v13",
                 "support-v4",
-//                "test"
+                "support-vector-drawable",
+                //"test",
+                "transition"
         };
         String groupId = "com.android.support";
 
@@ -541,7 +546,7 @@ public class ApiLookupTest extends AbstractCheckTest {
                 + "  ~ limitations under the License.\n"
                 + "  -->\n"
                 + "<!-- This file is generated by ApiLookupTest#generateSupportLibraryFile() -->\n"
-                + "<api version=\"2\"/>", false);
+                + "<api version=\"3\"/>", false);
         Element rootElement = document.getDocumentElement();
 
         Set<ClassNode> referencedClasses = Sets.newHashSetWithExpectedSize(100);
@@ -649,15 +654,12 @@ public class ApiLookupTest extends AbstractCheckTest {
     @NonNull
     private static List<MethodNode> sorted(List<MethodNode> methods) {
         List<MethodNode> sorted = Lists.newArrayList(methods);
-        Collections.sort(sorted, new Comparator<MethodNode>() {
-            @Override
-            public int compare(MethodNode node1, MethodNode node2) {
-                int delta = node1.name.compareTo(node2.name);
-                if (delta != 0) {
-                    return delta;
-                }
-                return node1.desc.compareTo(node2.desc);
+        Collections.sort(sorted, (node1, node2) -> {
+            int delta = node1.name.compareTo(node2.name);
+            if (delta != 0) {
+                return delta;
             }
+            return node1.desc.compareTo(node2.desc);
         });
         return sorted;
     }
@@ -665,12 +667,7 @@ public class ApiLookupTest extends AbstractCheckTest {
     @NonNull
     private static List<ClassNode> sorted(Collection<ClassNode> classes) {
         List<ClassNode> sorted = Lists.newArrayList(classes);
-        Collections.sort(sorted, new Comparator<ClassNode>() {
-            @Override
-            public int compare(ClassNode node1, ClassNode node2) {
-                return node1.name.compareTo(node2.name);
-            }
-        });
+        Collections.sort(sorted, (node1, node2) -> node1.name.compareTo(node2.name));
         return sorted;
     }
 

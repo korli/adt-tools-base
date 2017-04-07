@@ -39,7 +39,6 @@ import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiNewExpression;
 import com.intellij.psi.PsiParameter;
 import com.intellij.psi.PsiType;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -51,7 +50,7 @@ public class HandlerDetector extends Detector implements JavaPsiScanner {
 
     /** Potentially leaking handlers */
     public static final Issue ISSUE = Issue.create(
-            "HandlerLeak", //$NON-NLS-1$
+            "HandlerLeak",
             "Handler reference leaks",
 
             "Since this Handler is declared as an inner class, it may prevent the outer " +
@@ -130,7 +129,6 @@ public class HandlerDetector extends Detector implements JavaPsiScanner {
             name = declaration.getQualifiedName();
         }
 
-        //noinspection VariableNotUsedInsideIf
         context.report(ISSUE, locationNode, location, String.format(
                 "This Handler class should be static or leaks might occur (%1$s)",
                 name));

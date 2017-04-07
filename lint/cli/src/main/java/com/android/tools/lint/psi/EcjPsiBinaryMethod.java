@@ -24,6 +24,7 @@ import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
 import com.intellij.psi.PsiIdentifier;
 import com.intellij.psi.PsiMethod;
@@ -38,15 +39,13 @@ import com.intellij.psi.PsiTypeElement;
 import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.javadoc.PsiDocComment;
-
+import java.util.Collection;
+import java.util.List;
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.lookup.AnnotationBinding;
 import org.eclipse.jdt.internal.compiler.lookup.MethodBinding;
 import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
 import org.eclipse.jdt.internal.compiler.lookup.TypeBinding;
-
-import java.util.Collection;
-import java.util.List;
 
 class EcjPsiBinaryMethod extends EcjPsiBinaryElement implements PsiMethod, PsiParameterList,
         PsiModifierList {
@@ -80,6 +79,15 @@ class EcjPsiBinaryMethod extends EcjPsiBinaryElement implements PsiMethod, PsiPa
     @Override
     public void acceptChildren(@NonNull PsiElementVisitor visitor) {
         // Not exposing method bodies for binary elements
+    }
+
+    @Override
+    public PsiElement getParent() {
+        if (mMethodBinding.declaringClass != null) {
+            return mManager.findClass(mMethodBinding.declaringClass);
+        }
+
+        return null;
     }
 
     @NonNull

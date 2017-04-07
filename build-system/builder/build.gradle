@@ -1,9 +1,6 @@
 apply plugin: 'java'
 apply plugin: 'clone-artifacts'
-apply plugin: 'jacoco'
-
-evaluationDependsOn(':base:builder-model')
-evaluationDependsOn(':base:builder-test-api')
+apply plugin: 'jacoco-tools-base'
 
 dependencies {
     compile project(':base:builder-model')
@@ -22,17 +19,17 @@ dependencies {
     compile project(':analytics-library:shared')
     compile project(':analytics-library:tracker')
 
-    compile 'com.squareup:javawriter:2.5.0'
-    compile 'org.bouncycastle:bcpkix-jdk15on:1.48'
-    compile 'org.bouncycastle:bcprov-jdk15on:1.48'
-    compile 'org.ow2.asm:asm:5.0.4'
-    compile 'org.ow2.asm:asm-tree:5.0.4'
+    compile libs.javawriter
+    compile libs.bouncycastle_pkix
+    compile libs.bouncycastle_prov
+    compile libs.asm
+    compile libs.asm_tree
 
-    testCompile 'junit:junit:4.12'
-    testCompile 'org.mockito:mockito-all:1.9.5'
-    testCompile 'com.google.truth:truth:0.28'
+    testCompile libs.junit
+    testCompile libs.mockito_all
+    testCompile libs.truth
+    testCompile libs.equalsverifier
     testCompile project(':base:testutils')
-    testCompile project(':base:sdklib').sourceSets.test.output
 }
 
 test {
@@ -50,51 +47,24 @@ apply from: "$rootDir/buildSrc/base/publish.gradle"
 apply from: "$rootDir/buildSrc/base/bintray.gradle"
 apply from: "$rootDir/buildSrc/base/javadoc.gradle"
 
-jar.manifest.attributes("Builder-Version": version)
-
-def generated = new File("${project.buildDir}/generated/java")
+def generated = new File("${project.buildDir}/generated/resources")
 
 sourceSets {
     main {
-        java {
+        resources {
             srcDir generated
         }
     }
 }
 
-def componentPluginVersion = rootProject.ext.experimentalVersion
-task generateVersionConstantsJava {
-    inputs.property("apiVersion", apiVersion)
-    inputs.property("nativeApiVersion", nativeApiVersion)
-    inputs.property("version", version)
-    inputs.property("componentPluginVersion", componentPluginVersion)
-    ext.versionFile = new File(generated, "com/android/builder/Version.java")
-    outputs.file(versionFile)
-}
-generateVersionConstantsJava << {
-    versionFile.parentFile.mkdirs()
-    versionFile.text = """
-package com.android.builder;
-
-public final class Version {
-    private Version() {}
-    public static final String ANDROID_GRADLE_PLUGIN_VERSION = "$version";
-    public static final String ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION = "$componentPluginVersion";
-    public static final int BUILDER_MODEL_API_VERSION = $apiVersion;
-    public static final int BUILDER_NATIVE_MODEL_API_VERSION = $nativeApiVersion;
-
-    // Getter method for the plugin version so that it is not inlined.
-    public static String getAndroidGradlePluginVersion() {
-        return ANDROID_GRADLE_PLUGIN_VERSION;
-    }
-    public static String getAndroidGradleComponentPluginVersion() {
-        return ANDROID_GRADLE_COMPONENT_PLUGIN_VERSION;
-    }
-}
-"""
+task copyVersionProperties(type: Copy) {
+    from project.file("$rootDir/buildSrc/base/version.properties")
+    into project.file("$generated/com/android/builder")
 }
 
-tasks.compileJava.dependsOn generateVersionConstantsJava
+tasks.compileJava.dependsOn copyVersionProperties
+
+jar.manifest.attributes("Builder-Version": version)
 
 configurations {
     provided
@@ -108,18 +78,31 @@ dependencies {
     sourcesProvided(project(path:':base:profile', configuration:'sourcesOnly')) {
         transitive = false
     }
+
+    provided(project(':base:apkzlib')) {
+        transitive = false
+    }
+    sourcesProvided(project(path:':base:apkzlib', configuration:'sourcesOnly')) {
+        transitive = false
+    }
 }
 
-sourceSets.main.compileClasspath += [configurations.provided]
-sourceSets.test.runtimeClasspath += [configurations.provided]
+sourceSets.main.compileClasspath += configurations.provided
+sourceSets.test.compileClasspath += configurations.provided
+sourceSets.test.runtimeClasspath += configurations.provided
 tasks.compileJava.dependsOn(configurations.provided)
 tasks.sourcesJar.dependsOn(configurations.sourcesProvided)
 
 tasks.jar {
-    from({zipTree(configurations.provided.singleFile)})
+    from({
+        configurations.provided.collect({zipTree(it)})
+    })
 }
+
 tasks.sourcesJar {
-    from({zipTree(configurations.sourcesProvided.singleFile)})
+    from({
+        configurations.sourcesProvided.collect({zipTree(it)})
+    })
 }
 javadoc {
     classpath += configurations.provided

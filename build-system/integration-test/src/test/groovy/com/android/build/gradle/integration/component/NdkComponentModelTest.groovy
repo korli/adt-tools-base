@@ -220,7 +220,7 @@ model {
     }
 }
 """
-        AndroidProject model = project.executeAndReturnModel("assembleDebug")
+        AndroidProject model = project.executeAndReturnModel("assembleDebug").getOnlyModel()
         NativeLibrary f1Debug = ModelHelper.getVariant(model.getVariants(), "f1Debug").getMainArtifact()
                 .getNativeLibraries().first()
         assertThat(f1Debug.getCCompilerFlags()).contains("-DTEST_FLAG_DEBUG")
@@ -237,11 +237,11 @@ model {
 """
 model {
     android {
-        compileSdkVersion = "Google Inc.:Google APIs:$GradleTestProject.DEFAULT_COMPILE_SDK_VERSION"
+        compileSdkVersion = "Google Inc.:Google APIs:$GradleTestProject.LATEST_GOOGLE_APIS_VERSION"
     }
 }
 """
-        AndroidProject model = project.executeAndReturnModel("assembleDebug")
+        AndroidProject model = project.executeAndReturnModel("assembleDebug").getOnlyModel()
         NativeLibrary lib = ModelHelper.getVariant(model.getVariants(), "debug").getMainArtifact()
                 .getNativeLibraries().first()
         for (String flag : lib.getCCompilerFlags()) {
@@ -265,7 +265,7 @@ model {
     }
 }
 """
-        AndroidProject model = project.executeAndReturnModel("assembleDebug")
+        AndroidProject model = project.executeAndReturnModel("assembleDebug").getOnlyModel()
         NativeLibrary lib = ModelHelper.getVariant(model.getVariants(), "debug").getMainArtifact()
                 .getNativeLibraries().first()
         assertThat(lib.getCCompilerFlags()).containsAllOf(
@@ -286,7 +286,7 @@ model {
     }
 
     private AndroidProject checkAndroidProject(Map variantAbi) {
-        AndroidProject androidProject = project.model().getSingle();
+        AndroidProject androidProject = project.model().getSingle().getOnlyModel();
         Collection<Variant> variants = androidProject.getVariants()
 
         for (Map.Entry entry : variantAbi) {
@@ -330,8 +330,12 @@ model {
                         NativeModelHelper.getCFlags(model, artifact).get(project.file("src/main/jni"));
                 assertThat(cFlags).contains("-DTEST_C_FLAG");
                 assertThat(cFlags).contains("-gcc-toolchain");
-                // There is no C++ flags as there is no C++ source files.
-                assertThat(NativeModelHelper.getFlatCppFlags(model, artifact)).isEmpty()
+                assertThat(cFlags).doesNotContain("null");
+                List<String> cppFlags =
+                        NativeModelHelper.getCppFlags(model, artifact).get(project.file("src/main/jni"));
+                assertThat(cppFlags).contains("-DTEST_CPP_FLAG");
+                assertThat(cppFlags).contains("-gcc-toolchain");
+                assertThat(cppFlags).doesNotContain("null");
                 assertThat(artifact.getOutputFile()).exists();
             }
 

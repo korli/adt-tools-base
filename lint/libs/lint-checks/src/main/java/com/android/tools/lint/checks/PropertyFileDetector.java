@@ -16,8 +16,6 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.DOT_PROPERTIES;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.detector.api.Category;
@@ -32,7 +30,6 @@ import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.TextFormat;
 import com.android.utils.SdkUtils;
 import com.google.common.base.Splitter;
-
 import java.io.File;
 import java.util.Iterator;
 
@@ -44,7 +41,7 @@ import java.util.Iterator;
 public class PropertyFileDetector extends Detector {
     /** Property file not escaped */
     public static final Issue ESCAPE = Issue.create(
-            "PropertyEscape", //$NON-NLS-1$
+            "PropertyEscape",
             "Incorrect property escapes",
             "All backslashes and colons in .property files must be escaped with " +
             "a backslash (\\). This means that when writing a Windows path, you " +
@@ -60,7 +57,7 @@ public class PropertyFileDetector extends Detector {
 
     /** Using HTTP instead of HTTPS for the wrapper */
     public static final Issue HTTP = Issue.create(
-            "UsingHttp", //$NON-NLS-1$
+            "UsingHttp",
             "Using HTTP instead of HTTPS",
             "The Gradle Wrapper is available both via HTTP and HTTPS. HTTPS is more " +
             "secure since it protects against man-in-the-middle attacks etc. Older " +
@@ -79,13 +76,8 @@ public class PropertyFileDetector extends Detector {
     }
 
     @Override
-    public boolean appliesTo(@NonNull Context context, @NonNull File file) {
-        return file.getPath().endsWith(DOT_PROPERTIES);
-    }
-
-    @Override
     public void run(@NonNull Context context) {
-        String contents = context.getContents();
+        CharSequence contents = context.getContents();
         if (contents == null) {
             return;
         }
@@ -108,7 +100,7 @@ public class PropertyFileDetector extends Detector {
         }
     }
 
-    private static void checkLine(@NonNull Context context, @NonNull String contents,
+    private static void checkLine(@NonNull Context context, @NonNull CharSequence contents,
             @NonNull String line, int offset, int valueStart) {
         String prefix = "distributionUrl=http\\";
         if (line.startsWith(prefix)) {

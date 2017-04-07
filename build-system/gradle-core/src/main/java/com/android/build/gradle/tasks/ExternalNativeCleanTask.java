@@ -20,6 +20,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.external.gson.NativeBuildConfigValue;
+import com.android.build.gradle.external.gson.NativeLibraryValue;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.utils.FileUtils;
@@ -32,6 +33,8 @@ import com.android.builder.core.AndroidBuilder;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.utils.StringHelper;
+import com.google.common.base.Joiner;
+import com.google.common.collect.Sets;
 
 import org.gradle.api.tasks.TaskAction;
 
@@ -40,6 +43,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Task that takes set of JSON files of type NativeBuildConfigValue and does clean steps with them.
@@ -68,25 +72,35 @@ public class ExternalNativeCleanTask extends ExternalNativeBaseTask {
                 .getNativeBuildConfigValues(
                         existingJsons, checkNotNull(getVariantName()));
         List<String> cleanCommands = Lists.newArrayList();
+        List<String> targetNames = Lists.newArrayList();
         for (NativeBuildConfigValue config : configValueList) {
             if (config.libraries == null) {
                 continue;
             }
             if (config.cleanCommands != null) {
                 cleanCommands.addAll(config.cleanCommands);
+                Set<String> targets = Sets.newHashSet();
+                for (NativeLibraryValue library : config.libraries.values()) {
+                    targets.add(String.format("%s %s", library.artifactName, library.abi));
+                }
+                targetNames.add(Joiner.on(",").join(targets));
             }
         }
         diagnostic("about to execute %s clean commands", cleanCommands.size());
-        executeProcessBatch(cleanCommands);
+        executeProcessBatch(cleanCommands, targetNames);
 
-        if (stlSharedObjectFiles.size() > 0) {
+        if (!stlSharedObjectFiles.isEmpty()) {
             diagnostic("remove STL shared object files");
             for (Abi abi : stlSharedObjectFiles.keySet()) {
                 File stlSharedObjectFile = checkNotNull(stlSharedObjectFiles.get(abi));
                 File objAbi = FileUtils.join(objFolder, abi.getName(),
                         stlSharedObjectFile.getName());
-                diagnostic("remove file %s", objAbi);
-                objAbi.delete();
+
+                if (objAbi.delete()) {
+                    diagnostic("removed file %s", objAbi);
+                } else {
+                    diagnostic("failed to remove file %s", objAbi);
+                }
             }
         }
         diagnostic("clean complete");
@@ -96,9 +110,12 @@ public class ExternalNativeCleanTask extends ExternalNativeBaseTask {
      * Given a list of build commands, execute each. If there is a failure, processing is stopped at
      * that point.
      */
-    protected void executeProcessBatch(@NonNull List<String> commands) throws ProcessException {
-        for (String command : commands) {
-            getLogger().lifecycle(String.format("  cleaning %s", getName()));
+    protected void executeProcessBatch(@NonNull List<String> commands,
+            @NonNull List<String> targetNames) throws ProcessException, IOException {
+        for (int commandIndex = 0; commandIndex < commands.size(); ++commandIndex) {
+            String command = commands.get(commandIndex);
+            String target = targetNames.get(commandIndex);
+            getLogger().lifecycle(String.format("Clean %s", target));
             List<String> tokens = StringHelper.tokenizeString(command);
             ProcessInfoBuilder processBuilder = new ProcessInfoBuilder();
             processBuilder.setExecutable(tokens.get(0));
@@ -108,7 +125,8 @@ public class ExternalNativeCleanTask extends ExternalNativeBaseTask {
             diagnostic("%s", processBuilder);
             ExternalNativeBuildTaskUtils.executeBuildProcessAndLogError(
                     getBuilder(),
-                    processBuilder.createProcess());
+                    processBuilder,
+                    true /* logStdioToInfo */);
         }
     }
 

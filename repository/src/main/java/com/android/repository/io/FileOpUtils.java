@@ -128,7 +128,9 @@ public final class FileOpUtils {
             if (fop.exists(dest)) {
                 moveOrCopyAndDelete(dest, destBackup, fop, progress);
                 if (fop.exists(dest)) {
-                    throw new IOException("Failed to move away or delete existing target file");
+                    throw new IOException(String.format(
+                      "Failed to move away or delete existing target file: %s%n" +
+                      "Move it away manually and try again.", dest));
                 }
                 success = true;
             }
@@ -357,6 +359,16 @@ public final class FileOpUtils {
                 mFop.deleteFileOrFolder(dir);
             }
         }
+    }
+
+    /**
+     * Deletes the given file if it exists. Does nothing and returns successfully if the file didn't
+     * exist to begin with.
+     *
+     * @return true if the file no longer exists, false if we failed to delete it
+     */
+    public static boolean deleteIfExists(File file, FileOp fop) {
+        return !fop.exists(file) || fop.delete(file);
     }
 
     private FileOpUtils() {

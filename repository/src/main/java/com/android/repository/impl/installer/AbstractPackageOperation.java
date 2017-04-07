@@ -23,7 +23,6 @@ import com.android.repository.api.PackageOperation;
 import com.android.repository.api.ProgressIndicator;
 import com.android.repository.api.RepoManager;
 import com.android.repository.api.Uninstaller;
-import com.android.repository.impl.manager.LocalRepoLoaderImpl;
 import com.android.repository.io.FileOp;
 import com.android.repository.io.FileOpUtils;
 import com.android.repository.util.InstallerUtil;
@@ -35,12 +34,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -86,6 +83,8 @@ public abstract class AbstractPackageOperation implements PackageOperation {
      * Properties written to the final install folder, used to restart the installer if needed.
      */
     private Properties mInstallProperties;
+
+    private PackageOperation mFallbackOperation;
 
     /**
      * Listeners that will be notified when the status changes.
@@ -162,6 +161,7 @@ public abstract class AbstractPackageOperation implements PackageOperation {
             }
 
             result = doComplete(installTemp, progress);
+            progress.logInfo(String.format("\"%1$s\" complete.", getName()));
         } finally {
             if (!result && progress.isCanceled()) {
                 cleanup(progress);
@@ -178,7 +178,7 @@ public abstract class AbstractPackageOperation implements PackageOperation {
         progress.setFraction(1);
         progress.setIndeterminate(false);
         progress
-          .logInfo(String.format("\"%1$s\" %2$s.", getName(), result ? "complete" : "failed"));
+          .logInfo(String.format("\"%1$s\" %2$s.", getName(), result ? "finished" : "failed"));
         return result;
     }
 
@@ -391,10 +391,23 @@ public abstract class AbstractPackageOperation implements PackageOperation {
                 }
             }
         } catch (Exception e) {
+            progress.logError("Failed to update status to " + status, e);
             updateStatus(InstallStatus.FAILED, progress);
             return false;
         }
         return true;
+    }
+
+
+    @Override
+    @Nullable
+    public PackageOperation getFallbackOperation() {
+        return mFallbackOperation;
+    }
+
+    @Override
+    public void setFallbackOperation(@Nullable PackageOperation mFallbackOperation) {
+        this.mFallbackOperation = mFallbackOperation;
     }
 }
 

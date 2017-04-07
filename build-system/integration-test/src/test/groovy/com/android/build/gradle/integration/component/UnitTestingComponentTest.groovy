@@ -77,8 +77,7 @@ apply plugin: "com.android.model.application"
 
 model {
     android {
-        // We need an android.jar that contains Java 6 bytecode, since Jenkins runs on Java 6.
-        compileSdkVersion $GradleTestProject.LAST_JAVA6_SDK_VERSION
+        compileSdkVersion $GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
         buildToolsVersion "$GradleTestProject.DEFAULT_BUILD_TOOL_VERSION"
 
         testOptions.unitTests.returnDefaultValues = true
@@ -99,6 +98,6 @@ dependencies {
     @Test
     public void testDebug() {
         project.execute("clean", "testDebug")
-        assertThat(project.file("build/test-results/debug/TEST-com.android.tests.UnitTest.xml")).exists()
+        assertThat(project.file("build/test-results/testDebugUnitTest/TEST-com.android.tests.UnitTest.xml")).exists()
     }
 }

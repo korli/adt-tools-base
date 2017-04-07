@@ -32,14 +32,11 @@ import com.android.tools.lint.detector.api.LayoutDetector;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
-
-import org.w3c.dom.Element;
-
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import org.w3c.dom.Element;
 
 /**
  * Checks whether the current node can be replaced by a TextView using compound
@@ -48,7 +45,7 @@ import java.util.List;
 public class UseCompoundDrawableDetector extends LayoutDetector {
     /** The main issue discovered by this detector */
     public static final Issue ISSUE = Issue.create(
-            "UseCompoundDrawables", //$NON-NLS-1$
+            "UseCompoundDrawables",
             "Node can be replaced by a `TextView` with compound drawables",
 
             "A `LinearLayout` which contains an `ImageView` and a `TextView` can be more " +
@@ -69,12 +66,6 @@ public class UseCompoundDrawableDetector extends LayoutDetector {
 
     /** Constructs a new {@link UseCompoundDrawableDetector} */
     public UseCompoundDrawableDetector() {
-    }
-
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
     }
 
     @Override

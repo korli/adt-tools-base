@@ -36,7 +36,6 @@ import com.android.build.gradle.internal.dependency.VariantDependencies;
 import com.android.build.gradle.internal.dsl.CoreBuildType;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
-import com.android.build.gradle.internal.profile.SpanRecorders;
 import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
@@ -49,27 +48,24 @@ import com.android.builder.core.VariantType;
 import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.SigningConfig;
 import com.android.builder.model.SyncIssue;
-import com.android.builder.profile.ProcessRecorder;
-import com.google.wireless.android.sdk.stats.AndroidStudioStats.GradleBuildProfileSpan.ExecutionType;
+import com.android.builder.profile.ProcessProfileWriter;
 import com.android.builder.profile.Recorder;
-import com.android.builder.profile.ThreadRecorder;
 import com.android.utils.StringHelper;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
+import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan.ExecutionType;
+import java.io.File;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import org.gradle.api.Action;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.internal.reflect.Instantiator;
-
-import java.io.File;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Class to create, manage variants.
@@ -95,8 +91,8 @@ public class VariantManager implements VariantModel {
     private final TaskManager taskManager;
     @NonNull
     private final Instantiator instantiator;
-    @NonNull
-    private ProductFlavorData<CoreProductFlavor> defaultConfigData;
+    @NonNull private final Recorder recorder;
+    @NonNull private ProductFlavorData<CoreProductFlavor> defaultConfigData;
     @NonNull
     private final Map<String, BuildTypeData> buildTypes = Maps.newHashMap();
     @NonNull
@@ -120,13 +116,15 @@ public class VariantManager implements VariantModel {
             @NonNull AndroidConfig extension,
             @NonNull VariantFactory variantFactory,
             @NonNull TaskManager taskManager,
-            @NonNull Instantiator instantiator) {
+            @NonNull Instantiator instantiator,
+            @NonNull Recorder recorder) {
         this.extension = extension;
         this.androidBuilder = androidBuilder;
         this.project = project;
         this.variantFactory = variantFactory;
         this.taskManager = taskManager;
         this.instantiator = instantiator;
+        this.recorder = recorder;
 
         DefaultAndroidSourceSet mainSourceSet =
                 (DefaultAndroidSourceSet) extension.getSourceSets().getByName(extension.getDefaultConfig().getName());
@@ -262,38 +260,26 @@ public class VariantManager implements VariantModel {
 
         final TaskFactory tasks = new TaskContainerAdaptor(project.getTasks());
         if (variantDataList.isEmpty()) {
-            ThreadRecorder.get().record(ExecutionType.VARIANT_MANAGER_CREATE_VARIANTS,
-                    project.getPath(), null /*variantName*/, new Recorder.Block<Void>() {
-                        @Override
-                        public Void call() throws Exception {
-                            populateVariantDataList();
-                            return null;
-                        }
-                    });
+            recorder.record(
+                    ExecutionType.VARIANT_MANAGER_CREATE_VARIANTS,
+                    project.getPath(),
+                    null /*variantName*/,
+                    this::populateVariantDataList);
         }
 
         // Create top level test tasks.
-        ThreadRecorder.get().record(ExecutionType.VARIANT_MANAGER_CREATE_TESTS_TASKS,
-                project.getPath(), null /*variantName*/, new Recorder.Block<Void>() {
-                    @Override
-                    public Void call() throws Exception {
-                        taskManager.createTopLevelTestTasks(tasks, !productFlavors.isEmpty());
-                        return null;
-                    }
-                });
+        recorder.record(
+                ExecutionType.VARIANT_MANAGER_CREATE_TESTS_TASKS,
+                project.getPath(),
+                null /*variantName*/,
+                () -> taskManager.createTopLevelTestTasks(tasks, !productFlavors.isEmpty()));
 
         for (final BaseVariantData<? extends BaseVariantOutputData> variantData : variantDataList) {
-            SpanRecorders.record(
-                    project,
-                    variantData.getName(),
+            recorder.record(
                     ExecutionType.VARIANT_MANAGER_CREATE_TASKS_FOR_VARIANT,
-                    new Recorder.Block<Void>() {
-                        @Override
-                        public Void call() throws Exception {
-                            createTasksForVariantData(tasks, variantData);
-                            return null;
-                        }
-                    });
+                    project.getPath(),
+                    variantData.getName(),
+                    () -> createTasksForVariantData(tasks, variantData));
         }
 
         taskManager.createReportTasks(tasks, variantDataList);
@@ -424,29 +410,22 @@ public class VariantManager implements VariantModel {
             // now add the default config
             testVariantProviders.add(defaultConfigData.getTestConfigurationProvider(variantType));
 
-            assert(testVariantConfig.getTestedConfig() != null);
-            VariantDependencies parentVariant = null;
-            if (testVariantConfig.getTestedConfig().getType() == VariantType.LIBRARY) {
-                parentVariant = testedVariantData.getVariantDependency();
-            }
-
             // If the variant being tested is a library variant, VariantDependencies must be
             // computed after the tasks for the tested variant is created.  Therefore, the
             // VariantDependencies is computed here instead of when the VariantData was created.
-            final VariantDependencies variantDep = VariantDependencies.compute(
-                    project,
-                    androidBuilder.getErrorReporter(),
-                    testVariantConfig.getFullName(),
-                    false /*publishVariant*/,
-                    variantType,
-                    testedVariantType,
-                    parentVariant,
-                    testVariantProviders.toArray(
-                            new ConfigurationProvider[testVariantProviders.size()]));
+            VariantDependencies.Builder builder = VariantDependencies
+                    .builder(project, androidBuilder.getErrorReporter(),
+                            testVariantConfig.getFullName(), variantType)
+                    .setPublishVariant(false)
+                    .setTestedVariantType(testedVariantType)
+                    .addProviders(testVariantProviders)
+                    .addTestedVariant(testedVariantData.getVariantConfiguration(),
+                            testedVariantData.getVariantDependency());
+
+            final VariantDependencies variantDep = builder.build();
             variantData.setVariantDependency(variantDep);
 
             if (variantType == VariantType.ANDROID_TEST &&
-                    testVariantConfig.isMultiDexEnabled() &&
                     testVariantConfig.isLegacyMultiDexMode()) {
                 project.getDependencies().add(
                         variantDep.getCompileConfiguration().getName(), COM_ANDROID_SUPPORT_MULTIDEX_INSTRUMENTATION);
@@ -454,23 +433,19 @@ public class VariantManager implements VariantModel {
                         variantDep.getPackageConfiguration().getName(), COM_ANDROID_SUPPORT_MULTIDEX_INSTRUMENTATION);
             }
 
-            SpanRecorders.record(project,
-                    testVariantConfig.getFullName(),
-                    ExecutionType.RESOLVE_DEPENDENCIES,
-                    new Recorder.Block<Void>() {
-                        @Override
-                        public Void call() {
-                            taskManager.resolveDependencies(variantDep,
-                                    testVariantConfig.getTestedConfig().getType() == VariantType.LIBRARY
-                                            ? null
-                                            : testedVariantData.getVariantDependency(),
-                                    null /*testedProjectPath*/);
-                            return null;
-                        }
-                    });
-            testVariantConfig.setDependencies(
-                    variantDep.getCompileDependencies(),
-                    variantDep.getPackageDependencies());
+            if (!AndroidGradleOptions.isImprovedDependencyResolutionEnabled(project)) {
+                recorder.record(
+                        ExecutionType.RESOLVE_DEPENDENCIES,
+                        project.getPath(),
+                        testVariantConfig.getFullName(),
+                        () ->
+                                taskManager.resolveDependencies(
+                                        variantDep, null /*testedProjectPath*/));
+                testVariantConfig.setResolvedDependencies(
+                        variantDep.getCompileDependencies(),
+                        variantDep.getPackageDependencies());
+            }
+
             switch (variantType) {
                 case ANDROID_TEST:
                     taskManager.createAndroidTestVariantTasks(tasks, (TestVariantData) variantData);
@@ -491,7 +466,7 @@ public class VariantManager implements VariantModel {
      */
     public void populateVariantDataList() {
         if (productFlavors.isEmpty()) {
-            createVariantDataForProductFlavors(Collections.<ProductFlavor>emptyList());
+            createVariantDataForProductFlavors(Collections.emptyList());
         } else {
             List<String> flavorDimensionList = extension.getFlavorDimensionList();
 
@@ -602,20 +577,18 @@ public class VariantManager implements VariantModel {
 
         // Done. Create the variant and get its internal storage object.
         BaseVariantData<?> variantData =
-                variantFactory.createVariantData(variantConfig, taskManager);
+                variantFactory.createVariantData(variantConfig, taskManager, recorder);
 
-        final VariantDependencies variantDep = VariantDependencies.compute(
-                project,
-                androidBuilder.getErrorReporter(),
-                variantConfig.getFullName(),
-                isVariantPublished(),
-                variantData.getType(),
-                null /*testedVariantType*/,
-                null /*parentVariant*/,
-                variantProviders.toArray(new ConfigurationProvider[variantProviders.size()]));
+        VariantDependencies.Builder builder = VariantDependencies
+                .builder(project, androidBuilder.getErrorReporter(),
+                        variantConfig.getFullName(), variantData.getType())
+                .setPublishVariant(isVariantPublished())
+                .addProviders(variantProviders);
+
+        final VariantDependencies variantDep = builder.build();
         variantData.setVariantDependency(variantDep);
 
-        if (variantConfig.isMultiDexEnabled() && variantConfig.isLegacyMultiDexMode()) {
+        if (variantConfig.isLegacyMultiDexMode()) {
             project.getDependencies().add(
                     variantDep.getCompileConfiguration().getName(), COM_ANDROID_SUPPORT_MULTIDEX);
             project.getDependencies().add(
@@ -626,24 +599,17 @@ public class VariantManager implements VariantModel {
                 ((TestAndroidConfig) extension).getTargetProjectPath() :
                 null;
 
-        SpanRecorders.record(
-                project,
-                variantConfig.getFullName(),
-                ExecutionType.RESOLVE_DEPENDENCIES,
-                new Recorder.Block<Void>() {
-                    @Override
-                    public Void call() {
-                        taskManager.resolveDependencies(
-                                variantDep,
-                                null /*testedVariantDeps*/,
-                                testedProjectPath);
-                        return null;
-                    }
-                });
+        if (!AndroidGradleOptions.isImprovedDependencyResolutionEnabled(project)) {
+            recorder.record(
+                    ExecutionType.RESOLVE_DEPENDENCIES,
+                    project.getPath(),
+                    variantConfig.getFullName(),
+                    () -> taskManager.resolveDependencies(variantDep, testedProjectPath));
 
-        variantConfig.setDependencies(
-                variantDep.getCompileDependencies(),
-                variantDep.getPackageDependencies());
+            variantConfig.setResolvedDependencies(
+                    variantDep.getCompileDependencies(),
+                    variantDep.getPackageDependencies());
+        }
 
         return variantData;
     }
@@ -736,10 +702,14 @@ public class VariantManager implements VariantModel {
                 extension.getSourceSets());
 
         // create the internal storage for this variant.
-        TestVariantData testVariantData = new TestVariantData(
-                extension, taskManager,
-                testVariantConfig, (TestedVariantData) testedVariantData,
-                androidBuilder.getErrorReporter());
+        TestVariantData testVariantData =
+                new TestVariantData(
+                        extension,
+                        taskManager,
+                        testVariantConfig,
+                        (TestedVariantData) testedVariantData,
+                        androidBuilder.getErrorReporter(),
+                        recorder);
         // link the testVariant to the tested variant in the other direction
         ((TestedVariantData) testedVariantData).setTestVariantData(testVariantData, type);
 
@@ -826,13 +796,13 @@ public class VariantManager implements VariantModel {
                 variantDataList.add(variantData);
 
                 GradleVariantConfiguration variantConfig = variantData.getVariantConfiguration();
-                ProcessRecorder.addVariant(project.getPath(), variantData.getName())
+                ProcessProfileWriter.addVariant(project.getPath(), variantData.getName())
                         .setIsDebug(variantConfig.getBuildType().isDebuggable())
                         .setUseJack(variantConfig.getJackOptions().isEnabled())
                         .setMinifyEnabled(variantConfig.isMinifyEnabled())
                         .setUseMultidex(variantConfig.isMultiDexEnabled())
-                        .setUseLegacyMultidex(variantConfig.isLegacyMultiDexMode());
-
+                        .setUseLegacyMultidex(variantConfig.isLegacyMultiDexMode())
+                        .setVariantType(variantData.getType().getAnalyticsVariantType());
 
                 if (variantFactory.hasTestScope()) {
                     TestVariantData unitTestVariantData = createTestVariantData(
@@ -898,6 +868,14 @@ public class VariantManager implements VariantModel {
 
             if (signingOptions.storeType != null) {
                 signingConfigDsl.setStoreType(signingOptions.storeType);
+            }
+
+            if (signingOptions.v1Enabled != null) {
+                signingConfigDsl.setV1SigningEnabled(signingOptions.v1Enabled);
+            }
+
+            if (signingOptions.v2Enabled != null) {
+                signingConfigDsl.setV2SigningEnabled(signingOptions.v2Enabled);
             }
 
             return signingConfigDsl;

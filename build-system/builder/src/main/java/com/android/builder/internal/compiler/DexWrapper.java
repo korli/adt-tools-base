@@ -69,7 +69,7 @@ public class DexWrapper {
         Main.Arguments args = new Main.Arguments();
 
         // Inputs:
-        args.fileNames = Iterables.toArray(processBuilder.getFilesToAdd(null), String.class);
+        args.fileNames = Iterables.toArray(processBuilder.getFilesToAdd(), String.class);
 
         // Outputs:
         if (processBuilder.getOutputFile().isDirectory() && !processBuilder.isMultiDex()) {
@@ -89,7 +89,8 @@ public class DexWrapper {
 
         // Other:
         args.verbose = processBuilder.isVerbose();
-        args.optimize = !processBuilder.isNoOptimize();
+        // due to b.android.com/82031
+        args.optimize = true;
         args.numThreads = Objects.firstNonNull(dexOptions.getThreadCount(), 4);
         args.forceJumbo = dexOptions.getJumboMode();
 

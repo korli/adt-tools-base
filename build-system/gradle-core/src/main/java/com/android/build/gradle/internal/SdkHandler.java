@@ -18,10 +18,12 @@ package com.android.build.gradle.internal;
 
 import static com.android.SdkConstants.FN_LOCAL_PROPERTIES;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.concurrency.GuardedBy;
 import com.android.build.gradle.AndroidGradleOptions;
+import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.LibraryRequest;
 import com.android.builder.model.OptionalCompilationStep;
@@ -32,16 +34,16 @@ import com.android.builder.sdk.SdkLibData;
 import com.android.builder.sdk.SdkLoader;
 import com.android.builder.sdk.TargetInfo;
 import com.android.repository.Revision;
-import com.android.repository.api.RepoManager;
+import com.android.repository.api.ConsoleProgressIndicator;
+import com.android.repository.api.LocalPackage;
+import com.android.repository.api.ProgressIndicator;
+import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.utils.ILogger;
+import com.android.utils.Pair;
 import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.io.Closeables;
-
-import org.gradle.api.Project;
-import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -50,6 +52,8 @@ import java.io.InputStreamReader;
 import java.util.Collection;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import org.gradle.api.Project;
+import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
 
 /**
  * Handles the all things SDK for the Gradle plugin. There is one instance per project, around
@@ -72,14 +76,6 @@ public class SdkHandler {
     private File ndkFolder;
     private SdkLibData sdkLibData = SdkLibData.dontDownload();
     private boolean isRegularSdk = true;
-
-    /**
-     * This boolean starts at true to ensure that if the build fails to find some SDK components
-     * and we want to download these components, we reset the cache for local and remote
-     * repositories at least once, by having the expiration time set to 0 milliseconds. Once we have
-     * reset it once, we can go back to the default cache expiration period.
-     */
-    private boolean resetCache = true;
 
     public static void setTestSdkFolder(File testSdkFolder) {
         sTestSdkFolder = testSdkFolder;
@@ -120,13 +116,13 @@ public class SdkHandler {
         synchronized (LOCK_FOR_SDK_HANDLER) {
             if (useCachedVersion) {
                 if (sSdkLoader == null) {
-                    logger.info("Parsing the Sdk");
+                    logger.verbose("Parsing the Sdk");
                     sSdkLoader = getSdkLoader();
                 } else {
-                    logger.info("Reusing the SdkLoader");
+                    logger.verbose("Reusing the SdkLoader");
                 }
             } else {
-                logger.info("Parsing the SDK, no caching allowed");
+                logger.verbose("Parsing the SDK, no caching allowed");
                 sSdkLoader = getSdkLoader();
             }
             sdkLoader = sSdkLoader;
@@ -137,12 +133,6 @@ public class SdkHandler {
         SdkInfo sdkInfo = sdkLoader.getSdkInfo(logger);
 
         TargetInfo targetInfo;
-        if (resetCache) {
-            sdkLibData.setCacheExpirationPeriod(0);
-            resetCache = false;
-        } else {
-            sdkLibData.setCacheExpirationPeriod(RepoManager.DEFAULT_EXPIRATION_PERIOD_MS);
-        }
         targetInfo = sdkLoader.getTargetInfo(
                 targetHash,
                 buildToolRevision,
@@ -152,6 +142,16 @@ public class SdkHandler {
         androidBuilder.setSdkInfo(sdkInfo);
         androidBuilder.setTargetInfo(targetInfo);
         androidBuilder.setLibraryRequests(usedLibraries);
+
+        // Check if platform-tools are installed. We check here because realistically, all projects
+        // should have platform-tools in order to build.
+        ProgressIndicator progress = new ConsoleProgressIndicator();
+        AndroidSdkHandler sdk = AndroidSdkHandler.getInstance(getSdkFolder());
+        LocalPackage platformToolsPackage =
+                sdk.getLatestLocalPackageForPrefix(SdkConstants.FD_PLATFORM_TOOLS, true, progress);
+        if (platformToolsPackage == null) {
+            sdkLoader.installSdkTool(sdkLibData, SdkConstants.FD_PLATFORM_TOOLS);
+        }
         logger.verbose("SDK initialized in %1$d ms", stopwatch.elapsed(TimeUnit.MILLISECONDS));
     }
 
@@ -210,46 +210,46 @@ public class SdkHandler {
         return ndkFolder;
     }
 
-    private void findSdkLocation(@NonNull Properties properties, @NonNull File rootDir) {
+    /**
+     * Find the location of the SDK.
+     *
+     * Returns a Pair<File, Boolean>, where getFirst() returns a File of the SDK location, and
+     * getSecond() returns a Boolean indicating whether it is a regular SDK.
+     *
+     * Returns Pair.of(null, true) when SDK is not found.
+     *
+     * @param properties Properties, usually configured in local.properties file.
+     * @param rootDir directory for resolving relative paths.
+     * @return Pair of SDK location and boolean indicating if it's a regular SDK.
+     */
+    @NonNull
+    public static Pair<File, Boolean> findSdkLocation(
+            @NonNull Properties properties,
+            @NonNull File rootDir) {
         String sdkDirProp = properties.getProperty("sdk.dir");
         if (sdkDirProp != null) {
-            sdkFolder = new File(sdkDirProp);
-            if (!sdkFolder.isAbsolute()) {
-                sdkFolder = new File(rootDir, sdkDirProp);
+            File sdk = new File(sdkDirProp);
+            if (!sdk.isAbsolute()) {
+                sdk = new File(rootDir, sdkDirProp);
             }
-            return;
+            return Pair.of(sdk, true);
         }
 
         sdkDirProp = properties.getProperty("android.dir");
         if (sdkDirProp != null) {
-            sdkFolder = new File(rootDir, sdkDirProp);
-            isRegularSdk = false;
-            return;
+            return Pair.of(new File(rootDir, sdkDirProp), false);
         }
 
         String envVar = System.getenv("ANDROID_HOME");
         if (envVar != null) {
-            sdkFolder = new File(envVar);
-            return;
+            return Pair.of(new File(envVar), true);
         }
 
         String property = System.getProperty("android.home");
         if (property != null) {
-            sdkFolder = new File(property);
+            return Pair.of(new File(property), true);
         }
-    }
-
-    private void findNdkLocation(@NonNull Properties properties) {
-        String ndkDirProp = properties.getProperty("ndk.dir");
-        if (ndkDirProp != null) {
-            ndkFolder = new File(ndkDirProp);
-            return;
-        }
-
-        String envVar = System.getenv("ANDROID_NDK_HOME");
-        if (envVar != null) {
-            ndkFolder = new File(envVar);
-        }
+        return Pair.of(null, true);
     }
 
     private void findLocation(@NonNull Project project) {
@@ -285,20 +285,21 @@ public class SdkHandler {
             }
         }
 
-        findSdkLocation(properties, rootDir);
-        findNdkLocation(properties);
+        Pair<File, Boolean> sdkLocation = findSdkLocation(properties, rootDir);
+        sdkFolder = sdkLocation.getFirst();
+        isRegularSdk = sdkLocation.getSecond();
+        ndkFolder = NdkHandler.findNdkDirectory(properties, rootDir);
     }
 
     public void setSdkLibData(SdkLibData sdkLibData) {
         this.sdkLibData = sdkLibData;
     }
 
-    public boolean shouldResetCache() {
-        return resetCache;
-    }
-
-    public void setResetCache(boolean resetCache) {
-        this.resetCache = resetCache;
+    /**
+     * Installs CMake.
+     */
+    public void installCMake() {
+        sdkLoader.installSdkTool(sdkLibData, SdkConstants.FD_CMAKE);
     }
 
     public void addLocalRepositories(Project project) {
@@ -315,5 +316,13 @@ public class SdkHandler {
             project.getRepositories().remove(mavenRepository);
             project.getRepositories().addFirst(mavenRepository);
         }
+    }
+
+    /**
+     * This method checks if the cache of the local and remote repositories has been already reset
+     * this build.
+     */
+    public boolean checkResetCache() {
+        return sdkLibData.needsCacheReset();
     }
 }

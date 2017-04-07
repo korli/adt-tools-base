@@ -22,6 +22,7 @@ import com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp
 import com.android.builder.model.AndroidProject
 import com.android.builder.model.NativeAndroidProject
 import com.android.builder.model.SyncIssue
+import com.android.utils.FileUtils
 import groovy.transform.CompileStatic
 import org.junit.Before
 import org.junit.Rule
@@ -86,6 +87,28 @@ class NativeBuildOutputTest {
         project.file("src/main/cpp/hello-jni.cpp").write("xx");
 
         checkFailed(["'xx'"], [], 0);
+    }
+
+
+    // Make sure that the STDOUT of ndk-build -n doesn't appear for the user.
+    @Test
+    public void checkNdkBuildNoDashNOutput() {
+        project.buildFile << """
+            android {
+                externalNativeBuild {
+                    ndkBuild {
+                        path "src/main/cpp/Android.mk"
+                    }
+                }
+            }
+            """;
+
+        project.file("src/main/cpp/Android.mk") << androidMk;
+
+        checkSucceeded([], [
+                "install",
+                "rm -f"
+        ]);
     }
 
     @Test
@@ -218,7 +241,7 @@ class NativeBuildOutputTest {
             """;
 
         project.file("src/main/cpp/Android.mk") << androidMk;
-        checkSucceeded(["x86/libhello-jni.so"],
+        checkSucceeded(["Build hello-jni x86"],
                        ["armeabi"]);
     }
 
@@ -378,7 +401,7 @@ class NativeBuildOutputTest {
 
         project.file("src/main/cpp/hello-jni.cpp").write("void main() {}");
 
-        AndroidProject androidProject = project.model().getSingle(AndroidProject.class);
+        AndroidProject androidProject = project.model().getSingle().getOnlyModel();
         assertThat(androidProject.syncIssues).hasSize(0);
         NativeAndroidProject nativeProject = project.model().getSingle(NativeAndroidProject.class);
         // TODO: remove this if statement once a fresh CMake is deployed to buildbots.
@@ -404,7 +427,8 @@ class NativeBuildOutputTest {
 
         project.file("CMakeLists.txt") << cmakeLists;
 
-        checkSucceeded(["building", "x86/libhello-jni.so"], []);
+        checkSucceeded(["Building CXX", FileUtils.join("cpp", "hello-jni.cpp"),
+                        FileUtils.join("x86", "libhello-jni.so")], []);
     }
 
     private void checkSucceeded(List<String> expectInStdout, List<String> dontExpectInStdout) {
@@ -424,7 +448,7 @@ class NativeBuildOutputTest {
     private void checkFailed(List<String> expectInStderr, List<String> expectInSyncIssues,
             int expectedSyncIssueCount) {
         // Check the sync
-        AndroidProject androidProject = project.model().getSingle(AndroidProject.class);
+        AndroidProject androidProject = project.model().ignoreSyncIssues().getSingle().getOnlyModel();
 
         // Check for expected sync issues
         assertThat(androidProject.syncIssues).hasSize(expectedSyncIssueCount);

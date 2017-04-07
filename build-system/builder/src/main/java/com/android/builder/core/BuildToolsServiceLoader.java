@@ -19,12 +19,12 @@ package com.android.builder.core;
 import com.android.annotations.NonNull;
 import com.android.jack.api.JackProvider;
 import com.android.jill.api.JillProvider;
-import com.android.sdklib.BuildToolInfo;
 import com.android.repository.Revision;
+import com.android.sdklib.BuildToolInfo;
 import com.android.utils.ILogger;
 import com.google.common.base.Joiner;
+import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
-import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 
 import java.io.File;
@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.ServiceLoader;
 
 /**
@@ -95,7 +96,7 @@ public enum BuildToolsServiceLoader {
                 return Optional.of(loadedBuildTool);
             }
         }
-        return Optional.absent();
+        return Optional.empty();
     }
 
     /**
@@ -123,7 +124,7 @@ public enum BuildToolsServiceLoader {
 
         @Override
         public String toString() {
-            return Objects.toStringHelper(this)
+            return MoreObjects.toStringHelper(this)
                     .add("serviceClass", serviceClass)
                     .add("classpath", Joiner.on(",").join(classpath))
                     .toString();
@@ -134,13 +135,13 @@ public enum BuildToolsServiceLoader {
      * Jack service description.
      */
     public static final Service<JackProvider> JACK =
-            new Service<JackProvider>(ImmutableList.of("jack.jar"), JackProvider.class);
+            new Service<>(ImmutableList.of("jack.jar"), JackProvider.class);
 
     /**
      * Jill service description.
      */
     public static final Service<JillProvider> JILL =
-            new Service<JillProvider>(ImmutableList.of("jill.jar"), JillProvider.class);
+            new Service<>(ImmutableList.of("jill.jar"), JillProvider.class);
 
     /**
      * build-tools version specific {@link ServiceLoader} helper.
@@ -203,16 +204,18 @@ public enum BuildToolsServiceLoader {
                     throw new RuntimeException(e);
                 }
             }
-            ClassLoader cl = new URLClassLoader(urls, serviceType.getServiceClass().getClassLoader());
+
+            ApiClassLoader apiLoader = new ApiClassLoader(serviceType.getServiceClass());
+            ClassLoader cl = new URLClassLoader(urls, apiLoader);
             ServiceLoader<T> serviceLoader = ServiceLoader.load(serviceType.getServiceClass(), cl);
-            loadedServicesLoaders.add(new LoadedServiceLoader<T>(
-                    serviceType.getServiceClass(), serviceLoader));
+            loadedServicesLoaders.add(
+                    new LoadedServiceLoader<>(serviceType.getServiceClass(), serviceLoader));
             return serviceLoader;
         }
 
         /**
          * Return the first service instance for the requested service type or
-         * {@link Optional#absent()} if none exist.
+         * {@link Optional#empty()} if none exist.
          * @param logger to log resolution.
          * @param serviceType the requested service type encapsulation.
          * @param <T> the requested service class type.
@@ -235,8 +238,8 @@ public enum BuildToolsServiceLoader {
                         serviceIterator, service, service.getClass());
                 return Optional.of(service);
             } else {
-                logger.info("Cannot find service implementation %1$s" + serviceType);
-                return Optional.absent();
+                logger.verbose("Cannot find service implementation %1$s", serviceType);
+                return Optional.empty();
             }
         }
 
@@ -248,7 +251,36 @@ public enum BuildToolsServiceLoader {
                     return Optional.of((ServiceLoader<T>) loadedServiceLoader.serviceLoader);
                 }
             }
-            return Optional.absent();
+            return Optional.empty();
+        }
+    }
+
+
+    /**
+     * Class loader used to load the api classes from the class loader in which they
+     * were initially defined. All other classes will be loaded using the system
+     * class loader, {@link ClassLoader#getSystemClassLoader()}
+     */
+    private static class ApiClassLoader extends ClassLoader {
+
+        @NonNull
+        private final String mApiPackage;
+        @NonNull
+        private final ClassLoader mApiClassLoader;
+
+        public ApiClassLoader(@NonNull Class<?> apiClass) {
+            super(ClassLoader.getSystemClassLoader());
+            mApiPackage = apiClass.getPackage().getName();
+            mApiClassLoader = apiClass.getClassLoader();
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (name.startsWith(mApiPackage)) {
+                return mApiClassLoader.loadClass(name);
+            }
+            // use the system class loader to try to load the class
+            return ClassLoader.getSystemClassLoader().loadClass(name);
         }
     }
 }

@@ -30,44 +30,52 @@ import com.android.repository.api.RepositorySourceProvider;
 import com.android.repository.api.SchemaModule;
 import com.android.repository.api.SettingsController;
 import com.android.repository.impl.meta.RepositoryPackages;
-
-import org.w3c.dom.ls.LSResourceResolver;
-
+import com.google.common.collect.Sets;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import org.w3c.dom.ls.LSResourceResolver;
 
 /**
  * A fake {@link RepoManager}, for use in unit tests.
  */
 public class FakeRepoManager extends RepoManager {
-    RepositoryPackages mPackages;
 
-    public FakeRepoManager(RepositoryPackages packages) {
+    private RepositoryPackages mPackages;
+    private File mLocalPath;
+    private Set<SchemaModule<?>> mModules = Sets
+            .newHashSet(RepoManager.getCommonModule(), RepoManager.getGenericModule());
+
+    public FakeRepoManager(@Nullable File localPath, @NonNull RepositoryPackages packages) {
+        mLocalPath = localPath;
+        mPackages = packages;
+    }
+
+    public FakeRepoManager(@NonNull RepositoryPackages packages) {
         mPackages = packages;
     }
 
     @Override
     public void registerSchemaModule(@NonNull SchemaModule module) {
-
+        mModules.add(module);
     }
 
     @NonNull
     @Override
-    public Set<SchemaModule> getSchemaModules() {
-        return Collections.emptySet();
+    public Set<SchemaModule<?>> getSchemaModules() {
+        return mModules;
     }
 
     @Override
     public void setLocalPath(@Nullable File path) {
-
+        mLocalPath = path;
     }
 
     @Nullable
     @Override
     public File getLocalPath() {
-        return null;
+        return mLocalPath;
     }
 
     @Override
@@ -98,12 +106,12 @@ public class FakeRepoManager extends RepoManager {
     }
 
     @Override
-    public boolean load(long cacheExpirationMs,
+    public void load(long cacheExpirationMs,
             @Nullable List<RepoLoadedCallback> onLocalComplete,
             @Nullable List<RepoLoadedCallback> onSuccess,
             @Nullable List<Runnable> onError, @NonNull ProgressRunner runner,
             @Nullable Downloader downloader, @Nullable SettingsController settings, boolean sync) {
-        return false;
+
     }
 
     @Override

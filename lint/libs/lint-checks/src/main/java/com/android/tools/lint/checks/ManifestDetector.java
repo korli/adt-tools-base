@@ -16,7 +16,6 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.ANDROID_MANIFEST_XML;
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_ALLOW_BACKUP;
 import static com.android.SdkConstants.ATTR_FULL_BACKUP_CONTENT;
@@ -43,6 +42,7 @@ import static com.android.SdkConstants.TAG_USES_SDK;
 import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.SdkConstants.VALUE_FALSE;
 import static com.android.ide.common.repository.GradleCoordinate.COMPARE_PLUS_HIGHER;
+import static com.android.tools.lint.checks.GradleDetector.GMS_GROUP_ID;
 import static com.android.xml.AndroidManifest.NODE_ACTION;
 import static com.android.xml.AndroidManifest.NODE_DATA;
 import static com.android.xml.AndroidManifest.NODE_METADATA;
@@ -63,6 +63,8 @@ import com.android.ide.common.repository.MavenRepositories;
 import com.android.ide.common.repository.SdkMavenRepository;
 import com.android.ide.common.res2.AbstractResourceRepository;
 import com.android.ide.common.resources.ResourceUrl;
+import com.android.repository.io.FileOp;
+import com.android.repository.io.FileOpUtils;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector;
@@ -73,15 +75,8 @@ import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.Speed;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.collect.Maps;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
@@ -89,6 +84,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Checks for issues in AndroidManifest files such as declaring elements in the
@@ -102,7 +101,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Wrong order of elements in the manifest */
     public static final Issue ORDER = Issue.create(
-            "ManifestOrder", //$NON-NLS-1$
+            "ManifestOrder",
             "Incorrect order of elements in manifest",
             "The <application> tag should appear after the elements which declare " +
             "which version you need, which features you need, which libraries you " +
@@ -117,7 +116,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Missing a {@code <uses-sdk>} element */
     public static final Issue USES_SDK = Issue.create(
-            "UsesMinSdkAttributes", //$NON-NLS-1$
+            "UsesMinSdkAttributes",
             "Minimum SDK and target SDK attributes not defined",
 
             "The manifest should contain a `<uses-sdk>` element which defines the " +
@@ -129,11 +128,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             9,
             Severity.WARNING,
             IMPLEMENTATION).addMoreInfo(
-            "http://developer.android.com/guide/topics/manifest/uses-sdk-element.html"); //$NON-NLS-1$
+            "http://developer.android.com/guide/topics/manifest/uses-sdk-element.html");
 
     /** Using a targetSdkVersion that isn't recent */
     public static final Issue TARGET_NEWER = Issue.create(
-            "OldTargetApi", //$NON-NLS-1$
+            "OldTargetApi",
             "Target SDK attribute is not targeting latest version",
 
             "When your application runs on a version of Android that is more recent than your " +
@@ -152,11 +151,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             6,
             Severity.WARNING,
             IMPLEMENTATION).addMoreInfo(
-            "http://developer.android.com/reference/android/os/Build.VERSION_CODES.html"); //$NON-NLS-1$
+            "http://developer.android.com/reference/android/os/Build.VERSION_CODES.html");
 
     /** Using multiple {@code <uses-sdk>} elements */
     public static final Issue MULTIPLE_USES_SDK = Issue.create(
-            "MultipleUsesSdk", //$NON-NLS-1$
+            "MultipleUsesSdk",
             "Multiple `<uses-sdk>` elements in the manifest",
 
             "The `<uses-sdk>` element should appear just once; the tools will *not* merge the " +
@@ -168,11 +167,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             6,
             Severity.FATAL,
             IMPLEMENTATION).addMoreInfo(
-            "http://developer.android.com/guide/topics/manifest/uses-sdk-element.html"); //$NON-NLS-1$
+            "http://developer.android.com/guide/topics/manifest/uses-sdk-element.html");
 
     /** Missing a {@code <uses-sdk>} element */
     public static final Issue WRONG_PARENT = Issue.create(
-            "WrongManifestParent", //$NON-NLS-1$
+            "WrongManifestParent",
             "Wrong manifest parent",
 
             "The `<uses-library>` element should be defined as a direct child of the " +
@@ -185,11 +184,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             6,
             Severity.FATAL,
             IMPLEMENTATION).addMoreInfo(
-            "http://developer.android.com/guide/topics/manifest/manifest-intro.html"); //$NON-NLS-1$
+            "http://developer.android.com/guide/topics/manifest/manifest-intro.html");
 
     /** Missing a {@code <uses-sdk>} element */
     public static final Issue DUPLICATE_ACTIVITY = Issue.create(
-            "DuplicateActivity", //$NON-NLS-1$
+            "DuplicateActivity",
             "Activity registered more than once",
 
             "An activity should only be registered once in the manifest. If it is " +
@@ -210,7 +209,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Not explicitly defining allowBackup */
     public static final Issue ALLOW_BACKUP = Issue.create(
-            "AllowBackup", //$NON-NLS-1$
+            "AllowBackup",
             "AllowBackup/FullBackupContent Problems",
 
             "The `allowBackup` attribute determines if an application's data can be backed up " +
@@ -247,7 +246,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Conflicting permission names */
     public static final Issue UNIQUE_PERMISSION = Issue.create(
-            "UniquePermission", //$NON-NLS-1$
+            "UniquePermission",
             "Permission names are not unique",
 
             "The unqualified names or your permissions must be unique. The reason for this " +
@@ -266,7 +265,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Using a resource for attributes that do not allow it */
     public static final Issue SET_VERSION = Issue.create(
-            "MissingVersion", //$NON-NLS-1$
+            "MissingVersion",
             "Missing application name/version",
 
             "You should define the version information for your application.\n" +
@@ -284,7 +283,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Using a resource for attributes that do not allow it */
     public static final Issue ILLEGAL_REFERENCE = Issue.create(
-            "IllegalResourceRef", //$NON-NLS-1$
+            "IllegalResourceRef",
             "Name and version must be integer or string, not resource",
 
             "For the `versionCode` attribute, you have to specify an actual integer " +
@@ -299,7 +298,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Declaring a uses-feature multiple time */
     public static final Issue DUPLICATE_USES_FEATURE = Issue.create(
-            "DuplicateUsesFeature", //$NON-NLS-1$
+            "DuplicateUsesFeature",
             "Feature declared more than once",
 
             "A given feature should only be declared once in the manifest.",
@@ -311,7 +310,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Not explicitly defining application icon */
     public static final Issue APPLICATION_ICON = Issue.create(
-            "MissingApplicationIcon", //$NON-NLS-1$
+            "MissingApplicationIcon",
             "Missing application icon",
 
             "You should set an icon for the application as whole because there is no " +
@@ -322,11 +321,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             5,
             Severity.WARNING,
             IMPLEMENTATION).addMoreInfo(
-            "http://developer.android.com/tools/publishing/preparing.html#publishing-configure"); //$NON-NLS-1$
+            "http://developer.android.com/tools/publishing/preparing.html#publishing-configure");
 
     /** Malformed Device Admin */
     public static final Issue DEVICE_ADMIN = Issue.create(
-            "DeviceAdmin", //$NON-NLS-1$
+            "DeviceAdmin",
             "Malformed Device Admin",
             "If you register a broadcast receiver which acts as a device admin, you must also " +
             "register an `<intent-filter>` for the action " +
@@ -345,7 +344,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Using a mock location in a non-debug-specific manifest file */
     public static final Issue MOCK_LOCATION = Issue.create(
-            "MockLocation", //$NON-NLS-1$
+            "MockLocation",
             "Using mock location provider in production",
 
             "Using a mock location provider (by requiring the permission " +
@@ -364,7 +363,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Defining a value that is overridden by Gradle */
     public static final Issue GRADLE_OVERRIDES = Issue.create(
-            "GradleOverrides", //$NON-NLS-1$
+            "GradleOverrides",
             "Value overridden by Gradle build script",
 
             "The value of (for example) `minSdkVersion` is only used if it is not specified in " +
@@ -379,7 +378,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Using drawable rather than mipmap launcher icons */
     public static final Issue MIPMAP = Issue.create(
-            "MipmapIcons", //$NON-NLS-1$
+            "MipmapIcons",
             "Use Mipmap Launcher Icons",
 
             "Launcher icons should be provided in the `mipmap` resource directory. " +
@@ -402,7 +401,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     /** Uses Wear Bind Listener which is deprecated */
     public static final Issue WEARABLE_BIND_LISTENER = Issue.create(
-            "WearableBindListener", //$NON-NLS-1$
+            "WearableBindListener",
             "Usage of Android Wear BIND_LISTENER is deprecated",
             "BIND_LISTENER receives all Android Wear events whether the application needs " +
             "them or not. This can be inefficient and cause applications to wake up " +
@@ -414,11 +413,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             6,
             Severity.FATAL,
             IMPLEMENTATION).addMoreInfo(
-            "http://tools.android.com/tech-docs/bind-listener");
+            "http://android-developers.blogspot.com/2016/04/deprecation-of-bindlistener.html");
 
     /** Permission name of mock location permission */
     public static final String MOCK_LOCATION_PERMISSION =
-            "android.permission.ACCESS_MOCK_LOCATION";   //$NON-NLS-1$
+            "android.permission.ACCESS_MOCK_LOCATION";
     // Error message used by quick fix
     public static final String MISSING_FULL_BACKUP_CONTENT_RESOURCE = "Missing `<full-backup-content>` resource";
 
@@ -454,23 +453,12 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
      * if a manifest tag warning for this has been explicitly disabled) */
     private boolean mSeenAllowBackup;
 
-    @NonNull
-    @Override
-    public Speed getSpeed() {
-        return Speed.FAST;
-    }
-
-    @Override
-    public boolean appliesTo(@NonNull Context context, @NonNull File file) {
-        return file.getName().equals(ANDROID_MANIFEST_XML);
-    }
-
     @Override
     public void beforeCheckFile(@NonNull Context context) {
         mSeenApplication = false;
         mSeenUsesSdk = 0;
-        mActivities = new HashSet<String>();
-        mUsesFeatures = new HashSet<String>();
+        mActivities = new HashSet<>();
+        mUsesFeatures = new HashSet<>();
     }
 
     @Override
@@ -618,14 +606,14 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                 TAG_APPLICATION,
                 TAG_USES_PERMISSION,
                 TAG_PERMISSION,
-                "permission-tree",         //$NON-NLS-1$
-                "permission-group",        //$NON-NLS-1$
+                "permission-tree",
+                "permission-group",
                 TAG_USES_SDK,
-                "uses-configuration",      //$NON-NLS-1$
+                "uses-configuration",
                 TAG_USES_FEATURE,
-                "supports-screens",        //$NON-NLS-1$
-                "compatible-screens",      //$NON-NLS-1$
-                "supports-gl-texture",     //$NON-NLS-1$
+                "supports-screens",
+                "compatible-screens",
+                "supports-gl-texture",
                 TAG_USES_LIBRARY,
                 TAG_ACTIVITY,
                 TAG_SERVICE,
@@ -699,7 +687,8 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                     return;
                 }
                 // Ensure that the play-services-wearable version dependency is >= 8.2.0
-                Variant variant = context.getMainProject().getCurrentVariant();
+                Project project = context.getMainProject();
+                Variant variant = project.getCurrentVariant();
                 if (variant != null) {
                     Dependencies dependencies = variant.getMainArtifact().getDependencies();
                     for (AndroidLibrary library : dependencies.getLibraries()) {
@@ -714,18 +703,19 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                 }
                 // It's possible they are using an older version of play services so
                 // check the build version and report an error if compileSdkVersion >= 24
-                if (context.getMainProject().getBuildSdk() >= 24) {
+                if (project.getBuildSdk() >= 24) {
                     File sdkHome = context.getClient().getSdkHome();
+                    FileOp fileOp = FileOpUtils.create();
                     File repository =
-                            SdkMavenRepository.GOOGLE.getRepositoryLocation(sdkHome, true);
+                            SdkMavenRepository.GOOGLE.getRepositoryLocation(sdkHome, true, fileOp);
                     String message = "The `com.google.android.gms.wearable.BIND_LISTENER`" +
                             " action is deprecated. Please upgrade to the latest version" +
                             " of play-services-wearable 8.2.0 or later";
                     if (repository != null) {
                         GradleCoordinate max = MavenRepositories
-                                .getHighestInstalledVersion("com.google.android.gms", //$NON-NLS-1$
-                                        "play-services-wearable", //$NON-NLS-1$
-                                        repository, null, false);
+                                .getHighestInstalledVersion(GMS_GROUP_ID,
+                                        "play-services-wearable",
+                                        repository, null, false, fileOp);
                         if (max != null
                                 && COMPARE_PLUS_HIGHER.compare(max, MIN_WEARABLE_GMS_VERSION) > 0) {
                             message = String.format(
@@ -982,11 +972,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
     // Method to check if the app has a gms wearable dependency that
     // matches the specific criteria i.e >= MIN_WEARABLE_GMS_VERSION
-    private boolean hasWearableGmsDependency(AndroidLibrary library) {
+    private static boolean hasWearableGmsDependency(AndroidLibrary library) {
         MavenCoordinates mc = library.getResolvedCoordinates();
         if (mc != null
-            && mc.getArtifactId().equals("play-services-wearable") //$NON-NLS-1$
-            && mc.getGroupId().equals("com.google.android.gms")) { //$NON-NLS-1$
+                && mc.getGroupId().equals(GMS_GROUP_ID)
+                && mc.getArtifactId().equals("play-services-wearable")) {
             GradleCoordinate gc = GradleCoordinate.parseVersionOnly(mc.getVersion());
             if (COMPARE_PLUS_HIGHER.compare(gc, MIN_WEARABLE_GMS_VERSION) >= 0) {
                 return true;
@@ -1064,7 +1054,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
         for (Element child : LintUtils.getChildren(element)) {
             if (child.getTagName().equals(TAG_INTENT_FILTER)) {
                 for (Element innerChild : LintUtils.getChildren(child)) {
-                    if (innerChild.getTagName().equals("category")) { //$NON-NLS-1$
+                    if (innerChild.getTagName().equals("category")) {
                         String categoryString = innerChild.getAttributeNS(ANDROID_URI, ATTR_NAME);
                         return "android.intent.category.LAUNCHER".equals(categoryString);
                     }
@@ -1146,7 +1136,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                     String filterTag = filterChild.getTagName();
                     if (filterTag.equals(NODE_ACTION)) {
                         String name = filterChild.getAttributeNS(ANDROID_URI, ATTR_NAME);
-                        if ("android.app.action.DEVICE_ADMIN_ENABLED".equals(name)) { //$NON-NLS-1$
+                        if ("android.app.action.DEVICE_ADMIN_ENABLED".equals(name)) {
                             actionFound = true;
                         }
                     } else if (filterTag.equals(NODE_DATA)) {
@@ -1160,7 +1150,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                 Attr valueNode = child.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
                 if (valueNode != null) {
                     String name = valueNode.getValue();
-                    if ("android.app.device_admin".equals(name)) { //$NON-NLS-1$
+                    if ("android.app.device_admin".equals(name)) {
                         deviceAdmin = true;
                         locationNode = valueNode;
                     }

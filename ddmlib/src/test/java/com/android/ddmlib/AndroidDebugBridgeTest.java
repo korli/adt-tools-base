@@ -16,7 +16,11 @@
 
 package com.android.ddmlib;
 
-import org.junit.Assume;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertTrue;
+
+import com.android.testutils.TestUtils;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -25,29 +29,19 @@ import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.*;
-
 public class AndroidDebugBridgeTest {
-    private String mAndroidHome;
     private File mAdbPath;
 
     @Before
     public void setUp() throws Exception {
-        mAndroidHome = System.getenv("ANDROID_HOME");
-        assertNotNull(
-                "This test requires ANDROID_HOME environment variable to point to a valid SDK",
-                mAndroidHome);
-
-        mAdbPath = new File(mAndroidHome, "platform-tools" + File.separator + "adb");
-
+        mAdbPath = new File(TestUtils.getSdk(), "platform-tools/adb");
         AndroidDebugBridge.initIfNeeded(false);
     }
 
     // https://code.google.com/p/android/issues/detail?id=63170
     @Test
+    @Ignore  // Flaky: Disabled in CI
     public void recreateAdb() throws IOException {
-        Assume.assumeTrue("Flaky: Disabled in CI",
-                System.getenv("BUILDBOT_BUILDNUMBER") == null);
         AndroidDebugBridge adb = AndroidDebugBridge.createBridge(mAdbPath.getCanonicalPath(), true);
         assertNotNull(adb);
         AndroidDebugBridge.terminate();

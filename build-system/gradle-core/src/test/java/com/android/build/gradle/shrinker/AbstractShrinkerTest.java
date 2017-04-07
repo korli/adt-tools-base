@@ -34,6 +34,7 @@ import com.android.build.api.transform.TransformOutputProvider;
 import com.android.build.gradle.shrinker.parser.FilterSpecification;
 import com.android.ide.common.internal.WaitableExecutor;
 import com.android.sdklib.SdkVersionInfo;
+import com.android.testutils.TestUtils;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -181,23 +182,23 @@ public abstract class AbstractShrinkerTest {
         assertThat(innerClasses).isEmpty();
     }
 
-    protected void assertMembersLeft(String className, String... members) throws IOException {
+    protected void assertMembersLeft(String className, String... expectedMembers) throws IOException {
+        assertThat(getMembers(className)).containsExactlyElementsIn(Arrays.asList(expectedMembers));
+    }
+
+    protected Set<String> getMembers(String className) throws IOException {
         File outFile = getOutputClassFile(className);
 
         assertTrue(
                 String.format("Class %s does not exist in output.", className),
                 outFile.exists());
 
-        assertThat(getMembers(outFile)).containsExactlyElementsIn(Arrays.asList(members));
+        return getMembers(outFile);
     }
 
     @NonNull
     protected static Set<File> getPlatformJars() {
-        String androidHomePath = System.getenv(SdkConstants.ANDROID_HOME_ENV);
-
-        assertThat(androidHomePath).named("$ANDROID_HOME env variable").isNotNull();
-
-        File androidHome = new File(androidHomePath);
+        File androidHome = TestUtils.getSdk();
         File androidJar = FileUtils.join(
                 androidHome,
                 SdkConstants.FD_PLATFORMS,
