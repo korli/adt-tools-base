@@ -1,0 +1,16 @@
+apply plugin: 'java'
+apply plugin: 'jacoco'
+
+dependencies {
+    compile project(':analytics-library:protos')
+    compile project(':analytics-library:shared')
+    compile project(':analytics-library:tracker')
+    compile project(':base:annotations')
+    compile project(':base:common')
+    compile project(':base:testutils')
+    compile libs.guava
+    compile libs.gson
+
+    testCompile libs.junit
+    testCompile libs.truth
+}
