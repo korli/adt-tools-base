@@ -16,17 +16,18 @@
 
 package com.android.testutils;
 
-import static org.junit.Assert.assertTrue;
-
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.utils.FileUtils;
 import com.google.common.io.Files;
+import junit.framework.TestCase;
+
 import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
-import junit.framework.TestCase;
+
+import static org.junit.Assert.assertTrue;
 
 /**
  * Utility methods to deal with loading the test data.
@@ -200,7 +201,7 @@ public class TestUtils {
         }
 
         if (!f.exists()) {
-            throw new IllegalArgumentException("File \"" + path + "\" not found.");
+            throw new IllegalArgumentException("File \"" + f.getPath() + "\" not found.");
         }
 
         return f;
