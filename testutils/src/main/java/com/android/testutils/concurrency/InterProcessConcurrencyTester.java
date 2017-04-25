@@ -20,6 +20,8 @@ import com.android.annotations.NonNull;
 import com.android.utils.FileUtils;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import org.junit.Assert;
+
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -27,15 +29,10 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
-import org.junit.Assert;
 
 /**
  * Utility class to test inter-process concurrency.
@@ -216,7 +213,7 @@ public final class InterProcessConcurrencyTester {
 
         // Wait for all the processes to start execution
         LinkedList<Socket> startedProcesses = Lists.newLinkedList();
-        serverSocket.setSoTimeout(0); // A timeout of 0 is interpreted as infinite timeout
+        serverSocket.setSoTimeout(100000); // A timeout of 0 is interpreted as infinite timeout
         while (startedProcesses.size() < runnables.size()) {
             startedProcesses.add(serverSocket.accept());
         }
