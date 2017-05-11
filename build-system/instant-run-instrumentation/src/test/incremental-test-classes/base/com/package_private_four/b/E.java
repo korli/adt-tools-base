@@ -18,9 +18,6 @@ package com.package_private_four.b;
 
 import com.package_private_four.a.D;
 
-/**
- * Created by jedo on 8/18/2016.
- */
 public class E extends D {
     public void foo() {
         super.publicMethod();

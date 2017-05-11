@@ -16,9 +16,6 @@
 
 package com.example.basic;
 
-/**
- * Created by jedo on 10/13/15.
- */
 public class CovariantChild extends CovariantParent {
 
     // method with a more specific return type.

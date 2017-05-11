@@ -18,9 +18,6 @@ package com.package_private_two.b;
 
 import com.package_private_two.a.E;
 
-/**
- * Created by jedo on 8/18/2016.
- */
 public class F extends E {
     public void foo() {
         super.publicMethod();
