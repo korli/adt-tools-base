@@ -1,48 +1,18 @@
 package com.android.tools.lint.checks;
 
-import static com.android.tools.lint.detector.api.LintUtils.getNextInstruction;
-import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.tools.lint.detector.api.ClassContext;
-import com.intellij.psi.JavaTokenType;
-import com.intellij.psi.PsiBinaryExpression;
-import com.intellij.psi.PsiBlockStatement;
-import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiCodeBlock;
-import com.intellij.psi.PsiComment;
-import com.intellij.psi.PsiConditionalExpression;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiField;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiIfStatement;
-import com.intellij.psi.PsiLiteralExpression;
-import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
-import com.intellij.psi.PsiModifier;
-import com.intellij.psi.PsiModifierList;
-import com.intellij.psi.PsiParameter;
-import com.intellij.psi.PsiParameterList;
-import com.intellij.psi.PsiPolyadicExpression;
-import com.intellij.psi.PsiPrefixExpression;
-import com.intellij.psi.PsiReferenceExpression;
-import com.intellij.psi.PsiReturnStatement;
-import com.intellij.psi.PsiStatement;
-import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.FieldInsnNode;
-import org.objectweb.asm.tree.InsnList;
-import org.objectweb.asm.tree.IntInsnNode;
-import org.objectweb.asm.tree.JumpInsnNode;
-import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.*;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
+
+import static com.android.tools.lint.detector.api.LintUtils.getNextInstruction;
+import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 
 /**
  * Utility methods for checking whether a given element is surrounded (or preceded!) by
@@ -246,8 +216,7 @@ public class VersionChecks {
 
     @Nullable
     public static PsiStatement getPreviousStatement(PsiElement element) {
-        final PsiElement prevStatement = PsiTreeUtil.skipSiblingsBackward(element,
-                PsiWhiteSpace.class, PsiComment.class);
+      final PsiElement prevStatement = PsiTreeUtil.skipWhitespacesAndCommentsBackward(element);
         return prevStatement instanceof PsiStatement ? (PsiStatement)prevStatement : null;
     }
 
