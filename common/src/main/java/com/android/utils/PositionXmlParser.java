@@ -16,42 +16,21 @@
 
 package com.android.utils;
 
-import static com.android.SdkConstants.UTF_8;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.blame.SourcePosition;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Comment;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.w3c.dom.Text;
-import org.xml.sax.Attributes;
-import org.xml.sax.InputSource;
-import org.xml.sax.Locator;
-import org.xml.sax.SAXException;
-import org.xml.sax.XMLReader;
+import org.w3c.dom.*;
+import org.xml.sax.*;
 import org.xml.sax.ext.DefaultHandler2;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.StringReader;
-import java.io.UnsupportedEncodingException;
+import javax.xml.parsers.*;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
+import static com.android.SdkConstants.UTF_8;
 
 /**
  * A simple DOM XML parser which can retrieve exact beginning and end offsets
@@ -174,6 +153,7 @@ public class PositionXmlParser {
                 factory.setFeature(LOAD_EXTERNAL_DTD, false);
             }
             SAXParser parser = factory.newSAXParser();
+            parser.getXMLReader().setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             DomBuilder handler = new DomBuilder(xml);
             XMLReader xmlReader = parser.getXMLReader();
             xmlReader.setProperty(
