@@ -19,7 +19,6 @@ package com.android.builder.model;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.util.Properties;
 
 /** Version strings for this builder-model artifact. */
@@ -37,7 +36,7 @@ public final class Version {
             BUILDER_MODEL_API_VERSION = Integer.parseInt(properties.getProperty("apiVersion"));
             stream.close();
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new RuntimeException(e);
         }
     }
 
