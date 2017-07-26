@@ -61,7 +61,6 @@ public class StudioConfiguration implements Configuration {
         return rule.getLabel().startsWith("//prebuilts/tools/common/m2/repository/")
             || rule.getLabel().startsWith("//tools/vendor/google3/blaze/")
             || rule.getName().endsWith("devkit")  // Kotlin compilation fails
-            || rule.getName().endsWith("devkit-tests")  // depends on devkit
             || rule.getName().endsWith("maven30-server-impl")  // Java compilation fails
             || rule.getName().endsWith("maven32-server-impl")  // Java compilation fails
             || rule.getName().endsWith("cvs-core")  // Java compilation fails
