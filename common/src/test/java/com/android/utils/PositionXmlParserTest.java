@@ -17,6 +17,7 @@
 package com.android.utils;
 
 import com.android.ide.common.blame.SourcePosition;
+import com.google.common.base.Charsets;
 
 import junit.framework.TestCase;
 
@@ -29,6 +30,7 @@ import org.w3c.dom.Text;
 
 import java.io.BufferedOutputStream;
 import java.io.BufferedWriter;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -518,5 +520,18 @@ public class PositionXmlParserTest extends TestCase {
                 XML.substring(position.getStartOffset(), position.getEndOffset()));
         assertEquals("Button", subTag.getAttributeNS(NAMESPACE_URL, "text"));
         assertEquals(NAMESPACE_URL, subTag.getNamespaceURI());
+    }
+
+    public void testPreventDocType() throws Exception {
+        String xml =
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<!DOCTYPE module PUBLIC\n" +
+                "    \"-//TEST//DTD Check Configuration 1.3//EN\"\n" +
+                "    \"http://schemas.android.com/apk/res/android\">\n"
+                + "<resources>\n"
+                + "</resources>";
+
+        // Ok (earlier this would throw networking errors attempting to load schemas.android.com)
+        PositionXmlParser.parse(new ByteArrayInputStream(xml.getBytes(Charsets.UTF_8)));
     }
 }

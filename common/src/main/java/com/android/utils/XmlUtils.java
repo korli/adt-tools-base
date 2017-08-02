@@ -15,22 +15,6 @@
  */
 package com.android.utils;
 
-import static com.android.SdkConstants.AMP_ENTITY;
-import static com.android.SdkConstants.ANDROID_NS_NAME;
-import static com.android.SdkConstants.ANDROID_URI;
-import static com.android.SdkConstants.APOS_ENTITY;
-import static com.android.SdkConstants.APP_PREFIX;
-import static com.android.SdkConstants.GT_ENTITY;
-import static com.android.SdkConstants.LT_ENTITY;
-import static com.android.SdkConstants.NEWLINE_ENTITY;
-import static com.android.SdkConstants.QUOT_ENTITY;
-import static com.android.SdkConstants.XMLNS;
-import static com.android.SdkConstants.XMLNS_PREFIX;
-import static com.android.SdkConstants.XMLNS_URI;
-import static com.google.common.base.Charsets.UTF_16BE;
-import static com.google.common.base.Charsets.UTF_16LE;
-import static com.google.common.base.Charsets.UTF_8;
-
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -39,32 +23,23 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.google.common.base.CharMatcher;
 import com.google.common.io.Files;
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.StringReader;
-import java.util.HashSet;
-import java.util.Locale;
-import java.util.Map;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
+import org.w3c.dom.*;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+
+import javax.xml.parsers.*;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
+import java.io.*;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Map;
+
+import static com.android.SdkConstants.*;
+import static com.google.common.base.Charsets.*;
+import static com.google.common.base.Charsets.UTF_8;
 
 /** XML Utilities */
 public class XmlUtils {
@@ -79,6 +54,20 @@ public class XmlUtils {
     public static final char NS_SEPARATOR = ':';                  //$NON-NLS-1$
 
     private static final String SOURCE_FILE_USER_DATA_KEY = "sourcefile";
+
+    // XML parser features
+    private static final String NAMESPACE_PREFIX_FEATURE =
+            "http://xml.org/sax/features/namespace-prefixes";
+    private static final String PROVIDE_XMLNS_URIS =
+            "http://xml.org/sax/features/xmlns-uris";
+    private static final String LOAD_EXTERNAL_DTD =
+            "http://apache.org/xml/features/nonvalidating/load-external-dtd";
+    private static final String EXTERNAL_PARAMETER_ENTITIES =
+            "http://xml.org/sax/features/external-parameter-entities";
+    private static final String EXTERNAL_GENERAL_ENTITIES =
+            "http://xml.org/sax/features/external-general-entities";
+    private static final String DISALLOW_DOCTYPE_DECL =
+            "http://apache.org/xml/features/disallow-doctype-decl";
 
     /**
      * Returns the namespace prefix matching the requested namespace URI.
@@ -489,6 +478,9 @@ public class XmlUtils {
         InputSource is = new InputSource(xml);
         factory.setNamespaceAware(namespaceAware);
         factory.setValidating(false);
+        factory.setFeature(EXTERNAL_GENERAL_ENTITIES, false);
+        factory.setFeature(EXTERNAL_PARAMETER_ENTITIES, false);
+        factory.setFeature(LOAD_EXTERNAL_DTD, false);
         DocumentBuilder builder = factory.newDocumentBuilder();
         return builder.parse(is);
     }
@@ -510,6 +502,9 @@ public class XmlUtils {
             InputSource is = new InputSource(reader);
             factory.setNamespaceAware(namespaceAware);
             factory.setValidating(false);
+            factory.setFeature(EXTERNAL_GENERAL_ENTITIES, false);
+            factory.setFeature(EXTERNAL_PARAMETER_ENTITIES, false);
+            factory.setFeature(LOAD_EXTERNAL_DTD, false);
             DocumentBuilder builder = factory.newDocumentBuilder();
             return builder.parse(is);
         } finally {
@@ -544,6 +539,47 @@ public class XmlUtils {
         }
 
         return null;
+    }
+
+    public static SAXParserFactory configureSaxFactory(
+            @NonNull SAXParserFactory factory,
+            boolean namespaceAware, boolean checkDtd) {
+        try {
+            factory.setXIncludeAware(false);
+            factory.setNamespaceAware(namespaceAware); // http://xml.org/sax/features/namespaces
+            factory.setFeature(NAMESPACE_PREFIX_FEATURE, namespaceAware);
+            factory.setFeature(PROVIDE_XMLNS_URIS, namespaceAware);
+            factory.setValidating(checkDtd);
+        } catch (ParserConfigurationException|SAXException ignore) {
+        }
+
+        return factory;
+    }
+
+    @NonNull
+    public static SAXParser createSaxParser(
+            @NonNull SAXParserFactory factory) throws ParserConfigurationException, SAXException {
+        return createSaxParser(factory, false);
+    }
+
+    @NonNull
+    public static SAXParser createSaxParser(
+            @NonNull SAXParserFactory factory,
+            boolean allowDocTypeDeclarations) throws ParserConfigurationException, SAXException {
+        SAXParser parser = factory.newSAXParser();
+        XMLReader reader = parser.getXMLReader();
+
+        // Prevent XML External Entity attack
+        if (!allowDocTypeDeclarations) {
+            // Most secure
+            reader.setFeature(DISALLOW_DOCTYPE_DECL, true);
+        } else {
+            reader.setFeature(EXTERNAL_GENERAL_ENTITIES, false);
+            reader.setFeature(EXTERNAL_PARAMETER_ENTITIES, false);
+            reader.setFeature(LOAD_EXTERNAL_DTD, false);
+        }
+
+        return parser;
     }
 
     /**

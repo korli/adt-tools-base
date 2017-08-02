@@ -29,6 +29,7 @@ import com.android.io.StreamException;
 import com.android.resources.Keyboard;
 import com.android.resources.Navigation;
 import com.android.resources.TouchScreen;
+import com.android.utils.XmlUtils;
 import com.android.xml.AndroidManifest;
 import com.google.common.io.Closeables;
 
@@ -574,7 +575,7 @@ public class AndroidManifestParser {
 
     static {
         sParserFactory = SAXParserFactory.newInstance();
-        sParserFactory.setNamespaceAware(true);
+        XmlUtils.configureSaxFactory(sParserFactory, true, false);
     }
 
     /**
@@ -598,7 +599,7 @@ public class AndroidManifestParser {
             ManifestErrorHandler errorHandler)
                 throws SAXException, IOException, StreamException, ParserConfigurationException {
         if (manifestFile != null) {
-            SAXParser parser = sParserFactory.newSAXParser();
+            SAXParser parser = XmlUtils.createSaxParser(sParserFactory);
 
             ManifestData data = null;
             if (gatherData) {
@@ -667,7 +668,7 @@ public class AndroidManifestParser {
     public static ManifestData parse(InputStream manifestFileStream)
             throws SAXException, IOException, StreamException, ParserConfigurationException {
         if (manifestFileStream != null) {
-            SAXParser parser = sParserFactory.newSAXParser();
+            SAXParser parser = XmlUtils.createSaxParser(sParserFactory);
 
             ManifestData data = new ManifestData();
 

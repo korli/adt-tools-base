@@ -26,10 +26,10 @@ import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 
 import java.awt.geom.AffineTransform;
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -81,8 +81,7 @@ class SvgTree {
 
     public Document parse(File f) throws Exception {
         mFileName = f.getName();
-        Document doc = PositionXmlParser.parse(new FileInputStream(f), false);
-        return doc;
+        return PositionXmlParser.parse(new BufferedInputStream(new FileInputStream(f)), false);
     }
 
     public void normalize() {
