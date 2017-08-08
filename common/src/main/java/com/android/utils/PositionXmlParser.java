@@ -152,7 +152,6 @@ public class PositionXmlParser {
             SAXParserFactory factory = SAXParserFactory.newInstance();
             XmlUtils.configureSaxFactory(factory, namespaceAware, false);
             SAXParser parser = XmlUtils.createSaxParser(factory, true);
-            parser.getXMLReader().setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             DomBuilder handler = new DomBuilder(xml);
             XMLReader xmlReader = parser.getXMLReader();
             xmlReader.setProperty("http://xml.org/sax/properties/lexical-handler", handler);
