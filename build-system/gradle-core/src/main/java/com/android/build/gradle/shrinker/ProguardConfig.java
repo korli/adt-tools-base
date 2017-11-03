@@ -17,39 +17,35 @@
 package com.android.build.gradle.shrinker;
 
 import com.android.annotations.NonNull;
-import com.android.build.gradle.shrinker.parser.Flags;
 import com.android.build.gradle.shrinker.parser.GrammarActions;
-
+import com.android.build.gradle.shrinker.parser.ProguardFlags;
+import com.android.build.gradle.shrinker.parser.UnsupportedFlagsHandler;
+import java.io.File;
 import org.antlr.runtime.RecognitionException;
 
-import java.io.File;
-import java.io.IOException;
-
-/**
- * Stub of a real parser. Only checks the most simple rules produced by AAPT.
- */
+/** Stub of a real parser. Only checks the most simple rules produced by AAPT. */
 public class ProguardConfig {
 
-    private final Flags mFlags = new Flags();
+    private final ProguardFlags mFlags = new ProguardFlags();
 
-    public void parse(@NonNull File configFile) throws IOException {
+    public void parse(@NonNull File configFile, @NonNull UnsupportedFlagsHandler flagsHandler) {
         try {
-            GrammarActions.parse(configFile, mFlags);
+            GrammarActions.parse(configFile, mFlags, flagsHandler);
         } catch (RecognitionException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public void parse(@NonNull String input) throws IOException {
+    public void parse(@NonNull String input) {
         try {
-            GrammarActions.parse(input, mFlags);
+            GrammarActions.parse(input, mFlags, UnsupportedFlagsHandler.NO_OP);
         } catch (RecognitionException e) {
             throw new RuntimeException(e);
         }
     }
 
     @NonNull
-    public Flags getFlags() {
+    public ProguardFlags getFlags() {
         return mFlags;
     }
 }

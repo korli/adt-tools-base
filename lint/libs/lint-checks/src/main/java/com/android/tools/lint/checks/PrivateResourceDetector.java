@@ -41,13 +41,13 @@ import com.android.builder.model.AndroidLibrary;
 import com.android.builder.model.MavenCoordinates;
 import com.android.ide.common.repository.ResourceVisibilityLookup;
 import com.android.ide.common.res2.AbstractResourceRepository;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -58,17 +58,17 @@ import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.utils.XmlUtils;
 import com.google.common.collect.Lists;
-import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiField;
 import com.intellij.psi.PsiPackage;
-import com.intellij.psi.PsiReferenceExpression;
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UReferenceExpression;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -77,8 +77,7 @@ import org.w3c.dom.NodeList;
 /**
  * Check which looks for access of private resources.
  */
-public class PrivateResourceDetector extends ResourceXmlDetector implements
-        JavaPsiScanner {
+public class PrivateResourceDetector extends ResourceXmlDetector implements UastScanner {
     /** Attribute for overriding a resource */
     private static final String ATTR_OVERRIDE = "override";
 
@@ -111,7 +110,7 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
     public PrivateResourceDetector() {
     }
 
-    // ---- Implements JavaScanner ----
+    // ---- Implements UastScanner ----
 
     @Override
     public boolean appliesToResourceRefs() {
@@ -119,8 +118,7 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
     }
 
     @Override
-    public void visitResourceReference(@NonNull JavaContext context,
-            @Nullable JavaElementVisitor visitor, @NonNull PsiElement node,
+    public void visitResourceReference(@NonNull JavaContext context, @NonNull UElement node,
             @NonNull ResourceType resourceType, @NonNull String name, boolean isFramework) {
         if (context.getProject().isGradleProject() && !isFramework) {
             Project project = context.getProject();
@@ -128,8 +126,8 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
                 if (isPrivate(context, resourceType, name)) {
                     // See if it's a local package reference
                     boolean foreignPackage = false;
-                    if (node instanceof PsiReferenceExpression) {
-                        PsiElement resolved = ((PsiReferenceExpression)node).resolve();
+                    if (node instanceof UReferenceExpression) {
+                        PsiElement resolved = ((UReferenceExpression)node).resolve();
                         if (resolved instanceof PsiField) {
                             PsiPackage pkg = context.getEvaluator().getPackage(resolved);
                             if (pkg != null) {
@@ -145,7 +143,8 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
                     // See if this is resource we're overriding locally
                     if (!foreignPackage) {
                         AbstractResourceRepository repository =
-                          context.getClient().getResourceRepository(context.getMainProject(), true, false);
+                            context.getClient().getResourceRepository(context.getMainProject(),
+                                    true, false);
                         if (repository != null && repository.hasResourceItem(resourceType, name)) {
                             return;
                         }
@@ -198,7 +197,7 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
     @Override
     public void visitElement(@NonNull XmlContext context, @NonNull Element element) {
         if (TAG_RESOURCES.equals(element.getTagName())) {
-            for (Element item : LintUtils.getChildren(element)) {
+            for (Element item : XmlUtils.getSubTags(element)) {
                 Attr nameAttribute = item.getAttributeNode(ATTR_NAME);
                 if (nameAttribute != null) {
                     String name = getResourceFieldName(nameAttribute.getValue());
@@ -235,7 +234,7 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
                     || TAG_PLURALS.equals(element.getTagName())
                     || TAG_INTEGER_ARRAY.equals(element.getTagName())
                     || TAG_STRING_ARRAY.equals(element.getTagName());
-            for (Element item : LintUtils.getChildren(element)) {
+            for (Element item : XmlUtils.getSubTags(element)) {
                 checkChildRefs(context, item);
             }
         }
@@ -354,6 +353,7 @@ public class PrivateResourceDetector extends ResourceXmlDetector implements
                 return libraryName;
             }
             MavenCoordinates coordinates = library.getResolvedCoordinates();
+            //noinspection ConstantConditions
             if (coordinates != null) {
                 return coordinates.getGroupId() + ':' + coordinates.getArtifactId();
             }

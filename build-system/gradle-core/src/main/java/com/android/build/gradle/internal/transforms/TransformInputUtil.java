@@ -20,7 +20,6 @@ import com.android.build.api.transform.DirectoryInput;
 import com.android.build.api.transform.JarInput;
 import com.android.build.api.transform.TransformInput;
 import com.google.common.collect.ImmutableList;
-
 import java.io.File;
 import java.util.Collection;
 
@@ -31,10 +30,6 @@ public class TransformInputUtil {
 
     public static Collection<File> getAllFiles(Collection<TransformInput> transformInputs) {
         return getAllFiles(transformInputs, true, true);
-    }
-
-    public static Collection<File> getJarFiles(Collection<TransformInput> transformInputs) {
-        return getAllFiles(transformInputs, false, true);
     }
 
     public static Collection<File> getDirectories(Collection<TransformInput> transformInputs) {

@@ -34,11 +34,6 @@ import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
-
-import org.junit.ClassRule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -50,6 +45,9 @@ import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
+import org.junit.ClassRule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 /** TODO: Test Resources#getIdentifier() handling */
 @SuppressWarnings("SpellCheckingInspection")
@@ -94,8 +92,14 @@ public class ResourceUsageAnalyzerTest {
         File mergedManifest = createMergedManifest(dir);
         File resources = createResourceFolder(dir);
 
-        ResourceUsageAnalyzer analyzer = new ResourceUsageAnalyzer(rDir, classes,
-            mergedManifest, mapping, resources, null);
+        ResourceUsageAnalyzer analyzer =
+                new ResourceUsageAnalyzer(
+                        rDir,
+                        Collections.singleton(classes),
+                        mergedManifest,
+                        mapping,
+                        resources,
+                        null);
         analyzer.analyze();
         checkState(analyzer);
         assertEquals(""
@@ -133,9 +137,8 @@ public class ResourceUsageAnalyzerTest {
                 + "    @string/app_name\n"
                 + "@string/app_name : reachable=true\n"
                 + "@string/hello_world : reachable=true\n"
-                + "@style/AppTheme : reachable=true\n"
+                + "@style/AppTheme : reachable=false\n"
                 + "@style/MyStyle : reachable=true\n"
-                + "    @style/MyStyle_Child\n"
                 + "@style/MyStyle_Child : reachable=true\n"
                 + "    @style/MyStyle\n"
                 + "@xml/android_wear_micro_apk : reachable=true\n"
@@ -1135,8 +1138,9 @@ public class ResourceUsageAnalyzerTest {
     public void testIsResourceClass() throws Exception {
         File dummy = new File("dummy");
         File mappingFile = createMappingFile(Files.createTempDir());
-        ResourceUsageAnalyzer analyzer = new ResourceUsageAnalyzer(dummy, dummy, dummy,
-                mappingFile, dummy, null);
+        ResourceUsageAnalyzer analyzer =
+                new ResourceUsageAnalyzer(
+                        dummy, Collections.singleton(dummy), dummy, mappingFile, dummy, null);
         analyzer.getModel().addDeclaredResource(ResourceType.LAYOUT, "structure_status_view", null, true);
         analyzer.recordMapping(mappingFile);
         assertTrue(analyzer.isResourceClass("android/support/v7/appcompat/R$attr.class"));

@@ -17,19 +17,14 @@ package com.android.tools.bazel;
 
 import com.android.tools.bazel.model.BazelRule;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-
 import java.util.List;
-import java.util.Map;
 
 public class StudioConfiguration implements Configuration {
 
     @Override
     public String nameRule(String pkg, String rel, String name) {
         String prefix = "";
-        if (pkg.equals("tools") && rel.startsWith("tools/idea")) {
-            prefix = "idea.";
-        } else if (rel.startsWith("tools/base")) {
+        if (rel.startsWith("tools/base")) {
             prefix = "studio.";
         } else if (rel.startsWith("tools/data-binding")) {
             prefix = "studio.";
@@ -42,16 +37,6 @@ public class StudioConfiguration implements Configuration {
     }
 
     @Override
-    public String mapImportJar(String jar) {
-        switch (jar) {
-            case "out/studio/grpc-java/jarjar/studio-profiler-grpc-1.0-jarjar.jar":
-                return "//tools/base/profiler:studio-profiler-grpc-1.0-jarjar";
-            default:
-                return null;
-        }
-    }
-
-    @Override
     public List<String> getAdditionalImports() {
         return ImmutableList.of();
     }
@@ -59,22 +44,8 @@ public class StudioConfiguration implements Configuration {
     @Override
     public boolean shouldSuppress(BazelRule rule) {
         return rule.getLabel().startsWith("//prebuilts/tools/common/m2/repository/")
-            || rule.getLabel().startsWith("//tools/vendor/google3/blaze/")
-            || rule.getName().endsWith("devkit")  // Kotlin compilation fails
-            || rule.getName().endsWith("maven30-server-impl")  // Java compilation fails
-            || rule.getName().endsWith("maven32-server-impl")  // Java compilation fails
-            || rule.getName().endsWith("cvs-core")  // Java compilation fails
-            || rule.getName().endsWith("cvs-plugin")  // depends on cvs-core
-            || rule.getName().endsWith("community-main_and_others")  // big nasty build-graph cycle
-            || rule.getName().endsWith("community-main-tests")  // depends on community-main
-            || rule.getName().endsWith("android-uitests")  // depends on community-main
-            || rule.getName().endsWith("lldb-integration-tests");  // depends on community-main
-    }
-
-    @Override
-    public Map<String, String> getCopySpec() {
-        return ImmutableMap.of(
-                "tools/BUILD", "tools/base/bazel/tools.idea.BUILD"
-        );
+                || rule.getLabel().startsWith("//tools/vendor/google3/blaze/")
+                || rule.getName().endsWith("android-uitests") // TODO
+                || rule.getName().endsWith("lldb-integration-tests"); // TODO
     }
 }

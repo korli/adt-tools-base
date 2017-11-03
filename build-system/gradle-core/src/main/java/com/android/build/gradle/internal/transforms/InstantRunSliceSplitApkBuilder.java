@@ -16,6 +16,7 @@
 
 package com.android.build.gradle.internal.transforms;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.api.transform.DirectoryInput;
@@ -25,13 +26,14 @@ import com.android.build.api.transform.Status;
 import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
 import com.android.build.gradle.internal.scope.PackagingScope;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.model.AaptOptions;
-import com.android.ide.common.internal.LoggedErrorException;
+import com.android.builder.internal.aapt.AaptOptions;
+import com.android.builder.utils.FileCache;
 import com.android.ide.common.internal.WaitableExecutor;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableSet;
@@ -50,18 +52,40 @@ import org.gradle.api.logging.Logger;
  */
 public class InstantRunSliceSplitApkBuilder extends InstantRunSplitApkBuilder {
 
-    private final WaitableExecutor<File> executor = WaitableExecutor.useGlobalSharedThreadPool();
+    private final WaitableExecutor executor = WaitableExecutor.useGlobalSharedThreadPool();
+    private final boolean runSerially;
 
-    public InstantRunSliceSplitApkBuilder(@NonNull Logger logger,
+    public InstantRunSliceSplitApkBuilder(
+            @NonNull Logger logger,
             @NonNull Project project,
-            @NonNull InstantRunBuildContext instantRunBuildContext,
+            @NonNull InstantRunBuildContext buildContext,
             @NonNull AndroidBuilder androidBuilder,
+            @Nullable FileCache fileCache,
             @NonNull PackagingScope packagingScope,
             @Nullable CoreSigningConfig signingConf,
+            @NonNull AaptGeneration aaptGeneration,
             @NonNull AaptOptions aaptOptions,
-            @NonNull File outputDirectory, @NonNull File supportDirectory) {
-        super(logger, project, instantRunBuildContext, androidBuilder, packagingScope, signingConf,
-                aaptOptions, outputDirectory, supportDirectory);
+            @NonNull File outputDirectory,
+            @NonNull File supportDirectory,
+            @NonNull File aaptIntermediateDirectory,
+            @Nullable Boolean runAapt2Serially) {
+        super(
+                logger,
+                project,
+                buildContext,
+                androidBuilder,
+                fileCache,
+                packagingScope,
+                signingConf,
+                aaptGeneration,
+                aaptOptions,
+                outputDirectory,
+                supportDirectory,
+                aaptIntermediateDirectory);
+        runSerially = runAapt2Serially == null
+                ? SdkConstants.CURRENT_PLATFORM == SdkConstants.PLATFORM_WINDOWS
+                : runAapt2Serially;
+
     }
 
     @NonNull
@@ -167,19 +191,22 @@ public class InstantRunSliceSplitApkBuilder extends InstantRunSplitApkBuilder {
             }
         }
 
+        logger.debug("Invoking aapt2 serially : {} ", runSerially);
+
         // now build the APKs in parallel
         splitsToBuild.forEach(split -> {
             try {
-                executor.execute(() -> generateSplitApk(split));
+                if (runSerially) {
+                    generateSplitApk(split);
+                } else {
+                    executor.execute(() -> generateSplitApk(split));
+                }
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
-        try {
+        if (!runSerially) {
             executor.waitForTasksWithQuickFail(true /* cancelRemaining */);
-        } catch (LoggedErrorException e) {
-            logger.error("Exception while generating split APKs " + e.getMessage());
-            throw new TransformException(e);
         }
     }
 }

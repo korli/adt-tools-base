@@ -16,207 +16,166 @@
 
 package com.android.build.gradle.internal.publishing;
 
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.PublishedConfigType.API_ELEMENTS;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.PublishedConfigType.METADATA_ELEMENTS;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.PublishedConfigType.RUNTIME_ELEMENTS;
+
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.tasks.FileSupplier;
-import com.google.common.base.MoreObjects;
-import com.google.common.base.Supplier;
-import groovy.lang.Closure;
-import java.io.File;
-import java.util.Collections;
-import java.util.Date;
-import java.util.Set;
-import org.gradle.api.Project;
-import org.gradle.api.Task;
-import org.gradle.api.artifacts.ConfigurablePublishArtifact;
-import org.gradle.api.artifacts.PublishArtifact;
-import org.gradle.api.tasks.TaskDependency;
-import org.gradle.api.tasks.bundling.AbstractArchiveTask;
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition;
+import org.gradle.api.attributes.Attribute;
 
 /**
  * Helper for publishing android artifacts, both for internal (inter-project) and external
  * (to repositories).
  */
 public class AndroidArtifacts {
-    public static final String ARTIFACT_TYPE = "artifactType";
+    public static final Attribute<String> ARTIFACT_TYPE = Attribute.of("artifactType", String.class);
 
     // types for main artifacts
     public static final String TYPE_AAR = "aar";
-    public static final String TYPE_APK = "apk";
-    public static final String TYPE_ATOM_BUNDLE = "atombundle";
+    private static final String TYPE_APK = "apk";
+    private static final String TYPE_JAR = ArtifactTypeDefinition.JAR_TYPE;
 
-    public static PublishArtifact getAarArtifact(
-            @NonNull AbstractArchiveTask task,
-            @NonNull String classifier) {
-        return new AndroidArtifact(task.getBaseName(),
-                TYPE_AAR, TYPE_AAR,
-                classifier, new FileSupplier() {
-            @NonNull
-            @Override
-            public Task getTask() {
-                return task;
-            }
+    // types for AAR content
+    private static final String TYPE_CLASSES = "android-classes";
+    private static final String TYPE_JAVA_RES = "android-java-res";
+    private static final String TYPE_MANIFEST = "android-manifest";
+    private static final String TYPE_MANIFEST_METADATA = "android-manifest-metadata";
+    private static final String TYPE_ANDROID_RES = "android-res";
+    private static final String TYPE_ASSETS = "android-assets";
+    private static final String TYPE_JNI = "android-jni";
+    private static final String TYPE_AIDL = "android-aidl";
+    private static final String TYPE_RENDERSCRIPT = "android-renderscript";
+    private static final String TYPE_LINT_JAR = "android-lint";
+    private static final String TYPE_EXT_ANNOTATIONS = "android-ext-annot";
+    private static final String TYPE_PUBLIC_RES = "android-public-res";
+    private static final String TYPE_SYMBOL = "android-symbol";
+    private static final String TYPE_SYMBOL_WITH_PACKAGE_NAME = "android-symbol-with-package-name";
+    private static final String TYPE_PROGUARD_RULES = "android-proguad";
+    private static final String TYPE_DATA_BINDING_ARTIFACT = "android-databinding";
+    private static final String TYPE_EXPLODED_AAR = "android-exploded-aar";
 
-            @Override
-            public File get() {
-                return task.getArchivePath();
-            }
-        });
-    }
+    // types for additional artifacts to go with APK
+    private static final String TYPE_MAPPING = "android-mapping";
+    private static final String TYPE_METADATA = "android-metadata";
 
-    public static PublishArtifact buildArtifact(
-            @NonNull String name,
-            @NonNull String type,
-            @Nullable String classifier,
-            @NonNull FileSupplier outputFileSupplier) {
-        return new AndroidArtifact(name, type, type, classifier, outputFileSupplier);
-    }
+    // types for feature-split content.
+    private static final String TYPE_FEATURE_IDS_DECLARATION = "android-feature-split-ids";
+    private static final String TYPE_FEATURE_APPLICATION_ID = "android-feature-application-id";
+    private static final String TYPE_FEATURE_RESOURCE_PKG = "android-feature-res-ap_";
+    private static final String TYPE_FEATURE_TRANSITIVE_DEPS = "android-feature-transitive-deps";
 
-    public static PublishArtifact buildApkArtifact(
-            @NonNull String name,
-            @Nullable String classifier,
-            @NonNull FileSupplier outputFileSupplier) {
-        return new AndroidArtifact(
-                name, TYPE_APK, TYPE_APK, classifier, outputFileSupplier);
-    }
+    // types for metadata content.
+    private static final String TYPE_METADATA_FEATURE_DECLARATION = "android-metadata-feature-decl";
+    private static final String TYPE_METADATA_FEATURE_MANIFEST =
+            "android-metadata-feature-manifest";
+    private static final String TYPE_METADATA_APP_ID_DECLARATION = "android-metadata-app-id-decl";
 
-    public static PublishArtifact buildAtomArtifact(
-            @NonNull String name,
-            @Nullable String classifier,
-            @NonNull FileSupplier outputFileSupplier) {
-        return new AndroidArtifact(
-                name, TYPE_ATOM_BUNDLE, TYPE_ATOM_BUNDLE, classifier, outputFileSupplier);
-    }
+    public enum ConsumedConfigType {
+        COMPILE_CLASSPATH("compileClasspath", API_ELEMENTS, true),
+        RUNTIME_CLASSPATH("runtimeClasspath", RUNTIME_ELEMENTS, true),
+        ANNOTATION_PROCESSOR("annotationProcessorClasspath", RUNTIME_ELEMENTS, false),
+        METADATA_VALUES("metadata", METADATA_ELEMENTS, false);
 
-    public static PublishArtifact buildManifestArtifact(
-            @NonNull String name,
-            @NonNull FileSupplier outputFileSupplier) {
-        return new AndroidArtifact(
-                name, "xml", "xml", null /*classifier*/, outputFileSupplier);
-    }
+        @NonNull private final String name;
+        @NonNull private final PublishedConfigType publishedTo;
+        private final boolean needsTestedComponents;
 
-    public static PublishArtifact buildMappingArtifact(
-            @NonNull String name,
-            @NonNull FileSupplier outputFileSupplier) {
-        return new AndroidArtifact(
-                name, "map", "map", null /*classifier*/, outputFileSupplier);
-    }
-
-    public static PublishArtifact buildMetadataArtifact(
-            @NonNull String name,
-            @NonNull FileSupplier outputFileSupplier) {
-        return new AndroidArtifact(
-                name, "mtd", "mtd", null /*classifier*/, outputFileSupplier);
-    }
-
-    public static void publish(
-            Project project,
-            String publishConfigName,
-            File file,
-            String builtBy,
-            String type) {
-        project.getArtifacts().add(
-                publishConfigName,
-                file, new Closure(project /*doesnt matter*/) {
-                    public Object doCall(ConfigurablePublishArtifact artifact) {
-                        artifact.setType(type);
-                        artifact.builtBy(project.getTasks().getByName(builtBy));
-                        return null;
-                    }
-                });
-    }
-
-    private static class AndroidArtifact implements PublishArtifact {
-
-        @NonNull
-        private final String name;
-        @NonNull
-        private final String extension;
-        @NonNull
-        private final String type;
-        @Nullable
-        private final String classifier;
-        @NonNull
-        private final Supplier<File> outputFileSupplier;
-        @NonNull
-        private final TaskDependency taskDependency;
-
-        private static final class DefaultTaskDependency implements TaskDependency {
-
-            @NonNull
-            private final Set<Task> tasks;
-
-            DefaultTaskDependency(@NonNull Task task) {
-                this.tasks = Collections.singleton(task);
-            }
-
-            @Override
-            public Set<? extends Task> getDependencies(Task task) {
-                return tasks;
-            }
-        }
-
-        private AndroidArtifact(
+        ConsumedConfigType(
                 @NonNull String name,
-                @NonNull String extension,
-                @NonNull String type,
-                @Nullable String classifier,
-                @NonNull FileSupplier outputFileSupplier) {
+                @NonNull PublishedConfigType publishedTo,
+                boolean needsTestedComponents) {
             this.name = name;
-            this.extension = extension;
-            this.type = type;
-            this.classifier = classifier;
-            this.outputFileSupplier = outputFileSupplier;
-            this.taskDependency
-                    = new DefaultTaskDependency(outputFileSupplier.getTask());
+            this.publishedTo = publishedTo;
+            this.needsTestedComponents = needsTestedComponents;
         }
 
-        @Override
         @NonNull
         public String getName() {
             return name;
         }
 
-        @Nullable
-        @Override
-        public String getClassifier() {
-            return classifier;
+        @NonNull
+        public PublishedConfigType getPublishedTo() {
+            return publishedTo;
         }
 
-        @Override
-        public File getFile() {
-            return outputFileSupplier.get();
+        public boolean needsTestedComponents() {
+            return needsTestedComponents;
+        }
+    }
+
+    public enum PublishedConfigType {
+        API_ELEMENTS,
+        RUNTIME_ELEMENTS,
+        METADATA_ELEMENTS,
+    }
+
+    public enum ArtifactScope {
+        ALL, EXTERNAL, MODULE
+    }
+
+    public enum ArtifactType {
+        CLASSES(TYPE_CLASSES),
+        // Jar file for annotation processor as both classes and resources are needed, and for building model
+        JAR(TYPE_JAR),
+
+        // manifest is published to both to compare and detect provided-only library dependencies.
+        MANIFEST(TYPE_MANIFEST),
+        MANIFEST_METADATA(TYPE_MANIFEST_METADATA),
+
+        // API only elements.
+        AIDL(TYPE_AIDL),
+        RENDERSCRIPT(TYPE_RENDERSCRIPT),
+        DATA_BINDING_ARTIFACT(TYPE_DATA_BINDING_ARTIFACT),
+
+        // runtime only elements
+        JAVA_RES(TYPE_JAVA_RES),
+        ANDROID_RES(TYPE_ANDROID_RES),
+        ASSETS(TYPE_ASSETS),
+        SYMBOL_LIST(TYPE_SYMBOL),
+        /**
+         * The symbol list with the package name as the first line. As the r.txt format in the AAR
+         * cannot be changed, this is created by prepending the package name from the
+         * AndroidManifest.xml to the existing r.txt file.
+         */
+        SYMBOL_LIST_WITH_PACKAGE_NAME(TYPE_SYMBOL_WITH_PACKAGE_NAME),
+        JNI(TYPE_JNI),
+        ANNOTATIONS(TYPE_EXT_ANNOTATIONS),
+        PUBLIC_RES(TYPE_PUBLIC_RES),
+        PROGUARD_RULES(TYPE_PROGUARD_RULES),
+
+        LINT(TYPE_LINT_JAR),
+
+        APK_MAPPING(TYPE_MAPPING),
+        APK_METADATA(TYPE_METADATA),
+        APK(TYPE_APK),
+
+        // Feature split related artifacts.
+        FEATURE_IDS_DECLARATION(TYPE_FEATURE_IDS_DECLARATION),
+        FEATURE_APPLICATION_ID_DECLARATION(TYPE_FEATURE_APPLICATION_ID),
+        FEATURE_RESOURCE_PKG(TYPE_FEATURE_RESOURCE_PKG),
+        FEATURE_TRANSITIVE_DEPS(TYPE_FEATURE_TRANSITIVE_DEPS),
+
+        // Metadata artifacts
+        METADATA_FEATURE_DECLARATION(TYPE_METADATA_FEATURE_DECLARATION),
+        METADATA_FEATURE_MANIFEST(TYPE_METADATA_FEATURE_MANIFEST),
+        METADATA_APP_ID_DECLARATION(TYPE_METADATA_APP_ID_DECLARATION),
+
+        // types for querying only. Not publishable.
+        AAR(TYPE_AAR),
+        EXPLODED_AAR(TYPE_EXPLODED_AAR);
+
+        @NonNull
+        private final String type;
+
+        ArtifactType(@NonNull String type) {
+            this.type = type;
         }
 
-        @Override
-        public String getExtension() {
-            return extension;
-        }
-
-        @Override
+        @NonNull
         public String getType() {
             return type;
-        }
-
-        @Override
-        public Date getDate() {
-            // return null to let gradle use the current date during publication.
-            return null;
-        }
-
-        @Override
-        public TaskDependency getBuildDependencies() {
-            return taskDependency;
-        }
-
-        @Override
-        public String toString() {
-            return MoreObjects.toStringHelper(this)
-                    .add("name", name)
-                    .add("classifier", classifier)
-                    .add("outputFile", outputFileSupplier.get())
-                    .add("taskDependency", taskDependency)
-                    .toString();
         }
     }
 }

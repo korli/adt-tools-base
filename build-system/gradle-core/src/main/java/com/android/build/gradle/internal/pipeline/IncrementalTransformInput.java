@@ -23,7 +23,6 @@ import com.android.build.api.transform.QualifiedContent;
 import com.android.build.api.transform.Status;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.util.List;
 import java.util.Map;
@@ -127,7 +126,8 @@ abstract class IncrementalTransformInput {
      * @param transformScopes the scopes consumed or referenced by the transform
      * @param transformInputTypes the input {@see ContentType} types of the transform.
      * @param file the removed file
-     * @param fileSegments the removed file path segments for faster checks.   @return true if the file was part of this input.
+     * @param fileSegments the removed file path segments for faster checks.
+     * @return true if the file was part of this input.
      */
     abstract boolean checkRemovedJarFile(
             @NonNull Set<? super QualifiedContent.Scope> transformScopes,

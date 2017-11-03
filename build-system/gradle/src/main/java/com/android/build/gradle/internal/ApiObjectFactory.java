@@ -16,38 +16,40 @@
 
 package com.android.build.gradle.internal;
 
+import static com.android.builder.core.VariantType.ANDROID_TEST;
+import static com.android.builder.core.VariantType.LIBRARY;
+import static com.android.builder.core.VariantType.UNIT_TEST;
+
 import com.android.annotations.NonNull;
+import com.android.build.VariantOutput;
 import com.android.build.gradle.BaseExtension;
 import com.android.build.gradle.TestedAndroidConfig;
-import com.android.build.gradle.api.BaseVariant;
+import com.android.build.gradle.internal.api.ApkVariantOutputImpl;
+import com.android.build.gradle.internal.api.BaseVariantImpl;
+import com.android.build.gradle.internal.api.LibraryVariantOutputImpl;
 import com.android.build.gradle.internal.api.ReadOnlyObjectProvider;
 import com.android.build.gradle.internal.api.TestVariantImpl;
 import com.android.build.gradle.internal.api.TestedVariant;
 import com.android.build.gradle.internal.api.UnitTestVariantImpl;
-import com.android.build.gradle.internal.variant.ApplicationVariantFactory;
+import com.android.build.gradle.internal.dsl.VariantOutputFactory;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.TestVariantData;
 import com.android.build.gradle.internal.variant.TestedVariantData;
 import com.android.build.gradle.internal.variant.VariantFactory;
 import com.android.builder.core.AndroidBuilder;
-
+import org.gradle.api.model.ObjectFactory;
 import org.gradle.internal.reflect.Instantiator;
-
-import static com.android.builder.core.VariantType.ANDROID_TEST;
-import static com.android.builder.core.VariantType.UNIT_TEST;
 
 /**
  * Factory to create ApiObject from VariantData.
  */
 public class ApiObjectFactory {
-    @NonNull
-    private final AndroidBuilder androidBuilder;
-    @NonNull
-    private final BaseExtension extension;
-    @NonNull
-    private final VariantFactory variantFactory;
-    @NonNull
-    private final Instantiator instantiator;
+    @NonNull private final AndroidBuilder androidBuilder;
+    @NonNull private final BaseExtension extension;
+    @NonNull private final VariantFactory variantFactory;
+    @NonNull private final Instantiator instantiator;
+    @NonNull private final ObjectFactory objectFactory;
+
     @NonNull
     private final ReadOnlyObjectProvider readOnlyObjectProvider = new ReadOnlyObjectProvider();
 
@@ -55,39 +57,52 @@ public class ApiObjectFactory {
             @NonNull AndroidBuilder androidBuilder,
             @NonNull BaseExtension extension,
             @NonNull VariantFactory variantFactory,
-            @NonNull Instantiator instantiator) {
+            @NonNull Instantiator instantiator,
+            @NonNull ObjectFactory objectFactory) {
         this.androidBuilder = androidBuilder;
         this.extension = extension;
         this.variantFactory = variantFactory;
         this.instantiator = instantiator;
+        this.objectFactory = objectFactory;
     }
 
-    public void create(BaseVariantData<?> variantData) {
+    public BaseVariantImpl create(BaseVariantData variantData) {
         if (variantData.getType().isForTesting()) {
             // Testing variants are handled together with their "owners".
-            return;
+            createVariantOutput(variantData, null);
+            return null;
         }
 
-        BaseVariant variantApi =
-                variantFactory.createVariantApi(variantData, readOnlyObjectProvider);
+        BaseVariantImpl variantApi =
+                variantFactory.createVariantApi(
+                        instantiator,
+                        objectFactory,
+                        androidBuilder,
+                        variantData,
+                        readOnlyObjectProvider);
+        if (variantApi == null) {
+            return null;
+        }
 
         if (variantFactory.hasTestScope()) {
             TestVariantData androidTestVariantData =
                     ((TestedVariantData) variantData).getTestVariantData(ANDROID_TEST);
 
             if (androidTestVariantData != null) {
-                TestVariantImpl androidTestVariant = instantiator.newInstance(
-                        TestVariantImpl.class,
-                        androidTestVariantData,
-                        variantApi,
-                        androidBuilder,
-                        readOnlyObjectProvider);
-
-                // add the test output.
-                ApplicationVariantFactory.createApkOutputApiObjects(
-                        instantiator,
-                        androidTestVariantData,
-                        androidTestVariant);
+                TestVariantImpl androidTestVariant =
+                        instantiator.newInstance(
+                                TestVariantImpl.class,
+                                androidTestVariantData,
+                                variantApi,
+                                objectFactory,
+                                androidBuilder,
+                                readOnlyObjectProvider,
+                                variantData
+                                        .getScope()
+                                        .getGlobalScope()
+                                        .getProject()
+                                        .container(VariantOutput.class));
+                createVariantOutput(androidTestVariantData, androidTestVariant);
 
                 ((TestedAndroidConfig) extension).getTestVariants().add(androidTestVariant);
                 ((TestedVariant) variantApi).setTestVariant(androidTestVariant);
@@ -96,20 +111,54 @@ public class ApiObjectFactory {
             TestVariantData unitTestVariantData =
                     ((TestedVariantData) variantData).getTestVariantData(UNIT_TEST);
             if (unitTestVariantData != null) {
-                UnitTestVariantImpl unitTestVariant = instantiator.newInstance(
-                        UnitTestVariantImpl.class,
-                        unitTestVariantData,
-                        variantApi,
-                        androidBuilder,
-                        readOnlyObjectProvider);
+                UnitTestVariantImpl unitTestVariant =
+                        instantiator.newInstance(
+                                UnitTestVariantImpl.class,
+                                unitTestVariantData,
+                                variantApi,
+                                objectFactory,
+                                androidBuilder,
+                                readOnlyObjectProvider,
+                                variantData
+                                        .getScope()
+                                        .getGlobalScope()
+                                        .getProject()
+                                        .container(VariantOutput.class));
 
                 ((TestedAndroidConfig) extension).getUnitTestVariants().add(unitTestVariant);
                 ((TestedVariant) variantApi).setUnitTestVariant(unitTestVariant);
             }
         }
 
+        createVariantOutput(variantData, variantApi);
+
         // Only add the variant API object to the domain object set once it's been fully
         // initialized.
         extension.addVariant(variantApi);
+
+        return variantApi;
+    }
+
+    private void createVariantOutput(BaseVariantData variantData, BaseVariantImpl variantApi) {
+        variantData.variantOutputFactory =
+                new VariantOutputFactory(
+                        (variantData.getType() == LIBRARY)
+                                ? LibraryVariantOutputImpl.class
+                                : ApkVariantOutputImpl.class,
+                        instantiator,
+                        extension,
+                        variantApi,
+                        variantData);
+        variantData
+                .getOutputScope()
+                .getApkDatas()
+                .forEach(
+                        apkData -> {
+                            apkData.setVersionCode(
+                                    variantData.getVariantConfiguration().getVersionCode());
+                            apkData.setVersionName(
+                                    variantData.getVariantConfiguration().getVersionName());
+                            variantData.variantOutputFactory.create(apkData);
+                        });
     }
 }

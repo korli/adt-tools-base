@@ -25,15 +25,13 @@ import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.process.ProcessResult;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
-
+import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.process.ExecResult;
 import org.gradle.process.ExecSpec;
-
-import java.io.IOException;
 
 /**
  * Implementation of ProcessExecutor that uses Gradle's mechanism to execute external processes.
@@ -58,7 +56,7 @@ public class GradleProcessExecutor implements ProcessExecutor {
                 try {
                     ProcessResult result = execute(processInfo, processOutputHandler);
                     res.set(result);
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     res.setException(e);
                 }
             }

@@ -20,7 +20,7 @@ import static com.google.common.base.Preconditions.checkState;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
-import com.android.build.gradle.integration.common.runner.ParallelParameterized;
+import com.android.build.gradle.integration.common.runner.CheckAllRunner;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import java.io.File;
@@ -39,7 +39,7 @@ import org.junit.runners.Parameterized;
  *
  * <p>{@code ./gradlew :base:integration-test:automaticTest --tests=*[abiPureSplits]}
  */
-@RunWith(ParallelParameterized.class)
+@RunWith(CheckAllRunner.class)
 public class CheckAll {
 
     @Parameterized.Parameters(name = "{0}")
@@ -85,7 +85,10 @@ public class CheckAll {
     @Test
     public void assembleAndLint() throws Exception {
         Assume.assumeTrue(canAssemble(project));
-        project.execute("assembleDebug", "assembleAndroidTest", "lint");
+        project
+                .executor()
+                .withEnableInfoLogging(false)
+                .run("assembleDebug", "assembleAndroidTest", "lint");
     }
 
     private static boolean canAssemble(@NonNull GradleTestProject project) {
@@ -99,12 +102,15 @@ public class CheckAll {
                     "renderscriptNdk",
 
                     // These are all right:
+                    "genFolderApi", // Has a required injectable property
+                    "ndkJniPureSplitLib", // Doesn't build until externalNativeBuild {} is added.
                     "duplicateNameImport", // Fails on purpose.
                     "filteredOutBuildType", // assembleDebug does not exist as debug build type is removed.
                     "instant-unit-tests", // Specific to testing instant run, not a "real" project.
                     "projectWithLocalDeps", // Doesn't have a build.gradle, not much to check anyway.
                     "simpleManifestMergingTask", // Not an Android project.
-                    "externalBuildPlugin" // Not an Android Project.
+                    "externalBuildPlugin", // Not an Android Project.
+                    "lintCustomRules" // contains integ test for lint itself
                     );
 
     private static final ImmutableSet<String> COMPONENT_MODEL_PROJECTS =

@@ -18,9 +18,9 @@ package com.android.build.gradle.managed.adaptor;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.api.JavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeBuildOptions;
 import com.android.build.gradle.internal.dsl.CoreJackOptions;
-import com.android.build.gradle.internal.dsl.CoreJavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreNdkOptions;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
 import com.android.build.gradle.internal.dsl.CoreShaderOptions;
@@ -31,7 +31,6 @@ import com.android.builder.model.SigningConfig;
 import com.android.builder.model.VectorDrawablesOptions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
-
 import java.util.Collection;
 import java.util.Map;
 
@@ -201,7 +200,7 @@ public class ProductFlavorAdaptor extends BaseConfigAdaptor implements CoreProdu
 
     @Override
     @NonNull
-    public CoreJavaCompileOptions getJavaCompileOptions() {
+    public JavaCompileOptions getJavaCompileOptions() {
         return new JavaCompileOptionsAdaptor(productFlavor.getJavaCompileOptions());
     }
 

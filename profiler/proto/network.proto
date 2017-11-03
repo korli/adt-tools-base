@@ -22,7 +22,7 @@ option java_outer_classname = "NetworkProfiler";
 import "profiler.proto";
 
 service NetworkService {
-  // Requests profiler data from the app with ID being |app_id|, in the time range
+  // Requests profiler data from the app with ID being |process_id|, in the time range
   // from |start_timestamp| (exclusive) to |end_timestamp| (inclusive), or
   // mathematically written as in interval (start_timestamp, end_timestamp].
   rpc GetData(NetworkDataRequest) returns (NetworkDataResponse) {
@@ -49,10 +49,6 @@ service NetworkService {
   // |HttpDetailsRequest::Type|. Use |GetHttpRange| to get this ids.
   rpc GetHttpDetails(HttpDetailsRequest) returns (HttpDetailsResponse) {
   }
-
-  // Request the byte data associated with a body payload.
-  rpc GetPayload(NetworkPayloadRequest) returns (NetworkPayloadResponse) {
-  }
 }
 
 
@@ -78,9 +74,12 @@ message ConnectionData { int32 connection_number = 1; }
 message ConnectivityData {
   enum RadioState {
     UNSPECIFIED = 0;
-    ACTIVE = 1;
-    IDLE = 2;
-    SLEEPING = 3;
+    // The radio is in a high-energy state, having recently sent out some
+    // network traffic
+    HIGH = 1;
+    // The radio is in a low-energy state, having powered down after a period
+    // of inactivity.
+    LOW = 3; // Set to 3 for backwards-compatibility reasons
   }
 
   RadioState radio_state = 1;
@@ -97,7 +96,7 @@ message NetworkDataRequest {
   enum SpecialValues {
     // First enum value is required to be zero.
     UNSPECIFIED = 0;
-    // app_id field special value, it means these data is applicable to any app.
+    // process_id field special value, it means these data is applicable to any app.
     ANY_APP = -1;
   }
   enum Type {
@@ -105,17 +104,18 @@ message NetworkDataRequest {
     ALL = 0;
     // Default network type (wifi or mobile) and radio power state.
     // This data is device-wide and the same values will be returned across all
-    // valid |app_id| values.
+    // valid |process_id| values.
     CONNECTIVITY = 1;
     // Network transmitted and received speeds (in bytes / sec).
     SPEED = 2;
     // Number of open connections.
     CONNECTIONS = 3;
   }
-  int32 app_id = 1;
-  int64 start_timestamp = 2;
-  int64 end_timestamp = 3;
-  Type type = 4;
+  int32 process_id = 1;
+  Session session = 2;
+  int64 start_timestamp = 3;
+  int64 end_timestamp = 4;
+  Type type = 5;
 }
 
 message NetworkDataResponse {
@@ -123,7 +123,8 @@ message NetworkDataResponse {
 }
 
 message NetworkStartRequest {
-  int32 app_id = 1;
+  int32 process_id = 1;
+  Session session = 2;
 }
 
 // TODO: Dig more about network collector start response.
@@ -131,7 +132,8 @@ message NetworkStartResponse {
 }
 
 message NetworkStopRequest {
-  int32 app_id = 1;
+  int32 process_id = 1;
+  Session session = 2;
 }
 
 // TODO: Dig more about network collector stop response.
@@ -156,9 +158,20 @@ message NetworkStopResponse {
 // The time range match is inclusive, so requests ending on time |start| and
 // requests starting on time |end| will be included in the results.
 message HttpRangeRequest {
-  int32 app_id = 1;
-  int64 start_timestamp = 2;
-  int64 end_timestamp = 3;
+  int32 process_id = 1;
+  Session session = 2;
+  int64 start_timestamp = 3;
+  int64 end_timestamp = 4;
+}
+
+// Thread information obtained from Java, which is different from the thread data we would obtain from a JNI context.
+// See also: https://docs.oracle.com/javase/7/docs/api/java/lang/Thread.html
+message JavaThread {
+  // ID of the thread obtained from Java, which is different from the thread ID obtained in a JNI context.
+  int64 id = 1;
+  // Name of the thread.
+  // https://docs.oracle.com/javase/7/docs/api/java/lang/Thread.html#getName().
+  string name = 2;
 }
 
 // An HTTP connection represents the full lifetime of a single HTTP request /
@@ -208,10 +221,17 @@ message HttpDetailsRequest {
     // TODO: Can this type be combined with RESPONSE? Will reponse details be
     // available before this is ready, or only at the same time?
     RESPONSE_BODY = 4;
+
+    // Fetch accessed threads of a connection.
+    // This data can be queried as soon as you have a connection ID, however
+    // as a different thread may be added during the lifetime of the connection, it's advised to repeat the request
+    // when its end_timestamp is a non-zero value.
+    ACCESSING_THREADS = 5;
   }
 
   int64 conn_id = 1;
-  Type type = 2;
+  Session session = 2;
+  Type type = 3;
 }
 
 message HttpDetailsResponse {
@@ -237,8 +257,7 @@ message HttpDetailsResponse {
 
   message Body {
     // An ID which will uniquely identify the contents of an http body. It can
-    // be used to fetch payload bytes via |GetPayload|, and it can safely be
-    // used as a filename, if you want to cache the contents locally.
+    // be used to fetch payload bytes via |ProfilerService.GetBytes|.
     //
     // This value will be a hash of the contents, and the same hash always
     // indicates the same contents. This hash value calculation is independent
@@ -250,23 +269,17 @@ message HttpDetailsResponse {
     string payload_id = 1;
   }
 
+  message AccessingThreads {
+    // Threads that access a connection.
+    // The first thread is the thread that creates the connection.
+    repeated JavaThread thread = 1;
+  }
+
   oneof details {
     Request request = 1;
     Response response = 2;
     Body request_body = 3;
     Body response_body = 4;
+    AccessingThreads accessing_threads = 5;
   }
 }
-
-message NetworkPayloadRequest {
-  string payload_id = 1;
-}
-
-message NetworkPayloadResponse {
-  // The contents of the payload response, or "" if there is no payload (or
-  // otherwise the payload file was not found, e.g. removed from the cache after
-  // time passed). The caller should just treat no data as unable to preview.
-  bytes contents = 1;
-}
-
-

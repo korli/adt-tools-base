@@ -24,22 +24,20 @@ import com.android.ide.common.rendering.api.ResourceValue;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.resources.ResourceType;
 import com.android.testutils.TestResources;
-import com.android.testutils.TestUtils;
 import com.google.common.base.Charsets;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
-
-import org.junit.Test;
-import org.w3c.dom.Document;
-
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import org.junit.Test;
+import org.w3c.dom.Document;
 
 /**
  */
@@ -142,7 +140,7 @@ public class ValueResourceParser2Test extends BaseTestCase {
             File values = new File(root, "values");
             File valuesXml = new File(values, "values.xml");
 
-            ValueResourceParser2 parser = new ValueResourceParser2(valuesXml, null);
+            ValueResourceParser2 parser = new ValueResourceParser2(valuesXml, null, null);
             sResources = parser.parseFile();
 
             // create a fake resource file to allow calling ResourceItem.getKey()
@@ -212,7 +210,7 @@ public class ValueResourceParser2Test extends BaseTestCase {
         writer.write(xml);
         writer.close();
 
-        ValueResourceParser2 parser = new ValueResourceParser2(file, null);
+        ValueResourceParser2 parser = new ValueResourceParser2(file, null, null);
         List<ResourceItem> items = parser.parseFile();
         assertEquals(3, items.size());
         assertEquals(ResourceType.BOOL, items.get(0).getType());
@@ -223,5 +221,27 @@ public class ValueResourceParser2Test extends BaseTestCase {
         assertEquals("other", items.get(2).getName());
         //noinspection ResultOfMethodCallIgnored
         file.delete();
+    }
+
+    @Test
+    public void testPublicTag() throws Exception {
+        File file = File.createTempFile("testPublicTag", SdkConstants.DOT_XML);
+        String xml =
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<resources><public /></resources>";
+        Files.write(file.toPath(), xml.getBytes());
+
+        ValueResourceParser2 parser = new ValueResourceParser2(file, null, null);
+        List<ResourceItem> items = parser.parseFile();
+        ResourceItem publicTag = Iterables.getOnlyElement(items);
+
+        // Make sure the name is invalid, so it cannot conflict with anything the user would type.
+        assertNotNull(
+                ValueResourceNameValidator.getErrorText(publicTag.getName(), publicTag.getType()));
+
+        ResourceValue resourceValue = publicTag.getResourceValue(false);
+        assertNotNull(resourceValue);
+        assertEquals(ResourceType.PUBLIC, resourceValue.getResourceType());
+        assertEquals("", resourceValue.getValue());
     }
 }

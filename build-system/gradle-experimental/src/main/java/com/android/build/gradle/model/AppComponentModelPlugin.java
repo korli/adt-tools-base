@@ -21,14 +21,15 @@ import static com.android.build.gradle.model.ModelConstants.TASK_MANAGER;
 
 import android.databinding.tool.DataBindingBuilder;
 import com.android.build.gradle.AndroidConfig;
-import com.android.build.gradle.internal.DependencyManager;
 import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.profile.ProfilerInitializer;
+import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.variant.ApplicationVariantFactory;
 import com.android.build.gradle.internal.variant.VariantFactory;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.Version;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.profile.ProcessProfileWriter;
@@ -49,7 +50,8 @@ public class AppComponentModelPlugin implements Plugin<Project> {
 
     @Override
     public void apply(Project project) {
-        ProfilerInitializer.init(project);
+        ProjectOptions projectOptions = new ProjectOptions(project);
+        ProfilerInitializer.init(project, projectOptions);
         ProcessProfileWriter.getProject(project.getPath())
                 .setAndroidPluginVersion(Version.ANDROID_GRADLE_PLUGIN_VERSION)
                 .setAndroidPlugin(GradleBuildProject.PluginType.APPLICATION)
@@ -70,38 +72,38 @@ public class AppComponentModelPlugin implements Plugin<Project> {
 
         @Model(TASK_MANAGER)
         public static TaskManager createTaskManager(
+                GlobalScope globalScope,
                 AndroidConfig androidExtension,
                 Project project,
+                ProjectOptions projectOptions,
                 AndroidBuilder androidBuilder,
                 DataBindingBuilder dataBindingBuilder,
                 SdkHandler sdkHandler,
                 NdkHandler ndkHandler,
                 ExtraModelInfo extraModelInfo,
                 ToolingModelBuilderRegistry toolingRegistry) {
-            DependencyManager dependencyManager = new DependencyManager(
-                    project,
-                    extraModelInfo,
-                    sdkHandler);
 
             return new ApplicationComponentTaskManager(
+                    globalScope,
                     project,
+                    projectOptions,
                     androidBuilder,
                     dataBindingBuilder,
                     androidExtension,
                     sdkHandler,
-                    ndkHandler,
-                    dependencyManager,
                     toolingRegistry,
                     ThreadRecorder.get());
         }
 
         @Model
         public static VariantFactory createVariantFactory(
+                GlobalScope globalScope,
                 ServiceRegistry serviceRegistry,
                 AndroidBuilder androidBuilder,
                 AndroidConfig extension) {
             Instantiator instantiator = serviceRegistry.get(Instantiator.class);
-            return new ApplicationVariantFactory(instantiator, androidBuilder, extension);
+            return new ApplicationVariantFactory(
+                    globalScope, instantiator, androidBuilder, extension);
         }
     }
 }

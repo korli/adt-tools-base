@@ -4,8 +4,11 @@
     <uses-feature android:name="android.hardware.type.watch" />
 
     <application>
+
+	<meta-data android:name="com.google.android.wearable.standalone" android:value="true"/>
+
         <service
-            android:name="${relativePackage}.${serviceClass}"
+            android:name="${packageName}.${serviceClass}"
 <#if style == "analog">
             android:label="@string/my_analog_name"
 <#elseif style == "digital">

@@ -18,8 +18,6 @@ package com.android.build.gradle.integration.packaging;
 
 import static com.android.build.gradle.integration.common.fixture.TemporaryProjectModification.doTest;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAar;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.TestFileUtils.appendToFile;
 import static com.google.common.io.Files.write;
 
@@ -27,7 +25,6 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
-import com.android.ide.common.process.ProcessException;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
 import java.io.File;
@@ -54,7 +51,7 @@ public class JavaResPackagingTest {
     private GradleTestProject jarProject;
 
     @Before
-    public void setUp() throws IOException {
+    public void setUp() throws Exception {
         appProject = project.getSubproject("app");
         libProject = project.getSubproject("library");
         libProject2 = project.getSubproject("library2");
@@ -89,7 +86,6 @@ public class JavaResPackagingTest {
         appendToFile(testProject.getBuildFile(),
                 "android {\n"
                 + "    targetProjectPath ':app'\n"
-                + "    targetVariant 'debug'\n"
                 + "}\n");
 
         // put some default files in the 4 projects, to check non incremental packaging as well,
@@ -129,21 +125,22 @@ public class JavaResPackagingTest {
             @NonNull File projectFolder,
             @NonNull String dimension,
             @NonNull String filename,
-            @NonNull String content) throws IOException {
+            @NonNull String content)
+            throws Exception {
         File assetFolder = FileUtils.join(projectFolder, "src", dimension, "resources", "com", "foo");
         FileUtils.mkdirs(assetFolder);
         write(content, new File(assetFolder, filename), Charsets.UTF_8);
     }
 
-    private void execute(String... tasks) {
+    private void execute(String... tasks) throws IOException, InterruptedException {
         project.executor().run(tasks);
     }
 
     @Test
-    public void testNonIncrementalPackaging() throws IOException, ProcessException {
+    public void testNonIncrementalPackaging() throws Exception {
         execute("clean", "assembleDebug", "assembleAndroidTest");
 
-        // chek the files are there. Start from the bottom of the dependency graph
+        // check the files are there. Start from the bottom of the dependency graph
         checkAar(    libProject2, "library2.txt",     "library2:abcd");
         checkTestApk(libProject2, "library2.txt",     "library2:abcd");
         checkTestApk(libProject2, "library2test.txt", "library2Test:abcd");
@@ -505,7 +502,7 @@ public class JavaResPackagingTest {
     /**
      * check an apk has (or not) the given res file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
@@ -513,16 +510,15 @@ public class JavaResPackagingTest {
      * @param content the content
      */
     private static void checkApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
-        check(assertThatApk(project.getApk("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(assertThat(project.getApk("debug")), filename, content);
     }
 
     /**
      * check a test apk has (or not) the given res file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
@@ -530,16 +526,15 @@ public class JavaResPackagingTest {
      * @param content the content
      */
     private void checkTestApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
-        check(assertThatApk(project.getTestApk("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(assertThat(project.getTestApk()), filename, content);
     }
 
     /**
      * check an aat has (or not) the given res file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
@@ -547,16 +542,16 @@ public class JavaResPackagingTest {
      * @param content the content
      */
     private static void checkAar(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
-        check(assertThatAar(project.getAar("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(assertThat(project.getAar("debug")), filename, content);
     }
 
     private static void check(
             @NonNull AbstractAndroidSubject subject,
             @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
+            @Nullable String content)
+            throws Exception {
         if (content != null) {
             subject.containsJavaResourceWithContent("com/foo/" + filename, content);
         } else {

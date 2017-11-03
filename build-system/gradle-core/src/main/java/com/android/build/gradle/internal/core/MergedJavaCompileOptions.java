@@ -17,30 +17,28 @@
 package com.android.build.gradle.internal.core;
 
 import com.android.annotations.NonNull;
-import com.android.build.gradle.internal.dsl.AnnotationProcessorOptions;
-import com.android.build.gradle.internal.dsl.CoreAnnotationProcessorOptions;
-import com.android.build.gradle.internal.dsl.CoreJavaCompileOptions;
+import com.android.build.gradle.api.AnnotationProcessorOptions;
+import com.android.build.gradle.api.JavaCompileOptions;
 
-/**
- * Implementation of CoreJavaCompileOptions used to merge multiple configs together.
- */
-public class MergedJavaCompileOptions implements CoreJavaCompileOptions {
+/** Implementation of CoreJavaCompileOptions used to merge multiple configs together. */
+public class MergedJavaCompileOptions implements JavaCompileOptions {
 
-    private AnnotationProcessorOptions annotationProcessorOptions =
-            new AnnotationProcessorOptions();
+    private com.android.build.gradle.internal.dsl.AnnotationProcessorOptions
+            annotationProcessorOptions =
+                    new com.android.build.gradle.internal.dsl.AnnotationProcessorOptions();
 
+    @NonNull
     @Override
-    public CoreAnnotationProcessorOptions getAnnotationProcessorOptions() {
+    public AnnotationProcessorOptions getAnnotationProcessorOptions() {
         return annotationProcessorOptions;
     }
 
     public void reset() {
         annotationProcessorOptions.getClassNames().clear();
         annotationProcessorOptions.getArguments().clear();
-        annotationProcessorOptions.setIncludeCompileClasspath(true);
     }
 
-    public void append(@NonNull CoreJavaCompileOptions javaCompileOptions) {
+    public void append(@NonNull JavaCompileOptions javaCompileOptions) {
         annotationProcessorOptions.classNames(
                 javaCompileOptions.getAnnotationProcessorOptions().getClassNames());
         annotationProcessorOptions.arguments(

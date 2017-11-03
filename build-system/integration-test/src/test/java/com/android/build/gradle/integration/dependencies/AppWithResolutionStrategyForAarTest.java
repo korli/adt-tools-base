@@ -18,16 +18,12 @@ package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.COORDINATES;
-import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.GRADLE_PATH;
-import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.ANDROID;
-import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.MODULE;
 import static com.android.build.gradle.integration.common.utils.TestFileUtils.appendToFile;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.utils.LibraryGraphHelper;
-import com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Items;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.builder.model.AndroidArtifact;
@@ -36,16 +32,13 @@ import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-import java.io.IOException;
 import java.util.Collection;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 
-/**
- * test for flavored dependency on a different package.
- */
+/** test for flavored dependency on a different package. */
 public class AppWithResolutionStrategyForAarTest {
 
     @ClassRule
@@ -55,7 +48,7 @@ public class AppWithResolutionStrategyForAarTest {
     static ModelContainer<AndroidProject> modelContainer;
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         Files.write("include 'app', 'library'", project.getSettingsFile(), Charsets.UTF_8);
 
         appendToFile(project.getBuildFile(),
@@ -63,38 +56,34 @@ public class AppWithResolutionStrategyForAarTest {
                 "subprojects {\n" +
                 "    apply from: \"$rootDir/../commonLocalRepo.gradle\"\n" +
                 "}\n");
-        appendToFile(project.getSubproject("app").getBuildFile(),
-                "\n" +
-                "\n" +
-                "dependencies {\n" +
-                "    debugCompile project(\":library\")\n" +
-                "    releaseCompile project(\":library\")\n" +
-                "}\n" +
-                "\n" +
-                "configurations {\n" +
-                "  _debugCompile\n" +
-                "  _debugApk\n" +
-                "}\n" +
-                "\n" +
-                "configurations._debugCompile {\n" +
-                "  resolutionStrategy {\n" +
-                "    eachDependency { DependencyResolveDetails details ->\n" +
-                "      if (details.requested.name == \"jdeferred-android-aar\") {\n" +
-                "        details.useVersion \"1.2.2\"\n" +
-                "      }\n" +
-                "    }\n" +
-                "  }\n" +
-                "}\n" +
-                "configurations._debugApk {\n" +
-                "  resolutionStrategy {\n" +
-                "    eachDependency { DependencyResolveDetails details ->\n" +
-                "      if (details.requested.name == \"jdeferred-android-aar\") {\n" +
-                "        details.useVersion \"1.2.2\"\n" +
-                "      }\n" +
-                "    }\n" +
-                "  }\n" +
-                "}\n" +
-                "\n");
+        appendToFile(
+                project.getSubproject("app").getBuildFile(),
+                "\n"
+                        + "\n"
+                        + "dependencies {\n"
+                        + "    debugCompile project(\":library\")\n"
+                        + "    releaseCompile project(\":library\")\n"
+                        + "}\n"
+                        + "\n"
+                        + "android.applicationVariants.all { variant ->\n"
+                        + "  if (variant.buildType.name == \"debug\") {\n"
+                        + "    variant.getCompileConfiguration().resolutionStrategy {\n"
+                        + "      eachDependency { DependencyResolveDetails details ->\n"
+                        + "        if (details.requested.name == \"jdeferred-android-aar\") {\n"
+                        + "          details.useVersion \"1.2.2\"\n"
+                        + "        }\n"
+                        + "      }\n"
+                        + "    }\n"
+                        + "    variant.getRuntimeConfiguration().resolutionStrategy {\n"
+                        + "      eachDependency { DependencyResolveDetails details ->\n"
+                        + "        if (details.requested.name == \"jdeferred-android-aar\") {\n"
+                        + "          details.useVersion \"1.2.2\"\n"
+                        + "        }\n"
+                        + "      }\n"
+                        + "    }\n"
+                        + "  }\n"
+                        + "}\n"
+                        + "\n");
 
         TestFileUtils.appendToFile(project.getSubproject("library").getBuildFile(),
                 "\n" +
@@ -112,7 +101,7 @@ public class AppWithResolutionStrategyForAarTest {
     }
 
     @Test
-    public void checkModelContainsCorrectDependencies() {
+    public void checkModelContainsCorrectDependencies() throws Exception {
         LibraryGraphHelper helper = new LibraryGraphHelper(modelContainer);
 
         AndroidProject appProject = modelContainer.getModelMap().get(":app");
@@ -133,15 +122,8 @@ public class AppWithResolutionStrategyForAarTest {
 
         DependencyGraphs artifactCompileGraph = appArtifact.getDependencyGraphs();
 
-        Items moduleDeps = helper.on(artifactCompileGraph).withType(MODULE);
-        assertThat(moduleDeps.mapTo(GRADLE_PATH))
+        assertThat(helper.on(artifactCompileGraph).mapTo(COORDINATES))
                 .named("module dependencies of " + variantName)
-                .containsExactly(":library");
-
-        Items transitiveLibs = moduleDeps.getTransitiveFromSingleItem();
-
-        assertThat(transitiveLibs.withType(ANDROID).mapTo(COORDINATES))
-                .named("transitive libs of single direct module of " + variantName)
-                .containsExactly(aarCoodinate);
+                .containsAllOf(":library::" + variantName, aarCoodinate);
     }
 }

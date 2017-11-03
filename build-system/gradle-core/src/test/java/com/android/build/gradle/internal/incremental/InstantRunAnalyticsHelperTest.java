@@ -31,10 +31,8 @@ import org.mockito.MockitoAnnotations;
 
 public class InstantRunAnalyticsHelperTest {
 
-    @Mock
-    public InstantRunBuildContext mInstantRunBuildContext;
-    @Mock
-    public InstantRunBuildContext.Build mBuild;
+    @Mock public InstantRunBuildContext mInstantRunBuildContext;
+    @Mock public InstantRunBuildContext.Build mBuild;
 
     @Before
     public void initMocks() {
@@ -46,21 +44,22 @@ public class InstantRunAnalyticsHelperTest {
         when(mInstantRunBuildContext.getLastBuild()).thenReturn(mBuild);
         when(mInstantRunBuildContext.getBuildMode()).thenReturn(InstantRunBuildMode.HOT_WARM);
         when(mInstantRunBuildContext.getPatchingPolicy())
-                .thenReturn(InstantRunPatchingPolicy.MULTI_DEX);
+                .thenReturn(InstantRunPatchingPolicy.MULTI_APK);
         when(mInstantRunBuildContext.getVerifierResult())
                 .thenReturn(InstantRunVerifierStatus.COMPATIBLE);
-        when(mBuild.getArtifacts()).thenReturn(ImmutableList.of(
-                new InstantRunBuildContext.Artifact(FileType.RESOURCES,
-                        new File("resources.ap_")),
-                new InstantRunBuildContext.Artifact(FileType.RELOAD_DEX,
-                        new File("reload.dex"))
-        ));
+        when(mBuild.getArtifacts())
+                .thenReturn(
+                        ImmutableList.of(
+                                new InstantRunBuildContext.Artifact(
+                                        FileType.RESOURCES, new File("resources.ap_")),
+                                new InstantRunBuildContext.Artifact(
+                                        FileType.RELOAD_DEX, new File("reload.dex"))));
 
         InstantRunStatus proto =
                 InstantRunAnalyticsHelper.generateAnalyticsProto(mInstantRunBuildContext);
 
         assertEquals(InstantRunStatus.BuildMode.HOT_WARM, proto.getBuildMode());
-        assertEquals(InstantRunStatus.PatchingPolicy.MULTI_DEX, proto.getPatchingPolicy());
+        assertEquals(InstantRunStatus.PatchingPolicy.MULTI_APK, proto.getPatchingPolicy());
         assertEquals(InstantRunStatus.VerifierStatus.COMPATIBLE, proto.getVerifierStatus());
 
         assertEquals(2, proto.getArtifactCount());

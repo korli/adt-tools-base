@@ -55,9 +55,9 @@ import com.android.utils.StdLogger;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.nio.file.Files;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -182,7 +182,7 @@ public class DefaultSdkLoader implements SdkLoader {
      * Checks whether the {@link RepoManager} needs to have its local and remote packages cache
      * reset and invalidates them if they do.
      */
-    private void checkNeedsCacheReset(RepoManager repoManager, SdkLibData sdkLibData) {
+    private static void checkNeedsCacheReset(RepoManager repoManager, SdkLibData sdkLibData) {
         if (sdkLibData.needsCacheReset()) {
             repoManager.markInvalid();
             sdkLibData.setNeedsCacheReset(false);
@@ -207,6 +207,12 @@ public class DefaultSdkLoader implements SdkLoader {
             @NonNull ProgressIndicator progress) {
         Map<RemotePackage, InstallResultType> installResults = new HashMap<>();
         AndroidVersion targetVersion = AndroidTargetHash.getVersionFromHash(targetHash);
+
+        if (targetVersion == null) {
+            // For preview targets, like 'O', we can't do anything.
+            return Collections.emptyMap();
+        }
+
         String platformPath = DetailsTypes.getPlatformPath(targetVersion);
 
         UpdatablePackage platformPkg = repoManager.getPackages().getConsolidatedPkgs()
@@ -220,7 +226,7 @@ public class DefaultSdkLoader implements SdkLoader {
         }
 
         // Install platform sdk if it's not there.
-        if (!platformPkg.hasLocal()) {
+        if (!platformPkg.hasLocal() && platformPkg.getRemote() != null) {
             installResults.putAll(
                     installRemotePackages(
                             ImmutableList.of(platformPkg.getRemote()),
@@ -468,7 +474,7 @@ public class DefaultSdkLoader implements SdkLoader {
                 if (googleRepositoryPackage.hasLocal() && !googleRepositoryPackage.isUpdate()) {
                     File googleRepo = getMavenRepoAsFile(SdkMavenRepository.GOOGLE);
                     repositoriesBuilder.add(googleRepo);
-                } else {
+                } else if (googleRepositoryPackage.getRemote() != null) {
                     installResults.putAll(
                             installRemotePackages(
                                     ImmutableList.of(googleRepositoryPackage.getRemote()),
@@ -488,7 +494,7 @@ public class DefaultSdkLoader implements SdkLoader {
             if (androidRepositoryPackage.hasLocal() && !androidRepositoryPackage.isUpdate()) {
                 File androidRepo = getMavenRepoAsFile(SdkMavenRepository.ANDROID);
                 repositoriesBuilder.add(androidRepo);
-            } else {
+            } else if (androidRepositoryPackage.getRemote() != null) {
                 installResults.putAll(
                         installRemotePackages(
                                 ImmutableList.of(androidRepositoryPackage.getRemote()),
@@ -536,7 +542,7 @@ public class DefaultSdkLoader implements SdkLoader {
         RepoManager repoManager = mSdkHandler.getSdkManager(progress);
         repoManager.loadSynchronously(0, progress, null, null);
         LocalPackage localSdkToolPackage =
-                mSdkHandler.getLatestLocalPackageForPrefix(packageId, true, progress);
+                mSdkHandler.getLatestLocalPackageForPrefix(packageId, null, true, progress);
         if (localSdkToolPackage == null) {
             if (!sdkLibData.useSdkDownload()) {
                 // If we are offline and we haven't found a local package for the SDK Tool
@@ -566,10 +572,11 @@ public class DefaultSdkLoader implements SdkLoader {
                 checkResults(installResults);
                 repoManager.loadSynchronously(0, progress, null, null);
                 localSdkToolPackage =
-                        mSdkHandler.getLatestLocalPackageForPrefix(packageId, true, progress);
+                        mSdkHandler.getLatestLocalPackageForPrefix(packageId, null, true, progress);
             }
         }
-        return localSdkToolPackage.getLocation();
+        // getLatestLocalPackageForPrefix above should have set it to non-null by now, but let's be safe.
+        return localSdkToolPackage != null ? localSdkToolPackage.getLocation() : null;
     }
 
     /**

@@ -1,3 +1,5 @@
+load("//tools/base/bazel:android.bzl", "ANDROID_COPTS")
+
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
@@ -17,11 +19,12 @@ cc_library(
         "memory_profiler_component.h",
         "memory_service.h",
     ],
-    copts = [
+    copts = ANDROID_COPTS + [
         "-Itools/base/profiler/native",
         "-I$(GENDIR)/tools/base/profiler",
     ],
     deps = [
+        "//tools/base/profiler/native/perfd:perfd_internal_headers",
         "//tools/base/profiler/native/utils:profiler_utils",
         "//tools/base/profiler/proto:profiler_cc_proto",
     ],
@@ -30,6 +33,7 @@ cc_library(
 cc_test(
     name = "perfd_memory_tests",
     srcs = [
+        "memory_cache_test.cc",
         "memory_levels_sampler_test.cc",
     ],
     copts = [
@@ -39,6 +43,7 @@ cc_test(
     data = [
         "//tools/base/profiler/native/testdata:perfd/memory",
     ],
+    linkstatic = 1,
     deps = [
         ":profiler_memory",
         "//external:gmock_main",

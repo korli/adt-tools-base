@@ -16,6 +16,8 @@
 
 package com.android.builder.profile;
 
+import static com.google.common.base.Preconditions.checkState;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.analytics.CommonMetricsData;
@@ -63,7 +65,7 @@ public final class ProcessProfileWriter implements ProfileRecordWriter {
 
     private final LoadingCache<String, Project> mProjects;
 
-    @NonNull private final Path mBenchmarkProfileOutputFile;
+    private final boolean mEnableChromeTracingOutput;
 
     private final AtomicLong lastRecordId = new AtomicLong(1);
 
@@ -85,8 +87,8 @@ public final class ProcessProfileWriter implements ProfileRecordWriter {
     }
 
 
-    ProcessProfileWriter(@NonNull Path benchmarkProfileOutputFile) {
-        mBenchmarkProfileOutputFile = benchmarkProfileOutputFile;
+    ProcessProfileWriter(boolean enableChromeTracingOutput) {
+        mEnableChromeTracingOutput = enableChromeTracingOutput;
         mNameAnonymizer = new NameAnonymizer();
         mBuild = GradleBuildProfile.newBuilder();
         mStartMemoryStats = createAndRecordMemorySample();
@@ -107,16 +109,18 @@ public final class ProcessProfileWriter implements ProfileRecordWriter {
     }
 
     /**
-     * Done with the recording processing, finish processing the outstanding {@link
-     * GradleBuildProfileSpan} publication and shutdowns the processing queue.
+     * Finishes processing the outstanding {@link GradleBuildProfileSpan} publication and shuts down
+     * the processing queue. Write the final output file to the given path.
      *
-     * Should be called exactly once.
+     * <p>If chrome tracing output is enabled, this method will also create a second file, with a
+     * {@code .json} extension, in the same directory.
+     *
+     * <p>Should be called exactly once.
      */
-    synchronized void finish() throws InterruptedException {
-        if (finished) {
-            throw new IllegalStateException("Finish can only be called once.");
-        }
+    synchronized void finishAndMaybeWrite(@Nullable Path outputFile) throws InterruptedException {
+        checkState(!finished, "Already finished");
         finished = true;
+
         // This will not throw ConcurrentModificationException if writeRecord() calls are still
         // happening. ConcurrentLinkedQueue iterators are instead weakly consistent.
         mBuild.addAllSpan(spans);
@@ -137,17 +141,22 @@ public final class ProcessProfileWriter implements ProfileRecordWriter {
             }
         }
 
-        // Write benchmark file into build directory.
-        try {
-            Files.createDirectories(mBenchmarkProfileOutputFile.getParent());
-            try (BufferedOutputStream outputStream =
-                    new BufferedOutputStream(
-                            Files.newOutputStream(
-                                    mBenchmarkProfileOutputFile, StandardOpenOption.CREATE_NEW))) {
-                mBuild.build().writeTo(outputStream);
+        // Write benchmark file into build directory, if set.
+        if (outputFile != null) {
+            try {
+                Files.createDirectories(outputFile.getParent());
+                try (BufferedOutputStream outputStream =
+                        new BufferedOutputStream(
+                                Files.newOutputStream(outputFile, StandardOpenOption.CREATE_NEW))) {
+                    mBuild.build().writeTo(outputStream);
+                }
+
+                if (mEnableChromeTracingOutput) {
+                    ChromeTracingProfileConverter.toJson(outputFile);
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
             }
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
         }
 
         // Public build profile.
@@ -178,20 +187,22 @@ public final class ProcessProfileWriter implements ProfileRecordWriter {
         return get().mProjects.getUnchecked(projectPath).properties;
     }
 
-    public static GradleBuildVariant.Builder addVariant(
+    public static GradleBuildVariant.Builder getOrCreateVariant(
             @NonNull String projectPath, @NonNull String variantName) {
-        GradleBuildVariant.Builder properties = GradleBuildVariant.newBuilder();
-        get().addVariant(projectPath, variantName, properties);
-        return properties;
+        return get().addVariant(projectPath, variantName);
     }
 
-    private void addVariant(
-            @NonNull String projectPath,
-            @NonNull String variantName,
-            @NonNull GradleBuildVariant.Builder properties) {
+    // Idempotent.
+    private GradleBuildVariant.Builder addVariant(
+            @NonNull String projectPath, @NonNull String variantName) {
         Project project = mProjects.getUnchecked(projectPath);
-        properties.setId(mNameAnonymizer.anonymizeVariant(projectPath, variantName));
-        project.variants.put(variantName, properties);
+        GradleBuildVariant.Builder properties = project.variants.get(variantName);
+        if (properties == null) {
+            properties = GradleBuildVariant.newBuilder();
+            properties.setId(mNameAnonymizer.anonymizeVariant(projectPath, variantName));
+            project.variants.put(variantName, properties);
+        }
+        return properties;
     }
 
     private GradleBuildMemorySample createAndRecordMemorySample() {

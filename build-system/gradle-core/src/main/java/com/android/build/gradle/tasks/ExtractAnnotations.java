@@ -17,111 +17,108 @@
 package com.android.build.gradle.tasks;
 
 import static com.android.SdkConstants.DOT_JAVA;
-import static com.android.SdkConstants.UTF_8;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactScope.EXTERNAL;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactType.CLASSES;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.COMPILE_CLASSPATH;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.internal.LibraryTaskManager;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.AbstractAndroidCompile;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.LibraryVariantData;
-import com.android.build.gradle.tasks.annotations.ApiDatabase;
 import com.android.build.gradle.tasks.annotations.Extractor;
 import com.android.build.gradle.tasks.annotations.TypedefRemover;
 import com.android.builder.core.AndroidBuilder;
-import com.android.tools.lint.EcjParser;
-import com.android.tools.lint.EcjSourceFile;
+import com.android.tools.lint.LintCoreApplicationEnvironment;
+import com.android.tools.lint.LintCoreProjectEnvironment;
 import com.google.common.collect.Lists;
-
-import org.eclipse.jdt.core.compiler.CategorizedProblem;
-import org.eclipse.jdt.core.compiler.IProblem;
-import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
-import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
-import org.eclipse.jdt.internal.compiler.util.Util;
-import org.gradle.api.Project;
-import org.gradle.api.file.ConfigurableFileCollection;
-import org.gradle.api.file.EmptyFileVisitor;
-import org.gradle.api.file.FileVisitDetails;
-import org.gradle.api.logging.LogLevel;
-import org.gradle.api.plugins.BasePlugin;
-import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.InputDirectory;
-import org.gradle.api.tasks.InputFile;
-import org.gradle.api.tasks.Optional;
-import org.gradle.api.tasks.OutputFile;
-import org.gradle.api.tasks.ParallelizableTask;
-import org.gradle.api.tasks.TaskAction;
-import org.gradle.tooling.BuildException;
-
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.psi.PsiJavaFile;
 import java.io.File;
 import java.io.IOException;
-import java.util.Collection;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Callable;
+import java.util.function.Supplier;
+import org.gradle.api.artifacts.ArtifactCollection;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
+import org.gradle.api.artifacts.result.ResolvedArtifactResult;
+import org.gradle.api.file.EmptyFileVisitor;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.FileVisitDetails;
+import org.gradle.api.file.RelativePath;
+import org.gradle.api.logging.LogLevel;
+import org.gradle.api.plugins.BasePlugin;
+import org.gradle.api.tasks.CacheableTask;
+import org.gradle.api.tasks.CompileClasspath;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Optional;
+import org.gradle.api.tasks.OutputFile;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.api.tasks.TaskAction;
 
 /**
- * Task which extracts annotations from the source files, and writes them to one of
- * two possible destinations:
+ * Task which extracts annotations from the source files, and writes them to one of two possible
+ * destinations:
+ *
  * <ul>
- *     <li> A "external annotations" file (pointed to by {@link ExtractAnnotations#output})
- *          which records the annotations in a zipped XML format for use by the IDE and by
- *          lint to associate the (source retention) annotations back with the compiled code</li>
- *     <li> For any {@code Keep} annotated elements, a Proguard keep file (pointed to by
- *          {@link ExtractAnnotations#proguard}, which lists APIs (classes, methods and fields)
- *          that should not be removed even if no references in code are found to those APIs.</li>
+ *   <li>A "external annotations" file (pointed to by {@link ExtractAnnotations#output}) which
+ *       records the annotations in a zipped XML format for use by the IDE and by lint to associate
+ *       the (source retention) annotations back with the compiled code
  * </ul>
- * We typically only extract external annotations when building libraries; ProGuard annotations
- * are extracted when building libraries (to record in the AAR), <b>or</b> when building an
- * app module where ProGuarding is enabled.
+ *
+ * We typically only extract external annotations when building libraries; ProGuard annotations are
+ * extracted when building libraries (to record in the AAR), <b>or</b> when building an app module
+ * where ProGuarding is enabled.
  */
-@ParallelizableTask
+@CacheableTask
 public class ExtractAnnotations extends AbstractAndroidCompile {
     private BaseVariantData variant;
 
-    private List<String> bootClasspath;
+    private Supplier<List<String>> bootClasspath;
 
     private File typedefFile;
 
     private File output;
 
-    private File proguard;
-
-    private File apiFilter;
-
-    private List<File> mergeJars;
-
     private String encoding;
 
-    private File classDir;
+    private FileCollection classDir;
 
-    private boolean allowErrors = true;
-
-    public BaseVariantData getVariant() {
-        return variant;
-    }
+    private ArtifactCollection libraries;
 
     public void setVariant(BaseVariantData variant) {
         this.variant = variant;
     }
 
     /** Boot classpath: typically android.jar */
-    @Input
-    @Optional
+    @CompileClasspath
     public List<String> getBootClasspath() {
-        return bootClasspath;
+        return bootClasspath.get();
     }
 
-    public void setBootClasspath(List<String> bootClasspath) {
+    public void setBootClasspath(Supplier<List<String>> bootClasspath) {
         this.bootClasspath = bootClasspath;
     }
 
+    @CompileClasspath
+    public FileCollection getLibraries() {
+        return libraries.getArtifactFiles();
+    }
+
     /** The output .zip file to write the annotations database to, if any */
-    @Optional
     @OutputFile
     public File getOutput() {
         return output;
@@ -131,24 +128,12 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
         this.output = output;
     }
 
-    /** The output proguard file to write any @Keep rules into, if any */
-    @Optional
-    @OutputFile
-    public File getProguard() {
-        return proguard;
-    }
-
-    public void setProguard(File proguard) {
-        this.proguard = proguard;
-    }
-
     /**
      * The output .txt file to write the typedef recipe file to. A "recipe" file
      * is a file which describes typedef classes, typically ones that should
      * be deleted. It is generated by this {@link ExtractAnnotations} task and
      * consumed by the {@link TypedefRemover}.
      */
-    @Optional
     @OutputFile
     public File getTypedefFile() {
         return typedefFile;
@@ -159,41 +144,10 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
     }
 
     /**
-     * An optional pointer to an API file to filter the annotations by (any annotations
-     * not found in the API file are considered hidden/not exposed.) This is in the same
-     * format as the api-versions.xml file found in the SDK.
+     * The encoding to use when reading source files. The output file will ignore this and will
+     * always be a UTF-8 encoded .xml file inside the annotations zip file.
      */
-    @Optional
-    @InputFile
-    public File getApiFilter() {
-        return apiFilter;
-    }
-
-    public void setApiFilter(File apiFilter) {
-        this.apiFilter = apiFilter;
-    }
-
-    /**
-     * A list of existing annotation zip files (or dirs) to merge in. This can be used to merge in
-     * a hardcoded set of annotations that are not present in the source code, such as
-     * {@code @Contract} annotations we'd like to record without actually having a dependency
-     * on the IDEA annotations library.
-     */
-    @Optional
-    @InputFile
-    public List<File> getMergeJars() {
-        return mergeJars;
-    }
-
-    public void setMergeJars(List<File> mergeJars) {
-        this.mergeJars = mergeJars;
-    }
-
-    /**
-     * The encoding to use when reading source files. The output file will ignore this and
-     * will always be a UTF-8 encoded .xml file inside the annotations zip file.
-     */
-    @Optional
+    @NonNull
     @Input
     public String getEncoding() {
         return encoding;
@@ -204,181 +158,111 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
     }
 
     /**
-     * Location of class files. If set, any non-public typedef source retention annotations
-     * will be removed prior to .jar packaging.
+     * Location of class files. If set, any non-public typedef source retention annotations will be
+     * removed prior to .jar packaging.
      */
     @Optional
-    @InputDirectory
-    public File getClassDir() {
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public FileCollection getClassDir() {
         return classDir;
     }
 
-    public void setClassDir(File classDir) {
+    public void setClassDir(FileCollection classDir) {
         this.classDir = classDir;
-    }
-
-    /** Whether we allow extraction even in the presence of symbol resolution errors */
-    @Input
-    public boolean isAllowErrors() {
-        return allowErrors;
-    }
-
-    public void setAllowErrors(boolean allowErrors) {
-        this.allowErrors = allowErrors;
     }
 
     @Override
     @TaskAction
     protected void compile() {
         if (!hasAndroidAnnotations()) {
+            try {
+                Files.write(
+                        typedefFile.toPath(),
+                        Collections.singletonList(""),
+                        StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
             return;
         }
 
-        if (encoding == null) {
-            encoding = UTF_8;
-        }
-
-        EcjParser.EcjResult result = parseSources();
-        Collection<CompilationUnitDeclaration> parsedUnits = result.getCompilationUnits();
+        LintCoreApplicationEnvironment appEnv = LintCoreApplicationEnvironment.get();
+        Disposable parentDisposable = Disposer.newDisposable();
 
         try {
-            if (!allowErrors) {
-                for (CompilationUnitDeclaration unit : parsedUnits) {
-                    // so maybe I don't need my map!!
-                    CategorizedProblem[] problems = unit.compilationResult().getAllProblems();
-                    if (problems != null) {
-                        for (IProblem problem : problems) {
-                            if (problem != null && problem.isError()) {
-                                getLogger().warn("Not extracting annotations (compilation problems "
-                                        + "encountered)\n"
-                                        + "Error: " + new String(problem.getOriginatingFileName()) +
-                                        ":" +
-                                        problem.getSourceLineNumber() + ": " + problem
-                                        .getMessage());
-                                // TODO: Consider whether we abort the build at this point!
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
+            LintCoreProjectEnvironment projectEnvironment =
+                    LintCoreProjectEnvironment.create(parentDisposable, appEnv);
 
-            // API definition file
-            ApiDatabase database = null;
-            if (apiFilter != null && apiFilter.exists()) {
-                try {
-                    database = new ApiDatabase(apiFilter);
-                } catch (IOException e) {
-                    throw new BuildException("Could not open API database " + apiFilter, e);
-                }
-            }
+            List<PsiJavaFile> parsedUnits = parseSources(projectEnvironment);
 
-            boolean displayInfo = getProject().getLogger().isEnabled(LogLevel.INFO);
+            boolean displayInfo = getLogger().isEnabled(LogLevel.INFO);
 
-            Extractor extractor = new Extractor(
-                    database,
-                    classDir,
-                    displayInfo,
-                    false /*includeClassRetentionAnnotations*/,
-                    false /*sortAnnotations*/);
+            Extractor extractor =
+                    new Extractor(null, classDir.getSingleFile(), displayInfo, false, false);
+
             extractor.extractFromProjectSource(parsedUnits);
-            if (mergeJars != null) {
-                for (File jar : mergeJars) {
-                    extractor.mergeExisting(jar);
-                }
-            }
-            extractor.export(output, proguard);
-            if (typedefFile != null) {
-                extractor.writeTypedefFile(typedefFile);
-            } else {
-                extractor.removeTypedefClasses();
-            }
+            extractor.export(output, null);
+            extractor.writeTypedefFile(typedefFile);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         } finally {
-            result.dispose();
+            Disposer.dispose(parentDisposable);
+            LintCoreApplicationEnvironment.clearAccessorCache();
         }
     }
 
     @Input
     public boolean hasAndroidAnnotations() {
-        return variant.getVariantDependency().isAnnotationsPresent();
+        for (ResolvedArtifactResult artifact : libraries.getArtifacts()) {
+            ComponentIdentifier id = artifact.getId()
+                    .getComponentIdentifier();
+            // because we only ask for external dependencies, we should be able to cast
+            // this always
+            if (id instanceof ModuleComponentIdentifier) {
+                ModuleComponentIdentifier moduleId = (ModuleComponentIdentifier) id;
+
+                if (moduleId.getModule().equals("support-annotations") &&
+                        moduleId.getGroup().equals("com.android.support")) {
+                    return true;
+                }
+            }
+
+        }
+
+        return false;
     }
 
     @NonNull
-    private EcjParser.EcjResult parseSources() {
-        final List<EcjSourceFile> sourceUnits = Lists.newArrayListWithExpectedSize(100);
+    private List<PsiJavaFile> parseSources(LintCoreProjectEnvironment projectEnvironment) {
+        SourceFileVisitor fileVisitor = new SourceFileVisitor();
+        getSource().visit(fileVisitor);
+        List<File> sourceFiles = fileVisitor.sourceUnits;
+        List<File> sourceRoots = fileVisitor.getSourceRoots();
 
-        getSource().visit(new EmptyFileVisitor() {
-            @Override
-            public void visitFile(FileVisitDetails fileVisitDetails) {
-                File file = fileVisitDetails.getFile();
-                String path = file.getPath();
-                if (path.endsWith(DOT_JAVA) && file.isFile()) {
-                    char[] contents;
-                    try {
-                        contents = Util.getFileCharContent(file, encoding);
-                    } catch (IOException e) {
-                        getLogger().warn("Could not read file", e);
-                        return;
-                    }
-                    EcjSourceFile unit = EcjSourceFile.create(contents, file, encoding);
-                    sourceUnits.add(unit);
-                }
-            }
-        });
-
-        List<String> jars = Lists.newArrayList();
-        if (bootClasspath != null) {
-            jars.addAll(bootClasspath);
-        }
         if (getClasspath() != null) {
             for (File jar : getClasspath()) {
-                jars.add(jar.getPath());
+                sourceRoots.add(jar);
             }
         }
-
-        CompilerOptions options = EcjParser.createCompilerOptions();
-        options.docCommentSupport = Extractor.REMOVE_HIDDEN_TYPEDEFS; // So I can find @hide
-
-        // Note: We can *not* set options.ignoreMethodBodies=true because it disables
-        // type attribution!
-
-        options.sourceLevel = getLanguageLevel(getSourceCompatibility());
-        options.complianceLevel = options.sourceLevel;
-        // We don't generate code, but just in case the parser consults this flag
-        // and makes sure that it's not greater than the source level:
-        options.targetJDK = options.sourceLevel;
-        options.originalComplianceLevel = options.sourceLevel;
-        options.originalSourceLevel = options.sourceLevel;
-        options.inlineJsrBytecode = true; // >= 1.5
-
-        return EcjParser.parse(options, sourceUnits, jars, null);
-    }
-
-    private static long getLanguageLevel(String version) {
-        if ("1.6".equals(version)) {
-            return EcjParser.getLanguageLevel(1, 6);
-        } else if ("1.7".equals(version)) {
-            return EcjParser.getLanguageLevel(1, 7);
-        } else if ("1.5".equals(version)) {
-            return EcjParser.getLanguageLevel(1, 5);
-        } else if ("1.8".equals(version)) {
-            return EcjParser.getLanguageLevel(1, 8);
-        } else {
-            return EcjParser.getLanguageLevel(1, 7);
+        for (String path : getBootClasspath()) {
+            sourceRoots.add(new File(path));
         }
+
+        projectEnvironment.registerPaths(sourceRoots);
+
+        return Extractor.createUnitsForFiles(projectEnvironment.getProject(), sourceFiles);
     }
 
     public static class ConfigAction implements TaskConfigAction<ExtractAnnotations> {
 
-        @NonNull private Project project;
         @NonNull private AndroidConfig extension;
         @NonNull private VariantScope variantScope;
+        private File outputFile;
 
         public ConfigAction(
-                @NonNull Project project,
                 @NonNull AndroidConfig extension,
                 @NonNull VariantScope variantScope) {
-            this.project = project;
             this.extension = extension;
             this.variantScope = variantScope;
         }
@@ -410,35 +294,81 @@ public class ExtractAnnotations extends AbstractAndroidCompile {
                     new File(
                             variantScope.getGlobalScope().getIntermediatesDir(),
                             LibraryTaskManager.ANNOTATIONS + "/" + variantConfig.getDirName()));
-            task.setOutput(new File(task.getDestinationDir(), SdkConstants.FN_ANNOTATIONS_ZIP));
+            outputFile = new File(task.getDestinationDir(), SdkConstants.FN_ANNOTATIONS_ZIP);
+            task.setOutput(outputFile);
             task.setTypedefFile(variantScope.getTypedefFile());
-            task.setClassDir(variantScope.getJavaOutputDir());
+
+            // FIXME Replace with TaskOutputHolder.AnchorOutputType.ALL_CLASSES
+            // https://issuetracker.google.com/64344432
+            task.setClassDir(variantScope.getOutput(TaskOutputHolder.TaskOutputType.JAVAC));
+
             task.setSource(variantScope.getVariantData().getJavaSources());
             task.setEncoding(extension.getCompileOptions().getEncoding());
             task.setSourceCompatibility(
                     extension.getCompileOptions().getSourceCompatibility().toString());
-            ConventionMappingHelper.map(
-                    task,
-                    "classpath",
-                    new Callable<ConfigurableFileCollection>() {
-                        @Override
-                        public ConfigurableFileCollection call() throws Exception {
-                            return project.files(androidBuilder.getCompileClasspath(variantConfig));
-                        }
-                    });
+            task.setClasspath(variantScope.getJavaClasspath(COMPILE_CLASSPATH, CLASSES));
+
+            task.libraries = variantScope.getArtifactCollection(
+                    COMPILE_CLASSPATH, EXTERNAL, CLASSES);
 
             // Setup the boot classpath just before the task actually runs since this will
             // force the sdk to be parsed. (Same as in compileTask)
-            task.doFirst(
-                    aTask -> {
-                        if (aTask instanceof ExtractAnnotations) {
-                            ExtractAnnotations extractAnnotations = (ExtractAnnotations) aTask;
-                            extractAnnotations.setBootClasspath(
-                                    androidBuilder.getBootClasspathAsStrings(false));
-                        }
-                    });
+            task.setBootClasspath(() -> androidBuilder.getBootClasspathAsStrings(false));
 
             ((LibraryVariantData) variantScope.getVariantData()).generateAnnotationsTask = task;
+        }
+    }
+
+    /**
+     * Visitor which gathers a series of individual source files as well as inferring the
+     * set of source roots
+     */
+    private static class SourceFileVisitor extends EmptyFileVisitor {
+        private final List<File> sourceUnits = Lists.newArrayListWithExpectedSize(100);
+        private final List<File> sourceRoots = Lists.newArrayList();
+
+        private String mostRecentRoot = "\000";
+
+        public SourceFileVisitor() {
+        }
+
+        public List<File> getSourceFiles() {
+            return sourceUnits;
+        }
+
+        public List<File> getSourceRoots() {
+            return sourceRoots;
+        }
+
+        private static final String BUILD_GENERATED = File.separator + "build" + File.separator
+                + "generated" + File.separator;
+
+        @Override
+        public void visitFile(FileVisitDetails details) {
+            File file = details.getFile();
+            String path = file.getPath();
+            if (path.endsWith(DOT_JAVA) && !path.contains(BUILD_GENERATED)) {
+                // Infer the source roots. These are available as relative paths
+                // on the file visit details.
+                if (!path.startsWith(mostRecentRoot)) {
+                    RelativePath relativePath = details.getRelativePath();
+                    String pathString = relativePath.getPathString();
+                    // The above method always uses / as a file separator but for
+                    // comparisons with the path we need to use the native separator:
+                    pathString = pathString.replace('/', File.separatorChar);
+
+                    if (path.endsWith(pathString)) {
+                        String root = path.substring(0, path.length() - pathString.length());
+                        File rootFile = new File(root);
+                        if (!sourceRoots.contains(rootFile)) {
+                            mostRecentRoot = rootFile.getPath();
+                            sourceRoots.add(rootFile);
+                        }
+                    }
+                }
+
+                sourceUnits.add(file);
+            }
         }
     }
 }

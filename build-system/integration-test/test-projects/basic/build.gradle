@@ -1,3 +1,4 @@
+
 apply from: "../commonHeader.gradle"
 buildscript { apply from: "../commonBuildScript.gradle" }
 apply from: "../commonLocalRepo.gradle"
@@ -15,6 +16,8 @@ dependencies {
     // hamcrest-library depends on hamcrest-core, both provide a /LICENSE.txt file
     // which used to cause packaging conflict. We added a special case for license files.
     androidTestCompile 'org.hamcrest:hamcrest-library:1.3'
+
+    testCompile 'junit:junit:4.12'
 }
 
 android {
@@ -108,13 +111,21 @@ android {
         htmlOutput file("lint-report.html")
         // Reduce severity of this check to just informational
         informational 'LogConditional'
+        // Run all lint checks on all test sources, not just production code
+        checkTestSources true
+        // Run all lint checks on generated sources
+        checkGeneratedSources true
     }
 
     // Override the versionCode of the release version
     applicationVariants.all { variant ->
+        print variant
         if (variant.buildType.name == "release") {
-            assert variant.outputs.size() == 1 : "There must be exactly one output"
-            variant.outputs.get(0).versionCodeOverride = 13
+            variant.outputs.all {
+                print("Customizing " + this)
+                setVersionCodeOverride(13)
+                print("Done with " + this)
+            }
         }
     }
 }

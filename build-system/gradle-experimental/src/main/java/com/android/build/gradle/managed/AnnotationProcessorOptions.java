@@ -17,11 +17,9 @@
 package com.android.build.gradle.managed;
 
 import com.android.annotations.NonNull;
-
+import java.util.List;
 import org.gradle.model.Managed;
 import org.gradle.model.ModelMap;
-
-import java.util.List;
 
 @Managed
 public interface AnnotationProcessorOptions {
@@ -33,6 +31,6 @@ public interface AnnotationProcessorOptions {
     ModelMap<KeyValuePair> getArguments();
 
     @NonNull
-    Boolean getIncludeClasspath();
-    void setIncludeClasspath(Boolean includeClasspath);
+    Boolean getIncludeCompileClasspath();
+    void setIncludeCompileClasspath(Boolean includeClasspath);
 }

@@ -36,13 +36,15 @@ import com.android.ide.common.rendering.api.ResourceValue;
 import com.android.ide.common.res2.AbstractResourceRepository;
 import com.android.ide.common.res2.ResourceFile;
 import com.android.ide.common.res2.ResourceItem;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.ResourceFolderType;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.LayoutDetector;
+import com.android.tools.lint.detector.api.LintFix;
+import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
@@ -114,7 +116,7 @@ public class PxUsageDetector extends LayoutDetector {
             "specifying font sizes, so they will be adjusted for both the screen density " +
             "and the user's preference.\n" +
             "\n" +
-            "There *are* cases where you might need to use `dp`; typically this happens when " +
+            "There **are** cases where you might need to use `dp`; typically this happens when " +
             "the text is in a container with a specific dp-size. This will prevent the text " +
             "from spilling outside the container. Note however that this means that the user's " +
             "font size settings are not respected, so consider adjusting the layout itself " +
@@ -183,7 +185,8 @@ public class PxUsageDetector extends LayoutDetector {
                             Location secondary = mTextSizeUsage.get(name).resolve();
                             secondary.setMessage("Dimension used as a text size here");
                             location.setSecondary(secondary);
-                            context.report(DP_ISSUE, attribute, location, message);
+                            context.report(DP_ISSUE, attribute, location, message,
+                                    createDpToSpFix());
                             break;
                         }
                     }
@@ -229,7 +232,8 @@ public class PxUsageDetector extends LayoutDetector {
             if (isDpUnit(value)) {
                 if (context.isEnabled(DP_ISSUE)) {
                     context.report(DP_ISSUE, attribute, context.getLocation(attribute),
-                            "Should use \"`sp`\" instead of \"`dp`\" for text sizes");
+                            "Should use \"`sp`\" instead of \"`dp`\" for text sizes",
+                            createDpToSpFix());
                 }
             } else if (value.startsWith(DIMEN_PREFIX)) {
                 if (context.getClient().supportsProjectResources()) {
@@ -251,7 +255,9 @@ public class PxUsageDetector extends LayoutDetector {
                                         assert sourceFile != null;
                                         String message = String.format(
                                                 "Should use \"`sp`\" instead of \"`dp`\" for text sizes (`%1$s` is defined as `%2$s` in `%3$s`",
-                                                value, dimenValue, sourceFile.getFile());
+                                                value, dimenValue,
+                                                LintUtils.getFileNameWithParent(client,
+                                                        sourceFile.getFile()));
                                         context.report(DP_ISSUE, attribute,
                                                 context.getLocation(attribute),
                                                 message);
@@ -273,6 +279,13 @@ public class PxUsageDetector extends LayoutDetector {
                 }
             }
         }
+    }
+
+    @NonNull
+    private static LintFix createDpToSpFix() {
+        return fix().replace().pattern("\\d+(di?p)")
+                .with("sp")
+                .build();
     }
 
     private static boolean isDpUnit(String value) {
@@ -346,7 +359,8 @@ public class PxUsageDetector extends LayoutDetector {
                             && text.matches("\\d+di?p")) {
                         if (context.isEnabled(DP_ISSUE)) {
                             context.report(DP_ISSUE, item, context.getLocation(textNode),
-                                "Should use \"`sp`\" instead of \"`dp`\" for text sizes");
+                                "Should use \"`sp`\" instead of \"`dp`\" for text sizes",
+                                           createDpToSpFix());
                         }
                     }
                 } else if (c == 'p' && text.charAt(j - 1) == 's') {

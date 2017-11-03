@@ -19,7 +19,6 @@ package com.android.build.gradle;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.api.TestVariant;
 import com.android.build.gradle.api.UnitTestVariant;
-
 import org.gradle.api.DomainObjectSet;
 
 /**
@@ -27,10 +26,9 @@ import org.gradle.api.DomainObjectSet;
  */
 public interface TestedAndroidConfig extends AndroidConfig {
 
-    /**
-     * Return the name of the BuildType for testing.
-     */
+    /** Return the name of the BuildType for testing. */
     @NonNull
+    @Override
     String getTestBuildType();
 
     /**

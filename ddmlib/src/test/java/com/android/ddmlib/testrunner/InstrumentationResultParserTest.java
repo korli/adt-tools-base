@@ -16,18 +16,15 @@
 
 package com.android.ddmlib.testrunner;
 
+import java.util.Collections;
+import java.util.Map;
 import junit.framework.TestCase;
-
 import org.easymock.Capture;
 import org.easymock.EasyMock;
 
-import java.util.Collections;
-import java.util.Map;
-
 /**
- * Unit tests for {@link @InstrumentationResultParser}.
+ * Unit tests for {@link InstrumentationResultParser}.
  */
-@SuppressWarnings("unchecked")
 public class InstrumentationResultParserTest extends TestCase {
 
     private InstrumentationResultParser mParser;
@@ -87,8 +84,86 @@ public class InstrumentationResultParserTest extends TestCase {
     }
 
     /**
-     * Tests parsing output for a single successful test execution.
+     * Tests parsing output for a missing time stamp, meaning an invalid output from the runner.
      */
+    public void testParse_missingTimeStamp() {
+        // we enforce the time stamp
+        mParser.setEnforceTimeStamp(true);
+        StringBuilder output = new StringBuilder();
+        addLine(output, "INSTRUMENTATION_RESULT: stream=");
+        addLine(output, "INSTRUMENTATION_CODE: -1");
+
+        mMockListener.testRunStarted(RUN_NAME, 0);
+        mMockListener.testRunFailed(InstrumentationResultParser.INVALID_OUTPUT_ERR_MSG);
+        mMockListener.testRunEnded(0, Collections.EMPTY_MAP);
+
+        injectAndVerifyTestString(output.toString());
+    }
+
+    /**
+     * Tests parsing output for a missing time stamp, meaning an invalid output from the runner. In
+     * some case a stack or exception will be available in 'stream=' we recover it in this case to
+     * have a more meaningful message.
+     */
+    public void testParse_missingTimeStamp_withStack() {
+        // we enforce the time stamp
+        mParser.setEnforceTimeStamp(true);
+        StringBuilder output = new StringBuilder();
+        addLine(
+                output,
+                "INSTRUMENTATION_RESULT: stream="
+                        + InstrumentationResultParser.FATAL_EXCEPTION_MSG);
+        addLine(
+                output,
+                "java.lang.IllegalArgumentException: Ambiguous arguments: cannot provide both test"
+                        + " package and test class(es) to run");
+        addLine(
+                output,
+                "at android.support.test.internal.runner.TestRequestBuilder.validate(TestRequestBu"
+                        + "ilder.java:791)");
+        addLine(
+                output,
+                "at android.support.test.internal.runner.TestRequestBuilder.build(TestRequestBuild"
+                        + "er.java:760)");
+        addLine(
+                output,
+                "at android.support.test.runner.AndroidJUnitRunner.buildRequest(AndroidJUnitRunner"
+                        + ".java:399)");
+        addLine(
+                output,
+                "at android.support.test.runner.AndroidJUnitRunner.onStart(AndroidJUnitRunner.java"
+                        + ":298)");
+        addLine(
+                output,
+                "at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:)");
+        addLine(output, "INSTRUMENTATION_CODE: -1");
+
+        Capture<String> capture = new Capture<>();
+        mMockListener.testRunStarted(RUN_NAME, 0);
+        mMockListener.testRunFailed(EasyMock.capture(capture));
+        mMockListener.testRunEnded(0, Collections.EMPTY_MAP);
+
+        injectAndVerifyTestString(output.toString());
+        String failure = capture.getValue();
+        assertTrue(failure.startsWith(InstrumentationResultParser.INVALID_OUTPUT_ERR_MSG));
+        assertTrue(failure.contains(InstrumentationResultParser.FATAL_EXCEPTION_MSG));
+    }
+
+    /** Tests parsing output for a missing time stamp but without enforcing the format. */
+    public void testParse_missingTimeStamp_notEnforced() {
+        mParser.setEnforceTimeStamp(false);
+        StringBuilder output = new StringBuilder();
+        addLine(output, "INSTRUMENTATION_RESULT: stream=");
+        addLine(output, "INSTRUMENTATION_CODE: -1");
+
+        mMockListener.testRunStarted(RUN_NAME, 0);
+        // no failure should be expected
+        mMockListener.testRunEnded(0, Collections.EMPTY_MAP);
+
+        injectAndVerifyTestString(output.toString());
+    }
+
+    /** Tests parsing output for a single successful test execution. */
     public void testParse_singleTest() {
         StringBuilder output = createSuccessTest();
 
@@ -107,6 +182,7 @@ public class InstrumentationResultParserTest extends TestCase {
         StringBuilder output = buildCommonResult();
 
         addStatusKey(output, "randomKey", "randomValue");
+        addTimeStamp(output);
         addSuccessCode(output);
 
         final Capture<Map<String, String>> captureMetrics = new Capture<Map<String, String>>();
@@ -141,6 +217,7 @@ public class InstrumentationResultParserTest extends TestCase {
         // add test end
         addCommonStatus(output);
         addStatusKey(output, "numiterations", "3");
+        addTimeStamp(output);
         addSuccessCode(output);
 
         final Capture<Map<String, String>> captureMetrics = new Capture<Map<String, String>>();
@@ -160,6 +237,7 @@ public class InstrumentationResultParserTest extends TestCase {
      */
     public void testParse_testFailed() {
         StringBuilder output = buildCommonResult();
+        addTimeStamp(output);
         addStackTrace(output);
         addFailureCode(output);
 
@@ -300,6 +378,7 @@ public class InstrumentationResultParserTest extends TestCase {
         addResultKey(output, "java_allocated", "2539");
         addResultKey(output, "foo", "bar");
         addResultKey(output, "stream", "should not be captured");
+        addTimeStamp(output);
         addLine(output, "INSTRUMENTATION_CODE: -1");
 
         Capture<Map<String, String>> captureMetrics = new Capture<Map<String, String>>();
@@ -319,6 +398,13 @@ public class InstrumentationResultParserTest extends TestCase {
         addLine(output, "INSTRUMENTATION_STATUS: numtests=3");
         addLine(output, "INSTRUMENTATION_STATUS: stream=");
         addLine(output,  "com.example.helloworld.FailureAssumptionTest:");
+        addLine(output,  "INSTRUMENTATION_STATUS: id=AndroidJUnitRunner");
+        addLine(output,  "INSTRUMENTATION_STATUS: test=checkIgnoreTestsArePossible");
+        addLine(output,  "INSTRUMENTATION_STATUS: class=com.example.helloworld.FailureAssumptionTest");
+        addLine(output,  "INSTRUMENTATION_STATUS: current=1");
+        addLine(output,  "INSTRUMENTATION_STATUS_CODE: 1");
+        addLine(output,  "INSTRUMENTATION_STATUS: numtests=3");
+        addLine(output,  "INSTRUMENTATION_STATUS: stream=");
         addLine(output,  "INSTRUMENTATION_STATUS: id=AndroidJUnitRunner");
         addLine(output,  "INSTRUMENTATION_STATUS: test=checkIgnoreTestsArePossible");
         addLine(output,  "INSTRUMENTATION_STATUS: class=com.example.helloworld.FailureAssumptionTest");
@@ -415,7 +501,7 @@ public class InstrumentationResultParserTest extends TestCase {
                 "testPreconditions");
         mMockListener.testStarted(HELLO_WORLD);
         mMockListener.testEnded(HELLO_WORLD, Collections.EMPTY_MAP);
-        mMockListener.testRunEnded(EasyMock.eq(676L), EasyMock.<Map>anyObject());
+        mMockListener.testRunEnded(EasyMock.eq(676L), EasyMock.anyObject());
 
         injectAndVerifyTestString(output.toString());
 }
@@ -438,6 +524,7 @@ public class InstrumentationResultParserTest extends TestCase {
      */
     private StringBuilder createSuccessTest() {
         StringBuilder output = buildCommonResult();
+        addTimeStamp(output);
         addSuccessCode(output);
         return output;
     }
@@ -498,6 +585,11 @@ public class InstrumentationResultParserTest extends TestCase {
      */
     private void addLineBreak(StringBuilder outputBuilder) {
         outputBuilder.append("\r\n");
+    }
+
+    private void addTimeStamp(StringBuilder outputBuilder) {
+        outputBuilder.append("Time: 0");
+        addLineBreak(outputBuilder);
     }
 
     private void addStartCode(StringBuilder outputBuilder) {

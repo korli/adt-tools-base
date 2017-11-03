@@ -16,6 +16,7 @@
 
 package com.android.build.gradle.integration.instant;
 
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Matchers.anyListOf;
 import static org.mockito.Matchers.anyLong;
 import static org.mockito.Matchers.eq;
@@ -30,34 +31,40 @@ import com.android.builder.testing.api.DeviceException;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.InstallException;
 import com.android.sdklib.AndroidVersion;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.util.List;
+import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
-@RunWith(MockitoJUnitRunner.class)
 public class InstantRunTestUtilsTest {
+    @Rule public MockitoRule rule = MockitoJUnit.rule();
 
     @Mock public IDevice device;
 
+    @Mock public InstantRunBuildInfo info;
+
     @Test
-    public void testDoInstallForMultidex() throws DeviceException, InstallException {
-        InstantRunTestUtils.doInstall(
-                device,
-                ImmutableList.of(
-                        new InstantRunArtifact(
-                                InstantRunArtifactType.MAIN, new File("test"), "1")));
-        verify(device).installPackage(any(), anyBoolean());
+    public void testDoInstallForMultidex() throws Exception {
+        when(info.getArtifacts())
+                .thenReturn(
+                        ImmutableList.of(
+                                new InstantRunArtifact(
+                                        InstantRunArtifactType.MAIN, new File("test"), "1")));
+        InstantRunTestUtils.doInstall(device, info);
+        verify(device).installPackage(any(), anyBoolean(), anyString());
         verifyNoMoreInteractions(device);
     }
 
     @Test
-    public void testDoInstallForMultiApk() throws DeviceException, InstallException {
+    public void testDoInstallForMultiApk() throws Exception {
+        when(info.isPatchBuild()).thenReturn(true);
         File apkSplit = new File("test3.apk");
         checkMultiApkInstall(
                 ImmutableList.of(
@@ -85,8 +92,9 @@ public class InstantRunTestUtilsTest {
             @NonNull List<InstantRunArtifact> artifactList, @NonNull List<File> expectedFiles)
             throws DeviceException, InstallException {
         when(device.getVersion()).thenReturn(new AndroidVersion(21, null));
-
-        InstantRunTestUtils.doInstall(device, artifactList);
+        when(info.getFeatureLevel()).thenReturn(21);
+        when(info.getArtifacts()).thenReturn(artifactList);
+        InstantRunTestUtils.doInstall(device, info);
         verify(device).getVersion();
         verify(device)
                 .installPackages(

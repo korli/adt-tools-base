@@ -20,7 +20,6 @@ import static com.google.common.truth.Truth.assertThat;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.ide.common.repository.GradleVersion;
 import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.checks.UnusedResourceDetector;
 import com.android.tools.lint.detector.api.Detector;
@@ -91,7 +90,7 @@ public class ProjectTest extends AbstractCheckTest {
         File dir = new File("project");
         TestProject project1 = new TestProject(client, dir);
         client.registerProject(dir, project1);
-        project1.setDirectLibraries(Collections.<Project>singletonList(project1));
+        project1.setDirectLibraries(Collections.singletonList(project1));
         List<Project> libraries = project1.getAllLibraries();
         assertNotNull(libraries);
         assertEquals(
@@ -107,8 +106,8 @@ public class ProjectTest extends AbstractCheckTest {
         client.registerProject(dir1, project1);
         TestProject project2 = new TestProject(client, dir2);
         client.registerProject(dir2, project2);
-        project2.setDirectLibraries(Collections.<Project>singletonList(project1));
-        project1.setDirectLibraries(Collections.<Project>singletonList(project2));
+        project2.setDirectLibraries(Collections.singletonList(project1));
+        project1.setDirectLibraries(Collections.singletonList(project2));
         List<Project> libraries = project1.getAllLibraries();
         assertNotNull(libraries);
         assertEquals(
@@ -131,9 +130,9 @@ public class ProjectTest extends AbstractCheckTest {
         client.registerProject(dir2, project2);
         TestProject project3 = new TestProject(client, dir3);
         client.registerProject(dir3, project3);
-        project1.setDirectLibraries(Arrays.<Project>asList(project2, project3));
-        project2.setDirectLibraries(Collections.<Project>singletonList(project3));
-        project3.setDirectLibraries(Collections.<Project>emptyList());
+        project1.setDirectLibraries(Arrays.asList(project2, project3));
+        project2.setDirectLibraries(Collections.singletonList(project3));
+        project3.setDirectLibraries(Collections.emptyList());
         List<Project> libraries = project1.getAllLibraries();
         assertNotNull(libraries);
         assertEquals(

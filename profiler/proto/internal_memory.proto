@@ -20,12 +20,52 @@ package profiler.proto;
 import "memory.proto";
 
 service InternalMemoryService {
-  rpc RecordVmStats(VmStatsRequest) returns (EmptyMemoryReply) {}
+  // Register a memory agent in perfd and open a stream where perfd can send
+  // control requests to the agent.
+  rpc RegisterMemoryAgent(RegisterMemoryAgentRequest)
+    returns (stream MemoryControlRequest) {}
+
+  rpc RecordGcStats(GcStatsRequest) returns (EmptyMemoryReply) {}
+  rpc RecordAllocStats(AllocStatsRequest) returns (EmptyMemoryReply) {}
+
+  rpc RecordAllocationEvents(BatchAllocationSample)
+    returns (EmptyMemoryReply) {}
 }
 
-message VmStatsRequest {
-  int32 app_id = 1;
-  MemoryData.VmStatsSample vm_stats_sample = 2;
+message RegisterMemoryAgentRequest {
+  int64 pid = 1;
+}
+
+message MemoryControlRequest {
+  message EnableTracking {
+    int64 timestamp = 1;
+  }
+
+  message DisableTracking {
+    int64 timestamp = 1;
+  }
+
+  message SuspendTracking {}
+
+  message ResumeTracking {}
+
+  int64 pid = 1;
+  oneof control {
+    EnableTracking enable_request = 2;
+    DisableTracking disable_request = 3;
+    SuspendTracking suspend_request = 4;
+    ResumeTracking resume_request = 5;
+  }
+}
+
+message AllocStatsRequest {
+  int32 process_id = 1;
+  MemoryData.AllocStatsSample alloc_stats_sample = 2;
+}
+
+message GcStatsRequest {
+  int32 process_id = 1;
+  MemoryData.GcStatsSample gc_stats_sample = 2;
 }
 
 message EmptyMemoryReply {}

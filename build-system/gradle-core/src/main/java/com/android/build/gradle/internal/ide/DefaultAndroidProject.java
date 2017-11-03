@@ -19,22 +19,22 @@ package com.android.build.gradle.internal.ide;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.CompileOptions;
+import com.android.builder.Version;
 import com.android.builder.model.AaptOptions;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.ArtifactMetaData;
 import com.android.builder.model.BuildTypeContainer;
 import com.android.builder.model.JavaCompileOptions;
 import com.android.builder.model.LintOptions;
+import com.android.builder.model.NativeToolchain;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.SigningConfig;
 import com.android.builder.model.SyncIssue;
-import com.android.builder.model.NativeToolchain;
 import com.android.builder.model.Variant;
-
+import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.io.Serializable;
 import java.util.Collection;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -43,8 +43,6 @@ import java.util.Objects;
 final class DefaultAndroidProject implements AndroidProject, Serializable {
     private static final long serialVersionUID = 1L;
 
-    @NonNull
-    private final String modelVersion;
     @NonNull
     private final String name;
     @NonNull
@@ -60,11 +58,11 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
     @NonNull
     private final Collection<ArtifactMetaData> extraArtifacts;
     @NonNull
-    private final Collection<String> unresolvedDependencies;
-    @NonNull
     private final Collection<SyncIssue> syncIssues;
 
     private final int generation;
+
+    private final boolean baseSplit;
 
     @NonNull
     private final JavaCompileOptions javaCompileOptions;
@@ -92,7 +90,6 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
     private final Collection<String> flavorDimensions;
 
     DefaultAndroidProject(
-            @NonNull String modelVersion,
             @NonNull String name,
             @NonNull ProductFlavorContainer defaultConfig,
             @NonNull Collection<String> flavorDimensions,
@@ -105,7 +102,6 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
             @NonNull Collection<SigningConfig> signingConfigs,
             @NonNull AaptOptions aaptOptions,
             @NonNull Collection<ArtifactMetaData> extraArtifacts,
-            @NonNull Collection<String> unresolvedDependencies,
             @NonNull Collection<SyncIssue> syncIssues,
             @NonNull CompileOptions compileOptions,
             @NonNull LintOptions lintOptions,
@@ -115,8 +111,8 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
             @NonNull String buildToolsVersion,
             int projectType,
             int apiVersion,
-            int generation) {
-        this.modelVersion = modelVersion;
+            int generation,
+            boolean baseSplit) {
         this.name = name;
         this.defaultConfig = defaultConfig;
         this.flavorDimensions = flavorDimensions;
@@ -129,7 +125,6 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
         this.signingConfigs = signingConfigs;
         this.aaptOptions = aaptOptions;
         this.extraArtifacts = extraArtifacts;
-        this.unresolvedDependencies = unresolvedDependencies;
         this.syncIssues = syncIssues;
         this.javaCompileOptions = new DefaultJavaCompileOptions(compileOptions);
         this.lintOptions = lintOptions;
@@ -140,12 +135,13 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
         this.generation = generation;
         this.nativeToolchains = nativeToolchains;
         this.buildToolsVersion = buildToolsVersion;
+        this.baseSplit = baseSplit;
     }
 
     @Override
     @NonNull
     public String getModelVersion() {
-        return modelVersion;
+        return Version.ANDROID_GRADLE_PLUGIN_VERSION;
     }
 
     @Override
@@ -244,7 +240,7 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
     @Override
     @NonNull
     public Collection<String> getUnresolvedDependencies() {
-        return unresolvedDependencies;
+        return ImmutableList.of();
     }
 
     @NonNull
@@ -289,6 +285,11 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
     }
 
     @Override
+    public boolean isBaseSplit() {
+        return baseSplit;
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -297,42 +298,56 @@ final class DefaultAndroidProject implements AndroidProject, Serializable {
             return false;
         }
         DefaultAndroidProject that = (DefaultAndroidProject) o;
-        return generation == that.generation &&
-                projectType == that.projectType &&
-                apiVersion == that.apiVersion &&
-                Objects.equals(modelVersion, that.modelVersion) &&
-                Objects.equals(name, that.name) &&
-                Objects.equals(compileTarget, that.compileTarget) &&
-                Objects.equals(bootClasspath, that.bootClasspath) &&
-                Objects.equals(frameworkSource, that.frameworkSource) &&
-                Objects.equals(signingConfigs, that.signingConfigs) &&
-                Objects.equals(aaptOptions, that.aaptOptions) &&
-                Objects.equals(extraArtifacts, that.extraArtifacts) &&
-                Objects.equals(unresolvedDependencies, that.unresolvedDependencies) &&
-                Objects.equals(syncIssues, that.syncIssues) &&
-                Objects.equals(javaCompileOptions, that.javaCompileOptions) &&
-                Objects.equals(lintOptions, that.lintOptions) &&
-                Objects.equals(buildFolder, that.buildFolder) &&
-                Objects.equals(buildToolsVersion, that.buildToolsVersion) &&
-                Objects.equals(resourcePrefix, that.resourcePrefix) &&
-                Objects.equals(nativeToolchains, that.nativeToolchains) &&
-                Objects.equals(buildTypes, that.buildTypes) &&
-                Objects.equals(productFlavors, that.productFlavors) &&
-                Objects.equals(variants, that.variants) &&
-                Objects.equals(defaultConfig, that.defaultConfig) &&
-                Objects.equals(flavorDimensions, that.flavorDimensions);
+        return generation == that.generation
+                && projectType == that.projectType
+                && apiVersion == that.apiVersion
+                && Objects.equals(name, that.name)
+                && Objects.equals(compileTarget, that.compileTarget)
+                && Objects.equals(bootClasspath, that.bootClasspath)
+                && Objects.equals(frameworkSource, that.frameworkSource)
+                && Objects.equals(signingConfigs, that.signingConfigs)
+                && Objects.equals(aaptOptions, that.aaptOptions)
+                && Objects.equals(extraArtifacts, that.extraArtifacts)
+                && Objects.equals(syncIssues, that.syncIssues)
+                && Objects.equals(javaCompileOptions, that.javaCompileOptions)
+                && Objects.equals(lintOptions, that.lintOptions)
+                && Objects.equals(buildFolder, that.buildFolder)
+                && Objects.equals(buildToolsVersion, that.buildToolsVersion)
+                && Objects.equals(resourcePrefix, that.resourcePrefix)
+                && Objects.equals(nativeToolchains, that.nativeToolchains)
+                && Objects.equals(buildTypes, that.buildTypes)
+                && Objects.equals(productFlavors, that.productFlavors)
+                && Objects.equals(variants, that.variants)
+                && Objects.equals(defaultConfig, that.defaultConfig)
+                && Objects.equals(flavorDimensions, that.flavorDimensions)
+                && Objects.equals(baseSplit, that.baseSplit);
     }
 
     @Override
     public int hashCode() {
-        return Objects
-                .hash(modelVersion, name, compileTarget, bootClasspath, frameworkSource,
-                        signingConfigs,
-                        aaptOptions, extraArtifacts, unresolvedDependencies, syncIssues, generation,
-                        javaCompileOptions, lintOptions, buildFolder, buildToolsVersion,
-                        resourcePrefix,
-                        nativeToolchains, projectType, apiVersion, buildTypes, productFlavors,
-                        variants,
-                        defaultConfig, flavorDimensions);
+        return Objects.hash(
+                name,
+                compileTarget,
+                bootClasspath,
+                frameworkSource,
+                signingConfigs,
+                aaptOptions,
+                extraArtifacts,
+                syncIssues,
+                generation,
+                javaCompileOptions,
+                lintOptions,
+                buildFolder,
+                buildToolsVersion,
+                resourcePrefix,
+                nativeToolchains,
+                projectType,
+                apiVersion,
+                buildTypes,
+                productFlavors,
+                variants,
+                defaultConfig,
+                flavorDimensions,
+                baseSplit);
     }
 }

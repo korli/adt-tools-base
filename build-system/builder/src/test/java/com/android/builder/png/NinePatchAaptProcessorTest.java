@@ -17,13 +17,8 @@
 package com.android.builder.png;
 
 import com.android.annotations.NonNull;
-import com.android.ide.common.internal.AaptCruncher;
-import com.android.ide.common.internal.PngCruncher;
-import com.android.ide.common.internal.PngException;
-import com.android.ide.common.process.DefaultProcessExecutor;
-import com.android.ide.common.process.LoggedProcessOutputHandler;
-import com.android.ide.common.process.ProcessExecutor;
-import com.android.ide.common.process.ProcessOutputHandler;
+import com.android.ide.common.internal.ResourceCompilationException;
+import com.android.ide.common.internal.ResourceProcessor;
 import com.android.utils.ILogger;
 import com.android.utils.StdLogger;
 import com.google.common.collect.Maps;
@@ -52,7 +47,7 @@ public class NinePatchAaptProcessorTest {
 
     private static AtomicLong sClassStartTime = new AtomicLong();
     private static final AtomicInteger sCruncherKey = new AtomicInteger();
-    private static final PngCruncher sCruncher = getCruncher();
+    private static final ResourceProcessor sCruncher = getCruncher();
 
     private final File mFile;
 
@@ -67,7 +62,7 @@ public class NinePatchAaptProcessorTest {
     }
 
     @Test
-    public void run() throws PngException, IOException {
+    public void run() throws ResourceCompilationException, IOException {
         File outFile = NinePatchAaptProcessorTestUtils.crunchFile(
                 sCruncherKey.get(), mFile, sCruncher);
         sSourceAndCrunchedFiles.put(mFile, outFile);
@@ -83,12 +78,13 @@ public class NinePatchAaptProcessorTest {
     }
 
     @NonNull
-    private static PngCruncher getCruncher() {
+    private static ResourceProcessor getCruncher() {
         ILogger logger = new StdLogger(StdLogger.Level.VERBOSE);
-        ProcessExecutor processExecutor = new DefaultProcessExecutor(logger);
-        ProcessOutputHandler processOutputHandler = new LoggedProcessOutputHandler(logger);
         File aapt = NinePatchAaptProcessorTestUtils.getAapt();
-        return new AaptCruncher(aapt.getAbsolutePath(), processExecutor, processOutputHandler);
+        return QueuedCruncher.builder()
+                .executablePath(aapt.getAbsolutePath())
+                .logger(logger)
+                .build();
     }
 
     @Parameterized.Parameters(name = "{1}")

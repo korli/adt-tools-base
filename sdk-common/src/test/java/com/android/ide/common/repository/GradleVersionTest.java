@@ -21,9 +21,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import org.junit.Test;
-
 import java.util.List;
+import org.junit.Test;
 
 public class GradleVersionTest {
 
@@ -37,6 +36,7 @@ public class GradleVersionTest {
         assertNull(version.getPreviewType());
         assertFalse(version.isSnapshot());
         assertEquals("2", version.toString());
+        assertFalse(version.isPreview());
     }
 
     @Test
@@ -61,6 +61,7 @@ public class GradleVersionTest {
         assertEquals("alpha", version.getPreviewType());
         assertFalse(version.isSnapshot());
         assertEquals("2-alpha1", version.toString());
+        assertTrue(version.isPreview());
     }
 
     @Test
@@ -73,6 +74,7 @@ public class GradleVersionTest {
         assertEquals("alpha", version.getPreviewType());
         assertTrue(version.isSnapshot());
         assertEquals("2-alpha1-SNAPSHOT", version.toString());
+        assertTrue(version.isPreview());
     }
 
     @Test
@@ -85,6 +87,7 @@ public class GradleVersionTest {
         assertNull(version.getPreviewType());
         assertTrue(version.isSnapshot());
         assertEquals("2-SNAPSHOT", version.toString());
+        assertTrue(version.isPreview());
     }
 
     @Test
@@ -335,11 +338,20 @@ public class GradleVersionTest {
         assertTrue(GradleVersion.parse("1.0.0").compareTo("1.1.1") < 0);
 
         assertTrue(GradleVersion.parse("1.0.0").compareTo("1.0.0-alpha1") > 0);
+        assertTrue(GradleVersion.parse("1.0.0").compareTo("1.0.1-alpha1") < 0);
         assertTrue(GradleVersion.parse("1.0.0").compareTo("1.0.0-SNAPSHOT") > 0);
         assertTrue(GradleVersion.parse("1.0.0-alpha2").compareTo("1.0.0-alpha1") > 0);
         assertTrue(GradleVersion.parse("1.0.0-beta1").compareTo("1.0.0-alpha2") > 0);
+        assertTrue(GradleVersion.parse("1.0.0-beta1").compareTo("1.0.0-alpha9") > 0);
+        assertTrue(GradleVersion.parse("1.0.0-beta1").compareTo("1.0.0-alpha9-1") > 0);
+        assertTrue(GradleVersion.parse("1.0.0-alpha9-2").compareTo("1.0.0-alpha9-1") > 0);
+        assertTrue(GradleVersion.parse("1.0.0-alpha9-1").compareTo("1.0.0-alpha9-2") < 0);
         assertTrue(GradleVersion.parse("1.0.0-rc1").compareTo("1.0.0-alpha2") > 0);
         assertTrue(GradleVersion.parse("2.0.0-alpha1").compareTo("1.0.0-alpha1") > 0);
+
+        // A dev version is larger than a "numbered" preview. So if a piece of DSL was added in
+        // alpha3, projects for 3.0.0-dev will use it.
+        assertTrue(GradleVersion.parse("3.0.0-dev").compareTo("3.0.0-alpha3") > 0);
     }
 
     @Test
@@ -379,8 +391,9 @@ public class GradleVersionTest {
     }
 
     @Test
-    public void testConstructorWithNumbers() {
+    public void testConstructorWith3Numbers() {
         GradleVersion version = new GradleVersion(1, 2, 3);
+        assertNotNull(version.getMajorSegment());
         assertNotNull(version.getMinorSegment());
         assertNotNull(version.getMicroSegment());
         assertEquals(1, version.getMajor());
@@ -393,6 +406,23 @@ public class GradleVersionTest {
         assertNull(version.getPreviewType());
         assertFalse(version.isSnapshot());
         assertEquals("1.2.3", version.toString());
+    }
+
+    @Test
+    public void testConstructorWith2Numbers() {
+        GradleVersion version = new GradleVersion(1, 2);
+        assertNotNull(version.getMajorSegment());
+        assertNotNull(version.getMinorSegment());
+        assertNull(version.getMicroSegment());
+        assertEquals(1, version.getMajor());
+        assertEquals("1", version.getMajorSegment().getText());
+        assertEquals(2, version.getMinor());
+        assertEquals("2", version.getMinorSegment().getText());
+        assertEquals(0, version.getMicro());
+        assertEquals(0, version.getPreview());
+        assertNull(version.getPreviewType());
+        assertFalse(version.isSnapshot());
+        assertEquals("1.2", version.toString());
     }
 
     // See https://code.google.com/p/android/issues/detail?id=201325
@@ -427,6 +457,18 @@ public class GradleVersionTest {
         assertEquals(1, version.getMajor());
         assertEquals(2, version.getMinor());
         assertEquals(3, version.getMicro());
+    }
+
+    @Test
+    public void testMax() {
+        GradleVersion version1 = GradleVersion.parse("2.1.3");
+        GradleVersion version2 = GradleVersion.parse("2.2");
+
+        assertNull(GradleVersion.max(null, null));
+        assertEquals(version1, GradleVersion.max(version1, null));
+        assertEquals(version1, GradleVersion.max(null, version1));
+        assertEquals(version2, GradleVersion.max(version1, version2));
+        assertEquals(version2, GradleVersion.max(version2, version1));
     }
 
     @Test
@@ -470,5 +512,10 @@ public class GradleVersionTest {
         assertTrue(version.isAtLeast(2, 3, 0, "alpha", 8, false));
         assertFalse(version.isAtLeast(2, 3, 0, "beta", 2, false));
         assertFalse(version.isAtLeast(2, 3, 0, "rc", 1, false));
+
+        version = GradleVersion.parse("1.0.0-beta8-2");
+        assertTrue(version.isAtLeast(1, 0, 0, "alpha", 1, false));
+        assertTrue(version.isAtLeast(1, 0, 0, "beta", 8, false));
+        assertFalse(version.isAtLeast(1, 0, 0, "beta", 9, false));
     }
 }

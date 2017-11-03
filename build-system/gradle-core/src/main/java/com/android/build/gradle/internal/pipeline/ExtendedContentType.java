@@ -19,8 +19,6 @@ package com.android.build.gradle.internal.pipeline;
 import com.android.build.api.transform.QualifiedContent.ContentType;
 import com.android.build.api.transform.QualifiedContent.DefaultContentType;
 import com.google.common.collect.ImmutableSet;
-
-
 import java.util.Set;
 
 /**
@@ -47,18 +45,17 @@ public enum ExtendedContentType implements ContentType {
     CLASSES_ENHANCED(0x4000),
 
     /**
-     * The content is Jack library.
-     *
-     * This is zip file containing classes in jayce format.
-     * If the library has been pre-dexed it will also contain the corresponding dex.
-     */
-    JACK(0x8000),
-
-    /**
      * The content is an artifact exported by the data binding compiler.
      */
-    DATA_BINDING(0x10000);
+    DATA_BINDING(0x10000),
 
+    /** The content is Java source file. @Deprecated don't use! */
+    @Deprecated
+    JAVA_SOURCES(0x20000),
+
+    /** The content is a dex archive. It contains a single DEX file per class. */
+    DEX_ARCHIVE(0x40000),
+    ;
 
     private final int value;
 

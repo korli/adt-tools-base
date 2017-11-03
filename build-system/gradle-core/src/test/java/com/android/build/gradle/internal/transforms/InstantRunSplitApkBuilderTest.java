@@ -21,10 +21,8 @@ import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.when;
 
-import com.android.SdkConstants;
 import com.android.apkzlib.zfile.ApkCreatorFactory;
-import com.android.build.api.transform.TransformException;
-import com.android.build.gradle.internal.dsl.AaptOptions;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
 import com.android.build.gradle.internal.incremental.FileType;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
@@ -32,11 +30,10 @@ import com.android.build.gradle.internal.scope.PackagingScope;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.VariantType;
 import com.android.builder.internal.aapt.Aapt;
+import com.android.builder.internal.aapt.AaptOptions;
 import com.android.builder.internal.aapt.AaptPackageConfig;
-import com.android.builder.packaging.PackagerException;
 import com.android.builder.sdk.TargetInfo;
-import com.android.ide.common.process.ProcessException;
-import com.android.ide.common.signing.KeytoolException;
+import com.android.builder.utils.FileCache;
 import com.android.sdklib.BuildToolInfo;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableSet;
@@ -62,54 +59,59 @@ public class InstantRunSplitApkBuilderTest {
 
     @Mock Logger logger;
     @Mock Project project;
-    @Mock InstantRunBuildContext instantRunBuildContext;
+    @Mock InstantRunBuildContext buildContext;
     @Mock AndroidBuilder androidBuilder;
     @Mock Aapt aapt;
     @Mock PackagingScope packagingScope;
     @Mock CoreSigningConfig coreSigningConfig;
-    @Mock AaptOptions aaptOptions;
 
     @Mock TargetInfo targetInfo;
     @Mock BuildToolInfo buildTools;
 
     @Rule public TemporaryFolder outputDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder supportDirectory = new TemporaryFolder();
+    @Rule public TemporaryFolder fileCacheDirectory = new TemporaryFolder();
 
+    FileCache fileCache;
     InstantRunSliceSplitApkBuilder instantRunSliceSplitApkBuilder;
-
-    private static final String PATH_TO_ZIP_ALIGN =
-            (SdkConstants.CURRENT_PLATFORM == SdkConstants.PLATFORM_WINDOWS)
-                    ? "C:\\path\\to\\zip-align"
-                    : "/path/to/zip-align";
+    File instantRunFolder;
+    File aaptTempFolder;
 
     @Before
     public void setUpMock() {
         MockitoAnnotations.initMocks(this);
         when(androidBuilder.getTargetInfo()).thenReturn(targetInfo);
         when(targetInfo.getBuildTools()).thenReturn(buildTools);
-        when(buildTools.getPath(BuildToolInfo.PathId.ZIP_ALIGN)).thenReturn(PATH_TO_ZIP_ALIGN);
         when(packagingScope.getApplicationId()).thenReturn("com.foo.test");
         when(packagingScope.getVersionName()).thenReturn("test_version_name");
         when(packagingScope.getVersionCode()).thenReturn(12345);
     }
 
     @Before
-    public void setup() {
-        instantRunSliceSplitApkBuilder = new InstantRunSliceSplitApkBuilder(
-                logger,
-                project,
-                instantRunBuildContext,
-                androidBuilder,
-                packagingScope,
-                coreSigningConfig,
-                aaptOptions,
-                outputDirectory.getRoot(),
-                supportDirectory.getRoot()) {
-            @Override
-            protected Aapt getAapt() {
-                return aapt;
-            }
-        };
+    public void setup() throws IOException {
+        instantRunFolder = supportDirectory.newFolder("instant-run");
+        aaptTempFolder = supportDirectory.newFolder("aapt-temp");
+        fileCache = FileCache.getInstanceWithSingleProcessLocking(fileCacheDirectory.getRoot());
+        instantRunSliceSplitApkBuilder =
+                new InstantRunSliceSplitApkBuilder(
+                        logger,
+                        project,
+                        buildContext,
+                        androidBuilder,
+                        fileCache,
+                        packagingScope,
+                        coreSigningConfig,
+                        AaptGeneration.AAPT_V2_DAEMON_MODE,
+                        new AaptOptions(null, false, null),
+                        outputDirectory.getRoot(),
+                        instantRunFolder,
+                        aaptTempFolder, /* runAapt2Serially */
+                        false) {
+                    @Override
+                    protected Aapt getAapt() {
+                        return aapt;
+                    }
+                };
     }
 
     @Test
@@ -119,14 +121,11 @@ public class InstantRunSplitApkBuilderTest {
         assertThat(parameterInputs).containsEntry("applicationId", "com.foo.test");
         assertThat(parameterInputs).containsEntry("versionCode", 12345);
         assertThat(parameterInputs).containsEntry("versionName", "test_version_name");
-        assertThat(parameterInputs).containsEntry("zipAlignExe", PATH_TO_ZIP_ALIGN);
         assertThat(parameterInputs).hasSize(4);
     }
 
     @Test
-    public void testGeneratedManifest()
-            throws InterruptedException, KeytoolException, IOException, ProcessException,
-            PackagerException, TransformException {
+    public void testGeneratedManifest() throws Exception {
 
         ImmutableSet<File> files = ImmutableSet.of(
                 new File("/tmp", "dexFile1"), new File("/tmp", "dexFile2"));
@@ -135,7 +134,7 @@ public class InstantRunSplitApkBuilderTest {
                 new InstantRunSplitApkBuilder.DexFiles(files, "folderName");
 
         instantRunSliceSplitApkBuilder.generateSplitApk(dexFiles);
-        File folder = new File(supportDirectory.getRoot(), "folderName");
+        File folder = new File(instantRunFolder, "folderName");
         assertThat(folder.isDirectory()).isTrue();
         assertThat(folder.getName()).isEqualTo("folderName");
         File[] folderFiles = folder.listFiles();
@@ -149,9 +148,7 @@ public class InstantRunSplitApkBuilderTest {
     }
 
     @Test
-    public void testApFileGeneration()
-            throws InterruptedException, KeytoolException, IOException, ProcessException,
-            PackagerException, TransformException {
+    public void testApFileGeneration() throws Exception {
 
         ImmutableSet<File> files = ImmutableSet.of(
                 new File("/tmp", "dexFile1"), new File("/tmp", "dexFile2"));
@@ -163,8 +160,8 @@ public class InstantRunSplitApkBuilderTest {
                 ArgumentCaptor.forClass(AaptPackageConfig.Builder.class);
 
         instantRunSliceSplitApkBuilder.generateSplitApk(dexFiles);
-        Mockito.verify(androidBuilder).processResources(
-                any(Aapt.class), aaptConfigCaptor.capture(), eq(false));
+        Mockito.verify(androidBuilder)
+                .processResources(any(Aapt.class), aaptConfigCaptor.capture());
 
         AaptPackageConfig build = aaptConfigCaptor.getValue().build();
         File resourceOutputApk = build.getResourceOutputApk();
@@ -174,9 +171,7 @@ public class InstantRunSplitApkBuilderTest {
     }
 
     @Test
-    public void testGenerateSplitApk()
-            throws InterruptedException, KeytoolException, IOException, ProcessException,
-            PackagerException, TransformException {
+    public void testGenerateSplitApk() throws Exception {
 
         ImmutableSet<File> files = ImmutableSet.of(
                 new File("/tmp", "dexFile1"), new File("/tmp", "dexFile2"));
@@ -188,8 +183,8 @@ public class InstantRunSplitApkBuilderTest {
                 ArgumentCaptor.forClass(AaptPackageConfig.Builder.class);
 
         instantRunSliceSplitApkBuilder.generateSplitApk(dexFiles);
-        Mockito.verify(androidBuilder).processResources(
-                any(Aapt.class), aaptConfigCaptor.capture(), eq(false));
+        Mockito.verify(androidBuilder)
+                .processResources(any(Aapt.class), aaptConfigCaptor.capture());
 
         AaptPackageConfig build = aaptConfigCaptor.getValue().build();
         File resourceOutputApk = build.getResourceOutputApk();
@@ -202,34 +197,36 @@ public class InstantRunSplitApkBuilderTest {
                 any(ApkCreatorFactory.class));
 
         assertThat(outApkLocation.getValue().getName()).isEqualTo(dexFiles.encodeName() + ".apk");
-        Mockito.verify(instantRunBuildContext).addChangedFile(eq(FileType.SPLIT),
+        Mockito.verify(buildContext).addChangedFile(eq(FileType.SPLIT),
                 eq(outApkLocation.getValue()));
 
     }
 
     @Test
-    public void testNoVersionGeneration()
-            throws InterruptedException, KeytoolException, IOException, ProcessException,
-            PackagerException, TransformException {
+    public void testNoVersionGeneration() throws Exception {
         when(packagingScope.getVersionName()).thenReturn("-1");
         when(packagingScope.getVersionCode()).thenReturn(-1);
 
         InstantRunSliceSplitApkBuilder instantRunSliceSplitApkBuilder =
                 new InstantRunSliceSplitApkBuilder(
-                    logger,
-                    project,
-                    instantRunBuildContext,
-                    androidBuilder,
-                    packagingScope,
-                    coreSigningConfig,
-                    aaptOptions,
-                    outputDirectory.getRoot(),
-                    supportDirectory.getRoot()) {
-            @Override
-            protected Aapt getAapt() {
-                return aapt;
-            }
-        };
+                        logger,
+                        project,
+                        buildContext,
+                        androidBuilder,
+                        fileCache,
+                        packagingScope,
+                        coreSigningConfig,
+                        AaptGeneration.AAPT_V2_DAEMON_MODE,
+                        new AaptOptions(null, false, null),
+                        outputDirectory.getRoot(),
+                        instantRunFolder,
+                        aaptTempFolder, /* runAapt2Serially */
+                        false) {
+                    @Override
+                    protected Aapt getAapt() {
+                        return aapt;
+                    }
+                };
 
         Map<String, Object> parameterInputs = instantRunSliceSplitApkBuilder.getParameterInputs();
         assertThat(parameterInputs).containsEntry("versionCode", -1);
@@ -242,7 +239,7 @@ public class InstantRunSplitApkBuilderTest {
                 new InstantRunSplitApkBuilder.DexFiles(files, "folderName");
 
         instantRunSliceSplitApkBuilder.generateSplitApk(dexFiles);
-        File folder = new File(supportDirectory.getRoot(), "folderName");
+        File folder = new File(instantRunFolder, "folderName");
         assertThat(folder.isDirectory()).isTrue();
         assertThat(folder.getName()).isEqualTo("folderName");
         File[] folderFiles = folder.listFiles();

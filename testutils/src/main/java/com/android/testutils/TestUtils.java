@@ -33,6 +33,26 @@ import static org.junit.Assert.assertTrue;
  * Utility methods to deal with loading the test data.
  */
 public class TestUtils {
+
+    /**
+     * Kotlin version that is used in new project templates and integration tests.
+     *
+     * <p>This version needs to be present in prebuilts for tests to pass.
+     *
+     * <p>This version should be checked into prebuilts (see tools/base/bazel/README.md) and in sync
+     * with the version in:
+     *
+     * <ul>
+     *   <li>buildSrc/base/dependencies.properties
+     *   <li>tools/base/third_party/BUILD (this is generated from dependencies.properties)
+     *   <li>tools/base/build-system/integration-test/BUILD
+     *   <li>tools/adt/idea/android/BUILD
+     *   <li>tools/base/.idea/libraries definition for kotlin-stdlib-jre8
+     *   <li>tools/idea/.idea/libraries definition for kotlin-stdlib-jre8
+     * </ul>
+     */
+    public static final String KOTLIN_VERSION_FOR_TESTS = "1.1.3-2";
+
     /**
      * Default timeout for the {@link #eventually(Runnable)} check.
      */
@@ -44,19 +64,11 @@ public class TestUtils {
     private static final long EVENTUALLY_CHECK_CYCLE_TIME_MS = 10;
 
     /**
-     * returns a File for the subfolder of the test resource data.
+     * Returns a File for the subfolder of the test resource data.
      *
-     * <p>This is basically {@code src/test/resources/testData/$name"}.
-     *
-     * <p>Note that this folder is relative to the root project which is where gradle
-     * sets the current working dir when running the tests.
-     *
-     * <p>If you need a full folder path, use {@link #getCanonicalRoot(String...)}.
-     *
-     * @param names the names of the subfolders.
-     *
-     * @return a File
+     * @deprecated Use {@link #getWorkspaceRoot()} or {@link #getWorkspaceFile(String)} instead.
      */
+    @Deprecated
     @NonNull
     public static File getRoot(String... names) {
         File root = new File("src/test/resources/testData/");
@@ -83,21 +95,6 @@ public class TestUtils {
         return root;
     }
 
-    /**
-     * returns a File for the subfolder of the test resource data.
-     *
-     * The full path is canonized.
-     * This is basically ".../src/test/resources/testData/$name".
-     *
-     * @param names the names of the subfolders.
-     *
-     * @return a File
-     */
-    public static File getCanonicalRoot(String... names) throws IOException {
-        File root = getRoot(names);
-        return root.getCanonicalFile();
-    }
-
     public static void deleteFile(File dir) {
         if (dir.isDirectory()) {
             File[] files = dir.listFiles();
@@ -113,13 +110,7 @@ public class TestUtils {
 
     public static File createTempDirDeletedOnExit() {
         final File tempDir = Files.createTempDir();
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                deleteFile(tempDir);
-            }
-        });
-
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> deleteFile(tempDir)));
         return tempDir;
     }
 
@@ -225,12 +216,16 @@ public class TestUtils {
         return file;
     }
 
+    /** Checks if tests were started by Bazel. */
+    public static boolean runningFromBazel() {
+        return System.getenv().containsKey("TEST_WORKSPACE");
+    }
+
     /**
-     * Return the SDK directory.
+     * Returns the SDK directory.
      *
      * @throws IllegalStateException if the current OS is not supported.
      * @throws IllegalArgumentException if the path results in a file not found.
-     *
      * @return a valid File object pointing at the SDK directory.
      */
     @NonNull
@@ -245,9 +240,19 @@ public class TestUtils {
         return getWorkspaceFile("prebuilts/studio/sdk/" + hostDir);
     }
 
+    /**
+     * Returns the path to checked-in NDK.
+     *
+     * @see #getSdk()
+     */
+    @NonNull
+    public static File getNdk() {
+        return new File(getSdk(), SdkConstants.FD_NDK);
+    }
+
     @NonNull
     public static String getLatestAndroidPlatform() {
-        return "android-25";
+        return "android-26";
     }
 
     /**
@@ -287,14 +292,23 @@ public class TestUtils {
 
     @NonNull
     public static String getDiff(@NonNull String before, @NonNull  String after) {
-        return getDiff(before.split("\n"), after.split("\n"));
+        return getDiff(before, after, 0);
+    }
+
+    @NonNull
+    public static String getDiff(@NonNull String before, @NonNull  String after, int windowSize) {
+        return getDiff(before.split("\n"), after.split("\n"), windowSize);
     }
 
     @NonNull
     public static String getDiff(@NonNull String[] before, @NonNull String[] after) {
+        return getDiff(before, after, 0);
+    }
+
+    public static String getDiff(@NonNull String[] before, @NonNull String[] after,
+            int windowSize) {
         // Based on the LCS section in http://introcs.cs.princeton.edu/java/96optimization/
         StringBuilder sb = new StringBuilder();
-
         int n = before.length;
         int m = after.length;
 
@@ -322,6 +336,15 @@ public class TestUtils {
                 sb.append(" +");
                 sb.append(Integer.toString(j + 1));
                 sb.append('\n');
+
+                if (windowSize > 0) {
+                    for (int context = Math.max(0, i - windowSize); context < i; context++) {
+                        sb.append("  ");
+                        sb.append(before[context]);
+                        sb.append("\n");
+                    }
+                }
+
                 while (i < n && j < m && !before[i].equals(after[j])) {
                     if (lcs[i + 1][j] >= lcs[i][j + 1]) {
                         sb.append('-');
@@ -339,6 +362,14 @@ public class TestUtils {
                         sb.append(after[j]);
                         sb.append('\n');
                         j++;
+                    }
+                }
+
+                if (windowSize > 0) {
+                    for (int context = i; context < Math.min(n, i + windowSize); context++) {
+                        sb.append("  ");
+                        sb.append(before[context]);
+                        sb.append("\n");
                     }
                 }
             }

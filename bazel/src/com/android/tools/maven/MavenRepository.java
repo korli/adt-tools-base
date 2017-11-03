@@ -18,6 +18,7 @@ package com.android.tools.maven;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -50,6 +51,13 @@ import org.eclipse.aether.resolution.DependencyResult;
  */
 public class MavenRepository {
 
+    private static final Map<String, String> EXTENSIONS_MAP =
+            ImmutableMap.of("bundle", "jar", "maven-plugin", "jar", "eclipse-plugin", "jar");
+
+    public static String getArtifactExtension(Model model) {
+        return EXTENSIONS_MAP.getOrDefault(model.getPackaging(), model.getPackaging());
+    }
+
     private final Path mRepoDirectory;
     private final ModelBuilder mModelBuilder;
     private final ModelResolver mModelResolver;
@@ -75,9 +83,10 @@ public class MavenRepository {
         return mRepoDirectory;
     }
 
-    public DefaultRepositorySystemSession getmRepositorySystemSession() {
+    public DefaultRepositorySystemSession getRepositorySystemSession() {
         return mRepositorySystemSession;
     }
+
 
     public Model getPomEffectiveModel(Path pomFile) {
         DefaultModelBuildingRequest request = new DefaultModelBuildingRequest();
@@ -94,7 +103,6 @@ public class MavenRepository {
         }
     }
 
-
     public Path getRelativePath(Artifact artifact) {
         return Paths.get(mLocalRepositoryManager.getPathForLocalArtifact(artifact));
     }
@@ -107,11 +115,34 @@ public class MavenRepository {
         return getPath(new DefaultArtifact(group, artifact, extension, version));
     }
 
-    public Path getJarPath(Model model) {
-        return getPath(model.getGroupId(),
+    private Path getPath(String group, String artifact, String classifier, String extension, String version) {
+        return getPath(new DefaultArtifact(group, artifact, classifier, extension, version));
+    }
+
+    public Path getArtifactPath(Model model, String classifier) {
+        return getPath(
+                model.getGroupId(),
                 model.getArtifactId(),
-                "jar",
+                classifier,
+                getArtifactExtension(model),
                 model.getVersion());
+    }
+
+    public Path getArtifactPath(Model model) {
+        return getPath(
+                model.getGroupId(),
+                model.getArtifactId(),
+                getArtifactExtension(model),
+                model.getVersion());
+    }
+
+    public Path getSourceArtifactPath(Model model) {
+        return getPath(new DefaultArtifact(
+                model.getGroupId(),
+                model.getArtifactId(),
+                "sources",
+                getArtifactExtension(model),
+                model.getVersion()));
     }
 
     public Map<String, Path> getExecutables(Model model) {

@@ -33,14 +33,16 @@ import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
 import com.android.build.api.transform.TransformOutputProvider;
-import com.android.build.gradle.internal.dsl.AaptOptions;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
 import com.android.build.gradle.internal.scope.PackagingScope;
 import com.android.builder.core.AndroidBuilder;
+import com.android.builder.internal.aapt.AaptOptions;
 import com.android.builder.packaging.PackagerException;
 import com.android.builder.sdk.TargetInfo;
+import com.android.builder.utils.FileCache;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.signing.KeytoolException;
 import com.android.sdklib.BuildToolInfo;
@@ -73,10 +75,9 @@ public class InstantRunDependenciesApkBuilderTest {
 
     @Mock Logger logger;
     @Mock Project project;
-    @Mock InstantRunBuildContext instantRunBuildContext;
+    @Mock InstantRunBuildContext buildContext;
     @Mock AndroidBuilder androidBuilder;
     @Mock CoreSigningConfig coreSigningConfig;
-    @Mock AaptOptions aaptOptions;
     @Mock PackagingScope packagingScope;
 
     @Mock TargetInfo targetInfo;
@@ -85,7 +86,7 @@ public class InstantRunDependenciesApkBuilderTest {
     @Rule public TemporaryFolder outputDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder supportDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder dexFileFolder = new TemporaryFolder();
-
+    @Rule public TemporaryFolder fileCacheDirectory = new TemporaryFolder();
 
     InstantRunDependenciesApkBuilder instantRunSliceSplitApkBuilder;
     final List<InstantRunSplitApkBuilder.DexFiles> dexFilesList =
@@ -103,34 +104,36 @@ public class InstantRunDependenciesApkBuilderTest {
     }
 
     @Before
-    public void setup() {
-        instantRunSliceSplitApkBuilder = new InstantRunDependenciesApkBuilder(
-                logger,
-                project,
-                instantRunBuildContext,
-                androidBuilder,
-                packagingScope,
-                coreSigningConfig,
-                aaptOptions,
-                outputDirectory.getRoot(),
-                supportDirectory.getRoot()) {
-            @NonNull
-            @Override
-            protected File generateSplitApk(@NonNull DexFiles dexFiles)
-                    throws IOException, KeytoolException, PackagerException, InterruptedException,
-                    ProcessException, TransformException {
-                dexFilesList.add(dexFiles);
-                return new File("/dev/null");
-            }
-        };
+    public void setup() throws IOException {
+        instantRunSliceSplitApkBuilder =
+                new InstantRunDependenciesApkBuilder(
+                        logger,
+                        project,
+                        buildContext,
+                        androidBuilder,
+                        FileCache.getInstanceWithSingleProcessLocking(fileCacheDirectory.getRoot()),
+                        packagingScope,
+                        coreSigningConfig,
+                        AaptGeneration.AAPT_V2_DAEMON_MODE,
+                        new AaptOptions(null, false, null),
+                        outputDirectory.getRoot(),
+                        supportDirectory.newFolder("instant-run"),
+                        supportDirectory.newFolder("aapt-temp")) {
+                    @NonNull
+                    @Override
+                    protected File generateSplitApk(@NonNull DexFiles dexFiles)
+                            throws IOException, KeytoolException, PackagerException,
+                                    InterruptedException, ProcessException, TransformException {
+                        dexFilesList.add(dexFiles);
+                        return new File("/dev/null");
+                    }
+                };
     }
 
     @Test
     public void testTransformInterface() {
-        assertThat(instantRunSliceSplitApkBuilder.getScopes()).containsExactly(
-                QualifiedContent.Scope.EXTERNAL_LIBRARIES,
-                QualifiedContent.Scope.PROJECT_LOCAL_DEPS,
-                QualifiedContent.Scope.SUB_PROJECTS_LOCAL_DEPS);
+        assertThat(instantRunSliceSplitApkBuilder.getScopes())
+                .containsExactly(QualifiedContent.Scope.EXTERNAL_LIBRARIES);
         assertThat(instantRunSliceSplitApkBuilder.getInputTypes()).containsExactly(
                 ExtendedContentType.DEX);
         assertThat(instantRunSliceSplitApkBuilder.isIncremental()).isTrue();

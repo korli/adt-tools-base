@@ -85,6 +85,18 @@ import java.util.Set;
  *          informational 'StopShip'
  *          // Use (or create) a baseline file for issues that should not be reported
  *          baseline file("lint-baseline.xml")
+ *          // Normally most lint checks are not run on test sources (except the checks
+ *          // dedicated to looking for mistakes in unit or instrumentation tests.) You can
+ *          // turn on normal lint checking in all sources with the following:
+ *          checkTestSources true
+ *          // Normally lint will skip generated sources, but you can turn it on with this flag
+ *          checkGeneratedSources true
+ *          // Normally lint will analyze all dependencies along with each module; this ensures
+ *          // that lint can correctly (for example) determine if a resource declared in a library
+ *          // is unused; checking only the library in isolation would not be able to identify this
+ *          // problem. However, this leads to quite a bit of extra computation; a library is
+ *          // analyzed repeatedly, for each module that it is used in.
+ *          checkDependencies false
  *     }
  * }
  * </pre>
@@ -142,6 +154,25 @@ public interface LintOptions {
     /** Returns whether lint should treat all warnings as errors */
     boolean isWarningsAsErrors();
 
+    /**
+     * Returns whether lint should run all checks on test sources, instead of just the
+     * lint checks that have been specifically written to include tests (e.g. checks
+     * looking for specific test errors, or checks that need to consider testing code
+     * such as the unused resource detector)
+     *
+     * @return true to check tests, defaults to false
+     * @since 2.4
+     */
+    boolean isCheckTestSources();
+
+    /**
+     * Returns whether lint should run checks on generated sources.
+     *
+     * @return true to check generated sources, defaults to false
+     * @since 2.4
+     */
+    boolean isCheckGeneratedSources();
+
     /** Returns whether lint should include explanations for issue errors. (Note that
      * HTML and XML reports intentionally do this unconditionally, ignoring this setting.) */
     boolean isExplainIssues();
@@ -190,6 +221,12 @@ public interface LintOptions {
      * If issues with severity "fatal" are found, the release build is aborted.
      */
     boolean isCheckReleaseBuilds();
+
+    /**
+     * Returns whether lint should check all dependencies too as part of its analysis. Default is
+     * false.
+     */
+    boolean isCheckDependencies();
 
     /**
      * Returns the baseline file to use, if any. The baseline file is

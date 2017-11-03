@@ -16,23 +16,14 @@
 
 package com.android.tools.perflib.vmtrace;
 
-import com.android.annotations.NonNull;
 import com.android.annotations.VisibleForTesting;
 import com.android.ddmlib.ByteBufferUtil;
 import com.google.common.base.Charsets;
-import com.google.common.collect.Maps;
 import com.google.common.io.Closeables;
 import com.google.common.primitives.UnsignedInts;
-
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Map;
-import java.util.Set;
 
 public class VmTraceParser {
     private static final int TRACE_MAGIC = 0x574f4c53; // 'SLOW'
@@ -43,42 +34,59 @@ public class VmTraceParser {
     private static final String HEADER_END = "*end";
 
     private static final String KEY_CLOCK = "clock";
-    private static final String KEY_DATA_OVERFLOW = "data-file-overflow";
-    private static final String KEY_VM = "vm";
 
     private final File mTraceFile;
 
-    private final VmTraceData.Builder mTraceDataBuilder;
-    private VmTraceData mTraceData;
+    private final VmTraceHandler mTraceDataHandler;
 
-    public VmTraceParser(File traceFile) {
+    private int mVersion;
+
+    private VmClockType mVmClockType;
+
+    public VmTraceParser(File traceFile, VmTraceHandler traceHandler) {
         if (!traceFile.exists()) {
             throw new IllegalArgumentException(
                     "Trace file " + traceFile.getAbsolutePath() + " does not exist.");
         }
         mTraceFile = traceFile;
-        mTraceDataBuilder = new VmTraceData.Builder();
+        mTraceDataHandler = traceHandler;
     }
 
     public void parse() throws IOException {
-        long headerLength = parseHeader(mTraceFile);
-        ByteBuffer buffer = ByteBufferUtil.mapFile(mTraceFile, headerLength, ByteOrder.LITTLE_ENDIAN);
-        parseData(buffer);
-        computeTimingStatistics();
-    }
-
-    public VmTraceData getTraceData() {
-        if (mTraceData == null) {
-            mTraceData = mTraceDataBuilder.build();
+        ByteBuffer buffer;
+        if (isStreamingTrace(mTraceFile)) {
+            StreamingTraceParser streamingTraceParser = new StreamingTraceParser(mTraceFile);
+            buffer = streamingTraceParser.parse();
+        } else {
+            long headerLength = parseHeader(mTraceFile);
+            buffer = ByteBufferUtil.mapFile(mTraceFile, headerLength, ByteOrder.LITTLE_ENDIAN);
         }
-
-        return mTraceData;
+        parseData(buffer);
     }
 
-    static final int PARSE_VERSION = 0;
-    static final int PARSE_THREADS = 1;
-    static final int PARSE_METHODS = 2;
-    static final int PARSE_OPTIONS = 4;
+    private static boolean isStreamingTrace(File file) throws IOException {
+        BufferedReader in =
+                new BufferedReader(
+                        new InputStreamReader(new FileInputStream(file), Charsets.US_ASCII));
+        try {
+            String firstLine = in.readLine();
+            if (firstLine != null && firstLine.startsWith(HEADER_SECTION_VERSION)) {
+                // Trace file not obtained by using streaming mode
+                return false;
+            }
+        } finally {
+            in.close();
+        }
+        return true;
+    }
+
+    // The values of PARSE_METHODS, PARSE_THREADS and PARSE_SUMMARY match the corresponding value in trace files,
+    // which are written by Android Runtime (ART) code. Please do not change their values without a matching change to ART.
+    private static final int PARSE_VERSION = 0;
+    private static final int PARSE_METHODS = 1;
+    private static final int PARSE_THREADS = 2;
+    private static final int PARSE_SUMMARY = 3;
+    private static final int PARSE_OPTIONS = 4;
 
     /** Parses the trace file header and returns the offset in the file where the header ends. */
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
@@ -87,7 +95,6 @@ public class VmTraceParser {
         BufferedReader in = null;
         try {
             in = new BufferedReader(new InputStreamReader(new FileInputStream(f), Charsets.US_ASCII));
-
             int mode = PARSE_VERSION;
             String line;
             while (true) {
@@ -120,7 +127,8 @@ public class VmTraceParser {
 
                 switch (mode) {
                     case PARSE_VERSION:
-                        mTraceDataBuilder.setVersion(Integer.decode(line));
+                        mVersion = Integer.decode(line);
+                        mTraceDataHandler.setVersion(mVersion);
                         mode = PARSE_OPTIONS;
                         break;
                     case PARSE_THREADS:
@@ -153,22 +161,18 @@ public class VmTraceParser {
         if (tokens.length == 2) {
             String key = tokens[0];
             String value = tokens[1];
+            mTraceDataHandler.setProperty(key, value);
 
             if (key.equals(KEY_CLOCK)) {
                 if (value.equals("thread-cpu")) {
-                    mTraceDataBuilder.setVmClockType(VmTraceData.VmClockType.THREAD_CPU);
+                    mVmClockType = VmClockType.THREAD_CPU;
                 } else if (value.equals("wall")) {
-                    mTraceDataBuilder.setVmClockType(VmTraceData.VmClockType.WALL);
+                    mVmClockType = VmClockType.WALL;
                 } else if (value.equals("dual")) {
-                    mTraceDataBuilder.setVmClockType(VmTraceData.VmClockType.DUAL);
+                    mVmClockType = VmClockType.DUAL;
                 }
-            } else if (key.equals(KEY_DATA_OVERFLOW)) {
-                mTraceDataBuilder.setDataFileOverflow(Boolean.parseBoolean(value));
-            } else if (key.equals(KEY_VM)) {
-                mTraceDataBuilder.setVm(value);
-            } else {
-                mTraceDataBuilder.setProperty(key, value);
             }
+
         }
     }
 
@@ -182,7 +186,7 @@ public class VmTraceParser {
         try {
             int id = Integer.decode(line.substring(0, index));
             String name = line.substring(index).trim();
-            mTraceDataBuilder.addThread(id, name);
+            mTraceDataHandler.addThread(id, name);
         } catch (NumberFormatException ignored) {
         }
     }
@@ -217,8 +221,8 @@ public class VmTraceParser {
             }
         }
 
-        mTraceDataBuilder.addMethod(id, new MethodInfo(id, className, methodName, signature,
-                pathname, lineNumber));
+        mTraceDataHandler.addMethod(
+                id, new MethodInfo(id, className, methodName, signature, pathname, lineNumber));
     }
 
     private String constructPathname(String className, String pathname) {
@@ -263,8 +267,7 @@ public class VmTraceParser {
     private void parseMethodTraceData(ByteBuffer buffer, int recordSize) {
         int methodId;
         int threadId;
-        int version = mTraceDataBuilder.getVersion();
-        VmTraceData.VmClockType vmClockType = mTraceDataBuilder.getVmClockType();
+        int version = mVersion;
         while (buffer.hasRemaining()) {
             int threadTime;
             int globalTime;
@@ -274,7 +277,7 @@ public class VmTraceParser {
             threadId = version == 1 ? buffer.get() : buffer.getShort();
             methodId = buffer.getInt();
 
-            switch (vmClockType) {
+            switch (mVmClockType) {
                 case WALL:
                     globalTime = buffer.getInt();
                     threadTime = globalTime;
@@ -312,10 +315,10 @@ public class VmTraceParser {
                     throw new RuntimeException(
                             "Invalid trace action, expected one of method entry, exit or unroll.");
             }
-            methodId = methodId & ~0x03;
+            methodId &= ~0x03;
 
-            mTraceDataBuilder.addMethodAction(threadId, UnsignedInts.toLong(methodId), methodAction,
-                    threadTime, globalTime);
+            mTraceDataHandler.addMethodAction(
+                    threadId, UnsignedInts.toLong(methodId), methodAction, threadTime, globalTime);
         }
     }
 
@@ -332,35 +335,23 @@ public class VmTraceParser {
      * @return record size for each data entry following the header
      */
     private int readDataFileHeader(ByteBuffer buffer) {
-        int magic = buffer.getInt();
-        if (magic != TRACE_MAGIC) {
-            String msg = String.format("Error: magic number mismatch; got 0x%x, expected 0x%x\n",
-                    magic, TRACE_MAGIC);
-            throw new RuntimeException(msg);
-        }
-
+        validateMagic(buffer.getInt());
         // read version
         int version = buffer.getShort();
-        if (version != mTraceDataBuilder.getVersion()) {
-            String msg = String.format(
-                    "Error: version number mismatch; got %d in data header but %d in options\n",
-                    version, mTraceData.getVersion());
+        if (version != mVersion) {
+            String msg =
+                    String.format(
+                            "Error: version number mismatch; got %d in data header but %d in options\n",
+                            version, mVersion);
             throw new RuntimeException(msg);
         }
-        if (version < 1 || version > 3) {
-            String msg = String.format(
-                    "Error: unsupported trace version number %d.  "
-                            + "Please use a newer version of TraceView to read this file.",
-                    version);
-            throw new RuntimeException(msg);
-        }
+        validateTraceVersion(version);
 
         // read offset
         int offsetToData = buffer.getShort() - 16;
 
         // read startWhen
-        mTraceDataBuilder.setStartTimeUs(buffer.getLong());
-
+        mTraceDataHandler.setStartTimeUs(buffer.getLong());
 
         // read record size
         int recordSize;
@@ -385,59 +376,207 @@ public class VmTraceParser {
         return recordSize;
     }
 
-    private void computeTimingStatistics() {
-        VmTraceData data = getTraceData();
-
-        ProfileDataBuilder builder = new ProfileDataBuilder();
-        for (ThreadInfo thread : data.getThreads()) {
-            Call c = thread.getTopLevelCall();
-            if (c == null) {
-                continue;
-            }
-
-            builder.computeCallStats(c, null, thread);
-        }
-
-        for (Long methodId : builder.getMethodsWithProfileData()) {
-            MethodInfo method = data.getMethod(methodId);
-            method.setProfileData(builder.getProfileData(methodId));
+    private static void validateTraceVersion(int version) {
+        if (version < 1 || version > 3) {
+            String msg =
+                    String.format(
+                            "Error: unsupported trace version number %d.  "
+                                    + "Please use a newer version of TraceView to read this file.",
+                            version);
+            throw new RuntimeException(msg);
         }
     }
 
-    private static class ProfileDataBuilder {
-        /** Maps method ids to their corresponding method data builders */
-        private final Map<Long, MethodProfileData.Builder> mBuilderMap = Maps.newHashMap();
-
-        public void computeCallStats(Call c, Call parent, ThreadInfo thread) {
-            long methodId = c.getMethodId();
-            MethodProfileData.Builder builder = getProfileDataBuilder(methodId);
-            builder.addCallTime(c, parent, thread);
-            builder.incrementInvocationCount(c, parent, thread);
-            if (c.isRecursive()) {
-                builder.setRecursive();
-            }
-
-            for (Call callee: c.getCallees()) {
-                computeCallStats(callee, c, thread);
-            }
-        }
-
-        @NonNull
-        private MethodProfileData.Builder getProfileDataBuilder(long methodId) {
-            MethodProfileData.Builder builder = mBuilderMap.get(methodId);
-            if (builder == null) {
-                builder = new MethodProfileData.Builder();
-                mBuilderMap.put(methodId, builder);
-            }
-            return builder;
-        }
-
-        public Set<Long> getMethodsWithProfileData() {
-            return mBuilderMap.keySet();
-        }
-
-        public MethodProfileData getProfileData(Long methodId) {
-            return mBuilderMap.get(methodId).build();
+    private static void validateMagic(int magic) {
+        if (magic != TRACE_MAGIC) {
+            String msg =
+                    String.format(
+                            "Error: magic number mismatch; got 0x%x, expected 0x%x\n",
+                            magic, TRACE_MAGIC);
+            throw new RuntimeException(msg);
         }
     }
+
+    /**
+     * Traces obtained using streaming mode have a different format than the ones that are not. This
+     * class contains a method to parse streaming traces as well as some auxiliary methods.
+     */
+    private class StreamingTraceParser {
+        private static final int STREAMING_TRACE_VERSION_MASK = 0xF0;
+
+        private File mTraceFile;
+        private DataInputStream mInputStream;
+        private ByteArrayOutputStream mByteOutputStream;
+
+        private StreamingTraceParser(File streamingTraceFile) throws IOException {
+            mTraceFile = streamingTraceFile;
+            mInputStream = new DataInputStream(new FileInputStream(mTraceFile));
+            mByteOutputStream = new ByteArrayOutputStream();
+        }
+
+        /**
+         * Parses the streaming trace file. This method reads a streaming trace file, sets the
+         * header properties to {@link #mTraceDataHandler}, and returns a {@link ByteBuffer}
+         * containing the data file header and the method trace data corresponding to the trace.
+         */
+        private ByteBuffer parse() throws IOException {
+            try {
+                // Read the magic, validate it and copy it to data file header
+                int magic = readNumberLE(4);
+                validateMagic(magic);
+                writeNumberLE(magic, 4);
+
+                // Read the version, apply the mask, validate it and copy it to data file header
+                int version = readNumberLE(2);
+                version ^= STREAMING_TRACE_VERSION_MASK;
+                validateTraceVersion(version);
+                writeNumberLE(version, 2);
+                // Set the version in the trace data builder
+                mVersion = version;
+                mTraceDataHandler.setVersion(version);
+
+                // Read the offset and copy it to data file header
+                int offsetToData = readNumberLE(2) - 16;
+                writeNumberLE(offsetToData + 16, 2);
+
+                // Copy startWhen to data file header
+                copyBytes(8);
+
+                // Determine the record size according to the version
+                int recordSize;
+                switch (version) {
+                    case 1:
+                        recordSize = 9;
+                        break;
+                    case 2:
+                        recordSize = 10;
+                        break;
+                    default:
+                        // if using version 3, read the record size from trace file and copy it to data file header
+                        recordSize = readNumberLE(2);
+                        writeNumberLE(recordSize, 2);
+                        offsetToData -= 2;
+                        break;
+                }
+                // copy offsetToData bytes to data file header
+                copyBytes(offsetToData);
+
+                try {
+                    while (true) {
+                        int threadId = readNumberLE(2);
+
+                        // Thread id equals to 0 indicate we should read a special code next.
+                        // This code will indicate the action that should be made (e.g. parse a method)
+                        if (threadId == 0) {
+                            int code = mInputStream.readUnsignedByte();
+                            if (code == PARSE_METHODS) {
+                                int methodLineLength = readNumberLE(2);
+                                parseMethod(readString(methodLineLength));
+                            } else if (code == PARSE_THREADS) {
+                                int tid = readNumberLE(2);
+                                int threadLineLength = readNumberLE(2);
+                                String name = readString(threadLineLength);
+                                mTraceDataHandler.addThread(tid, name);
+                            } else if (code == PARSE_SUMMARY) {
+                                int summaryLength = readNumberLE(4);
+                                String summary = readString(summaryLength);
+                                processSummary(summary);
+                                break;
+                            } else {
+                                throw new RuntimeException(
+                                        "Invalid trace format: got an invalid code.");
+                            }
+                        } else {
+                            // Regular data. Just copy it to method trace data.
+                            writeNumberLE(threadId, 2);
+                            copyBytes(recordSize - 2);
+                        }
+                    }
+                } catch (EOFException e) {
+                    // End of file reached
+                }
+
+            } finally {
+                try {
+                    Closeables.close(mInputStream, true /* swallowIOException */);
+                } catch (IOException e) {
+                    // cannot happen
+                }
+            }
+            return ByteBuffer.wrap(mByteOutputStream.toByteArray()).order(ByteOrder.LITTLE_ENDIAN);
+        }
+
+        /**
+         * The summary in streaming trace files is similar to the header of other trace formats.
+         * It's used to parse the trace options and some additional threads.
+         */
+        private void processSummary(String summary) {
+            String[] summaryLines = summary.split("\n");
+            // First two lines should be '*version' and the version number respectively
+            int lineIndex = 2;
+            assert summaryLines.length > lineIndex;
+            String line = summaryLines[lineIndex];
+
+            // Iterate and parse each line until we reach the end of the options section of the summary,
+            // which is currently the beginning of the threads section
+            while (lineIndex < summaryLines.length && !line.equals("*threads\n")) {
+                parseOption(summaryLines[lineIndex]);
+                lineIndex++;
+            }
+        }
+
+        /**
+         * Reads a given number of bytes from the input stream and writes them to the output stream.
+         */
+        private void copyBytes(int numBytes) throws IOException {
+            byte[] bytesToCopy = new byte[numBytes];
+            int bytesRead = mInputStream.read(bytesToCopy);
+            if (bytesRead != numBytes) {
+                String msg =
+                        String.format(
+                                "Invalid trace format: expected %d bytes, but found %d\n",
+                                numBytes, bytesRead);
+                throw new RuntimeException(msg);
+            }
+            mByteOutputStream.write(bytesToCopy);
+        }
+
+        /**
+         * Reads a given number of bytes from the input stream, converts them to char and returns
+         * the resulting string.
+         */
+        private String readString(int length) throws IOException {
+            StringBuilder sb = new StringBuilder();
+            while (length-- > 0) {
+                sb.append((char) mInputStream.readUnsignedByte());
+            }
+            return sb.toString();
+        }
+
+        /**
+         * Reads a given number of bytes from the input stream and converts the result to an integer
+         * represented in little-endian order.
+         */
+        private int readNumberLE(int numBytes) throws IOException {
+            int leNumber = 0;
+            for (int i = 0; i < numBytes; i++) {
+                leNumber += mInputStream.readUnsignedByte() << (i * 8);
+            }
+            return leNumber;
+        }
+
+        /**
+         * Converts a number to little-endian representation (given a certain number of bytes) and
+         * writes it to the output stream.
+         */
+        private void writeNumberLE(int value, int numBytes) throws IOException {
+            byte[] intBytes = new byte[numBytes];
+            for (int i = 0; i < numBytes; i++) {
+                intBytes[i] = (byte) ((value >> (i * 8)) & 0xFF);
+            }
+            mByteOutputStream.write(intBytes);
+        }
+    }
+
+
 }

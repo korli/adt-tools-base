@@ -18,7 +18,7 @@ package com.android.build.gradle.internal.pipeline;
 
 import static com.android.build.api.transform.QualifiedContent.DefaultContentType.CLASSES;
 import static com.android.build.api.transform.QualifiedContent.DefaultContentType.RESOURCES;
-import static com.android.build.gradle.internal.pipeline.ExtendedContentType.JACK;
+import static com.android.build.gradle.internal.pipeline.ExtendedContentType.NATIVE_LIBS;
 import static com.android.utils.StringHelper.capitalize;
 
 import com.android.annotations.NonNull;
@@ -27,13 +27,13 @@ import com.android.annotations.VisibleForTesting;
 import com.android.build.api.transform.QualifiedContent;
 import com.android.build.api.transform.QualifiedContent.ContentType;
 import com.android.build.api.transform.QualifiedContent.Scope;
+import com.android.build.api.transform.QualifiedContent.ScopeType;
 import com.android.build.api.transform.Transform;
 import com.android.build.gradle.internal.InternalScope;
 import com.android.build.gradle.internal.TaskFactory;
 import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.AndroidTaskRegistry;
 import com.android.build.gradle.internal.scope.TransformVariantScope;
-import com.android.build.gradle.tasks.JackPreDexTransform;
 import com.android.builder.core.ErrorReporter;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.SyncIssue;
@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.gradle.api.Project;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
@@ -72,66 +73,71 @@ public class TransformManager extends FilterableStreamCollection {
     public static final Set<ContentType> CONTENT_CLASS = ImmutableSet.of(CLASSES);
     public static final Set<ContentType> CONTENT_JARS = ImmutableSet.of(CLASSES, RESOURCES);
     public static final Set<ContentType> CONTENT_RESOURCES = ImmutableSet.of(RESOURCES);
-    public static final Set<ContentType> CONTENT_NATIVE_LIBS = ImmutableSet.of(
-            ExtendedContentType.NATIVE_LIBS);
-    public static final Set<ContentType> CONTENT_DEX = ImmutableSet.of(
-            ExtendedContentType.DEX);
-    public static final Set<ContentType> CONTENT_JACK = ImmutableSet.of(JACK);
-    public static final Set<ContentType> DATA_BINDING_ARTIFACT = ImmutableSet.of(
-            ExtendedContentType.DATA_BINDING, CLASSES);
-    public static final Set<Scope> SCOPE_FULL_PROJECT = Sets.immutableEnumSet(
-            Scope.PROJECT,
-            Scope.PROJECT_LOCAL_DEPS,
-            Scope.SUB_PROJECTS,
-            Scope.SUB_PROJECTS_LOCAL_DEPS,
-            Scope.EXTERNAL_LIBRARIES);
-    public static final Set<QualifiedContent.ScopeType> SCOPE_FULL_INSTANT_RUN_PROJECT =
-            new ImmutableSet.Builder<QualifiedContent.ScopeType>()
+    public static final Set<ContentType> CONTENT_NATIVE_LIBS =
+            ImmutableSet.of(NATIVE_LIBS);
+    public static final Set<ContentType> CONTENT_DEX = ImmutableSet.of(ExtendedContentType.DEX);
+    public static final Set<ContentType> DATA_BINDING_ARTIFACT =
+            ImmutableSet.of(ExtendedContentType.DATA_BINDING);
+    public static final Set<ScopeType> PROJECT_ONLY = ImmutableSet.of(Scope.PROJECT);
+    public static final Set<Scope> SCOPE_FULL_PROJECT =
+            Sets.immutableEnumSet(
+                    Scope.PROJECT,
+                    Scope.SUB_PROJECTS,
+                    Scope.EXTERNAL_LIBRARIES);
+    public static final Set<ScopeType> SCOPE_FULL_WITH_IR_FOR_DEXING =
+            new ImmutableSet.Builder<ScopeType>()
                     .addAll(SCOPE_FULL_PROJECT)
                     .add(InternalScope.MAIN_SPLIT)
                     .build();
-    public static final Set<Scope> SCOPE_FULL_LIBRARY = Sets.immutableEnumSet(
-            Scope.PROJECT,
-            Scope.PROJECT_LOCAL_DEPS);
+    public static final Set<ScopeType> SCOPE_FULL_LIBRARY_WITH_LOCAL_JARS =
+            ImmutableSet.of(Scope.PROJECT, InternalScope.LOCAL_DEPS);
 
+    @NonNull
+    private final Project project;
     @NonNull
     private final AndroidTaskRegistry taskRegistry;
     @NonNull
     private final ErrorReporter errorReporter;
     @NonNull
     private final Logger logger;
+    @NonNull
+    private final Recorder recorder;
 
     /**
      * These are the streams that are available for new Transforms to consume.
      *
-     * Once a new transform is added, the streams that it consumes are removed from this list,
+     * <p>Once a new transform is added, the streams that it consumes are removed from this list,
      * and the streams it produces are put instead.
      *
-     * When all the transforms have been added, the remaining streams should be consumed by
+     * <p>When all the transforms have been added, the remaining streams should be consumed by
      * standard Tasks somehow.
      *
      * @see #getStreams(StreamFilter)
      */
-    @NonNull
-    private final List<TransformStream> streams = Lists.newArrayList();
+    @NonNull private final List<TransformStream> streams = Lists.newArrayList();
     @NonNull
     private final List<Transform> transforms = Lists.newArrayList();
-    @NonNull private final Recorder recorder;
 
     public TransformManager(
+            @NonNull Project project,
             @NonNull AndroidTaskRegistry taskRegistry,
             @NonNull ErrorReporter errorReporter,
             @NonNull Recorder recorder) {
+        this.project = project;
         this.taskRegistry = taskRegistry;
         this.errorReporter = errorReporter;
         this.recorder = recorder;
         this.logger = Logging.getLogger(TransformManager.class);
-
     }
 
     @NonNull
     public AndroidTaskRegistry getTaskRegistry() {
         return taskRegistry;
+    }
+
+    @Override
+    Project getProject() {
+        return project;
     }
 
     public void addStream(@NonNull TransformStream stream) {
@@ -251,13 +257,6 @@ public class TransformManager extends FilterableStreamCollection {
                                 recorder,
                                 callback));
 
-        for (TransformStream s : inputStreams) {
-            task.dependsOn(taskFactory, s.getDependencies());
-        }
-        for (TransformStream s : referencedStreams) {
-            task.dependsOn(taskFactory, s.getDependencies());
-        }
-
         return Optional.ofNullable(task);
     }
 
@@ -341,14 +340,22 @@ public class TransformManager extends FilterableStreamCollection {
                     // first the stream that gets consumed. It consumes only the common types/scopes
                     inputStreams.add(stream.makeRestrictedCopy(commonTypes, commonScopes));
 
-                    // now we'll have a second stream, that's left for consumption later on.
+                    // Now we could have two more streams. One with the requestedScope but the remainingTypes, and the other one with the remaining scopes and all the types.
                     // compute remaining scopes/types.
-                    Sets.SetView<ContentType> remainingTypes = Sets.difference(availableTypes, commonTypes);
+                    Sets.SetView<ContentType> remainingTypes =
+                            Sets.difference(availableTypes, commonTypes);
                     Sets.SetView<? super Scope> remainingScopes = Sets.difference(availableScopes, commonScopes);
 
-                    oldStreams.add(stream.makeRestrictedCopy(
-                            remainingTypes.isEmpty() ? availableTypes : remainingTypes.immutableCopy(),
-                            remainingScopes.isEmpty() ? availableScopes : remainingScopes.immutableCopy()));
+                    if (!remainingTypes.isEmpty()) {
+                        oldStreams.add(
+                                stream.makeRestrictedCopy(
+                                        remainingTypes.immutableCopy(), availableScopes));
+                    }
+                    if (!remainingScopes.isEmpty()) {
+                        oldStreams.add(
+                                stream.makeRestrictedCopy(
+                                        availableTypes, remainingScopes.immutableCopy()));
+                    }
                 } else {
                     // stream is an exact match (or at least subset) for the request,
                     // so we add it as it.
@@ -375,12 +382,14 @@ public class TransformManager extends FilterableStreamCollection {
         streams.addAll(oldStreams);
 
         // create the output
-        IntermediateStream outputStream = IntermediateStream.builder()
-                .addContentTypes(outputTypes)
-                .addScopes(requestedScopes)
-                .setRootLocation(outRootFolder)
-                .setDependency(taskName)
-                .build();
+        IntermediateStream outputStream =
+                IntermediateStream.builder(
+                                project, transform.getName() + "-" + scope.getFullVariantName())
+                        .addContentTypes(outputTypes)
+                        .addScopes(requestedScopes)
+                        .setRootLocation(outRootFolder)
+                        .setTaskName(taskName)
+                        .build();
         // and add it to the list of available streams for next transforms.
         streams.add(outputStream);
 
@@ -427,8 +436,7 @@ public class TransformManager extends FilterableStreamCollection {
 
         // check some scopes are not consumed.
         Set<? super Scope> scopes = transform.getScopes();
-        // Allow Jack transform to consume provided classes as the .jack files are needed.
-        if (scopes.contains(Scope.PROVIDED_ONLY) && !isJackRuntimeLib(transform)) {
+        if (scopes.contains(Scope.PROVIDED_ONLY)) {
             errorReporter.handleSyncError(null, SyncIssue.TYPE_GENERIC,
                     String.format("PROVIDED_ONLY scope cannot be consumed by Transform '%1$s'",
                             transform.getName()));
@@ -442,8 +450,43 @@ public class TransformManager extends FilterableStreamCollection {
 
         }
 
+        if (!transform
+                .getClass()
+                .getCanonicalName()
+                .startsWith("com.android.build.gradle.internal.transforms")) {
+            checkScopeDeprecation(transform.getScopes(), transform.getName());
+            checkScopeDeprecation(transform.getReferencedScopes(), transform.getName());
+        }
 
         return true;
+    }
+
+    @SuppressWarnings("deprecation")
+    private void checkScopeDeprecation(
+            @NonNull Set<? super Scope> scopes, @NonNull String transformName) {
+        if (scopes.contains(Scope.PROJECT_LOCAL_DEPS)) {
+            final String message =
+                    String.format(
+                            "Transform '%1$s' uses scope %2$s which is deprecated and replaced with %3$s",
+                            transformName,
+                            Scope.PROJECT_LOCAL_DEPS.name(),
+                            Scope.EXTERNAL_LIBRARIES.name());
+            if (!scopes.contains(Scope.EXTERNAL_LIBRARIES)) {
+                errorReporter.handleSyncError(null, SyncIssue.TYPE_GENERIC, message);
+            }
+        }
+
+        if (scopes.contains(Scope.SUB_PROJECTS_LOCAL_DEPS)) {
+            final String message =
+                    String.format(
+                            "Transform '%1$s' uses scope %2$s which is deprecated and replaced with %3$s",
+                            transformName,
+                            Scope.SUB_PROJECTS_LOCAL_DEPS.name(),
+                            Scope.EXTERNAL_LIBRARIES.name());
+            if (!scopes.contains(Scope.EXTERNAL_LIBRARIES)) {
+                errorReporter.handleSyncError(null, SyncIssue.TYPE_GENERIC, message);
+            }
+        }
     }
 
     private boolean checkContentTypes(
@@ -459,10 +502,5 @@ public class TransformManager extends FilterableStreamCollection {
             }
         }
         return true;
-    }
-
-    private static boolean isJackRuntimeLib(@NonNull Transform transform) {
-        return (transform instanceof JackPreDexTransform)
-                && ((JackPreDexTransform) transform).isForRuntimeLibs();
     }
 }

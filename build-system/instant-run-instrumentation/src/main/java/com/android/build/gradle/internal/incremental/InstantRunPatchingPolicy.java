@@ -20,9 +20,7 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.AndroidProject;
 import com.android.sdklib.AndroidVersion;
-import com.google.common.base.Strings;
 
-import java.util.Locale;
 
 /**
  * Patching policy for delivering incremental code changes and triggering a cold start (application
@@ -38,19 +36,19 @@ public enum InstantRunPatchingPolicy {
     PRE_LOLLIPOP(DexPackagingPolicy.STANDARD, false /* useMultidex */),
 
     /**
-     * For Lollipop and before N, the application will be split in shards of dex files upon initial
-     * build and packaged as a native multi dex application. Each incremental changes will trigger
-     * rebuilding the affected shard dex files. Such dex files will be pushed on the device using
-     * the embedded micro-server and installed by it.
+     * For L and above, each shard dex file described above will be packaged in a single pure split
+     * APK that will be pushed and installed on the device using adb install-multiple commands.
      */
-    MULTI_DEX(DexPackagingPolicy.INSTANT_RUN_SHARDS_IN_SINGLE_APK, true /* useMultidex */),
+    MULTI_APK(DexPackagingPolicy.INSTANT_RUN_MULTI_APK, true /* useMultidex */),
 
     /**
-     * For N and above, each shard dex file described above will be packaged in a single pure
-     * split APK that will be pushed and installed on the device using adb install-multiple
-     * commands.
+     * For O and above, we ship the resources in a separate APK from the main APK.
+     *
+     * <p>In a near future, this can be merged with the {@link #MULTI_APK} case but - we need to
+     * test this thoroughly back to 21. - we need aapt2 in the stable build tools to support all
+     * cases.
      */
-    MULTI_APK(DexPackagingPolicy.INSTANT_RUN_MULTI_APK, true /* useMultidex */);
+    MULTI_APK_SEPARATE_RESOURCES(DexPackagingPolicy.INSTANT_RUN_MULTI_APK, true /* useMultidex */);
 
     @NonNull
     private final DexPackagingPolicy dexPatchingPolicy;
@@ -68,6 +66,14 @@ public enum InstantRunPatchingPolicy {
         return useMultiDex;
     }
 
+    public static boolean useMultiApk(@Nullable InstantRunPatchingPolicy subject) {
+        return subject != null && subject.useMultiApk();
+    }
+
+    public boolean useMultiApk() {
+        return this == MULTI_APK_SEPARATE_RESOURCES || this == MULTI_APK;
+    }
+
     /**
      * Returns the dex packaging policy for this patching policy. There can be variations depending
      * on the target platforms.
@@ -82,38 +88,24 @@ public enum InstantRunPatchingPolicy {
      * Returns the patching policy following the {@link AndroidProject#PROPERTY_BUILD_API} value
      * passed by Android Studio.
      *
-     * @param featureLevel the feature level of the target device
-     * @param coldswapMode desired coldswap mode optionally provided.
+     * @param androidVersion the android version of the target device
+     * @param useAapt2OrAbove use aapt2 or above to process resources.
      * @return a {@link InstantRunPatchingPolicy} instance.
      */
     @NonNull
     public static InstantRunPatchingPolicy getPatchingPolicy(
-            int featureLevel,
-            @Nullable String coldswapMode) {
+            AndroidVersion androidVersion,
+            boolean useAapt2OrAbove,
+            boolean createSeparateApkForResources) {
 
-        if (featureLevel < AndroidVersion.ART_RUNTIME.getFeatureLevel()) {
+        if (androidVersion.getFeatureLevel() < AndroidVersion.ART_RUNTIME.getFeatureLevel()) {
             return PRE_LOLLIPOP;
         } else {
-            // whe dealing with Lollipop or Marshmallow, by default, we use MULTI_DEX
-            // , but starting with 24, use MULT_APK
-            InstantRunPatchingPolicy defaultModeForArchitecture =
-                    featureLevel < 24 ? MULTI_DEX : MULTI_APK;
-
-            if (Strings.isNullOrEmpty(coldswapMode)) {
-                return defaultModeForArchitecture;
-            }
-            // coldswap mode was provided, it trumps everything
-            ColdswapMode coldswap = ColdswapMode.valueOf(coldswapMode.toUpperCase(Locale.US));
-            switch(coldswap) {
-                case MULTIAPK: return MULTI_APK;
-                case MULTIDEX: return MULTI_DEX;
-                case AUTO:
-                    return defaultModeForArchitecture;
-                case DEFAULT:
-                    return defaultModeForArchitecture;
-                default:
-                    throw new RuntimeException("Cold-swap case not handled " + coldswap);
-            }
+            return androidVersion.getFeatureLevel() >= AndroidVersion.VersionCodes.O
+                            && useAapt2OrAbove
+                            && createSeparateApkForResources
+                    ? MULTI_APK_SEPARATE_RESOURCES
+                    : MULTI_APK;
         }
     }
 

@@ -22,20 +22,18 @@ import static com.android.SdkConstants.TAG_USES_PERMISSION_SDK_M;
 import static com.android.tools.lint.checks.AnnotationDetectorTest.SUPPORT_ANNOTATIONS_JAR_BASE64_GZIP;
 import static com.android.tools.lint.checks.SupportAnnotationDetector.PERMISSION_ANNOTATION;
 
+import com.android.annotations.Nullable;
 import com.android.tools.lint.ExternalAnnotationRepository;
 import com.android.tools.lint.ExternalAnnotationRepositoryTest;
 import com.android.tools.lint.checks.infrastructure.ProjectDescription;
 import com.android.tools.lint.client.api.JavaParser.ResolvedAnnotation;
 import com.android.tools.lint.client.api.JavaParser.ResolvedMethod;
 import com.android.tools.lint.detector.api.Detector;
-import java.io.IOException;
 
 @SuppressWarnings("all") // Lots of test sample projects with faulty code
 public class SupportAnnotationDetectorTest extends AbstractCheckTest {
 
-    private static final boolean SDK_ANNOTATIONS_AVAILABLE =
-            new SupportAnnotationDetectorTest().createClient().findResource(
-            ExternalAnnotationRepository.SDK_ANNOTATIONS_PATH) != null;
+    private static final boolean SDK_ANNOTATIONS_AVAILABLE = true;
 
     @Override
     protected Detector getDetector() {
@@ -514,6 +512,25 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 ));
     }
 
+    public void testTypeDef37324044() {
+        // Regression test for issue 37324044
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import java.util.Calendar;\n"
+                        + "\n"
+                        + "public class IntDefTest {\n"
+                        + "    public void test() {\n"
+                        + "        Calendar.getInstance().get(Calendar.DAY_OF_MONTH);\n"
+                        + "    }\n"
+                        + "}\n"),
+                mSupportClasspath,
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
     public void testColorInt() throws Exception {
         // Needs updated annotations!
         assertEquals((SDK_ANNOTATIONS_AVAILABLE ? ""
@@ -715,13 +732,13 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
     }
 
     public void testResourceType() throws Exception {
-        assertEquals((SDK_ANNOTATIONS_AVAILABLE ? ""
+        assertEquals(""
                 + "src/p1/p2/Flow.java:13: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        resources.getDrawable(10); // ERROR\n"
                 + "                              ~~\n"
                 + "src/p1/p2/Flow.java:18: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        resources.getDrawable(R.string.my_string); // ERROR\n"
-                + "                              ~~~~~~~~~~~~~~~~~~\n" : "")
+                + "                              ~~~~~~~~~~~~~~~~~~\n"
                 + "src/p1/p2/Flow.java:22: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        myMethod(R.string.my_string, null); // ERROR\n"
                 + "                 ~~~~~~~~~~~~~~~~~~\n"
@@ -731,16 +748,22 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/p1/p2/Flow.java:32: Error: Expected resource identifier (R.type.name) [ResourceType]\n"
                 + "        myAnyResMethod(50); // ERROR\n"
                 + "                       ~~\n"
-                + (SDK_ANNOTATIONS_AVAILABLE ? "src/p1/p2/Flow.java:60: Error: Expected resource of type drawable [ResourceType]\n"
+                + "src/p1/p2/Flow.java:43: Error: Expected resource of type drawable [ResourceType]\n"
+                + "        resources.getDrawable(s1); // ERROR\n"
+                + "                              ~~\n"
+                + "src/p1/p2/Flow.java:50: Error: Expected resource of type drawable [ResourceType]\n"
+                + "        resources.getDrawable(MimeTypes.style); // ERROR\n"
+                + "                              ~~~~~~~~~~~~~~~\n"
+                + "src/p1/p2/Flow.java:60: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        resources.getDrawable(MimeTypes.getAnnotatedString()); // Error\n"
-                + "                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" : "")
+                + "                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "src/p1/p2/Flow.java:68: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        myMethod(z, null); // ERROR\n"
                 + "                 ~\n"
                 + "src/p1/p2/Flow.java:71: Error: Expected resource of type drawable [ResourceType]\n"
                 + "        myMethod(w, null); // ERROR\n"
                 + "                 ~\n"
-                + (SDK_ANNOTATIONS_AVAILABLE ? "8 errors, 0 warnings\n" : "5 errors, 0 warnings\n"),
+                + "10 errors, 0 warnings\n",
 
                 lintProject(
                         java("src/p1/p2/Flow.java", ""
@@ -1131,7 +1154,31 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
         return getManifestWithPermissions(1, targetSdk, permissions);
     }
 
+    private TestFile getThingsManifestWithPermissions(int targetSdk, @Nullable Boolean isRequired, String... permissions) {
+        StringBuilder applicationBlock = new StringBuilder();
+        applicationBlock.append("<uses-library android:name=\"com.google.android.things\"");
+        if (isRequired != null) {
+            applicationBlock.append(" android:required=");
+            if (isRequired) {
+                applicationBlock.append("\"true\"");
+            } else {
+                applicationBlock.append("\"false\"");
+            }
+        }
+        applicationBlock.append("/>\n");
+        return getManifestWithPermissions(
+                applicationBlock.toString(),
+                1,
+                targetSdk,
+                permissions);
+    }
+
     private TestFile getManifestWithPermissions(int minSdk, int targetSdk, String... permissions) {
+        return getManifestWithPermissions(null, minSdk, targetSdk, permissions);
+    }
+
+    private TestFile getManifestWithPermissions(
+            @Nullable String applicationBlock, int minSdk, int targetSdk, String... permissions) {
         StringBuilder permissionBlock = new StringBuilder();
         for (String permission : permissions) {
             permissionBlock.append("    <uses-permission android:name=\"").append(permission)
@@ -1152,6 +1199,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "    <application\n"
                 + "        android:icon=\"@drawable/ic_launcher\"\n"
                 + "        android:label=\"@string/app_name\" >\n"
+                + (applicationBlock != null ? applicationBlock : "")
                 + "    </application>\n"
                 + "\n"
                 + "</manifest>");
@@ -1440,6 +1488,48 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 ));
     }
 
+    public void testMissingManifestLevelPermissionsWithAndroidThings() throws Exception {
+        assertEquals(
+                ""
+                        + "src/test/pkg/PermissionTest.java:7: Error: Missing permissions required by LocationManager.myMethod: android.permission.ACCESS_FINE_LOCATION or android.permission.ACCESS_COARSE_LOCATION [MissingPermission]\n"
+                        + "        LocationManager.Location location = locationManager.myMethod(provider);\n"
+                        + "                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "1 errors, 0 warnings\n",
+                lintProject(
+                        getThingsManifestWithPermissions(24, null),
+                        mPermissionTest,
+                        mLocationManagerStub,
+                        mSupportClasspath,
+                        mSupportJar));
+    }
+
+    public void testHasManifestLevelPermissionsWithAndroidThings() throws Exception {
+        assertEquals(
+                "No warnings.",
+                lintProject(
+                        getThingsManifestWithPermissions(
+                                24, null, "android.permission.ACCESS_FINE_LOCATION"),
+                        mPermissionTest,
+                        mLocationManagerStub,
+                        mSupportClasspath,
+                        mSupportJar));
+    }
+
+    public void testMissingRuntimePermissionsWithOptionalAndroidThings() throws Exception {
+        assertEquals(
+                ""
+                        + "src/test/pkg/PermissionTest.java:7: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]\n"
+                        + "        LocationManager.Location location = locationManager.myMethod(provider);\n"
+                        + "                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "1 errors, 0 warnings\n",
+                lintProject(
+                        getThingsManifestWithPermissions(24, false, "android.permission.ACCESS_FINE_LOCATION"),
+                        mPermissionTest,
+                        mLocationManagerStub,
+                        mSupportClasspath,
+                        mSupportJar));
+    }
+
     public void testThreading() throws Exception {
         assertEquals(""
                 + "src/test/pkg/ThreadTest.java:15: Error: Method onPreExecute must be called from the main thread, currently inferred thread is worker thread [WrongThread]\n"
@@ -1547,7 +1637,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "5 errors, 0 warnings\n",
 
                 lintProject(
-                        java("src/test/pkg/ThreadTest.java", ""
+                        java("src/test/pkg/BigClass.java", ""
                                 + "package test.pkg;\n"
                                 + "\n"
                                 + "import android.support.annotation.UiThread;\n"
@@ -1561,6 +1651,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "    void f100() { }\n"
                                 + "    @WorkerThread // this single method is not UI, it's something else\n"
                                 + "    void g() { }\n"
+                                + "    BigClass() { }\n"
                                 + "}\n"),
                         java("src/test/pkg/BigClassClient.java", ""
                                 + "package test.pkg;\n"
@@ -1802,9 +1893,15 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/ActionTest.java:55: Error: Missing permissions required by intent ActionTest.ACTION_CALL: android.permission.CALL_PHONE [MissingPermission]\n"
                 + "        context.sendBroadcast(intent, \"\");\n"
                 + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "src/test/pkg/ActionTest.java:56: Error: Missing permissions required by Context.sendBroadcastAsUser: android.permission.INTERACT_ACROSS_USERS [MissingPermission]\n"
+                + "        context.sendBroadcastAsUser(intent, null);\n"
+                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/ActionTest.java:56: Error: Missing permissions required by intent ActionTest.ACTION_CALL: android.permission.CALL_PHONE [MissingPermission]\n"
                 + "        context.sendBroadcastAsUser(intent, null);\n"
                 + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "src/test/pkg/ActionTest.java:57: Error: Missing permissions required by Context.sendStickyBroadcast: android.permission.BROADCAST_STICKY [MissingPermission]\n"
+                + "        context.sendStickyBroadcast(intent);\n"
+                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/ActionTest.java:57: Error: Missing permissions required by intent ActionTest.ACTION_CALL: android.permission.CALL_PHONE [MissingPermission]\n"
                 + "        context.sendStickyBroadcast(intent);\n"
                 + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
@@ -1829,7 +1926,7 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/ActionTest.java:88: Error: Missing permissions required to read ActionTest.BOOKMARKS_URI: com.android.browser.permission.READ_HISTORY_BOOKMARKS [MissingPermission]\n"
                 + "        myWriteResolverMethod(BOOKMARKS_URI);\n"
                 + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "19 errors, 0 warnings\n",
+                + "21 errors, 0 warnings\n",
 
                 lintProject(
                         getManifestWithPermissions(14, 23),
@@ -1935,13 +2032,16 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
 
     public void testCombinedIntDefAndIntRange() throws Exception {
         assertEquals(""
-                + "src/test/pkg/X.java:28: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be \u2265 10 (was -5) [WrongConstant]\n"
+                + "src/test/pkg/X.java:27: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG [WrongConstant]\n"
+                + "        setDuration(UNRELATED); /// OK within range\n" // Not sure about this one
+                + "                    ~~~~~~~~~\n"
+                + "src/test/pkg/X.java:28: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be ≥ 10 (was -5) [WrongConstant]\n"
                 + "        setDuration(-5); // ERROR (not right int def or value\n"
                 + "                    ~~\n"
-                + "src/test/pkg/X.java:29: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be \u2265 10 (was 8) [WrongConstant]\n"
+                + "src/test/pkg/X.java:29: Error: Must be one of: X.LENGTH_INDEFINITE, X.LENGTH_SHORT, X.LENGTH_LONG or value must be ≥ 10 (was 8) [WrongConstant]\n"
                 + "        setDuration(8); // ERROR (not matching number range)\n"
                 + "                    ~\n"
-                + "2 errors, 0 warnings\n",
+                + "3 errors, 0 warnings\n",
                 lintProject(
                         getManifestWithPermissions(14, 23),
                         java("src/test/pkg/X.java", ""
@@ -2151,13 +2251,19 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/IntDefMultiple.java:24: Error: Must be one of: IntDefMultiple.VALUE_A, IntDefMultiple.VALUE_B [WrongConstant]\n"
                 + "        restrictedArray(/*Must be one of: X.VALUE_A, X.VALUE_B*/new int[]{VALUE_A, 0, VALUE_B}/**/); // ERROR;\n"
                 + "                                                                                   ~\n"
+                + "src/test/pkg/IntDefMultiple.java:26: Error: Must be one of: IntDefMultiple.VALUE_A, IntDefMultiple.VALUE_B [WrongConstant]\n"
+                + "        restrictedArray(/*Must be one of: X.VALUE_A, X.VALUE_B*/INVALID_ARRAY/**/); // ERROR\n"
+                + "                                                                ~~~~~~~~~~~~~\n"
+                + "src/test/pkg/IntDefMultiple.java:27: Error: Must be one of: IntDefMultiple.VALUE_A, IntDefMultiple.VALUE_B [WrongConstant]\n"
+                + "        restrictedArray(/*Must be one of: X.VALUE_A, X.VALUE_B*/INVALID_ARRAY2/**/); // ERROR\n"
+                + "                                                                ~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/IntDefMultiple.java:31: Error: Must be one of: IntDefMultiple.VALUE_A, IntDefMultiple.VALUE_B [WrongConstant]\n"
                 + "        restrictedEllipsis(VALUE_A, /*Must be one of: X.VALUE_A, X.VALUE_B*/0/**/, VALUE_B); // ERROR\n"
                 + "                                                                            ~\n"
                 + "src/test/pkg/IntDefMultiple.java:32: Error: Must be one of: IntDefMultiple.VALUE_A, IntDefMultiple.VALUE_B [WrongConstant]\n"
                 + "        restrictedEllipsis(/*Must be one of: X.VALUE_A, X.VALUE_B*/0/**/); // ERROR\n"
                 + "                                                                   ~\n"
-                + "3 errors, 0 warnings\n",
+                + "5 errors, 0 warnings\n",
                 lintProject(
                         java("src/test/pkg/IntDefMultiple.java", ""
                                 + "package test.pkg;\n"
@@ -2211,16 +2317,31 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
      */
     public void testRangesMultiple() throws Exception {
         assertEquals(""
-                + "src/test/pkg/RangesMultiple.java:22: Error: Value must be \u2265 10.0 (was 5.0) [Range]\n"
-                + "        varargsFloat(15.0f, 10.0f, /*Value must be \u2265 10.0 and \u2264 15.0 (was 5.0f)*/5.0f/**/); // ERROR\n"
-                + "                                                                                 ~~~~\n"
-                + "src/test/pkg/RangesMultiple.java:32: Error: Value must be \u2264 500 (was 510) [Range]\n"
-                + "        varargsInt(15, 10, /*Value must be \u2265 10 and \u2264 500 (was 510)*/510/**/); // ERROR\n"
-                + "                                                                     ~~~\n"
-                + "src/test/pkg/RangesMultiple.java:36: Error: Value must be \u2265 10 (was 0) [Range]\n"
-                + "        restrictedIntArray(/*Value must be \u2265 10 and \u2264 500*/new int[]{0, 500}/**/); // ERROR\n"
-                + "                                                           ~~~~~~~~~~~~~~~~~\n"
-                + "3 errors, 0 warnings\n",
+                        + "src/test/pkg/RangesMultiple.java:20: Error: Value must be ≥ 10.0 (was 5) [Range]\n"
+                        + "        a[0] = /*Value must be ≥ 10.0 and ≤ 15.0 (was 5f)*/5f/**/; // ERROR\n"
+                        + "                                                           ~~\n"
+                        + "src/test/pkg/RangesMultiple.java:22: Error: Value must be ≥ 10.0 (was 5.0) [Range]\n"
+                        + "        varargsFloat(15.0f, 10.0f, /*Value must be ≥ 10.0 and ≤ 15.0 (was 5.0f)*/5.0f/**/); // ERROR\n"
+                        + "                                                                                 ~~~~\n"
+                        + "src/test/pkg/RangesMultiple.java:24: Error: Value must be ≥ 10.0 (was 5.0) [Range]\n"
+                        + "        restrictedFloatArray(/*Value must be ≥ 10.0 and ≤ 15.0*/INVALID_FLOAT_ARRAY/**/); // ERROR\n"
+                        + "                                                                ~~~~~~~~~~~~~~~~~~~\n"
+                        + "src/test/pkg/RangesMultiple.java:26: Error: Value must be ≤ 15.0 (was 500.0) [Range]\n"
+                        + "        restrictedFloatArray(/*Value must be ≥ 10.0 and ≤ 15.0*/new float[]{12.0f, 500.0f}/**/); // ERROR\n"
+                        + "                                                                ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "src/test/pkg/RangesMultiple.java:30: Error: Value must be ≥ 10 (was 5) [Range]\n"
+                        + "        b[0] = /*Value must be ≥ 10 and ≤ 500 (was 5)*/5/**/; // ERROR\n"
+                        + "                                                       ~\n"
+                        + "src/test/pkg/RangesMultiple.java:32: Error: Value must be ≤ 500 (was 510) [Range]\n"
+                        + "        varargsInt(15, 10, /*Value must be ≥ 10 and ≤ 500 (was 510)*/510/**/); // ERROR\n"
+                        + "                                                                     ~~~\n"
+                        + "src/test/pkg/RangesMultiple.java:34: Error: Value must be ≥ 10 (was 5) [Range]\n"
+                        + "        restrictedIntArray(/*Value must be ≥ 10 and ≤ 500*/INVALID_INT_ARRAY/**/); // ERROR\n"
+                        + "                                                           ~~~~~~~~~~~~~~~~~\n"
+                        + "src/test/pkg/RangesMultiple.java:36: Error: Value must be ≥ 10 (was 0) [Range]\n"
+                        + "        restrictedIntArray(/*Value must be ≥ 10 and ≤ 500*/new int[]{0, 500}/**/); // ERROR\n"
+                        + "                                                           ~~~~~~~~~~~~~~~~~\n"
+                        + "8 errors, 0 warnings\n",
                 lintProject(
                         java("src/test/pkg/RangesMultiple.java", ""
                                 + "package test.pkg;\n"
@@ -2442,32 +2563,6 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                                 + "}\n")));
     }
 
-    public void testAlias() throws Exception {
-        assertEquals("No warnings.",
-                lintProject(
-                        java("src/test/pkg/FlagAlias.java", ""
-                                + "package test.pkg;\n"
-                                + "\n"
-                                + "import android.graphics.Canvas;\n"
-                                + "import android.graphics.RectF;\n"
-                                + "\n"
-                                + "@SuppressWarnings(\"unused\")\n"
-                                + "public class FlagAlias {\n"
-                                + "    private static final int CANVAS_SAVE_FLAGS =\n"
-                                + "            Canvas.CLIP_SAVE_FLAG |\n"
-                                + "                    Canvas.HAS_ALPHA_LAYER_SAVE_FLAG |\n"
-                                + "                    Canvas.FULL_COLOR_LAYER_SAVE_FLAG;\n"
-                                + "    private RectF mBounds;\n"
-                                + "    private int mAlpha;\n"
-                                + "\n"
-                                + "\n"
-                                + "    public void draw(Canvas canvas) {\n"
-                                + "        canvas.saveLayerAlpha(mBounds, mAlpha, CANVAS_SAVE_FLAGS);\n"
-                                + "    }\n"
-                                + "}\n")
-                ));
-    }
-
     @SuppressWarnings("ALL") // sample code with warnings
     public void testRestrictToSubClass() throws Exception {
         assertEquals(""
@@ -2650,7 +2745,6 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         + "dependencies {\n"
                         + "    compile 'my.group.id:mylib:25.0.0-SNAPSHOT'\n"
                         + "}")
-
         );
         lint().projects(project).run().expect(""
                 + "src/main/java/test/pkg/TestLibrary.java:10: Error: Library.privateMethod can only be called from within the same library group (groupId=my.group.id) [RestrictedApi]\n"
@@ -2724,13 +2818,13 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                 + "            ~~~~~~~~~~~\n"
                 + "src/test/otherpkg/OtherPkg.java:8: Warning: This method should only be accessed from tests or within protected scope [VisibleForTests]\n"
                 + "        new ProductionCode().testHelper3(); // ERROR\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "                             ~~~~~~~~~~~\n"
                 + "src/test/otherpkg/OtherPkg.java:9: Warning: This method should only be accessed from tests or within private scope [VisibleForTests]\n"
                 + "        new ProductionCode().testHelper4(); // ERROR\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "                             ~~~~~~~~~~~\n"
                 + "src/test/otherpkg/OtherPkg.java:10: Warning: This method should only be accessed from tests or within package private scope [VisibleForTests]\n"
                 + "        new ProductionCode().testHelper5(); // ERROR\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "                             ~~~~~~~~~~~\n"
                 + "2 errors, 3 warnings\n",
                 lintProject(
                         java(""
@@ -2797,6 +2891,167 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         mSupportJar
 
                 ));
+    }
+
+    public void testVisibleForTestingIncrementally() throws Exception {
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.VisibleForTesting;\n"
+                        + "\n"
+                        + "public class ProductionCode {\n"
+                        + "    @VisibleForTesting\n"
+                        + "    public void testHelper() {\n"
+                        + "    }\n"
+                        + "}\n"),
+                // test/ prefix makes it a test folder entry:
+                java("test/test/pkg/UnitTest.java", ""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "public class UnitTest {\n"
+                        + "    public void test() {\n"
+                        + "        new ProductionCode().testHelper(); // OK\n"
+                        + "        \n"
+                        + "    }\n"
+                        + "}\n"),
+                mSupportClasspath,
+                mSupportJar)
+                .incremental("test/test/pkg/UnitTest.java")
+                .run()
+                .expectClean();
+    }
+
+    public void testVisibleForTestingSameCompilationUnit() throws Exception {
+        //noinspection all // Sample code
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.VisibleForTesting;\n"
+                        + "\n"
+                        + "public class PrivTest {\n"
+                        + "    private static CredentialsProvider sCredentialsProvider = new DefaultCredentialsProvider();\n"
+                        + "\n"
+                        + "    static interface CredentialsProvider {\n"
+                        + "        void test();\n"
+                        + "    }\n"
+                        + "    @VisibleForTesting\n"
+                        + "    static class DefaultCredentialsProvider implements CredentialsProvider {\n"
+                        + "        @Override\n"
+                        + "        public void test() {\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}\n"),
+                mSupportClasspath,
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testGmsHide() throws Exception {
+        lint().files(
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import test.pkg.internal.HiddenInPackage;\n" +
+                        "\n" +
+                        "public class HideTest {\n" +
+                        "    public void test() {\n" +
+                        "        HiddenInPackage.test(); // Error\n" +
+                        "        HiddenClass.test(); // Error\n" +
+                        "        PublicClass.hiddenMethod(); // Error\n" +
+                        "        PublicClass.normalMethod(); // OK!\n" +
+                        "    }\n" +
+                        "}\n"),
+                java("" +
+                        // Access from within the GMS codebase should not flag errors
+                        "package com.google.android.gms.foo.bar;\n" +
+                        "\n" +
+                        "import test.pkg.internal.HiddenInPackage;\n" +
+                        "\n" +
+                        "public class HideTest {\n" +
+                        "    public void test() {\n" +
+                        "        HiddenInPackage.test(); // Error\n" +
+                        "        HiddenClass.test(); // Error\n" +
+                        "        PublicClass.hiddenMethod(); // Error\n" +
+                        "        PublicClass.normalMethod(); // OK!\n" +
+                        "    }\n" +
+                        "}\n"),
+                java("" +
+                        "package test.pkg.internal;\n" +
+                        "\n" +
+                        "public class HiddenInPackage {\n" +
+                        "    public static void test() {\n" +
+                        "    }\n" +
+                        "}\n"),
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import com.google.android.gms.common.internal.Hide;\n" +
+                        "\n" +
+                        "@Hide\n" +
+                        "public class HiddenClass {\n" +
+                        "    public static void test() {\n" +
+                        "    }\n" +
+                        "}\n"),
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import com.google.android.gms.common.internal.Hide;\n" +
+                        "\n" +
+                        "public class PublicClass {\n" +
+                        "    public static void normalMethod() {\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    @Hide\n" +
+                        "    public static void hiddenMethod() {\n" +
+                        "    }\n" +
+                        "}\n"),
+                java("" +
+                        "package com.google.android.gms.common.internal;\n" +
+                        "\n" +
+                        "import java.lang.annotation.Documented;\n" +
+                        "import java.lang.annotation.ElementType;\n" +
+                        "import java.lang.annotation.Retention;\n" +
+                        "import java.lang.annotation.RetentionPolicy;\n" +
+                        "import java.lang.annotation.Target;\n" +
+                        "import java.lang.annotation.Target;\n" +
+                        "import static java.lang.annotation.ElementType.*;\n" +
+                        "@Target({TYPE,FIELD,METHOD,CONSTRUCTOR,PACKAGE})\n" +
+                        "@Retention(RetentionPolicy.CLASS)\n" +
+                        "public @interface Hide {}"),
+                java("src/test/pkg/package-info.java", "" +
+                        "@Hide\n" +
+                        "package test.pkg.internal;\n" +
+                        "\n" +
+                        "import com.google.android.gms.common.internal.Hide;\n"),
+                // Also register the compiled version of the above package-info jar file;
+                // without this we don't resolve package annotations
+                base64gzip("libs/packageinfoclass.jar", "" +
+                        "H4sIAAAAAAAAAAvwZmYRYeDg4GC4tYDfmwEJcDKwMPi6hjjqevq56f87xcDA" +
+                        "zBDgzc4BkmKCKgnAqVkEiOGafR39PN1cg0P0fN0++5457eOtq3eR11tX69yZ" +
+                        "85uDDK4YP3hapOflq+Ppe7F0FQtnxAvJI9KzpF6KLX22RE1suVZGxdJpFqKq" +
+                        "ac9EtUVei758mv2p6GMRI9gtbSuDVb2ANnmhuEVhPqpbVIC4JLW4RL8gO10/" +
+                        "M68ktSgvMUe/IDE5OzE9VTczLy1fLzknsbjYt9cw75CDgOt/oQOKoRmXXB6x" +
+                        "pc0qWZmhpKSoqKoe8SbRNM22+c1WfveDjBYih1RcP3X/X/q/q3znvHMM9wxO" +
+                        "T0itKKn4tW2d5g9nJesz/fssfhzY+eLetKnv9x5+Hb7cM+vflbiom65xK6M+" +
+                        "efpEt9cER/ge1HFRW5+aHBS0Ilrq3a0pLsLmr5TXLn1S3u76yOziR4F/J+qX" +
+                        "H/581+ti9oK36x4p7WXgU/6T1tI+Xy7Z6E2JQvADNlAAHM4XN1kP9N5VcAAw" +
+                        "MokwoEYHLKJAcYkKUGIWXStyuIqgaLPFEa/IJoDCH9lhKigmnCQyNgK8WdlA" +
+                        "6pmB8DyQPsUI4gEAH9csuq8CAAA="))
+                .run()
+                .expect("" +
+                        "src/test/pkg/HideTest.java:7: Error: HiddenInPackage.test is marked as internal and should not be accessed from apps [RestrictedApi]\n" +
+                        "        HiddenInPackage.test(); // Error\n" +
+                        "                        ~~~~\n" +
+                        "src/test/pkg/HideTest.java:8: Error: HiddenClass is marked as internal and should not be accessed from apps [RestrictedApi]\n" +
+                        "        HiddenClass.test(); // Error\n" +
+                        "        ~~~~~~~~~~~\n" +
+                        "src/test/pkg/HideTest.java:9: Error: PublicClass.hiddenMethod is marked as internal and should not be accessed from apps [RestrictedApi]\n" +
+                        "        PublicClass.hiddenMethod(); // Error\n" +
+                        "                    ~~~~~~~~~~~~\n" +
+                        "3 errors, 0 warnings\n");
     }
 
     public void testRequiresPermissionWithinRequires() throws Exception {
@@ -2971,6 +3226,289 @@ public class SupportAnnotationDetectorTest extends AbstractCheckTest {
                         + "}"),
                 classpath(SUPPORT_JAR_PATH,
                         "libs/exploded-aar/my.group.id/mylib/25.0.0-SNAPSHOT/jars/classes.jar"),
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testSizeAnnotations() throws Exception {
+        lint().files(
+                java(""
+                        + "package pkg.my.myapplication;\n"
+                        + "\n"
+                        + "import android.support.annotation.NonNull;\n"
+                        + "import android.support.annotation.Size;\n"
+                        + "\n"
+                        + "public class SizeTest2 {\n"
+                        + "    @Size(3)\n"
+                        + "    public float[] toLinear(float r, float g, float b) {\n"
+                        + "        return toLinear(new float[] { r, g, b });\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    @NonNull\n"
+                        + "    public float[] toLinear(@NonNull @Size(min = 3) float[] v) {\n"
+                        + "        return v;\n"
+                        + "    }\n"
+                        + "}\n"),
+                mSupportClasspath,
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testWrongConstant() throws Exception {
+        // Regression test for scenario found to be inconsistent between PSI and UAST
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.NonNull;\n"
+                        + "\n"
+                        + "public class ViewableDayInterval {\n"
+                        + "    @CalendarDay\n"
+                        + "    private int mDayCreatedFor;\n"
+                        + "\n"
+                        + "    public ViewableDayInterval(long startOffset, long duration, @NonNull @CalendarDay int... startDays) {\n"
+                        + "        this(startDays[0], startOffset, duration, startDays);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public ViewableDayInterval(long start, @NonNull @WeekDay int... weekdays) {\n"
+                        + "        this(weekdays[0], start, start, weekdays);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public ViewableDayInterval(long start, @NonNull @WeekDay int weekday) {\n"
+                        + "        this(weekday, start, start, weekday);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public ViewableDayInterval(@CalendarDay int dayCreatedFor, long startOffset, long duration, @NonNull @CalendarDay int... startDays) {\n"
+                        + "        mDayCreatedFor = dayCreatedFor;\n"
+                        + "    }\n"
+                        + "}"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.IntDef;\n"
+                        + "\n"
+                        + "import java.lang.annotation.Retention;\n"
+                        + "import java.lang.annotation.RetentionPolicy;\n"
+                        + "import java.util.Calendar;\n"
+                        + "\n"
+                        + "@Retention(RetentionPolicy.SOURCE)\n"
+                        + "@IntDef({Calendar.SUNDAY, Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY,\n"
+                        + "        Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY})\n"
+                        + "public @interface CalendarDay {\n"
+                        + "}"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.IntDef;\n"
+                        + "\n"
+                        + "import java.lang.annotation.Retention;\n"
+                        + "import java.lang.annotation.RetentionPolicy;\n"
+                        + "import java.util.Calendar;\n"
+                        + "\n"
+                        + "@Retention(RetentionPolicy.SOURCE)\n"
+                        + "@IntDef({Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY,\n"
+                        + "        Calendar.THURSDAY, Calendar.FRIDAY})\n"
+                        + "public @interface WeekDay {\n"
+                        + "}"),
+                mSupportClasspath,
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testPrivateVisibilityWithDefaultConstructor() {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=235661
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.VisibleForTesting;\n"
+                        + "\n"
+                        + "public class LintBugExample {\n"
+                        + "    public static Object demonstrateBug() {\n"
+                        + "        return new InnerClass();\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    @VisibleForTesting\n"
+                        + "    static class InnerClass {\n"
+                        + "    }\n"
+                        + "}"),
+                mSupportClasspath,
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testIndirectTypedef() {
+        // Regression test for b/36384014
+        lint().files(
+                java("package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.IntDef;\n"
+                        + "\n"
+                        + "public class Lifecycle {\n"
+                        + "    public static final int ON_CREATE = 1;\n"
+                        + "    public static final int ON_START = 2;\n"
+                        + "    public static final int ON_RESUME = 3;\n"
+                        + "    public static final int ON_PAUSE = 4;\n"
+                        + "    public static final int ON_STOP = 5;\n"
+                        + "    public static final int ON_DESTROY = 6;\n"
+                        + "    public static final int ANY = 7;\n"
+                        + "\n"
+                        + "    @IntDef(value = {ON_CREATE, ON_START, ON_RESUME, ON_PAUSE, ON_STOP, ON_DESTROY, ANY},\n"
+                        + "            flag = true)\n"
+                        + "    public @interface Event {\n"
+                        + "    }\n"
+                        + "}"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import java.lang.annotation.ElementType;\n"
+                        + "import java.lang.annotation.Retention;\n"
+                        + "import java.lang.annotation.RetentionPolicy;\n"
+                        + "import java.lang.annotation.Target;\n"
+                        + "\n"
+                        + "@Retention(RetentionPolicy.RUNTIME)\n"
+                        + "@Target(ElementType.METHOD)\n"
+                        + "public @interface OnLifecycleEvent {\n"
+                        + "    @Lifecycle.Event\n"
+                        + "    int value();\n"
+                        + "}\n"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "public interface Usage {\n"
+                        + "    @OnLifecycleEvent(4494823) // this value is not valid\n"
+                        + "    void addLocationListener();\n"
+                        + "}\n"),
+                mSupportClasspath,
+                mSupportJar)
+                .run()
+                .expect(""
+                        + "src/test/pkg/Usage.java:4: Error: Must be one or more of: Lifecycle.ON_CREATE, Lifecycle.ON_START, Lifecycle.ON_RESUME, Lifecycle.ON_PAUSE, Lifecycle.ON_STOP, Lifecycle.ON_DESTROY, Lifecycle.ANY [WrongConstant]\n"
+                        + "    @OnLifecycleEvent(4494823) // this value is not valid\n"
+                        + "                      ~~~~~~~\n"
+                        + "1 errors, 0 warnings\n");
+    }
+
+    public void testCalendar() {
+        // Regression test for
+        // https://code.google.com/p/android/issues/detail?id=251256 and
+        // http://youtrack.jetbrains.com/issue/IDEA-144891
+        //noinspection all // Sample code
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import java.util.Calendar;\n"
+                        + "\n"
+                        + "public class CalendarTest {\n"
+                        + "    public void test() {\n"
+                        + "        Calendar now = Calendar.getInstance();\n"
+                        + "        now.get(Calendar.DAY_OF_MONTH);\n"
+                        + "        now.get(Calendar.HOUR_OF_DAY);\n"
+                        + "        now.get(Calendar.MINUTE);\n"
+                        + "        if (now.get(Calendar.MONTH) == Calendar.JANUARY) {\n"
+                        + "        }\n"
+                        + "        now.set(Calendar.HOUR_OF_DAY, 50);\n"
+                        + "        now.set(2017, 3, 29);\n"
+                        + "    }\n"
+                        + "}\n"))
+                .run()
+                .expectClean();
+    }
+
+    public void testThreadsInLambdas() {
+        // Regression test for b/38069472
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(1),
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.support.annotation.MainThread;\n"
+                        + "import android.support.annotation.WorkerThread;\n"
+                        + "\n"
+                        + "import java.util.concurrent.Executor;\n"
+                        + "\n"
+                        + "public abstract class ApiCallInLambda<T> {\n"
+                        + "    Executor networkExecutor;\n"
+                        + "    @MainThread\n"
+                        + "    private void fetchFromNetwork(T data) {\n"
+                        + "        networkExecutor.execute(() -> {\n"
+                        + "            Call<T> call = createCall();\n"
+                        + "        });\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    @WorkerThread\n"
+                        + "    protected abstract Call<T> createCall();\n"
+                        + "\n"
+                        + "    private static class Call<T> {\n"
+                        + "    }\n"
+                        + "}\n"),
+                mSupportClasspath,
+                mSupportJar)
+                .checkMessage(this::checkReportedError)
+                .run()
+                .expectClean();
+    }
+
+    public void testExtensionMethods() {
+        if (skipKotlinTests()) {
+            return;
+        }
+
+        // Regression test for https://issuetracker.google.com/65602862
+        lint().files(
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.app.Activity\n" +
+                        "import android.content.Context\n" +
+                        "import android.content.res.Resources\n" +
+                        "import android.support.annotation.AttrRes\n" +
+                        "import android.support.annotation.ColorInt\n" +
+                        "\n" +
+                        "class TestActivity: Activity() {\n" +
+                        "\n" +
+                        "    @ColorInt\n" +
+                        "    fun Context.getColor(@AttrRes attrId: Int, @ColorInt defaultColor: Int) = theme.getColor(attrId, defaultColor)\n" +
+                        "\n" +
+                        "    @ColorInt\n" +
+                        "    fun Resources.Theme.getColor(@AttrRes attrId: Int, @ColorInt defaultColor: Int): Int {\n" +
+                        "        return 0;\n" +
+                        "    }\n" +
+                        "}"),
+                mSupportClasspath,
+                mSupportJar)
+                .checkMessage(this::checkReportedError)
+                .run()
+                .expectClean();
+    }
+
+    public void testRangeInKotlin() {
+        if (skipKotlinTests()) {
+            return;
+        }
+
+        // Regression test for https://issuetracker.google.com/66892728
+        lint().files(
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.support.annotation.FloatRange\n" +
+                        "import android.util.Log\n" +
+                        "\n" +
+                        "fun foo(@FloatRange(from = 0.0, to = 25.0) radius: Float) {\n" +
+                        "    bar(radius)\n" +
+                        "}\n" +
+                        "\n" +
+                        "fun bar(@FloatRange(from = 0.0, to = 25.0) radius: Float) {\n" +
+                        "    Log.d(\"AppLog\", \"Radius:\" + radius)\n" +
+                        "}"),
+                mSupportClasspath,
                 mSupportJar)
                 .run()
                 .expectClean();

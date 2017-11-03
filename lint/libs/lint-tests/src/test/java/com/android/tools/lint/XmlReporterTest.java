@@ -60,7 +60,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     new DefaultPosition(6, 4, 198), new DefaultPosition(6, 42, 236));
 
             Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
-                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    "Hardcoded string \"Fooo\", should use @string resource",
                     Severity.WARNING, project);
             warning2.line = 11;
             warning2.file = new File("/foo/bar/Foo/res/layout/main.xml");
@@ -102,7 +102,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     + "    <issue\n"
                     + "        id=\"HardcodedText\"\n"
                     + "        severity=\"Warning\"\n"
-                    + "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
+                    + "        message=\"Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
                     + "        category=\"Internationalization\"\n"
                     + "        priority=\"5\"\n"
                     + "        summary=\"Hardcoded text\"\n"
@@ -116,7 +116,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     + "    </issue>\n"
                     + "\n"
                     + "</issues>\n",
-                report);
+                report.replace(File.separatorChar, '/'));
 
             // Make sure the XML is valid
             Document document = PositionXmlParser.parse(report);
@@ -153,7 +153,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     new DefaultPosition(6, 4, 198), new DefaultPosition(6, 42, 236));
 
             Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
-                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    "Hardcoded string \"Fooo\", should use @string resource",
                     Severity.WARNING, project);
             warning2.line = 11;
             warning2.file = new File("/foo/bar/Foo/res/layout/main.xml");
@@ -187,7 +187,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     + "        errorLine1=\"    &lt;uses-sdk android:minSdkVersion=&quot;8&quot; />\"\n"
                     + "        errorLine2=\"    ^\">\n"
                     + "        <location\n"
-                    + "            file=\"/foo/Foo/AndroidManifest.xml\"\n"
+                    + "            file=\"" + new File("/foo/Foo/AndroidManifest.xml").getAbsolutePath() + "\"\n"
                     + "            line=\"7\"\n"
                     + "            column=\"5\"/>\n"
                     + "    </issue>\n"
@@ -195,7 +195,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     + "    <issue\n"
                     + "        id=\"HardcodedText\"\n"
                     + "        severity=\"Warning\"\n"
-                    + "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
+                    + "        message=\"Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
                     + "        category=\"Internationalization\"\n"
                     + "        priority=\"5\"\n"
                     + "        summary=\"Hardcoded text\"\n"
@@ -203,7 +203,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     + "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n"
                     + "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n"
                     + "        <location\n"
-                    + "            file=\"/foo/bar/Foo/res/layout/main.xml\"\n"
+                    + "            file=\"" + new File("/foo/bar/Foo/res/layout/main.xml").getAbsolutePath() + "\"\n"
                     + "            line=\"12\"\n"
                     + "            column=\"9\"/>\n"
                     + "    </issue>\n"
@@ -271,7 +271,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     + "    </issue>\n"
                     + "\n"
                     + "</issues>\n",
-                    report);
+                    report.replace(File.separatorChar, '/'));
 
             // Make sure the XML is valid
             Document document = PositionXmlParser.parse(report);
@@ -313,7 +313,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                     new DefaultPosition(6, 4, 198), new DefaultPosition(6, 42, 236));
 
             Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
-                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    "Hardcoded string \"Fooo\", should use @string resource",
                     Severity.WARNING, project);
             warning2.line = 11;
             warning2.file = new File("/foo/bar/Foo/res/layout/main.xml");
@@ -347,7 +347,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                             + "\n"
                             + "    <issue\n"
                             + "        id=\"HardcodedText\"\n"
-                            + "        message=\"[I18N] Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
+                            + "        message=\"Hardcoded string &quot;Fooo&quot;, should use @string resource\"\n"
                             + "        errorLine1=\"        android:text=&quot;Fooo&quot; />\"\n"
                             + "        errorLine2=\"        ~~~~~~~~~~~~~~~~~~~\">\n"
                             + "        <location\n"
@@ -357,7 +357,7 @@ public class XmlReporterTest extends AbstractCheckTest {
                             + "    </issue>\n"
                             + "\n"
                             + "</issues>\n",
-                    report);
+                    report.replace(File.separatorChar, '/'));
 
             // Make sure the XML is valid
             Document document = PositionXmlParser.parse(report);

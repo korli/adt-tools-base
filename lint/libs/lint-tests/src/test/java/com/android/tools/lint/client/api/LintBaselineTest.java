@@ -21,6 +21,7 @@ import static com.google.common.truth.Truth.assertThat;
 import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.checks.HardcodedValuesDetector;
 import com.android.tools.lint.checks.ManifestDetector;
+import com.android.tools.lint.checks.SupportAnnotationDetector;
 import com.android.tools.lint.detector.api.DefaultPosition;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Location;
@@ -82,6 +83,17 @@ public class LintBaselineTest extends AbstractCheckTest {
                 + "            line=\"11\"/>\n"
                 + "    </issue>\n"
                 + "\n"
+                + "    <issue\n"
+                + "        id=\"Range\"\n"
+                + "        message=\"Value must be \u2265 0 (was -1)\"\n"
+                + "        errorLine1=\"                                childHeightSpec = MeasureSpec.makeMeasureSpec(maxLayoutHeight,\"\n"
+                + "        errorLine2=\"                                                                              ~~~~~~~~~~~~~~~\">\n"
+                + "        <location\n"
+                + "            file=\"java/android/support/v4/widget/SlidingPaneLayout.java\"\n"
+                + "            line=\"589\"\n"
+                + "            column=\"79\"/>\n"
+                +"    </issue>\n"
+                + "\n"
                 + "</issues>\n";
         Files.write(baselineContents, baselineFile, Charsets.UTF_8);
 
@@ -93,50 +105,63 @@ public class LintBaselineTest extends AbstractCheckTest {
         assertThat(found).isFalse();
         assertThat(baseline.getFoundWarningCount()).isEqualTo(0);
         assertThat(baseline.getFoundErrorCount()).isEqualTo(0);
-        assertThat(baseline.getTotalCount()).isEqualTo(2);
+        assertThat(baseline.getTotalCount()).isEqualTo(3);
         // because we haven't actually matched anything
-        assertThat(baseline.getFixedCount()).isEqualTo(2);
+        assertThat(baseline.getFixedCount()).isEqualTo(3);
 
         // Wrong issue
         found = baseline.findAndMark(ManifestDetector.USES_SDK,
                 Location.create(new File("bogus")),
-                "[I18N] Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
+                "Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
                 null);
         assertThat(found).isFalse();
         assertThat(baseline.getFoundWarningCount()).isEqualTo(0);
         assertThat(baseline.getFoundErrorCount()).isEqualTo(0);
-        assertThat(baseline.getFixedCount()).isEqualTo(2);
+        assertThat(baseline.getFixedCount()).isEqualTo(3);
 
         // Wrong file
         found = baseline.findAndMark(HardcodedValuesDetector.ISSUE,
                 Location.create(new File("res/layout-port/main.xml")),
-                "[I18N] Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
+                "Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
                 null);
         assertThat(found).isFalse();
         assertThat(baseline.getFoundWarningCount()).isEqualTo(0);
         assertThat(baseline.getFoundErrorCount()).isEqualTo(0);
-        assertThat(baseline.getFixedCount()).isEqualTo(2);
+        assertThat(baseline.getFixedCount()).isEqualTo(3);
 
         // Match
         found = baseline.findAndMark(HardcodedValuesDetector.ISSUE,
                 Location.create(new File("res/layout/main.xml")),
-                "[I18N] Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
+                "Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
                 null);
         assertThat(found).isTrue();
-        assertThat(baseline.getFixedCount()).isEqualTo(1);
+        assertThat(baseline.getFixedCount()).isEqualTo(2);
         assertThat(baseline.getFoundWarningCount()).isEqualTo(1);
         assertThat(baseline.getFoundErrorCount()).isEqualTo(0);
-        assertThat(baseline.getFixedCount()).isEqualTo(1);
+        assertThat(baseline.getFixedCount()).isEqualTo(2);
 
         // Search for the same error once it's already been found: no longer there
         found = baseline.findAndMark(HardcodedValuesDetector.ISSUE,
                 Location.create(new File("res/layout/main.xml")),
-                "[I18N] Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
+                "Hardcoded string \"Fooo\", should use @string resource", Severity.WARNING,
                 null);
         assertThat(found).isFalse();
         assertThat(baseline.getFoundWarningCount()).isEqualTo(1);
         assertThat(baseline.getFoundErrorCount()).isEqualTo(0);
+        assertThat(baseline.getFixedCount()).isEqualTo(2);
+
+        // Match
+        found = baseline.findAndMark(SupportAnnotationDetector.RANGE,
+                Location.create(new File(
+                        "java/android/support/v4/widget/SlidingPaneLayout.java")),
+                "Value must be \u2265 0 (was -1)", Severity.WARNING,
+                null);
+        assertThat(found).isTrue();
         assertThat(baseline.getFixedCount()).isEqualTo(1);
+        assertThat(baseline.getFoundWarningCount()).isEqualTo(2);
+        assertThat(baseline.getFoundErrorCount()).isEqualTo(0);
+        assertThat(baseline.getFixedCount()).isEqualTo(1);
+
         baseline.close();
     }
 
@@ -144,7 +169,9 @@ public class LintBaselineTest extends AbstractCheckTest {
         assertTrue(LintBaseline.isSamePathSuffix("foo", "foo"));
         assertTrue(LintBaseline.isSamePathSuffix("", ""));
         assertTrue(LintBaseline.isSamePathSuffix("abc/def/foo", "def/foo"));
+        assertTrue(LintBaseline.isSamePathSuffix("abc/def/foo", "../../def/foo"));
         assertTrue(LintBaseline.isSamePathSuffix("abc\\def\\foo", "abc\\def\\foo"));
+        assertTrue(LintBaseline.isSamePathSuffix("abc\\def\\foo", "..\\..\\abc\\def\\foo"));
         assertTrue(LintBaseline.isSamePathSuffix("abc\\def\\foo", "def\\foo"));
         assertFalse(LintBaseline.isSamePathSuffix("foo", "bar"));
     }

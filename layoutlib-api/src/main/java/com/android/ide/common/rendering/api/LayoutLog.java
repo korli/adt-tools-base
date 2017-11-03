@@ -19,7 +19,7 @@ package com.android.ide.common.rendering.api;
 /**
  * Log class for actions executed through {@link Bridge} and {@link RenderSession}.
  */
-public class LayoutLog {
+public class LayoutLog implements ILayoutLog {
     /**
      * Prefix for resource warnings/errors. This is not meant to be used as-is by the Layout
      * Library, but is there to help test against a wider type of warning/error.
@@ -149,47 +149,42 @@ public class LayoutLog {
      */
     public static final String TAG_INFO = "info";
 
+
+    // Old methods that didn't include the support for viewCookie
+
     /**
-     * Logs a warning.
-     * @param tag a tag describing the type of the warning
-     * @param message the message of the warning
-     * @param data an optional data bundle that the client can use to improve the warning display.
+     * To be removed after layoutlib transitions to the new interface.
+     *
+     * @deprecated use {@link #warning(String, String, Object, Object)}
      */
     public void warning(String tag, String message, Object data) {
+        warning(tag, message, null, data);
     }
 
     /**
-     * Logs a fidelity warning.
+     * To be removed after layoutlib transitions to the new interface.
      *
-     * This type of warning indicates that the render will not be
-     * the same as the rendering on a device due to limitation of the Java rendering API.
-     *
-     * @param tag a tag describing the type of the warning
-     * @param message the message of the warning
-     * @param throwable an optional Throwable that triggered the warning
-     * @param data an optional data bundle that the client can use to improve the warning display.
+     * @deprecated use {@link #fidelityWarning(String, String, Throwable, Object, Object)}
      */
     public void fidelityWarning(String tag, String message, Throwable throwable, Object data) {
+        fidelityWarning(tag, message, throwable, null, data);
     }
 
     /**
-     * Logs an error.
+     * To be removed after layoutlib transitions to the new interface.
      *
-     * @param tag a tag describing the type of the error
-     * @param message the message of the error
-     * @param data an optional data bundle that the client can use to improve the error display.
+     * @deprecated use {@link #error(String, String, Object, Object)}
      */
     public void error(String tag, String message, Object data) {
+        error(tag, message, (Object) null, data);
     }
 
     /**
-     * Logs an error, and the {@link Throwable} that triggered it.
+     * To be removed after layoutlib transitions to the new interface.
      *
-     * @param tag a tag describing the type of the error
-     * @param message the message of the error
-     * @param throwable the Throwable that triggered the error
-     * @param data an optional data bundle that the client can use to improve the error display.
+     * @deprecated use {@link #error(String, String, Throwable, Object, Object)}
      */
     public void error(String tag, String message, Throwable throwable, Object data) {
+        error(tag, message, throwable, null, data);
     }
 }

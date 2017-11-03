@@ -20,8 +20,9 @@ import static com.android.testutils.truth.MoreTruth.assertThat;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.android.annotations.NonNull;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.builder.profile.ProcessProfileWriterFactory;
-import com.google.common.jimfs.Jimfs;
+import com.android.sdklib.AndroidVersion;
 import java.io.File;
 import java.io.IOException;
 import org.gradle.api.Project;
@@ -51,8 +52,7 @@ public class BuildInfoTasksTest {
         pastBuildsDirectory = new File(buildDir, "build/intermediates/builds/debug/");
         buildInfoFile = new File(buildDir, "build/intermediates/restart-dex/build-info.xml");
         tmpBuildInfoFile = new File(buildDir, "build/intermediates/restart-dex/tmp-build-info.xml");
-        ProcessProfileWriterFactory.initializeForTests(
-                Jimfs.newFileSystem().getPath("/tmp/profile.rawproto"));
+        ProcessProfileWriterFactory.initializeForTests();
     }
 
     @Test
@@ -70,8 +70,14 @@ public class BuildInfoTasksTest {
 
     private void initialFailedBuild() throws IOException {
         Project project = createProject();
-        InstantRunBuildContext context = new InstantRunBuildContext();
-        context.setApiLevel(23, ColdswapMode.MULTIDEX.toString(), null);
+        InstantRunBuildContext context =
+                new InstantRunBuildContext(
+                        true,
+                        AaptGeneration.AAPT_V2_DAEMON_MODE,
+                        new AndroidVersion(23, null),
+                        null,
+                        null,
+                        true);
         runLoaderTask(project, context);
 
         context.addChangedFile(FileType.RESOURCES, new File("resources-debug.ap_"));
@@ -82,8 +88,14 @@ public class BuildInfoTasksTest {
 
     private void secondPassingBuild() throws IOException {
         Project project = createProject();
-        InstantRunBuildContext context = new InstantRunBuildContext();
-        context.setApiLevel(23, ColdswapMode.MULTIDEX.toString(), null);
+        InstantRunBuildContext context =
+                new InstantRunBuildContext(
+                        true,
+                        AaptGeneration.AAPT_V2_DAEMON_MODE,
+                        new AndroidVersion(23, null),
+                        null,
+                        null,
+                        true);
 
         runLoaderTask(project, context);
 
@@ -97,26 +109,22 @@ public class BuildInfoTasksTest {
         assertThat(context.getLastBuild().getArtifactForType(FileType.RESOURCES)).isNotNull();
     }
 
-    private void runLoaderTask(
-            @NonNull Project project,
-            @NonNull InstantRunBuildContext context) {
+    private void runLoaderTask(@NonNull Project project, @NonNull InstantRunBuildContext context) {
         BuildInfoLoaderTask loader = project.getTasks().create("loader", BuildInfoLoaderTask.class);
         loader.buildInfoFile = buildInfoFile;
         loader.tmpBuildInfoFile = tmpBuildInfoFile;
         loader.pastBuildsFolder = pastBuildsDirectory;
-        loader.instantRunBuildContext = context;
+        loader.buildContext = context;
         loader.logger = logger;
         loader.execute();
     }
 
-    private void runWriterTask(
-            @NonNull Project project,
-            @NonNull InstantRunBuildContext context) {
+    private void runWriterTask(@NonNull Project project, @NonNull InstantRunBuildContext context) {
         BuildInfoWriterTask writer = project.getTasks().create("writer", BuildInfoWriterTask.class);
         writer.buildInfoFile = buildInfoFile;
         writer.tmpBuildInfoFile = tmpBuildInfoFile;
         writer.logger = logger;
-        writer.instantRunBuildContext = context;
+        writer.buildContext = context;
         writer.execute();
     }
 

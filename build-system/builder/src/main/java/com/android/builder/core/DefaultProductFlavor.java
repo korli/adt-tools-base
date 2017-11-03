@@ -22,18 +22,20 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.internal.BaseConfigImpl;
 import com.android.builder.model.ApiVersion;
+import com.android.builder.model.BaseConfig;
 import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.SigningConfig;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -119,7 +121,7 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
         mDimension = dimension;
     }
 
-    /** Name of the dimension this product flavor belongs to. */
+    /** {@inheritDoc} */
     @Nullable
     @Override
     public String getDimension() {
@@ -207,10 +209,7 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
     @Nullable
     @Override
     public ApiVersion getMinSdkVersion() {
-        // FIXME once VariantConfiguration reads manifest attrs from all sourcesets, use it instead
-        return VariantConfiguration
-                .getCalculatedApiVersions(mMinSdkVersion, mTargetSdkVersion)
-                .minSdkVersion;
+        return mMinSdkVersion;
     }
 
     /** Sets the targetSdkVersion to the given value. */
@@ -226,10 +225,7 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
     @Nullable
     @Override
     public ApiVersion getTargetSdkVersion() {
-        // FIXME once VariantConfiguration reads manifest attrs from all sourcesets, use it instead
-        return VariantConfiguration
-                .getCalculatedApiVersions(mMinSdkVersion, mTargetSdkVersion)
-                .targetSdkVersion;
+        return mTargetSdkVersion;
     }
 
     @NonNull
@@ -349,15 +345,18 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
     /**
      * Test instrumentation runner custom arguments.
      *
-     * e.g. <code>[key: "value"]</code> will give
-     * <code>adb shell am instrument -w <b>-e key value</b> com.example</code>...".
+     * <p>e.g. <code>[key: "value"]</code> will give <code>
+     * adb shell am instrument -w <b>-e key value</b> com.example</code>...".
      *
-     * <p>See <a href="http://developer.android.com/guide/topics/manifest/instrumentation-element.html">
+     * <p>See <a
+     * href="http://developer.android.com/guide/topics/manifest/instrumentation-element.html">
      * instrumentation</a>.
      *
      * <p>Test runner arguments can also be specified from the command line:
      *
-     * <p><pre>
+     * <p>
+     *
+     * <pre>
      * ./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.size=medium
      * ./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.foo=bar
      * </pre>
@@ -494,19 +493,319 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
         return mResourceConfiguration;
     }
 
+    /** Class representing a request with fallbacks. */
+    public static class DimensionRequest {
+        @NonNull private final String requested;
+        @NonNull private final ImmutableList<String> fallbacks;
+
+        public DimensionRequest(
+                @NonNull String requested, @NonNull ImmutableList<String> fallbacks) {
+            this.requested = requested;
+            this.fallbacks = fallbacks;
+        }
+
+        @NonNull
+        public String getRequested() {
+            return requested;
+        }
+
+        @NonNull
+        public List<String> getFallbacks() {
+            return fallbacks;
+        }
+    }
+
+    /** map of dimension -> request */
+    private Map<String, DimensionRequest> missingDimensionSelections;
+
+    /**
+     * Specifies a flavor that the plugin should try to use from a given dimension in a dependency.
+     *
+     * <p>Android plugin 3.0.0 and higher try to match each variant of your module with the same one
+     * from its dependencies. For example, consider if both your app and its dependencies include a
+     * "tier" <a href="/studio/build/build-variants.html#flavor-dimensions">flavor dimension</a>,
+     * with flavors "free" and "paid". When you build a "freeDebug" version of your app, the plugin
+     * tries to match it with "freeDebug" versions of the local library modules the app depends on.
+     *
+     * <p>However, there may be situations in which <b>a library dependency includes a flavor
+     * dimension that your app does not</b>. For example, consider if a library dependency includes
+     * flavors for a "minApi" dimension, but your app includes flavors for only the "tier"
+     * dimension. So, when you want to build the "freeDebug" version of your app, the plugin doesn't
+     * know whether to use the "minApi23Debug" or "minApi18Debug" version of the dependency, and
+     * you'll see an error message similar to the following:
+     *
+     * <pre>
+     * Error:Failed to resolve: Could not resolve project :mylibrary.
+     * Required by:
+     *     project :app
+     * </pre>
+     *
+     * <p>In this type of situation, use <code>missingDimensionStrategy</code> in the <a
+     * href="com.android.build.gradle.internal.dsl.DefaultConfig.html"><code>defaultConfig</code>
+     * </a> block to specify the default flavor the plugin should select from each missing
+     * dimension, as shown in the sample below. You can also override your selection in the <a
+     * href="com.android.build.gradle.internal.dsl.ProductFlavor.html"><code>productFlavors</code>
+     * </a> block, so each flavor can specify a different matching strategy for a missing dimension.
+     * (Tip: you can also use this property if you simply want to change the matching strategy for a
+     * dimension that exists in both the app and its dependencies.)
+     *
+     * <pre>
+     * // In the app's build.gradle file.
+     * android {
+     *     defaultConfig{
+     *     // Specifies a flavor that the plugin should try to use from
+     *     // a given dimension. The following tells the plugin that, when encountering
+     *     // a dependency that includes a "minApi" dimension, it should select the
+     *     // "minApi18" flavor.
+     *     missingDimensionStrategy 'minApi', 'minApi18'
+     *     // You should specify a missingDimensionStrategy property for each
+     *     // dimension that exists in a local dependency but not in your app.
+     *     missingDimensionStrategy 'abi', 'x86'
+     *     }
+     *     flavorDimensions 'tier'
+     *     productFlavors {
+     *         free {
+     *             dimension 'tier'
+     *             // You can override the default selection at the product flavor
+     *             // level by configuring another missingDimensionStrategy property
+     *             // for the "minApi" dimension.
+     *             missingDimensionStrategy 'minApi', 'minApi23'
+     *         }
+     *         paid {}
+     *     }
+     * }
+     * </pre>
+     *
+     * @param dimension
+     * @param requestedValue
+     */
+    public void missingDimensionStrategy(String dimension, String requestedValue) {
+        missingDimensionStrategy(dimension, ImmutableList.of(requestedValue));
+    }
+
+    /**
+     * Specifies a sorted list of flavors that the plugin should try to use from a given dimension
+     * in a dependency.
+     *
+     * <p>Android plugin 3.0.0 and higher try to match each variant of your module with the same one
+     * from its dependencies. For example, consider if both your app and its dependencies include a
+     * "tier" <a href="/studio/build/build-variants.html#flavor-dimensions">flavor dimension</a>,
+     * with flavors "free" and "paid". When you build a "freeDebug" version of your app, the plugin
+     * tries to match it with "freeDebug" versions of the local library modules the app depends on.
+     *
+     * <p>However, there may be situations in which <b>a library dependency includes a flavor
+     * dimension that your app does not</b>. For example, consider if a library dependency includes
+     * flavors for a "minApi" dimension, but your app includes flavors for only the "tier"
+     * dimension. So, when you want to build the "freeDebug" version of your app, the plugin doesn't
+     * know whether to use the "minApi23Debug" or "minApi18Debug" version of the dependency, and
+     * you'll see an error message similar to the following:
+     *
+     * <pre>
+     * Error:Failed to resolve: Could not resolve project :mylibrary.
+     * Required by:
+     *     project :app
+     * </pre>
+     *
+     * <p>In this type of situation, use <code>missingDimensionStrategy</code> in the <a
+     * href="com.android.build.gradle.internal.dsl.DefaultConfig.html"><code>defaultConfig</code>
+     * </a> block to specify the default flavor the plugin should select from each missing
+     * dimension, as shown in the sample below. You can also override your selection in the <a
+     * href="com.android.build.gradle.internal.dsl.ProductFlavor.html"><code>productFlavors</code>
+     * </a> block, so each flavor can specify a different matching strategy for a missing dimension.
+     * (Tip: you can also use this property if you simply want to change the matching strategy for a
+     * dimension that exists in both the app and its dependencies.)
+     *
+     * <pre>
+     * // In the app's build.gradle file.
+     * android {
+     *     defaultConfig{
+     *     // Specifies a sorted list of flavors that the plugin should try to use from
+     *     // a given dimension. The following tells the plugin that, when encountering
+     *     // a dependency that includes a "minApi" dimension, it should select the
+     *     // "minApi18" flavor. You can include additional flavor names to provide a
+     *     // sorted list of fallbacks for the dimension.
+     *     missingDimensionStrategy 'minApi', 'minApi18', 'minApi23'
+     *     // You should specify a missingDimensionStrategy property for each
+     *     // dimension that exists in a local dependency but not in your app.
+     *     missingDimensionStrategy 'abi', 'x86', 'arm64'
+     *     }
+     *     flavorDimensions 'tier'
+     *     productFlavors {
+     *         free {
+     *             dimension 'tier'
+     *             // You can override the default selection at the product flavor
+     *             // level by configuring another missingDimensionStrategy property
+     *             // for the "minApi" dimension.
+     *             missingDimensionStrategy 'minApi', 'minApi23', 'minApi18'
+     *         }
+     *         paid {}
+     *     }
+     * }
+     * </pre>
+     *
+     * @param dimension
+     * @param requestedValues
+     */
+    public void missingDimensionStrategy(String dimension, String... requestedValues) {
+        missingDimensionStrategy(dimension, ImmutableList.copyOf(requestedValues));
+    }
+
+    /**
+     * Specifies a sorted list of flavors that the plugin should try to use from a given dimension
+     * in a dependency.
+     *
+     * <p>Android plugin 3.0.0 and higher try to match each variant of your module with the same one
+     * from its dependencies. For example, consider if both your app and its dependencies include a
+     * "tier" <a href="/studio/build/build-variants.html#flavor-dimensions">flavor dimension</a>,
+     * with flavors "free" and "paid". When you build a "freeDebug" version of your app, the plugin
+     * tries to match it with "freeDebug" versions of the local library modules the app depends on.
+     *
+     * <p>However, there may be situations in which <b>a library dependency includes a flavor
+     * dimension that your app does not</b>. For example, consider if a library dependency includes
+     * flavors for a "minApi" dimension, but your app includes flavors for only the "tier"
+     * dimension. So, when you want to build the "freeDebug" version of your app, the plugin doesn't
+     * know whether to use the "minApi23Debug" or "minApi18Debug" version of the dependency, and
+     * you'll see an error message similar to the following:
+     *
+     * <pre>
+     * Error:Failed to resolve: Could not resolve project :mylibrary.
+     * Required by:
+     *     project :app
+     * </pre>
+     *
+     * <p>In this type of situation, use <code>missingDimensionStrategy</code> in the <a
+     * href="com.android.build.gradle.internal.dsl.DefaultConfig.html"><code>defaultConfig</code>
+     * </a> block to specify the default flavor the plugin should select from each missing
+     * dimension, as shown in the sample below. You can also override your selection in the <a
+     * href="com.android.build.gradle.internal.dsl.ProductFlavor.html"><code>productFlavors</code>
+     * </a> block, so each flavor can specify a different matching strategy for a missing dimension.
+     * (Tip: you can also use this property if you simply want to change the matching strategy for a
+     * dimension that exists in both the app and its dependencies.)
+     *
+     * <pre>
+     * // In the app's build.gradle file.
+     * android {
+     *     defaultConfig{
+     *     // Specifies a sorted list of flavors that the plugin should try to use from
+     *     // a given dimension. The following tells the plugin that, when encountering
+     *     // a dependency that includes a "minApi" dimension, it should select the
+     *     // "minApi18" flavor. You can include additional flavor names to provide a
+     *     // sorted list of fallbacks for the dimension.
+     *     missingDimensionStrategy 'minApi', 'minApi18', 'minApi23'
+     *     // You should specify a missingDimensionStrategy property for each
+     *     // dimension that exists in a local dependency but not in your app.
+     *     missingDimensionStrategy 'abi', 'x86', 'arm64'
+     *     }
+     *     flavorDimensions 'tier'
+     *     productFlavors {
+     *         free {
+     *             dimension 'tier'
+     *             // You can override the default selection at the product flavor
+     *             // level by configuring another missingDimensionStrategy property
+     *             // for the "minApi" dimension.
+     *             missingDimensionStrategy 'minApi', 'minApi23', 'minApi18'
+     *         }
+     *         paid {}
+     *     }
+     * }
+     * </pre>
+     *
+     * @param dimension
+     * @param requestedValues
+     */
+    public void missingDimensionStrategy(String dimension, List<String> requestedValues) {
+        if (requestedValues.isEmpty()) {
+            throw new RuntimeException("List of requested values cannot be empty");
+        }
+
+        final DimensionRequest selection = computeRequestedAndFallBacks(requestedValues);
+
+        if (missingDimensionSelections == null) {
+            missingDimensionSelections = Maps.newHashMap();
+        }
+
+        missingDimensionSelections.put(dimension, selection);
+    }
+
+    /**
+     * Computes the requested value and the fallback list from the list of values provided in the
+     * DSL
+     *
+     * @param requestedValues the values provided in the DSL
+     * @return a DimensionRequest with the main requested value and the fallbacks.
+     */
+    @NonNull
+    protected DimensionRequest computeRequestedAndFallBacks(@NonNull List<String> requestedValues) {
+        // default implementation is that the fallback's first item is the requested item.
+        return new DimensionRequest(
+                requestedValues.get(0),
+                ImmutableList.copyOf(requestedValues.subList(1, requestedValues.size())));
+    }
+
+    public Map<String, DimensionRequest> getMissingDimensionStrategies() {
+        if (missingDimensionSelections == null) {
+            return ImmutableMap.of();
+        }
+
+        return missingDimensionSelections;
+    }
+
+    /**
+     * Merges the flavors by analyzing the specified one and the list. Flavors whose position in the
+     * list is higher will have their values overwritten by the lower-position flavors (in case they
+     * have non-null values for some properties). E.g. if flavor at position 1 specifies
+     * applicationId &quot;my.application&quot;, and flavor at position 0 specifies
+     * &quot;sample.app&quot;, merged flavor will have applicationId &quot;sampleapp&quot; (if there
+     * are no other flavors overwriting this value). Flavor {@code lowestPriority}, as the name
+     * says, has the lowest priority of them all, and will always be overwritten.
+     *
+     * @param lowestPriority flavor with the lowest priority
+     * @param flavors flavors to merge
+     * @return final merged product flavor
+     */
+    static ProductFlavor mergeFlavors(
+            @NonNull ProductFlavor lowestPriority, @NonNull List<? extends ProductFlavor> flavors) {
+        DefaultProductFlavor mergedFlavor = DefaultProductFlavor.clone(lowestPriority);
+        for (ProductFlavor flavor : Lists.reverse(flavors)) {
+            mergedFlavor = DefaultProductFlavor.mergeFlavors(mergedFlavor, flavor);
+        }
+
+        /*
+         * For variants with product flavor dimensions d1, d2 and flavors f1 of d1 and f2 of d2, we
+         * will have final applicationSuffixId suffix(default).suffix(f2).suffix(f1). However, the
+         * previous implementation of product flavor merging would produce
+         * suffix(default).suffix(f1).suffix(f2). We match that behavior below as we do not want to
+         * change application id of developers' applications. The same applies to versionNameSuffix.
+         */
+        String applicationIdSuffix = lowestPriority.getApplicationIdSuffix();
+        String versionNameSuffix = lowestPriority.getVersionNameSuffix();
+        for (ProductFlavor mFlavor : flavors) {
+            applicationIdSuffix =
+                    DefaultProductFlavor.mergeApplicationIdSuffix(
+                            mFlavor.getApplicationIdSuffix(), applicationIdSuffix);
+            versionNameSuffix =
+                    DefaultProductFlavor.mergeVersionNameSuffix(
+                            mFlavor.getVersionNameSuffix(), versionNameSuffix);
+        }
+        mergedFlavor.setApplicationIdSuffix(applicationIdSuffix);
+        mergedFlavor.setVersionNameSuffix(versionNameSuffix);
+
+        return mergedFlavor;
+    }
+
     /**
      * Merges two flavors on top of one another and returns a new object with the result.
      *
-     * The behavior is that if a value is present in the overlay, then it is used, otherwise
-     * we use the value from the base.
+     * <p>The behavior is that if a value is present in the overlay, then it is used, otherwise we
+     * use the value from the base.
      *
      * @param base the flavor to merge on top of
      * @param overlay the flavor to apply on top of the base.
-     *
      * @return a new ProductFlavor that represents the merge.
      */
     @NonNull
-    static ProductFlavor mergeFlavors(@NonNull ProductFlavor base, @NonNull ProductFlavor overlay) {
+    private static DefaultProductFlavor mergeFlavors(
+            @NonNull ProductFlavor base, @NonNull ProductFlavor overlay) {
         DefaultProductFlavor flavor = new DefaultProductFlavor("");
 
         flavor.mMinSdkVersion = chooseNotNull(
@@ -609,6 +908,19 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
                         overlay.getVectorDrawables().getUseSupportLibrary(),
                         base.getVectorDrawables().getUseSupportLibrary()));
 
+        flavor.missingDimensionSelections = Maps.newHashMap();
+        if (base instanceof DefaultProductFlavor) {
+            flavor.missingDimensionSelections.putAll(
+                    ((DefaultProductFlavor) base).getMissingDimensionStrategies());
+        }
+        if (overlay instanceof DefaultProductFlavor) {
+            flavor.missingDimensionSelections.putAll(
+                    ((DefaultProductFlavor) overlay).getMissingDimensionStrategies());
+        }
+
+        // no need to merge missingDimensionStrategies, it's not queried from the merged flavor.
+        // TODO this should all be clean up with the new variant DSL/API in 3.1
+
         return flavor;
     }
 
@@ -620,7 +932,7 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
      * @return a new instance that is a clone of the flavor.
      */
     @NonNull
-    static ProductFlavor clone(@NonNull ProductFlavor productFlavor) {
+    static DefaultProductFlavor clone(@NonNull ProductFlavor productFlavor) {
         DefaultProductFlavor flavor = new DefaultProductFlavor(productFlavor.getName());
         flavor._initWith(productFlavor);
         flavor.mDimension = productFlavor.getDimension();
@@ -662,10 +974,32 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
         flavor.setMultiDexKeepProguard(productFlavor.getMultiDexKeepProguard());
         flavor.setJarJarRuleFiles(ImmutableList.copyOf(productFlavor.getJarJarRuleFiles()));
 
+        if (productFlavor instanceof DefaultProductFlavor) {
+            final DefaultProductFlavor defaultProductFlavor = (DefaultProductFlavor) productFlavor;
+            flavor.missingDimensionSelections =
+                    Maps.newHashMap(defaultProductFlavor.getMissingDimensionStrategies());
+        }
+
         return flavor;
     }
 
-    private static <T> T chooseNotNull(T overlay, T base) {
+    protected void cloneFrom(@NonNull ProductFlavor flavor) {
+        // nothing to do
+    }
+
+    @Override
+    protected void _initWith(@NonNull BaseConfig that) {
+        super._initWith(that);
+        if (that instanceof DefaultProductFlavor) {
+            DefaultProductFlavor from = (DefaultProductFlavor) that;
+            if (from.missingDimensionSelections != null) {
+                // the objects inside the map are immutable, so it's fine to keep them.
+                missingDimensionSelections = Maps.newHashMap(from.missingDimensionSelections);
+            }
+        }
+    }
+
+    protected static <T> T chooseNotNull(T overlay, T base) {
         return overlay != null ? overlay : base;
     }
 
@@ -691,71 +1025,6 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
         else{
             return base;
         }
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        if (!super.equals(o)) {
-            return false;
-        }
-
-        DefaultProductFlavor that = (DefaultProductFlavor) o;
-
-        return Objects.equal(mDimension, that.mDimension) &&
-                Objects.equal(mApplicationId, that.mApplicationId) &&
-                Objects.equal(mMaxSdkVersion, that.mMaxSdkVersion) &&
-                Objects.equal(mMinSdkVersion, that.mMinSdkVersion) &&
-                Objects.equal(mName, that.mName) &&
-                Objects.equal(mRenderscriptNdkModeEnabled, that.mRenderscriptNdkModeEnabled) &&
-                Objects.equal(mRenderscriptSupportModeEnabled,
-                        that.mRenderscriptSupportModeEnabled) &&
-                Objects.equal(mRenderscriptSupportModeBlasEnabled,
-                        that.mRenderscriptSupportModeBlasEnabled) &&
-                Objects.equal(mRenderscriptTargetApi, that.mRenderscriptTargetApi) &&
-                Objects.equal(mResourceConfiguration, that.mResourceConfiguration) &&
-                Objects.equal(mSigningConfig, that.mSigningConfig) &&
-                Objects.equal(mTargetSdkVersion, that.mTargetSdkVersion) &&
-                Objects.equal(mTestApplicationId, that.mTestApplicationId) &&
-                Objects.equal(mTestFunctionalTest, that.mTestFunctionalTest) &&
-                Objects.equal(mTestHandleProfiling, that.mTestHandleProfiling) &&
-                Objects.equal(mTestInstrumentationRunner, that.mTestInstrumentationRunner) &&
-                Objects.equal(mTestInstrumentationRunnerArguments,
-                        that.mTestInstrumentationRunnerArguments) &&
-                Objects.equal(mVersionCode, that.mVersionCode) &&
-                Objects.equal(mVersionName, that.mVersionName) &&
-                Objects.equal(mWearAppUnbundled, that.mWearAppUnbundled);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(
-                super.hashCode(),
-                mName,
-                mDimension,
-                mMinSdkVersion,
-                mTargetSdkVersion,
-                mMaxSdkVersion,
-                mRenderscriptTargetApi,
-                mRenderscriptSupportModeEnabled,
-                mRenderscriptSupportModeBlasEnabled,
-                mRenderscriptNdkModeEnabled,
-                mVersionCode,
-                mVersionName,
-                mApplicationId,
-                mTestApplicationId,
-                mTestInstrumentationRunner,
-                mTestInstrumentationRunnerArguments,
-                mTestHandleProfiling,
-                mTestFunctionalTest,
-                mSigningConfig,
-                mResourceConfiguration,
-                mWearAppUnbundled);
     }
 
     @Override

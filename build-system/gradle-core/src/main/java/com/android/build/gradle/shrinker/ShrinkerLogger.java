@@ -16,19 +16,16 @@
 
 package com.android.build.gradle.shrinker;
 
+import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.internal.incremental.ByteCodeUtils;
 import com.android.build.gradle.shrinker.parser.FilterSpecification;
 import com.android.utils.Pair;
 import com.google.common.collect.Sets;
-
-import org.slf4j.Logger;
-
 import java.util.List;
 import java.util.Set;
+import org.slf4j.Logger;
 
-/**
- * Shrinker-specific logger that can be configured with -dontwarn flag.
- */
+/** Shrinker-specific logger that can be configured with -dontwarn flag. */
 public class ShrinkerLogger {
     private final List<FilterSpecification> mDontWarnSpecs;
     private final Logger mLogger;
@@ -82,6 +79,11 @@ public class ShrinkerLogger {
     }
 
     public int getWarningsCount() {
-        return mWarningsEmitted.size();
+        return getWarningsEmitted().size();
+    }
+
+    @VisibleForTesting
+    Set<Pair<String, String>> getWarningsEmitted() {
+        return mWarningsEmitted;
     }
 }

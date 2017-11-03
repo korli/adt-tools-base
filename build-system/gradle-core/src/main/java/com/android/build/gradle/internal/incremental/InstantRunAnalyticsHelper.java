@@ -17,24 +17,24 @@
 package com.android.build.gradle.internal.incremental;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.wireless.android.sdk.stats.InstantRunArtifact;
 import com.google.wireless.android.sdk.stats.InstantRunStatus;
-import org.jetbrains.annotations.Nullable;
 
 public class InstantRunAnalyticsHelper {
 
     /** Generate a scrubbed proto of the instant run build context for analytics. */
     @NonNull
     public static InstantRunStatus generateAnalyticsProto(
-            @NonNull InstantRunBuildContext instantRunBuildContext) {
+            @NonNull InstantRunBuildContext buildContext) {
         InstantRunStatus.Builder builder = InstantRunStatus.newBuilder();
 
-        builder.setBuildMode(convert(instantRunBuildContext.getBuildMode()));
-        builder.setPatchingPolicy(convert(instantRunBuildContext.getPatchingPolicy()));
-        builder.setVerifierStatus(convert(instantRunBuildContext.getVerifierResult()));
+        builder.setBuildMode(convert(buildContext.getBuildMode()));
+        builder.setPatchingPolicy(convert(buildContext.getPatchingPolicy()));
+        builder.setVerifierStatus(convert(buildContext.getVerifierResult()));
 
-        InstantRunBuildContext.Build last = instantRunBuildContext.getLastBuild();
+        InstantRunBuildContext.Build last = buildContext.getLastBuild();
         if (last != null) {
             for (InstantRunBuildContext.Artifact artifact : last.getArtifacts()) {
                 builder.addArtifact(
@@ -69,10 +69,10 @@ public class InstantRunAnalyticsHelper {
         switch (policy) {
             case PRE_LOLLIPOP:
                 return InstantRunStatus.PatchingPolicy.PRE_LOLLIPOP;
-            case MULTI_DEX:
-                return InstantRunStatus.PatchingPolicy.MULTI_DEX;
             case MULTI_APK:
                 return InstantRunStatus.PatchingPolicy.MULTI_APK;
+            case MULTI_APK_SEPARATE_RESOURCES:
+                return InstantRunStatus.PatchingPolicy.MULTI_APK_SEPARATE_RESOURCES;
             default:
                 return InstantRunStatus.PatchingPolicy.UNKNOWN_PATCHING_POLICY;
         }
@@ -98,8 +98,6 @@ public class InstantRunAnalyticsHelper {
                 return InstantRunArtifact.Type.SPLIT_MAIN;
             case RELOAD_DEX:
                 return InstantRunArtifact.Type.RELOAD_DEX;
-            case DEX:
-                return InstantRunArtifact.Type.DEX;
             case SPLIT:
                 return InstantRunArtifact.Type.SPLIT;
             case RESOURCES:

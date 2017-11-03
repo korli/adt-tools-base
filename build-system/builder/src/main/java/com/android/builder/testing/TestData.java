@@ -18,21 +18,35 @@ package com.android.builder.testing;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.builder.model.ApiVersion;
 import com.android.builder.testing.api.DeviceConfigProvider;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessExecutor;
+import com.android.sdklib.AndroidVersion;
 import com.android.utils.ILogger;
 import com.google.common.collect.ImmutableList;
-
 import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import javax.xml.parsers.ParserConfigurationException;
+import org.xml.sax.SAXException;
 
 /**
  * Data representing the test app and the tested application/library.
  */
 public interface TestData {
+
+
+    /**
+     * load the tested variant build output metadata file.
+     *
+     * @param metadataFile the metadata file of the tested variant.
+     * @throws ParserConfigurationException xml configuration error
+     * @throws SAXException xml parsing error
+     * @throws IOException cannot load the xml file.
+     */
+    void loadFromMetadataFile(File metadataFile)
+            throws ParserConfigurationException, SAXException, IOException;
 
     /**
      * Returns the application id.
@@ -63,11 +77,9 @@ public interface TestData {
      */
     boolean isTestCoverageEnabled();
 
-    /**
-     * The min SDK version of the app
-     */
+    /** The min SDK version of the app */
     @NonNull
-    ApiVersion getMinSdkVersion();
+    AndroidVersion getMinSdkVersion();
 
     boolean isLibrary();
 

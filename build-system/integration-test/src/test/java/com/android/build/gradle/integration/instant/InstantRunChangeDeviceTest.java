@@ -21,16 +21,15 @@ import static com.android.build.gradle.integration.common.truth.TruthHelper.asse
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
-import com.android.build.gradle.integration.common.truth.ApkSubject;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
@@ -41,7 +40,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -77,34 +75,31 @@ public class InstantRunChangeDeviceTest {
     @Rule
     public Expect expect = Expect.createAndEnableStackTrace();
 
-    @Before
-    public void checkEnvironment() {
-        // IR currently does not work with Jack - http://b.android.com/224374
-        AssumeUtil.assumeNotUsingJack();
-    }
-
     @Test
     public void switchScenario() throws Exception {
         AndroidProject model = mProject.model().getSingle().getOnlyModel();
-        File apk = model.getVariants().stream()
-                .filter(variant -> variant.getName().equals("debug")).iterator().next()
-                .getMainArtifact()
-                .getOutputs().iterator().next()
-                .getOutputs().iterator().next()
-                .getOutputFile();
+
+        AndroidArtifact debug =
+                model.getVariants()
+                        .stream()
+                        .filter(variant -> variant.getName().equals("debug"))
+                        .iterator()
+                        .next()
+                        .getMainArtifact();
         InstantRun instantRunModel = InstantRunTestUtils.getInstantRunModel(model);
         String startBuildId;
         mProject.execute("clean");
 
         if (firstBuild == BuildTarget.NO_INSTANT_RUN) {
             mProject.executor().run("assembleDebug");
+            File apk = (debug.getOutputs().iterator().next()).getMainOutputFile().getOutputFile();
+
             checkNormalApk(apk);
             startBuildId = null;
         } else {
             mProject.executor()
                     .withInstantRun(
-                            firstBuild.getApiLevel(),
-                            ColdswapMode.MULTIAPK,
+                            new AndroidVersion(firstBuild.getApiLevel(), null),
                             OptionalCompilationStep.FULL_APK)
                     .run("assembleDebug");
             InstantRunBuildInfo initialContext = InstantRunTestUtils.loadContext(instantRunModel);
@@ -115,12 +110,12 @@ public class InstantRunChangeDeviceTest {
 
         if (secondBuild == BuildTarget.NO_INSTANT_RUN) {
             mProject.executor().run("assembleDebug");
+            File apk = debug.getOutputs().iterator().next().getMainOutputFile().getOutputFile();
             checkNormalApk(apk);
         } else {
             mProject.executor()
                     .withInstantRun(
-                            secondBuild.getApiLevel(),
-                            ColdswapMode.MULTIAPK,
+                            new AndroidVersion(secondBuild.getApiLevel(), null),
                             OptionalCompilationStep.FULL_APK)
                     .run("assembleDebug");
             InstantRunBuildInfo buildContext = InstantRunTestUtils.loadContext(instantRunModel);
@@ -131,29 +126,28 @@ public class InstantRunChangeDeviceTest {
         }
     }
 
-    private void checkSplitApk(@NonNull List<InstantRunArtifact> artifacts) throws Exception {
+    private static void checkSplitApk(@NonNull List<InstantRunArtifact> artifacts)
+            throws Exception {
         assertThat(artifacts).hasSize(11);
         InstantRunArtifact main = artifacts.stream()
                 .filter(artifact -> artifact.type == InstantRunArtifactType.SPLIT_MAIN)
                 .findFirst().orElseThrow(() -> new AssertionError("Main artifact not found"));
 
-        ApkSubject apkSubject = expect.about(ApkSubject.FACTORY).that(main.file);
-
-        apkSubject.doesNotContainClass("Lcom/example/helloworld/HelloWorld;");
-        apkSubject.hasClass("Lcom/android/tools/fd/runtime/Server;",
-                AbstractAndroidSubject.ClassFileScope.MAIN_AND_SECONDARY);
+        try (Apk apk = new Apk(main.file)) {
+            assertThat(apk).doesNotContainClass("Lcom/example/helloworld/HelloWorld;");
+            assertThat(apk).containsClass("Lcom/android/tools/ir/server/Server;");
+        }
     }
 
-    private void checkNormalApk(@NonNull File apk) throws Exception {
-        ApkSubject apkSubject = expect.about(ApkSubject.FACTORY).that(apk);
-
-        apkSubject.hasClass("Lcom/example/helloworld/HelloWorld;",
-                AbstractAndroidSubject.ClassFileScope.MAIN)
-                .that().hasMethod("onCreate");
-        apkSubject.doesNotContainClass("Lcom/android/tools/fd/runtime/Server;",
-                AbstractAndroidSubject.ClassFileScope.MAIN);
-        apkSubject.doesNotContainClass("Lcom/android/tools/fd/runtime/AppInfo;",
-                AbstractAndroidSubject.ClassFileScope.MAIN);
+    private static void checkNormalApk(@NonNull File apkFile) throws Exception {
+        try (Apk apk = new Apk(apkFile)) {
+            assertThat(apk)
+                    .hasMainClass("Lcom/example/helloworld/HelloWorld;")
+                    .that()
+                    .hasMethod("onCreate");
+            assertThat(apk).doesNotContainMainClass("Lcom/android/tools/ir/server/Server;");
+            assertThat(apk).doesNotContainMainClass("Lcom/android/tools/ir/server/AppInfo;");
+        }
     }
 
 

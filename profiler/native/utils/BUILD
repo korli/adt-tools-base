@@ -1,22 +1,28 @@
+load("//tools/base/bazel:android.bzl", "select_android")
+
 package(default_visibility = ["//visibility:public"])
 
 cc_library(
     name = "profiler_utils",
     srcs = [
         "activity_manager.cc",
+        "background_queue.cc",
         "bash_command.cc",
+        "config.cc",
         "current_process.cc",
+        "device_info.cc",
+        "file_cache.cc",
         "file_reader.cc",
         "fs/dir.cc",
         "fs/disk_file_system.cc",
         "fs/file.cc",
         "fs/file_system.cc",
+        "fs/memory_file_system.cc",
         "fs/path.cc",
         "installer.cc",
-        "log.cc",
         "package_manager.cc",
         "process_manager.cc",
-        "profiler_file.cc",
+        "socket_utils.cc",
         "stopwatch.cc",
         "tokenizer.cc",
         "trace.cc",
@@ -33,15 +39,27 @@ cc_library(
             "filesystem_notifier.cc",
             "thread_name.cc",
         ],
-    }),
+    }) + select_android(
+        [
+            "log.android.cc",
+        ],
+        [
+            "log.cc",
+        ],
+    ),
     hdrs = [
         "activity_manager.h",
         "android_studio_version.h",
+        "background_queue.h",
         "bash_command.h",
+        "circular_buffer.h",
         "clock.h",
         "config.h",
+        "count_down_latch.h",
         "current_process.h",
+        "device_info.h",
         "fake_clock.h",
+        "file_cache.h",
         "file_reader.h",
         "filesystem_notifier.h",
         "fs/dir.h",
@@ -54,33 +72,42 @@ cc_library(
         "log.h",
         "package_manager.h",
         "process_manager.h",
-        "profiler_file.h",
+        "producer_consumer_queue.h",
+        "socket_utils.h",
         "stopwatch.h",
         "thread_name.h",
         "time_value_buffer.h",
-        "timespec_math.h",
         "tokenizer.h",
         "trace.h",
+        "trie.h",
         "uid_fetcher.h",
     ],
     copts = [
         "-Itools/base/profiler/native",
         "-I$(GENDIR)/tools/base/profiler",
     ],
+    deps = [
+        "//tools/base/profiler/proto:profiler_cc_proto",
+    ],
 )
 
 cc_test(
     name = "profiler_utils_test",
     srcs = [
+        "activity_manager_test.cc",
+        "background_queue_test.cc",
+        "circular_buffer_test.cc",
         "clock_test.cc",
+        "count_down_latch_test.cc",
         "current_process_test.cc",
+        "file_cache_test.cc",
         "file_reader_test.cc",
         "fs/file_system_test.cc",
-        "fs/memory_file_system.cc",
+        "producer_consumer_queue_test.cc",
         "stopwatch_test.cc",
         "time_value_buffer_test.cc",
-        "timespec_math_test.cc",
         "tokenizer_test.cc",
+        "trie_test.cc",
         "uid_fetcher_test.cc",
     ],
     copts = [
@@ -90,6 +117,7 @@ cc_test(
     data = [
         "//tools/base/profiler/native/testdata:utils",
     ],
+    linkstatic = 1,
     deps = [
         ":profiler_utils",
         "//external:gmock_main",

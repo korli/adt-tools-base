@@ -22,13 +22,12 @@ import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.dependency.NativeDependencyResolveResult;
 import com.android.build.gradle.internal.dependency.NativeLibraryArtifact;
-import com.android.build.gradle.internal.model.NativeLibraryFactory;
 import com.android.build.gradle.internal.ide.NativeLibraryImpl;
+import com.android.build.gradle.internal.model.NativeLibraryFactory;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.ndk.Stl;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
 import com.android.build.gradle.managed.NdkAbiOptions;
 import com.android.build.gradle.managed.NdkConfig;
 import com.android.build.gradle.managed.NdkOptions;
@@ -40,13 +39,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-
-import org.gradle.model.ModelMap;
-import org.gradle.nativeplatform.NativeLibraryBinary;
-import org.gradle.nativeplatform.NativeLibraryBinarySpec;
-import org.gradle.nativeplatform.SharedLibraryBinary;
-import org.gradle.nativeplatform.StaticLibraryBinary;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
@@ -54,6 +46,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.gradle.model.ModelMap;
+import org.gradle.nativeplatform.NativeLibraryBinary;
+import org.gradle.nativeplatform.NativeLibraryBinarySpec;
+import org.gradle.nativeplatform.SharedLibraryBinary;
+import org.gradle.nativeplatform.StaticLibraryBinary;
 
 /**
  * Implementation of NativeLibraryFactory from in the component model plugin.
@@ -91,7 +88,7 @@ public class ComponentNativeLibraryFactory implements NativeLibraryFactory {
             @NonNull VariantScope scope,
             @NonNull String toolchainName,
             @NonNull final Abi abi) {
-        BaseVariantData<? extends BaseVariantOutputData> variantData = scope.getVariantData();
+        BaseVariantData variantData = scope.getVariantData();
 
         AndroidBinaryInternal androidBinary =
                 binaries.get(COMPONENT_NAME + StringHelper.capitalize(variantData.getName()));
@@ -159,11 +156,11 @@ public class ComponentNativeLibraryFactory implements NativeLibraryFactory {
     }
 
     /**
-     * Find all directories containing library with debug symbol.
-     * Include libraries from dependencies.
+     * Find all directories containing library with debug symbol. Include libraries from
+     * dependencies.
      */
     private List<File> findDebuggableLibraryDirectories(
-            @NonNull BaseVariantData<? extends BaseVariantOutputData> variantData,
+            @NonNull BaseVariantData variantData,
             @NonNull AndroidBinaryInternal binary,
             @NonNull Abi abi) {
         // Create LinkedHashSet to remove duplicated while maintaining order.

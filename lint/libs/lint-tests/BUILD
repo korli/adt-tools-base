@@ -1,9 +1,14 @@
-java_library(
+load("//tools/base/bazel:kotlin.bzl", "kotlin_library", "kotlin_test")
+load("//tools/base/bazel:maven.bzl", "maven_pom")
+
+kotlin_library(
     name = "lint-tests",
-    srcs = glob(["src/main/java/**/*.java"]),
+    srcs = ["src/main/java"],
+    pom = ":pom",
     visibility = ["//visibility:public"],
     deps = [
-        "//prebuilts/tools/common/uast:uast-162.2228.14",
+        "//prebuilts/tools/common/intellij-core:intellij-core-171.4249.32",
+        "//prebuilts/tools/common/uast:uast-171.4249.32",
         "//tools/base/annotations",
         "//tools/base/build-system/builder-model",
         "//tools/base/common:tools.common",
@@ -18,27 +23,36 @@ java_library(
         "//tools/base/third_party:com.intellij_annotations",
         "//tools/base/third_party:junit_junit",
         "//tools/base/third_party:org.eclipse.jdt.core.compiler_ecj",
-        "//tools/base/third_party:org.mockito_mockito-all",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
+        "//tools/base/third_party:org.jetbrains.trove4j_trove4j",
+        "//tools/base/third_party:org.mockito_mockito-core",
         "//tools/base/third_party:org.ow2.asm_asm",
     ],
 )
 
-java_test(
+kotlin_test(
     name = "tests",
-    srcs = glob(["src/test/java/**/*.java"]),
+    srcs = ["src/test/java"],
     data = [
         "//prebuilts/studio/sdk:platform-tools",
         "//prebuilts/studio/sdk:platforms/latest",
+        "//prebuilts/studio/sdk:typos",
         "//tools/adt/idea/android/annotations",
         "//tools/base/files/typos",
     ],
-    jvm_flags = ["-Dtest.suite.jar=tests.jar"],
+    jvm_flags = [
+        "-Dtest.suite.jar=tests.jar",
+        # TODO: Inject the cache directory into tests.
+        "-Duser.home=/tmp",
+    ],
     test_class = "com.android.testutils.JarTestSuite",
     deps = [
         ":lint-tests",
+        "//prebuilts/tools/common/intellij-core:intellij-core-171.4249.32",
         "//prebuilts/tools/common/m2/repository/org/mockito/mockito-all/1.9.5:jar",
-        "//prebuilts/tools/common/uast:uast-162.2228.14",
+        "//prebuilts/tools/common/uast:uast-171.4249.32",
         "//tools/base/annotations",
+        "//tools/base/build-system:tools.manifest-merger",
         "//tools/base/build-system/builder-model",
         "//tools/base/common:tools.common",
         "//tools/base/layoutlib-api:tools.layoutlib-api",
@@ -53,9 +67,19 @@ java_test(
         "//tools/base/third_party:com.google.code.gson_gson",
         "//tools/base/third_party:com.google.truth_truth",
         "//tools/base/third_party:com.intellij_annotations",
+        "//tools/base/third_party:junit_junit",
         "//tools/base/third_party:net.sf.kxml_kxml2",
         "//tools/base/third_party:org.codehaus.groovy_groovy-all",
         "//tools/base/third_party:org.eclipse.jdt.core.compiler_ecj",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
+        "//tools/base/third_party:org.jetbrains.trove4j_trove4j",
         "//tools/base/third_party:org.ow2.asm_asm-tree",
     ],
+)
+
+maven_pom(
+    name = "pom",
+    artifact = "lint-tests",
+    group = "com.android.tools.lint",
+    source = "//tools/buildSrc/base:build_version",
 )

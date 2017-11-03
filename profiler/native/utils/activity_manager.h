@@ -18,6 +18,7 @@
 #define UTILS_PROFILER_ACTIVITYMANAGER_H
 
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 
@@ -25,14 +26,12 @@
 
 namespace profiler {
 
-
-
-// Singleton rapper around Android executable "am" (Activity Manager).
-class ActivityManager : public BashCommandRunner {
+// Singleton wrapper around Android executable "am" (Activity Manager).
+class ActivityManager {
  public:
   enum ProfilingMode { SAMPLING, INSTRUMENTED };
 
-  static ActivityManager* Instance();
+  static ActivityManager *Instance();
 
   // Starts profiling using ART runtime profiler either by sampling or
   // code instrumentation.
@@ -42,25 +41,30 @@ class ActivityManager : public BashCommandRunner {
   // Calling start twice in a row (without a stop) will result in an error.
   bool StartProfiling(const ProfilingMode profiling_mode,
                       const std::string &app_package_name,
-                      std::string *trace_path, std::string *error_string) ;
+                      int sampling_interval, std::string *trace_path,
+                      std::string *error_string);
 
   // Stops ongoing profiling. If no profiling was ongoing, this function is a
   // no-op.
   // Returns true is profiling stopped successfully. Otherwise false
   // and populate error_string.
   bool StopProfiling(const std::string &app_package_name,
-                     std::string *error_string) ;
+                     std::string *error_string);
 
   bool TriggerHeapDump(int pid, const std::string &file_path,
                        std::string *error_string) const;
 
+ protected:
+  // A protected constructor designed for testing.
+  ActivityManager(std::unique_ptr<BashCommandRunner> bash)
+      : bash_(std::move(bash)) {}
+
  private:
   ActivityManager();
-
   // Entry storing all data related to an ongoing profiling.
   class ArtOnGoingProfiling {
    public:
-    std::string trace_path;     // File path where trace will be made availabe.
+    std::string trace_path;  // File path where trace will be made available.
     std::string app_pkg_name;
   };
 
@@ -76,14 +80,18 @@ class ActivityManager : public BashCommandRunner {
   std::string GenerateTracePath(const std::string &app_package_name) const;
 
   // Returns true if app is being profiled.
-  bool IsAppProfiled(const std::string& app_package_name) const;
+  bool IsAppProfiled(const std::string &app_package_name) const;
 
-  void AddProfiledApp(const std::string& app_package_name, const std::string& trace_path);
+  void AddProfiledApp(const std::string &app_package_name,
+                      const std::string &trace_path);
 
-  void RemoveProfiledApp(const std::string& app_package_name);
+  void RemoveProfiledApp(const std::string &app_package_name);
   // Only call this method if you are certain the app is being profiled.
   // Otherwise result is undefined.
-  std::string GetProfiledAppTracePath(const std::string& app_package_name) const;
+  std::string GetProfiledAppTracePath(
+      const std::string &app_package_name) const;
+
+  std::unique_ptr<BashCommandRunner> bash_;
 };
 }  // namespace profiler
 

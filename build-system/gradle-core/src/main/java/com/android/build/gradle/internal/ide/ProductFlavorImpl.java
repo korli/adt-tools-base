@@ -27,7 +27,6 @@ import com.android.builder.model.VectorDrawablesOptions;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-
 import java.io.Serializable;
 import java.util.Collection;
 import java.util.Map;
@@ -64,24 +63,14 @@ final class ProductFlavorImpl extends BaseConfigImpl implements ProductFlavor, S
     private final Boolean mWearAppUnbundled;
 
 
-    public ProductFlavorImpl(
-            @NonNull ProductFlavor productFlavor,
-            @Nullable ApiVersion minSdkVersionOverride,
-            @Nullable ApiVersion targetSdkVersionOverride) {
+    public ProductFlavorImpl(@NonNull ProductFlavor productFlavor) {
         super(productFlavor);
 
         this.name = productFlavor.getName();
         this.mDimension = productFlavor.getDimension();
-        this.mMinSdkVersion = minSdkVersionOverride != null
-                ? minSdkVersionOverride
-                : ApiVersionImpl.clone(productFlavor.getMinSdkVersion());
-        this.mTargetSdkVersion = targetSdkVersionOverride != null
-                ? targetSdkVersionOverride
-                : ApiVersionImpl.clone(productFlavor.getTargetSdkVersion());
-        //noinspection VariableNotUsedInsideIf
-        this.mMaxSdkVersion = targetSdkVersionOverride != null
-                ? null /* we remove the maxSdkVersion when dealing with a preview release */
-                : productFlavor.getMaxSdkVersion();
+        this.mMinSdkVersion = ApiVersionImpl.clone(productFlavor.getMinSdkVersion());
+        this.mTargetSdkVersion = ApiVersionImpl.clone(productFlavor.getTargetSdkVersion());
+        this.mMaxSdkVersion = productFlavor.getMaxSdkVersion();
         this.mRenderscriptTargetApi = productFlavor.getRenderscriptTargetApi();
         this.mRenderscriptSupportMode = productFlavor.getRenderscriptSupportModeEnabled();
         this.mRenderscriptSupportModeBlas = productFlavor.getRenderscriptSupportModeBlasEnabled();

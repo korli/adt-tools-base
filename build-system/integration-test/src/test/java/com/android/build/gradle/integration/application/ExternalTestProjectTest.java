@@ -27,7 +27,6 @@ import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.SyncIssue;
 import java.io.File;
-import java.io.IOException;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -43,7 +42,7 @@ public class ExternalTestProjectTest {
     private File app2BuildFile;
 
     @Before
-    public void setUp() throws IOException {
+    public void setUp() throws Exception {
         TestFileUtils.appendToFile(project.getSettingsFile(),
                 "include ':app1'\ninclude ':app2'\n");
 
@@ -79,7 +78,7 @@ public class ExternalTestProjectTest {
     }
 
     @Test
-    public void testExtraJarDependency() throws IOException {
+    public void testExtraJarDependency() throws Exception {
         TestFileUtils.appendToFile(app2BuildFile,
                 "apply plugin: 'com.android.application'\n"
                 + "\n"
@@ -93,75 +92,5 @@ public class ExternalTestProjectTest {
                 + "}\n");
 
         project.execute("clean", "app2:assembleDebug");
-    }
-
-    @Test
-    public void testApkDependencyInBuild() throws IOException {
-        TestFileUtils.appendToFile(app2BuildFile,
-                "apply plugin: 'com.android.application'\n"
-                + "\n"
-                + "android {\n"
-                + "    compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n"
-                + "    buildToolsVersion '" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "'\n"
-                + "}\n"
-                + "\n"
-                + "dependencies {\n"
-                + "    compile project(path: ':app1')\n"
-                + "}\n");
-
-        GradleBuildResult result =
-                project.executor().expectFailure().run("clean", "app2:assembleDebug");
-
-        Throwable t = result.getException();
-        while (t.getCause() != null) {
-            t = t.getCause();
-        }
-
-        // looks like we can't actually test the instance t against GradleException
-        // due to it coming through the tooling API from a different class loader.
-        assertThat(t.getClass().getCanonicalName())
-                .named("Exception class name")
-                .isSameAs("org.gradle.api.GradleException");
-        assertThat(t.getMessage())
-                .named("Exception message")
-                .isEqualTo("Dependency Error. See console for details.");
-
-
-        // check there is a version of the error, after the task name:
-        assertThat(result.getStderr())
-                .named("build stderr")
-                .contains(
-                        "Dependency project:app1:unspecified on project app2 resolves to an APK "
-                                + "archive which is not supported as a compilation dependency. "
-                                + "File:");
-
-    }
-
-    @Test
-    public void testApkDependencyInModel() throws IOException {
-        TestFileUtils.appendToFile(app2BuildFile,
-                "apply plugin: 'com.android.application'\n"
-                + "\n"
-                + "android {\n"
-                + "    compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n"
-                + "    buildToolsVersion '" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "'\n"
-                + "}\n"
-                + "\n"
-                + "dependencies {\n"
-                + "    compile project(path: ':app1')\n"
-                + "}\n");
-
-        ModelContainer<AndroidProject> modelMap = project.model().ignoreSyncIssues().getMulti();
-
-        AndroidProject model = modelMap.getModelMap().get(":app2");
-        assertNotNull(model);
-
-        SyncIssue issue = assertThat(model).hasSingleIssue(
-                SyncIssue.SEVERITY_ERROR,
-                SyncIssue.TYPE_DEPENDENCY_IS_APK,
-                "project:app1:unspecified");
-
-        String expectedMsg = "Dependency project:app1:unspecified on project app2 resolves to an APK archive which is not supported as a compilation dependency. File:";
-        assertThat(issue.getMessage()).startsWith(expectedMsg);
     }
 }

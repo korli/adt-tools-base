@@ -17,10 +17,9 @@
 package com.android.builder.utils;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.annotations.concurrency.Immutable;
-import com.android.ide.common.util.ReadWriteProcessLock;
-import com.android.ide.common.util.ReadWriteThreadLock;
 import com.android.utils.FileUtils;
 import com.google.common.base.Joiner;
 import com.google.common.base.MoreObjects;
@@ -31,138 +30,133 @@ import com.google.common.hash.Hashing;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReadWriteLock;
 
 /**
- * Cache for already-created files/directories.
+ * A cache for already-created files/directories.
  *
  * <p>This class is used to avoid creating the same file/directory multiple times. The main API
- * method {@link #createFile(File, Inputs, Callable)} creates an output file/directory by either
- * copying it from the cache, or creating it first and caching it if the cached file/directory does
- * not yet exist. Similarly, the {@link #createFileInCacheIfAbsent(Inputs, ExceptionConsumer)}
- * method returns the cached output file/directory, and creates it first if the cached
- * file/directory does not yet exist.
+ * method {@link #createFile(File, Inputs, ExceptionRunnable)} creates an output file/directory by
+ * either copying it from the cache, or creating it first and caching it if the cached
+ * file/directory does not yet exist. The other API method, {@link
+ * #createFileInCacheIfAbsent(Inputs, ExceptionConsumer)}, returns the cached output file/directory
+ * directly, and creates it first if the cached file/directory does not yet exist.
  *
- * <p>Note that if a cache entry exists but is found to be corrupted, the cache entry will be
- * deleted and recreated.
+ * <p>Access to the cache is synchronized. Synchronization can take effect for threads within the
+ * same process or across different processes. The client can configure this locking scope when
+ * constructing a {@code FileCache}. If the cache is never accessed by more than one process at a
+ * time, the client should configure the cache with {@code SINGLE_PROCESS} locking scope since there
+ * will be less synchronization overhead. However, if the cache may be accessed by more than one
+ * process at a time, the client must configure the cache with {@code MULTI_PROCESS} locking scope.
+ *
+ * <p>In any case, synchronization takes effect only for the same cache (i.e., threads/processes
+ * accessing different caches are not synchronized). Also, the client must access the cache via
+ * {@code FileCache}'s API; otherwise, the previous concurrency guarantees will not hold.
+ *
+ * <p>Two caches are considered the same if they refer to the same physical cache directory. There
+ * could be multiple instances of {@code FileCache} for the same physical cache directory, and as
+ * long as they refer to the same physical cache directory, access to them will be synchronized.
+ * (The client does not need to normalize the cache directory's path when constructing a {@code
+ * FileCache}.)
+ *
+ * <p>Multiple threads/processes can read the same cache entry at the same time. However, once a
+ * thread/process starts writing to the cache entry, the other threads/processes will block. This
+ * behavior is similar to a {@link java.util.concurrent.locks.ReadWriteLock}.
+ *
+ * <p>Note that we often use the term "process", although the term "JVM" would be more correct since
+ * there could exist multiple JVMs in a process.
+ *
+ * <p>If a cache entry exists but is found to be corrupted, the cache entry will be deleted and
+ * recreated.
  *
  * <p>This class is thread-safe.
  */
 @Immutable
 public class FileCache {
 
-    /**
-     * The scope of the locking facility. With {@code INTER_PROCESS} scope, synchronization takes
-     * place for threads of the same process as well as those across different processes. With
-     * {@code SINGLE_PROCESS} scope, synchronization takes place for threads of the same process
-     * only and not for threads across different processes. Note that the locking can be in the form
-     * of a shared lock and an exclusive lock depending on {@code LockingType}.
-     */
+    /** The scope of the locking facility. */
     private enum LockingScope {
 
         /**
-         * Synchronization for threads of the same process as well as those across different
-         * processes.
+         * Synchronization takes effect for threads both within the same process and across
+         * different processes.
          */
-        INTER_PROCESS,
+        MULTI_PROCESS,
 
         /**
-         * Synchronization for threads of the same process only and not for threads across different
-         * processes.
+         * Synchronization takes effect for threads within the same process but not for threads
+         * across different processes.
          */
         SINGLE_PROCESS
     }
 
-    /**
-     * The type of the locking facility, similar to those used in a {@link ReadWriteLock}. Note that
-     * the locking can take place within a single process or across different processes depending on
-     * {@code LockingScope}.
-     */
-    @VisibleForTesting
-    enum LockingType {
+    @NonNull private final File cacheDirectory;
 
-        /** Shared lock used for reading. */
-        SHARED,
-
-        /** Exclusive lock used for writing. */
-        EXCLUSIVE
-    }
-
-    @NonNull private final File mCacheDirectory;
-
-    @NonNull private final LockingScope mLockingScope;
+    @NonNull private final LockingScope lockingScope;
 
     // Additional fields used for testing only
-    @NonNull private final AtomicInteger mMisses = new AtomicInteger(0);
-    @NonNull private final AtomicInteger mHits = new AtomicInteger(0);
+    @NonNull private final AtomicInteger missCount = new AtomicInteger(0);
+    @NonNull private final AtomicInteger hitCount = new AtomicInteger(0);
 
-    private FileCache(@NonNull File cacheDirectory, @NonNull LockingScope lockingScope)
-            throws IOException {
-        mCacheDirectory = cacheDirectory.getCanonicalFile();
-        mLockingScope = lockingScope;
+    private FileCache(@NonNull File cacheDirectory, @NonNull LockingScope lockingScope) {
+        this.cacheDirectory = cacheDirectory;
+        this.lockingScope = lockingScope;
     }
 
     /**
-     * Returns a {@code FileCache} instance with {@link LockingScope#INTER_PROCESS}.
+     * Returns a {@code FileCache} instance where synchronization takes effect for threads both
+     * within the same process and across different processes.
      *
-     * <p>Threads of the same process as well as those across different processes can read same the
-     * cache entry concurrently, but only one of them can write to the same cache entry or the same
-     * output file/directory at a time, without any other thread concurrently reading that cache
-     * entry. If the cache is being deleted by another thread of any process, then any read or write
-     * access to the cache will block until the deletion completes. The user must access the cache
-     * via {@code FileCache}'s API; otherwise, the previous concurrency guarantees will no longer
-     * hold.
+     * <p>Inter-process synchronization is provided via {@link SynchronizedFile}, which requires
+     * lock files to be created. One lock file will be placed next to the cache directory and the
+     * other lock files will be placed next to the cache entry directories (inside the cache
+     * directory). Note that currently it is not possible for the underlying locking mechanism to
+     * delete these lock files. The lock files should only be deleted together with the entire cache
+     * directory.
      *
-     * <p>Note that if this cache is never used by more than one process at a time, it may be
-     * preferable to configure the cache with {@code SINGLE_PROCESS} locking scope instead since
-     * there will be less synchronization overhead.
+     * <p>The given cache directory may or may not already exist. If it does not yet exist, this
+     * method will not create the cache directory here (the cache directory will be created when the
+     * cache is actually used).
      *
-     * @param cacheDirectory the directory that will contain the cached files/directories (may not
-     *     already exist)
+     * <p>Note: If the cache is never accessed by more than one process at a time, the client should
+     * use the {@link #getInstanceWithSingleProcessLocking(File)} method instead since there will be
+     * less synchronization overhead.
+     *
+     * @param cacheDirectory the cache directory, which may not yet exist
      * @see #getInstanceWithSingleProcessLocking(File)
      */
     @NonNull
-    public static FileCache getInstanceWithInterProcessLocking(@NonNull File cacheDirectory)
-            throws IOException {
-        return new FileCache(cacheDirectory, LockingScope.INTER_PROCESS);
+    public static FileCache getInstanceWithMultiProcessLocking(@NonNull File cacheDirectory) {
+        return new FileCache(cacheDirectory, LockingScope.MULTI_PROCESS);
     }
 
     /**
-     * Returns a {@code FileCache} instance with {@link LockingScope#SINGLE_PROCESS}.
+     * Returns a {@code FileCache} instance where synchronization takes effect for threads within
+     * the same process but not for threads across different processes.
      *
-     * <p>Threads of the same process as well as those across different processes can read same the
-     * cache entry concurrently; however, only one thread in the current process can write to the
-     * same cache entry or the same output file/directory at a time, without any other thread in the
-     * current process concurrently reading that cache entry, but there is no guarantee that that
-     * cache entry is not being read or written to by another thread of another process. If the
-     * cache is being deleted by another thread of the current process, then any read or write
-     * access to the cache will block until the deletion completes. The user must access the cache
-     * via {@code FileCache}'s API; otherwise, the previous concurrency guarantees will no longer
-     * hold.
+     * <p>The given cache directory may or may not already exist. If it does not yet exist, this
+     * method will not create the cache directory here (the cache directory will be created when the
+     * cache is actually used).
      *
-     * <p>Note that if this cache may be used by more than one process at a time, the client must
-     * configure the cache with {@code INTER_PROCESS} locking scope instead, even though there
-     * will be more synchronization overhead.
+     * <p>Note: If the cache may be accessed by more than one process at a time, the client must use
+     * the {@link #getInstanceWithMultiProcessLocking(File)} method instead.
      *
-     * @param cacheDirectory the directory that will contain the cached files/directories (may not
-     *     already exist)
-     * @see #getInstanceWithInterProcessLocking(File)
+     * @param cacheDirectory the cache directory, which may not yet exist
+     * @see #getInstanceWithMultiProcessLocking(File)
      */
     @NonNull
-    public static FileCache getInstanceWithSingleProcessLocking(@NonNull File cacheDirectory)
-            throws IOException {
+    public static FileCache getInstanceWithSingleProcessLocking(@NonNull File cacheDirectory) {
         return new FileCache(cacheDirectory, LockingScope.SINGLE_PROCESS);
     }
 
     @NonNull
     public File getCacheDirectory() {
-        return mCacheDirectory;
+        return cacheDirectory;
     }
 
     /**
@@ -192,6 +186,12 @@ public class FileCache {
      * and the type of locking scope configured for this cache, this method may block until it is
      * allowed to continue.
      *
+     * <p>NOTE ON THREAD SAFETY: The cache is responsible for synchronizing access within the cache
+     * directory only. When the clients of the cache use this method to create an output
+     * file/directory (which must be outside the cache directory), they need to make sure that
+     * multiple threads/processes do not create the same output file/directory, or they need to have
+     * a way to manage that situation.
+     *
      * @param outputFile the output file/directory
      * @param inputs all the inputs that affect the creation of the output file/directory
      * @param fileCreator the callback function to create the output file/directory
@@ -207,85 +207,69 @@ public class FileCache {
     public QueryResult createFile(
             @NonNull File outputFile,
             @NonNull Inputs inputs,
-            @NonNull Callable<Void> fileCreator)
+            @NonNull ExceptionRunnable fileCreator)
             throws ExecutionException, IOException {
         Preconditions.checkArgument(
-                !FileUtils.isFileInDirectory(outputFile, mCacheDirectory),
+                !FileUtils.isFileInDirectory(outputFile, cacheDirectory),
                 String.format(
                         "Output file/directory '%1$s' must not be located"
                                 + " in the cache directory '%2$s'",
-                        outputFile.getAbsolutePath(), mCacheDirectory.getAbsolutePath()));
+                        outputFile.getAbsolutePath(), cacheDirectory.getAbsolutePath()));
         Preconditions.checkArgument(
-                !FileUtils.isFileInDirectory(mCacheDirectory, outputFile),
+                !FileUtils.isFileInDirectory(cacheDirectory, outputFile),
                 String.format(
                         "Output directory '%1$s' must not contain the cache directory '%2$s'",
-                        outputFile.getAbsolutePath(), mCacheDirectory.getAbsolutePath()));
+                        outputFile.getAbsolutePath(), cacheDirectory.getAbsolutePath()));
         Preconditions.checkArgument(
-                !outputFile.getCanonicalFile().equals(mCacheDirectory.getCanonicalFile()),
+                !FileUtils.isSameFile(outputFile, cacheDirectory),
                 String.format(
                         "Output directory must not be the same as the cache directory '%1$s'",
-                        mCacheDirectory.getAbsolutePath()));
+                        cacheDirectory.getAbsolutePath()));
 
         File cacheEntryDir = getCacheEntryDir(inputs);
         File cachedFile = getCachedFile(cacheEntryDir);
 
-        // Callable to create the output file
-        Callable<Void> createOutputFile = () -> {
-            // Delete the output file and create its parent directory first according to the
-            // contract of this method
-            FileUtils.deletePath(outputFile);
-            Files.createParentDirs(outputFile);
-            try {
-                fileCreator.call();
-            } catch (Exception exception) {
-                throw new FileCreatorException(exception);
-            }
-            return null;
-        };
-
-        // Callable to copy the output file to the cached file
-        Callable<Void> copyOutputFileToCachedFile = () -> {
-            // Only copy if the output file exists as file creator is not required to always
-            // produce an output
-            if (outputFile.exists()) {
-                copyFileOrDirectory(outputFile, cachedFile);
-            }
-            return null;
-        };
-
-        // Callable to copy the cached file to the output file
-        Callable<Void> copyCachedFileToOutputFile = () -> {
-            // Delete the output file and create its parent directory according to the contract of
-            // this method
-            FileUtils.deletePath(outputFile);
-            Files.createParentDirs(outputFile);
-            // Only copy if the cached file exist as file creator may not have produced an output
-            // during the first time this cache is called on the given inputs
-            if (cachedFile.exists()) {
-                copyFileOrDirectory(cachedFile, outputFile);
-            }
-            return null;
-        };
-
         // If the cache is hit, copy the cached file to the output file. The cached file should have
-        // been guarded with a SHARED lock when this callable is invoked (see method
-        // queryCacheEntry). Here, we guard the output file with an EXCLUSIVE lock so that other
-        // threads/processes won't be able to write to the same output file at the same time.
+        // been guarded with a READ or WRITE lock when this callable is invoked (see method
+        // queryCacheEntry). Note that as stated in the contract of this method, we don't guard the
+        // output file with an WRITE lock.
         Callable<Void> actionIfCacheHit =
-                () -> doLocked(outputFile, LockingType.EXCLUSIVE, copyCachedFileToOutputFile);
+                () -> {
+                    // Delete the output file and create its parent directory according to the
+                    // contract of this method
+                    FileUtils.deletePath(outputFile);
+                    Files.createParentDirs(outputFile);
+                    // Only copy if the cached file exist as file creator may not have produced an
+                    // output during the first time this cache is called on the given inputs
+                    if (cachedFile.exists()) {
+                        copyFileOrDirectory(cachedFile, outputFile);
+                    }
+                    return null;
+                };
 
         // If the cache is missed or corrupted, create the output file and copy it to the cached
-        // file. The cached file should have been guarded with an EXCLUSIVE lock when this callable
-        // is invoked (see method queryCacheEntry). Here, we again guard the output file with an
-        // EXCLUSIVE lock.
+        // file. The cached file should have been guarded with an WRITE lock when this callable
+        // is invoked (see method queryCacheEntry). We again don't guard the output file with an
+        // WRITE lock.
         Callable<Void> actionIfCacheMissedOrCorrupted =
-                () -> doLocked(
-                        outputFile,
-                        LockingType.EXCLUSIVE, () -> {
-                                createOutputFile.call();
-                                copyOutputFileToCachedFile.call();
-                                return null;
-                        });
+                () -> {
+                    // Delete the output file and create its parent directory first according to the
+                    // contract of this method
+                    FileUtils.deletePath(outputFile);
+                    Files.createParentDirs(outputFile);
+                    try {
+                        fileCreator.run();
+                    } catch (Exception exception) {
+                        throw new FileCreatorException(exception);
+                    }
+
+                    // Only copy if the output file exists as file creator is not required to always
+                    // produce an output
+                    if (outputFile.exists()) {
+                        copyFileOrDirectory(outputFile, cachedFile);
+                    }
+                    return null;
+                };
 
         return queryCacheEntry(
                 inputs, cacheEntryDir, actionIfCacheHit, actionIfCacheMissedOrCorrupted);
@@ -341,23 +325,22 @@ public class FileCache {
         File cachedFile = getCachedFile(cacheEntryDir);
 
         // If the cache is hit, do nothing. If the cache is missed or corrupted, create the cached
-        // output file. The cached file should have been guarded with an EXCLUSIVE lock when this
+        // output file. The cached file should have been guarded with an WRITE lock when this
         // callable is invoked (see method queryCacheEntry).
-        Callable<Void> actionIfCacheMissedOrCorrupted = () -> {
-            try {
-                fileCreator.accept(cachedFile);
-            } catch (Exception exception) {
-                throw new FileCreatorException(exception);
-            }
-            return null;
-        };
+        Callable<Void> actionIfCacheMissedOrCorrupted =
+                () -> {
+                    try {
+                        fileCreator.accept(cachedFile);
+                    } catch (Exception exception) {
+                        throw new FileCreatorException(exception);
+                    }
+                    return null;
+                };
 
         QueryResult queryResult =
                 queryCacheEntry(inputs, cacheEntryDir, () -> null, actionIfCacheMissedOrCorrupted);
         return new QueryResult(
-                queryResult.getQueryEvent(),
-                queryResult.getCauseOfCorruption(),
-                Optional.of(cachedFile));
+                queryResult.getQueryEvent(), queryResult.getCauseOfCorruption(), cachedFile);
     }
 
     /**
@@ -368,14 +351,15 @@ public class FileCache {
      * @param cacheEntryDir the cache entry directory
      * @param actionIfCacheHit the action to invoke if the cache entry exists and is not corrupted
      * @param actionIfCacheMissedOrCorrupted the action to invoke if the cache entry either does not
-     *      exist or exists but is corrupted
+     *     exist or exists but is corrupted
      * @return the result of this query (which does not include the path to the cached output
      *     file/directory)
-     * @throws ExecutionException if a {@link FileCreatorException} occurred
-     * @throws IOException if an I/O exception occurred, and the exception was not wrapped by
-     *     {@link FileCreatorException}
-     * @throws RuntimeException if a runtime exception occurred, and the exception was not wrapped
-     *     by {@link FileCreatorException}
+     * @throws ExecutionException if an exception occurred during the execution of the file creator
+     *     (i.e., a {@link FileCreatorException} was thrown)
+     * @throws IOException if an I/O exception occurred, but not during the execution of the file
+     *     creator (or the file creator was not executed)
+     * @throws RuntimeException if a runtime exception occurred, but not during the execution of the
+     *     file creator (or the file creator was not executed)
      */
     @NonNull
     private QueryResult queryCacheEntry(
@@ -384,46 +368,59 @@ public class FileCache {
             @NonNull Callable<Void> actionIfCacheHit,
             @NonNull Callable<Void> actionIfCacheMissedOrCorrupted)
             throws ExecutionException, IOException {
-        // In this method, we use two levels of locking: A SHARED lock on the cache directory and a
-        // SHARED or EXCLUSIVE lock on the cache entry directory.
+        // The underlying facility for multi-process locking (SynchronizedFile) requires that the
+        // parent directory of the file/directory being synchronized exist (see method
+        // getSynchronizedFile), so we create the parent directory first (if it does not yet exist).
+        // The following method call is thread-safe and process-safe.
+        if (lockingScope == LockingScope.MULTI_PROCESS) {
+            // We cannot create a parent directory if the cache directory is at root. We also don't
+            // want the cache directory to be at root, so let's fail early.
+            Preconditions.checkNotNull(
+                    cacheDirectory.getCanonicalFile().getParentFile(),
+                    "Cache directory must not be the root directory");
+            FileUtils.mkdirs(cacheDirectory.getCanonicalFile().getParentFile());
+        }
+
+        // In this method, we use two levels of locking: A READ lock on the cache directory and a
+        // READ or WRITE lock on the cache entry directory.
         try {
-            // Guard the cache directory with a SHARED lock so that other threads/processes can read
+            // Guard the cache directory with a READ lock so that other threads/processes can read
             // or write to the cache at the same time but cannot delete the cache while it is being
             // read/written to. (Further locking within the cache will make sure multiple
             // threads/processes can read but cannot write to the same cache entry at the same
             // time.)
-            return doLocked(mCacheDirectory, LockingType.SHARED, () -> {
+            return getSynchronizedFile(cacheDirectory).read(sameCacheDirectory -> {
                 // Create (or recreate) the cache directory since it may not exist or might have
-                // been deleted. The following method is thread-safe so it's okay to call it from
-                // multiple threads (and processes).
-                FileUtils.mkdirs(mCacheDirectory);
+                // been deleted. The following method call is thread-safe and process-safe.
+                FileUtils.mkdirs(cacheDirectory);
 
-                // Guard the cache entry directory with a SHARED lock so that multiple
+                // Guard the cache entry directory with a READ lock so that multiple
                 // threads/processes can read it at the same time
-                QueryResult queryResult = doLocked(cacheEntryDir, LockingType.SHARED, () -> {
-                    QueryResult result = checkCacheEntry(inputs, cacheEntryDir);
-                    // If the cache entry is HIT, run the given action
-                    if (result.getQueryEvent().equals(QueryEvent.HIT)) {
-                        mHits.incrementAndGet();
-                        actionIfCacheHit.call();
-                    }
-                    return result;
-                });
+                QueryResult queryResult = getSynchronizedFile(cacheEntryDir).read(
+                        (sameCacheEntryDir) -> {
+                            QueryResult result = checkCacheEntry(inputs, cacheEntryDir);
+                            // If the cache entry is HIT, run the given action
+                            if (result.getQueryEvent().equals(QueryEvent.HIT)) {
+                                hitCount.incrementAndGet();
+                                actionIfCacheHit.call();
+                            }
+                            return result;
+                        });
                 // If the cache entry is HIT, return immediately
                 if (queryResult.getQueryEvent().equals(QueryEvent.HIT)) {
                     return queryResult;
                 }
 
-                // Guard the cache entry directory with an EXCLUSIVE lock so that only one
+                // Guard the cache entry directory with an WRITE lock so that only one
                 // thread/process can write to it
-                return doLocked(cacheEntryDir, LockingType.EXCLUSIVE, () -> {
+                return getSynchronizedFile(cacheEntryDir).write(sameCacheEntryDir -> {
                     // Check the cache entry again as it might have been changed by another
                     // thread/process since the last time we checked it.
                     QueryResult result = checkCacheEntry(inputs, cacheEntryDir);
 
                     // If the cache entry is HIT, run the given action and return immediately
                     if (result.getQueryEvent().equals(QueryEvent.HIT)) {
-                        mHits.incrementAndGet();
+                        hitCount.incrementAndGet();
                         actionIfCacheHit.call();
                         return result;
                     }
@@ -434,45 +431,78 @@ public class FileCache {
                     }
 
                     // If the cache entry is MISSED or CORRUPTED, create or recreate the cache entry
-                    mMisses.incrementAndGet();
+                    missCount.incrementAndGet();
                     FileUtils.mkdirs(cacheEntryDir);
 
+                    // The following method to create the cache entry's contents might be canceled
+                    // abruptly due to an exception (or maybe a sudden process kill or power
+                    // outage). However, if it happens, we don't roll back and delete the cache
+                    // entry directory immediately because (1) the corrupted contents may provide
+                    // important clues for debugging, and (2) the next time the cache is used, it
+                    // will detect that the cache entry is corrupted and will delete and recreate
+                    // the cache entry anyway.
                     actionIfCacheMissedOrCorrupted.call();
 
                     // Write the inputs to the inputs file for diagnostic purposes. We also use it
                     // to check whether a cache entry is corrupted or not.
-                    Files.write(
-                            inputs.toString(),
-                            getInputsFile(cacheEntryDir),
-                            StandardCharsets.UTF_8);
+                    Files.asCharSink(getInputsFile(cacheEntryDir), StandardCharsets.UTF_8)
+                            .write(inputs.toString());
 
                     return result;
                 });
             });
         } catch (ExecutionException exception) {
-            // If FileCreatorException was thrown, it will be wrapped by a chain of execution
-            // exceptions (due to nested doLocked() method calls), so let's iterate through the
-            // causal chain and find out.
-            for (Throwable cause : Throwables.getCausalChain(exception)) {
-                if (cause instanceof FileCreatorException) {
-                    // Externally, FileCreatorException is regarded as ExecutionException (see the
-                    // javadoc of this method), so we simply rethrow the exception here.
+            // We need to figure out whether the exception comes from the file creator (i.e., a
+            // FileCreatorException was thrown). If so, we rethrow the ExecutionException;
+            // otherwise, we rethrow the exception as an IOException or a RuntimeException (as
+            // documented in the javadoc of this method).
+            for (Throwable exceptionInCausalChain : Throwables.getCausalChain(exception)) {
+                if (exceptionInCausalChain instanceof FileCreatorException) {
                     throw exception;
-                } else if (cause instanceof IOException) {
-                    throw new IOException(exception);
-                } else if (cause instanceof ExecutionException) {
-                    continue;
-                } else {
-                    // If none of the previous exceptions is the cause, then the cause must be a
-                    // RuntimeException since the previous exceptions are the only checked
-                    // exceptions that we thew in this method.
-                    throw new RuntimeException(exception);
                 }
             }
-            // We should never get to this line, but if we do, then we have some implementation
-            // error, let's throw a runtime exception to indicate that.
-            throw new RuntimeException(
-                    "Unable to find root cause of ExecutionException, " + exception);
+            for (Throwable exceptionInCausalChain : Throwables.getCausalChain(exception)) {
+                if (exceptionInCausalChain instanceof IOException) {
+                    throw new IOException(exception);
+                }
+            }
+            throw new RuntimeException(exception);
+        }
+    }
+
+    /**
+     * Returns {@code true} if the cache entry for the given list of inputs exists and is not
+     * corrupted, and {@code false} otherwise. This method will block if the cache/cache entry is
+     * being created/deleted by another thread/process.
+     *
+     * @param inputs all the inputs that affect the creation of the output file/directory
+     */
+    public boolean cacheEntryExists(@NonNull Inputs inputs) throws IOException {
+        // This method is a stripped-down version of queryCacheEntry(). See queryCacheEntry() for
+        // an explanation of this code.
+        if (lockingScope == LockingScope.MULTI_PROCESS) {
+            Preconditions.checkNotNull(
+                    cacheDirectory.getCanonicalFile().getParentFile(),
+                    "Cache directory must not be the root directory");
+            FileUtils.mkdirs(cacheDirectory.getCanonicalFile().getParentFile());
+        }
+
+        try {
+            QueryResult queryResult =
+                    getSynchronizedFile(cacheDirectory).read(
+                            sameCacheDirectory -> {
+                                FileUtils.mkdirs(cacheDirectory);
+                                return getSynchronizedFile(getCacheEntryDir(inputs)).read(
+                                        (cacheEntryDir) -> checkCacheEntry(inputs, cacheEntryDir));
+                            });
+            return queryResult.getQueryEvent().equals(QueryEvent.HIT);
+        } catch (ExecutionException exception) {
+            for (Throwable exceptionInCausalChain : Throwables.getCausalChain(exception)) {
+                if (exceptionInCausalChain instanceof IOException) {
+                    throw new IOException(exception);
+                }
+            }
+            throw new RuntimeException(exception);
         }
     }
 
@@ -489,7 +519,8 @@ public class FileCache {
      *     file/directory)
      */
     @NonNull
-    private QueryResult checkCacheEntry(@NonNull Inputs inputs, @NonNull File cacheEntryDir) {
+    private static QueryResult checkCacheEntry(
+            @NonNull Inputs inputs, @NonNull File cacheEntryDir) {
         if (!cacheEntryDir.exists()) {
             return new QueryResult(QueryEvent.MISSED);
         }
@@ -511,7 +542,7 @@ public class FileCache {
         // the same key). In either case, we also report it as a corrupted cache entry.
         String inputsInCacheEntry;
         try {
-            inputsInCacheEntry = Files.toString(inputsFile, StandardCharsets.UTF_8);
+            inputsInCacheEntry = Files.asCharSource(inputsFile, StandardCharsets.UTF_8).read();
         } catch (IOException e) {
             return new QueryResult(QueryEvent.CORRUPTED, e);
         }
@@ -538,14 +569,12 @@ public class FileCache {
      */
     @NonNull
     private File getCacheEntryDir(@NonNull Inputs inputs) {
-        return new File(mCacheDirectory, inputs.getKey());
+        return new File(cacheDirectory, inputs.getKey());
     }
 
-    /**
-     * Returns the path of the cached output file/directory inside the cache entry directory.
-     */
+    /** Returns the path of the cached output file/directory inside the cache entry directory. */
     @NonNull
-    private File getCachedFile(@NonNull File cacheEntryDir) {
+    private static File getCachedFile(@NonNull File cacheEntryDir) {
         return new File(cacheEntryDir, "output");
     }
 
@@ -554,7 +583,7 @@ public class FileCache {
      * describe the inputs to an API call on the cache.
      */
     @NonNull
-    private File getInputsFile(@NonNull File cacheEntryDir) {
+    private static File getInputsFile(@NonNull File cacheEntryDir) {
         return new File(cacheEntryDir, "inputs");
     }
 
@@ -584,143 +613,79 @@ public class FileCache {
      * Deletes the cache directory and its contents.
      *
      * <p>If the cache is being used by another thread of any process in the case of {@code
-     * INTER_PROCESS} locking scope, or by another thread of the current process in the case of
+     * MULTI_PROCESS} locking scope, or by another thread of the current process in the case of
      * {@code SINGLE_PROCESS} locking scope, then this method will block until that operation
      * completes.
      */
     public void delete() throws IOException {
-        try {
-            doLocked(
-                    mCacheDirectory,
-                    LockingType.EXCLUSIVE,
-                    () -> {
-                        FileUtils.deletePath(mCacheDirectory);
-                        return null;
-                    });
-        } catch (ExecutionException exception) {
-            // The deletion action above does not throw any checked exceptions other than
-            // IOException.
-            if (exception.getCause() instanceof IOException) {
-                throw new IOException(exception);
-            } else {
-                throw new RuntimeException(exception);
+        // The underlying facility for multi-process locking (SynchronizedFile) requires that the
+        // parent directory of the file/directory being synchronized exist (see method
+        // getSynchronizedFile), so we make sure the parent directory exists first. If not, we
+        // simply return immediately. The existence check may not be thread-safe and process-safe,
+        // but it's okay since we're checking the parent directory, not the cache directory itself.
+        if (lockingScope == LockingScope.MULTI_PROCESS) {
+            if (!FileUtils.parentDirExists(cacheDirectory)) {
+                return;
             }
+        }
+
+        try {
+            getSynchronizedFile(cacheDirectory)
+                    .write(
+                            sameCacheDirectory -> {
+                                FileUtils.deletePath(cacheDirectory);
+                                return null;
+                            });
+        } catch (ExecutionException exception) {
+            // We need to figure out whether the exception comes from the deletion action. If so, we
+            // rethrow the exception as an IOException; otherwise, we rethrow the exception as a
+            // RuntimeException.
+            for (Throwable exceptionInCausalChain : Throwables.getCausalChain(exception)) {
+                if (exceptionInCausalChain instanceof IOException) {
+                    throw new IOException(exception);
+                }
+            }
+            throw new RuntimeException(exception);
         }
     }
 
     /**
-     * Executes an action that accesses a file/directory with a shared lock (for reading) or an
-     * exclusive lock (for writing).
+     * Returns a {@link SynchronizedFile} to synchronize access to the given file/directory.
      *
-     * <p>If this cache is configured with {@link LockingScope#INTER_PROCESS}, synchronization takes
-     * place for threads of the same process as well as those across different processes. If this
-     * cache is configured with {@link LockingScope#SINGLE_PROCESS}, synchronization takes place for
-     * threads of the same process only and not for threads across different processes. In any case,
-     * synchronization takes effect only for the same cache (i.e., processes/threads using different
-     * cache directories are not synchronized).
-     *
-     * <p>Note that the file/directory to be accessed may or may not already exist.
-     *
-     * @param accessedFile the file/directory that an action is going to access
-     * @param lockingType the type of lock (shared/reading or exclusive/writing)
-     * @param action the action that will be accessing the file/directory
-     * @throws ExecutionException if an exception occurred during the execution of the action
-     * @throws IOException if an I/O exception occurred, but not during the execution of the action
-     * @throws RuntimeException if a runtime exception occurred, but not during the execution of the
-     *     action
+     * @param fileToSynchronize the file/directory whose access will be synchronized, which may not
+     *     yet exist. If the cache is configured with {@code MULTI_PROCESS} locking scope, as
+     *     required by {@link SynchronizedFile}, the parent directory of the file/directory being
+     *     synchronized must exist.
      */
-    @VisibleForTesting
-    <V> V doLocked(
-            @NonNull File accessedFile,
-            @NonNull LockingType lockingType,
-            @NonNull Callable<V> action)
-            throws ExecutionException, IOException {
-        if (mLockingScope == LockingScope.INTER_PROCESS) {
-            return doInterProcessLocked(accessedFile, lockingType, action);
+    @NonNull
+    private SynchronizedFile getSynchronizedFile(@NonNull File fileToSynchronize) {
+        if (lockingScope == LockingScope.MULTI_PROCESS) {
+            Preconditions.checkArgument(
+                    FileUtils.parentDirExists(fileToSynchronize),
+                    "Parent directory of "
+                            + fileToSynchronize.getAbsolutePath()
+                            + " does not exist");
+            return SynchronizedFile.getInstanceWithMultiProcessLocking(fileToSynchronize);
         } else {
-            return doSingleProcessLocked(accessedFile, lockingType, action);
-        }
-    }
-
-    /** Executes an action that accesses a file/directory with inter-process locking. */
-    private <V> V doInterProcessLocked(
-            @NonNull File accessedFile,
-            @NonNull LockingType lockingType,
-            @NonNull Callable<V> action)
-            throws ExecutionException, IOException {
-        // For each file/directory being accessed, we create a corresponding lock file to
-        // synchronize execution across processes. We don't use the file/directory being accessed as
-        // the lock file since we want to separate its usage from the locking mechanism and it is
-        // also not possible for the underlying locking mechanism (using Java's FileLock) to lock a
-        // directory.
-        String lockFileName =
-                Hashing.sha1()
-                        .hashString(
-                                FileUtils.getCaseSensitivityAwareCanonicalPath(accessedFile),
-                                StandardCharsets.UTF_8)
-                        .toString();
-        // If the file/directory being accessed is the cache directory itself, we use a lock file
-        // within the tmpdir directory; otherwise we use a lock file within the cache directory
-        File lockFile =
-                accessedFile.getCanonicalFile().equals(mCacheDirectory)
-                        ? new File(System.getProperty("java.io.tmpdir"), lockFileName)
-                        : new File(mCacheDirectory, lockFileName);
-
-        // ReadWriteProcessLock will normalize the lock file's path so that the paths can be
-        // correctly compared by equals(), we don't need to normalize it here.
-        ReadWriteProcessLock readWriteProcessLock = new ReadWriteProcessLock(lockFile.toPath());
-        ReadWriteProcessLock.Lock lock =
-                lockingType == LockingType.SHARED
-                        ? readWriteProcessLock.readLock()
-                        : readWriteProcessLock.writeLock();
-        lock.lock();
-        try {
-            return action.call();
-        } catch (Exception exception) {
-            throw new ExecutionException(exception);
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    /** Executes an action that accesses a file/directory with single-process locking. */
-    private <V> V doSingleProcessLocked(
-            @NonNull File accessedFile,
-            @NonNull LockingType lockingType,
-            @NonNull Callable<V> action)
-            throws ExecutionException, IOException {
-        // We normalize the lock file's path so that the paths can be correctly compared by equals()
-        ReadWriteThreadLock readWriteThreadLock =
-                new ReadWriteThreadLock(accessedFile.toPath().normalize());
-        ReadWriteThreadLock.Lock lock =
-                lockingType == LockingType.SHARED
-                        ? readWriteThreadLock.readLock()
-                        : readWriteThreadLock.writeLock();
-        lock.lock();
-        try {
-            return action.call();
-        } catch (Exception exception) {
-            throw new ExecutionException(exception);
-        } finally {
-            lock.unlock();
+            return SynchronizedFile.getInstanceWithSingleProcessLocking(fileToSynchronize);
         }
     }
 
     @VisibleForTesting
     int getMisses() {
-        return mMisses.get();
+        return missCount.get();
     }
 
     @VisibleForTesting
     int getHits() {
-        return mHits.get();
+        return hitCount.get();
     }
 
     @Override
     public String toString() {
         return MoreObjects.toStringHelper(this)
-                .add("cacheDirectory", mCacheDirectory)
-                .add("lockingScope", mLockingScope)
+                .add("cacheDirectory", cacheDirectory)
+                .add("lockingScope", lockingScope)
                 .toString();
     }
 
@@ -734,10 +699,10 @@ public class FileCache {
     private static void copyFileOrDirectory(@NonNull File from, @NonNull File to)
             throws IOException {
         Preconditions.checkArgument(
-                from.exists(), "Source path " + from.getAbsolutePath() + " does not exists.");
+                from.exists(), "Source path " + from.getAbsolutePath() + " does not exist");
         Preconditions.checkArgument(!FileUtils.isFileInDirectory(from, to));
         Preconditions.checkArgument(!FileUtils.isFileInDirectory(to, from));
-        Preconditions.checkArgument(!from.getCanonicalFile().equals(to.getCanonicalFile()));
+        Preconditions.checkArgument(!FileUtils.isSameFile(from, to));
 
         if (from.isFile()) {
             Files.createParentDirs(to);
@@ -817,42 +782,6 @@ public class FileCache {
             }
 
             /**
-             * Adds the path of a file/directory as an input parameter. If a parameter with the same
-             * name exists, the file/directory's path is overwritten.
-             *
-             * <p>Note that this method is used to indicate that the path of an input file/directory
-             * affects the output. Depending on your specific use case, consider adding other
-             * properties of the file/directory such as its hash, size, or timestamp as part of the
-             * inputs as well.
-             */
-            public Builder putFilePath(@NonNull String name, @NonNull File file) {
-                parameters.put(name, file.getPath());
-                return this;
-            }
-
-            /**
-             * Adds the hash of a file's contents as an input parameter. If a parameter with the
-             * same name exists, the file's hash is overwritten.
-             *
-             * <p>Note that this method is used to indicate that the contents of an input file
-             * affect the output. Also, by using this method, you are assuming that the hash of a
-             * file represents its contents, so beware of accidental hash collisions when two
-             * different files with different contents end up having the same hash (although it is
-             * unlikely to happen, it is possible). Depending on the specific use case, consider
-             * adding other properties of the file such as its path, name, size, or timestamp as
-             * part of the inputs as well.
-             *
-             * @param file the file to be hashed (must not be a directory)
-             */
-            public Builder putFileHash(@NonNull String name, @NonNull File file)
-                    throws IOException {
-                Preconditions.checkArgument(file.isFile(), file + " is not a file.");
-
-                parameters.put(name, Files.hash(file, Hashing.sha1()).toString());
-                return this;
-            }
-
-            /**
              * Adds an input parameter with a String value. If a parameter with the same name
              * exists, the parameter's value is overwritten.
              */
@@ -865,18 +794,57 @@ public class FileCache {
              * Adds an input parameter with a Boolean value. If a parameter with the same name
              * exists, the parameter's value is overwritten.
              */
-            public Builder putBoolean(@NonNull String name, @NonNull boolean value) {
+            public Builder putBoolean(@NonNull String name, boolean value) {
                 parameters.put(name, String.valueOf(value));
                 return this;
             }
 
             /**
-             * Adds an input parameter with a Long value. If a parameter with the same name
-             * exists, the parameter's value is overwritten.
+             * Adds an input parameter with a Long value. If a parameter with the same name exists,
+             * the parameter's value is overwritten.
              */
-            public Builder putLong(@NonNull String name, @NonNull long value) {
+            public Builder putLong(@NonNull String name, long value) {
                 parameters.put(name, String.valueOf(value));
                 return this;
+            }
+
+            /**
+             * Adds one or multiple input parameters containing one or multiple properties of a
+             * regular file (not a directory). If a parameter with the same name exists, the
+             * parameter's value is overwritten.
+             */
+            public Builder putFile(
+                    @NonNull String name,
+                    @NonNull File file,
+                    @NonNull FileProperties fileProperties) {
+                Preconditions.checkArgument(file.isFile(), file + " is not a file.");
+                switch (fileProperties) {
+                    case HASH:
+                        putString(name, getFileHash(file));
+                        break;
+                    case PATH_HASH:
+                        putString(name + ".path", file.getPath());
+                        putString(name + ".hash", getFileHash(file));
+                        break;
+                    case PATH_SIZE_TIMESTAMP:
+                        putString(name + ".path", file.getPath());
+                        putLong(name + ".size", file.length());
+                        putLong(name + ".timestamp", file.lastModified());
+                        break;
+                    default:
+                        throw new RuntimeException("switch statement misses cases");
+                }
+                return this;
+            }
+
+            /** Returns the hash of the file's contents. */
+            @NonNull
+            private static String getFileHash(@NonNull File file) {
+                try {
+                    return Files.asByteSource(file).hash(Hashing.sha256()).toString();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             }
 
             /**
@@ -910,7 +878,7 @@ public class FileCache {
          */
         @NonNull
         public String getKey() {
-            return Hashing.sha1().hashString(toString(), StandardCharsets.UTF_8).toString();
+            return Hashing.sha256().hashString(toString(), StandardCharsets.UTF_8).toString();
         }
     }
 
@@ -924,11 +892,61 @@ public class FileCache {
         /** Command used for testing only. */
         TEST,
 
-        /** The predex-library command. */
+        /** Pre-dex a library. */
         PREDEX_LIBRARY,
 
-        /** The prepare-library command. */
-        PREPARE_LIBRARY
+        /** Mockable jars used for unit testing. */
+        GENERATE_MOCKABLE_JAR,
+
+        /** Pre-dex a library to a dex archive. */
+        PREDEX_LIBRARY_TO_DEX_ARCHIVE,
+
+        /** Desugar a library. */
+        DESUGAR_LIBRARY,
+
+        /** Extract the AAPT2 JNI libraries so they can be loaded. */
+        EXTRACT_AAPT2_JNI,
+
+        /** Extract the Desugar jar so it can be used for processing. */
+        EXTRACT_DESUGAR_JAR,
+
+        /** Fix stack frames. */
+        FIX_STACK_FRAMES,
+    }
+
+    /**
+     * Properties of a regular file (not a directory) to be used when constructing the cache inputs.
+     */
+    public enum FileProperties {
+
+        /**
+         * The properties include the hash of a regular file (not a directory).
+         *
+         * <p>This is the recommended way of constructing the cache inputs for a file. Clients can
+         * consider using {@link #PATH_HASH} to also add a path to the cache inputs (typically for
+         * debugging purposes).
+         */
+        HASH,
+
+        /**
+         * The properties include the path and hash of a regular file (not a directory).
+         *
+         * <p>This option is similar to {@link #HASH} except that a path is added to the cache
+         * inputs, typically for debugging purposes (e.g., to find out what file a cache entry is
+         * created from).
+         */
+        PATH_HASH,
+
+        /**
+         * The properties include the path, size, and timestamp of a regular file (not a directory).
+         *
+         * <p>WARNING: Although this option is faster than using {@link #HASH}, it is not as safe.
+         * The main reason is that, due to the granularity of filesystem timestamps, timestamps may
+         * actually not change between two consecutive writes. This will lead to incorrect cache
+         * entries. This option should only be used after careful consideration and with knowledge
+         * of its limitations. Otherwise, {@link #HASH} should be used instead.
+         */
+        PATH_SIZE_TIMESTAMP,
     }
 
     /**
@@ -941,26 +959,26 @@ public class FileCache {
 
         @NonNull private final QueryEvent queryEvent;
 
-        @NonNull private final Optional<Throwable> causeOfCorruption;
+        @Nullable private final Throwable causeOfCorruption;
 
-        @NonNull private final Optional<File> cachedFile;
+        @Nullable private final File cachedFile;
 
         /**
          * Creates a {@code QueryResult} instance.
          *
          * @param queryEvent the query event
-         * @param causeOfCorruption a cause if the cache is corrupted, and empty otherwise
-         * @param cachedFile the path to cached output file/directory, can be empty if the cache
-         *     does not want to expose this information
+         * @param causeOfCorruption a cause if the cache is corrupted, or null otherwise
+         * @param cachedFile the path to cached output file/directory, can be null if the cache does
+         *     not want to expose this information
          */
         QueryResult(
                 @NonNull QueryEvent queryEvent,
-                @NonNull Optional<Throwable> causeOfCorruption,
-                @NonNull Optional<File> cachedFile) {
+                @Nullable Throwable causeOfCorruption,
+                @Nullable File cachedFile) {
             Preconditions.checkState(
-                    (queryEvent.equals(QueryEvent.CORRUPTED) && causeOfCorruption.isPresent())
+                    (queryEvent.equals(QueryEvent.CORRUPTED) && causeOfCorruption != null)
                             || (!queryEvent.equals(QueryEvent.CORRUPTED)
-                                    && !causeOfCorruption.isPresent()));
+                                    && causeOfCorruption == null));
 
             this.queryEvent = queryEvent;
             this.causeOfCorruption = causeOfCorruption;
@@ -968,11 +986,11 @@ public class FileCache {
         }
 
         QueryResult(@NonNull QueryEvent queryEvent, @NonNull Throwable causeOfCorruption) {
-            this(queryEvent, Optional.of(causeOfCorruption), Optional.empty());
+            this(queryEvent, causeOfCorruption, null);
         }
 
         QueryResult(@NonNull QueryEvent queryEvent) {
-            this(queryEvent, Optional.empty(), Optional.empty());
+            this(queryEvent, null, null);
         }
 
         /**
@@ -983,20 +1001,18 @@ public class FileCache {
             return queryEvent;
         }
 
-        /**
-         * Returns a cause if the cache is corrupted, and empty otherwise.
-         */
-        @NonNull
-        public Optional<Throwable> getCauseOfCorruption() {
+        /** Returns a cause if the cache is corrupted, and null otherwise. */
+        @Nullable
+        public Throwable getCauseOfCorruption() {
             return causeOfCorruption;
         }
 
         /**
-         * Returns the path to the cached output file/directory, can be empty if the cache does not
+         * Returns the path to the cached output file/directory, can be null if the cache does not
          * want to expose this information.
          */
-        @NonNull
-        public Optional<File> getCachedFile() {
+        @Nullable
+        public File getCachedFile() {
             return cachedFile;
         }
     }
@@ -1014,6 +1030,6 @@ public class FileCache {
         MISSED,
 
         /** The cache entry exists and is corrupted. */
-        CORRUPTED;
+        CORRUPTED,
     }
 }

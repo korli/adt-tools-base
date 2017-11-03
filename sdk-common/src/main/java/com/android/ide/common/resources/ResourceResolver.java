@@ -16,29 +16,19 @@
 
 package com.android.ide.common.resources;
 
+import static com.android.SdkConstants.*;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.ide.common.rendering.api.ArrayResourceValue;
-import com.android.ide.common.rendering.api.ItemResourceValue;
-import com.android.ide.common.rendering.api.LayoutLog;
-import com.android.ide.common.rendering.api.RenderResources;
-import com.android.ide.common.rendering.api.ResourceValue;
-import com.android.ide.common.rendering.api.StyleResourceValue;
+import com.android.ide.common.rendering.api.*;
+import com.android.ide.common.resources.sampledata.SampleDataManager;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
-
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import static com.android.SdkConstants.*;
 
 public class ResourceResolver extends RenderResources {
     public static final String THEME_NAME = "Theme";
@@ -174,8 +164,9 @@ public class ResourceResolver extends RenderResources {
             StyleResourceValue to = (StyleResourceValue)map.get(parentName);
 
             if (from != null && to != null) {
-                StyleResourceValue newStyle = new StyleResourceValue(ResourceType.STYLE,
-                        from.getName(), parentName, from.isFramework(), from.getLibraryName());
+                StyleResourceValue newStyle =
+                        new StyleResourceValue(
+                                from.getResourceUrl(), parentName, from.getLibraryName());
                 newStyle.replaceWith(from);
                 mStyleInheritanceMap.put(newStyle, to);
             }
@@ -314,8 +305,10 @@ public class ResourceResolver extends RenderResources {
             if (parentStyle != null) {
                 if (depth >= MAX_RESOURCE_INDIRECTION) {
                     if (mLogger != null) {
-                        mLogger.error(LayoutLog.TAG_BROKEN,
-                                String.format("Cyclic style parent definitions: %1$s",
+                        mLogger.error(
+                                LayoutLog.TAG_BROKEN,
+                                String.format(
+                                        "Cyclic style parent definitions: %1$s",
                                         computeCyclicStyleChain(style)),
                                 null);
                     }
@@ -376,48 +369,27 @@ public class ResourceResolver extends RenderResources {
         }
 
         ResourceUrl resource = ResourceUrl.parse(reference);
-        if (resource != null && resource.hasValidName()) {
-            if (resource.theme) {
-                // no theme? no need to go further!
-                if (mDefaultTheme == null) {
-                    return null;
-                }
-
-                if (resource.type != ResourceType.ATTR) {
-                    // At this time, no support for ?type/name where type is not "attr"
-                    return null;
-                }
-
-                // Now look for the item in the theme, starting with the current one.
-                return findItemInTheme(resource.name, forceFrameworkOnly || resource.framework);
-            } else {
-                return findResValue(resource, forceFrameworkOnly);
-            }
-        }
-
-        // Looks like the value didn't reference anything. Return null.
-        return null;
-    }
-
-    @Override
-    public ResourceValue resolveValue(ResourceType type, String name, String value,
-            boolean isFrameworkValue) {
-        if (value == null) {
+        if (resource == null || !resource.hasValidName()) {
+            // Looks like the value didn't reference anything. Return null.
             return null;
         }
 
-        // get the ResourceValue referenced by this value
-        ResourceValue resValue = findResValue(value, isFrameworkValue);
+        if (resource.theme) {
+            // no theme? no need to go further!
+            if (mDefaultTheme == null) {
+                return null;
+            }
 
-        // if resValue is null, but value is not null, this means it was not a reference.
-        // we return the name/value wrapper in a ResourceValue. the isFramework flag doesn't
-        // matter.
-        if (resValue == null) {
-            return new ResourceValue(type, name, value, isFrameworkValue);
+            if (resource.type != ResourceType.ATTR) {
+                // At this time, no support for ?type/name where type is not "attr"
+                return null;
+            }
+
+            // Now look for the item in the theme, starting with the current one.
+            return findItemInTheme(resource.name, forceFrameworkOnly || resource.framework);
+        } else {
+            return findResValue(resource, forceFrameworkOnly);
         }
-
-        // we resolved a first reference, but we need to make sure this isn't a reference also.
-        return resolveResValue(resValue);
     }
 
     @Override
@@ -447,8 +419,11 @@ public class ResourceResolver extends RenderResources {
         // detect potential loop due to mishandled namespace in attributes
         if (resValue == resolvedResValue || depth >= MAX_RESOURCE_INDIRECTION) {
             if (mLogger != null) {
-                mLogger.error(LayoutLog.TAG_BROKEN,
-                        String.format("Potential stack overflow trying to resolve '%s': cyclic resource definitions? Render may not be accurate.", value),
+                mLogger.error(
+                        LayoutLog.TAG_BROKEN,
+                        String.format(
+                                "Potential stack overflow trying to resolve '%s': cyclic resource definitions? Render may not be accurate.",
+                                value),
                         null);
             }
             return resValue;
@@ -460,55 +435,79 @@ public class ResourceResolver extends RenderResources {
 
     // ---- Private helper methods.
 
+    private SampleDataManager mSampleDataManager = new SampleDataManager();
+
+    private ResourceValue findSampleDataValue(@NonNull ResourceUrl url) {
+        // TODO: Remove this once repositories have namespace support
+        // Resource repositories do not support namespaces yet. Because of this
+        // we currently hack the namespace support as part of the item name.
+        String name = (url.namespace == null ? "" : url.namespace + ":") + url.name;
+        return Optional.ofNullable(mProjectResources.get(ResourceType.SAMPLE_DATA))
+                .map(t -> t.get(SampleDataManager.getResourceNameFromSampleReference(name)))
+                .filter(SampleDataResourceValue.class::isInstance)
+                .map(SampleDataResourceValue.class::cast)
+                .map(SampleDataResourceValue::getValueAsLines)
+                .map(content -> mSampleDataManager.getSampleDataLine(name, content))
+                .map(
+                        lineContent ->
+                                new ResourceValue(
+                                        ResourceUrl.create(
+                                                url.namespace, ResourceType.SAMPLE_DATA, name),
+                                        lineContent))
+                .orElse(null);
+    }
+
     /**
      * Searches for, and returns a {@link ResourceValue} by its parsed reference.
-     * @param resource the parsed resource
-     * @param forceFramework if <code>true</code>, the method does not search in the
-     * project resources
+     *
+     * @param url the parsed resource
+     * @param forceFramework if <code>true</code>, the method does not search in the project
+     *     resources
      */
-    private ResourceValue findResValue(ResourceUrl resource, boolean forceFramework) {
-        if (resource.type == ResourceType.AAPT) {
+    private ResourceValue findResValue(ResourceUrl url, boolean forceFramework) {
+        if (url.type == ResourceType.AAPT) {
             // Aapt resources are synthetic references that do not need to be resolved.
             return null;
+        } else if (url.type == ResourceType.SAMPLE_DATA) {
+            // Sample data resources are only available within the tools namespace
+            return findSampleDataValue(url);
         }
 
         // map of ResourceValue for the given type
         ResourceValueMap typeMap;
-        ResourceType resType = resource.type;
-        String resName = resource.name;
-        boolean isFramework = forceFramework || resource.framework;
-
-        if (!isFramework) {
-            typeMap = mProjectResources.get(resType);
+        ResourceType resType = url.type;
+        String resName = url.name;
+        boolean isFramework = forceFramework || url.framework;
+        typeMap = !isFramework ? mProjectResources.get(resType) : mFrameworkResources.get(resType);
+        if (typeMap != null) {
             ResourceValue item = typeMap.get(resName);
             if (item != null) {
                 return item;
             }
-        } else {
-            typeMap = mFrameworkResources.get(resType);
-            if (typeMap != null) {
-                ResourceValue item = typeMap.get(resName);
-                if (item != null) {
-                    return item;
-                }
-            }
+        }
 
+        if (isFramework) {
             // if it was not found and the type is an id, it is possible that the ID was
             // generated dynamically when compiling the framework resources.
             // Look for it in the R map.
             if (mFrameworkProvider != null && resType == ResourceType.ID) {
                 if (mFrameworkProvider.getId(resType, resName) != null) {
-                    return new ResourceValue(resType, resName, true);
+                    return new ResourceValue(url.withFramework(true), null);
                 }
             }
         }
 
-      // didn't find the resource anywhere.
-        if (!resource.create && mLogger != null) {
-            mLogger.warning(LayoutLog.TAG_RESOURCES_RESOLVE,
-                    "Couldn't resolve resource @" +
-                    (isFramework ? "android:" : "") + resType + "/" + resName,
-                    new ResourceValue(resType, resName, isFramework));
+        // didn't find the resource anywhere.
+        if (!url.create && mLogger != null) {
+            mLogger.warning(
+                    LayoutLog.TAG_RESOURCES_RESOLVE,
+                    "Couldn't resolve resource @"
+                            + (isFramework ? "android:" : "")
+                            + resType
+                            + "/"
+                            + resName,
+                    null,
+                    url.withFramework(isFramework));
         }
         return null;
     }
@@ -658,7 +657,9 @@ public class ResourceResolver extends RenderResources {
         res = styleMap.get(styleName);
         if (res != null) {
             if (!(res instanceof StyleResourceValue) && mLogger != null) {
-                mLogger.error(null, String.format(
+                mLogger.error(
+                        null,
+                        String.format(
                                 "Style %1$s is not of type STYLE (instead %2$s)",
                                 styleName, res.getResourceType().toString()),
                         null);
@@ -723,13 +724,14 @@ public class ResourceResolver extends RenderResources {
 
         // make sure the result is the proper class type and return it.
         if (parent instanceof StyleResourceValue) {
-            return (StyleResourceValue)parent;
+            return (StyleResourceValue) parent;
         }
 
         if (mLogger != null) {
-            mLogger.error(LayoutLog.TAG_RESOURCES_RESOLVE,
+            mLogger.error(
+                    LayoutLog.TAG_RESOURCES_RESOLVE,
                     String.format("Unable to resolve parent style name: %s", parentName),
-                    null /*data*/);
+                    null);
         }
 
         return null;
@@ -766,8 +768,10 @@ public class ResourceResolver extends RenderResources {
             if (parentStyle != null) {
                 if (depth >= MAX_RESOURCE_INDIRECTION) {
                     if (mLogger != null) {
-                        mLogger.error(LayoutLog.TAG_BROKEN,
-                                String.format("Cyclic style parent definitions: %1$s",
+                        mLogger.error(
+                                LayoutLog.TAG_BROKEN,
+                                String.format(
+                                        "Cyclic style parent definitions: %1$s",
                                         computeCyclicStyleChain(srv)),
                                 null);
                     }
@@ -853,8 +857,8 @@ public class ResourceResolver extends RenderResources {
             if (!mLookupChain.isEmpty() && reference != null && reference.startsWith(PREFIX_RESOURCE_REF)) {
                 ResourceValue prev = mLookupChain.get(mLookupChain.size() - 1);
                 if (!reference.equals(prev.getValue())) {
-                    ResourceValue next = new ResourceValue(prev.getResourceType(), prev.getName(),
-                            prev.isFramework(), prev.getLibraryName());
+                    ResourceValue next =
+                            new ResourceValue(prev.getResourceUrl(), null, prev.getLibraryName());
                     next.setValue(reference);
                     mLookupChain.add(next);
                 }
@@ -886,16 +890,6 @@ public class ResourceResolver extends RenderResources {
                 mLookupChain.add(value);
             }
             return value;
-        }
-
-        @Override
-        public ResourceValue resolveValue(ResourceType type, String name, String value,
-                boolean isFrameworkValue) {
-            ResourceValue resourceValue = super.resolveValue(type, name, value, isFrameworkValue);
-            if (resourceValue != null) {
-                mLookupChain.add(resourceValue);
-            }
-            return resourceValue;
         }
     }
 }

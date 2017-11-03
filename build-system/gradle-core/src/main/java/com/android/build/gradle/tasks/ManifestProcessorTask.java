@@ -16,65 +16,87 @@
 package com.android.build.gradle.tasks;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.CombinedInput;
 import com.android.build.gradle.internal.tasks.IncrementalTask;
-import com.android.builder.model.AndroidBundle;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Ordering;
-
-import org.gradle.api.tasks.Optional;
-import org.gradle.api.tasks.OutputFile;
-
 import java.io.File;
 import java.util.Map;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Optional;
+import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.OutputFile;
 
 /**
  * A task that processes the manifest
  */
 public abstract class ManifestProcessorTask extends IncrementalTask {
 
-    private File manifestOutputFile;
+    private File manifestOutputDirectory;
 
-    private File aaptFriendlyManifestOutputFile;
+    private File aaptFriendlyManifestOutputDirectory;
 
-    private File instantRunManifestOutputFile;
+    private File instantRunManifestOutputDirectory;
+
+    private File reportFile;
 
     /**
-     * The processed Manifest.
+     * The aapt friendly processed Manifest. In case we are processing a library manifest, some
+     * placeholders may not have been resolved (and will be when the library is merged into the
+     * importing application). However, such placeholders keys are not friendly to aapt which flags
+     * some illegal characters. Such characters are replaced/encoded in this version.
      */
-    @OutputFile
-    public File getManifestOutputFile() {
-        return manifestOutputFile;
+    @Nullable
+    @Internal
+    public abstract File getAaptFriendlyManifestOutputFile();
+
+    /** The processed Manifest. */
+    @OutputDirectory
+    public File getManifestOutputDirectory() {
+        return manifestOutputDirectory;
     }
 
-    public void setManifestOutputFile(File manifestOutputFile) {
-        this.manifestOutputFile = manifestOutputFile;
+    public void setManifestOutputDirectory(File manifestOutputFolder) {
+        this.manifestOutputDirectory = manifestOutputFolder;
     }
 
-    @OutputFile
+    @OutputDirectory
     @Optional
-    public File getInstantRunManifestOutputFile() {
-        return instantRunManifestOutputFile;
+    public File getInstantRunManifestOutputDirectory() {
+        return instantRunManifestOutputDirectory;
     }
 
-    public void setInstantRunManifestOutputFile(File instantRunManifestOutputFile) {
-        this.instantRunManifestOutputFile = instantRunManifestOutputFile;
+    public void setInstantRunManifestOutputDirectory(File instantRunManifestOutputDirectory) {
+        this.instantRunManifestOutputDirectory = instantRunManifestOutputDirectory;
     }
 
     /**
      * The aapt friendly processed Manifest. In case we are processing a library manifest, some
      * placeholders may not have been resolved (and will be when the library is merged into the
-     * importing application). However, such placeholders keys are not friendly to aapt which
-     * flags some illegal characters. Such characters are replaced/encoded in this version.
+     * importing application). However, such placeholders keys are not friendly to aapt which flags
+     * some illegal characters. Such characters are replaced/encoded in this version.
      */
-    @OutputFile
+    @OutputDirectory
     @Optional
-    public File getAaptFriendlyManifestOutputFile() {
-        return aaptFriendlyManifestOutputFile;
+    public File getAaptFriendlyManifestOutputDirectory() {
+        return aaptFriendlyManifestOutputDirectory;
     }
 
-    public void setAaptFriendlyManifestOutputFile(File aaptFriendlyManifestOutputFile) {
-        this.aaptFriendlyManifestOutputFile = aaptFriendlyManifestOutputFile;
+    public void setAaptFriendlyManifestOutputDirectory(File aaptFriendlyManifestOutputDirectory) {
+        this.aaptFriendlyManifestOutputDirectory = aaptFriendlyManifestOutputDirectory;
+    }
+
+    @OutputFile
+    @Optional
+    public File getReportFile() {
+        return reportFile;
+    }
+
+    public void setReportFile(File reportFile) {
+        this.reportFile = reportFile;
     }
 
 
@@ -94,12 +116,32 @@ public abstract class ManifestProcessorTask extends IncrementalTask {
     }
 
     /**
-     * Returns the manifest processing output file. if an aapt friendly version was requested,
-     * return that otherwise return the actual output of the manifest merger tool directly.
+     * Backward compatibility support. This method used to be available on AGP prior to 3.0 but has
+     * now been replaced with {@link #getManifestOutputDirectory()}.
+     *
+     * @return
+     * @deprecated As or release 3.0, replaced with {@link #getManifestOutputDirectory()}
      */
-    public File getOutputFile() {
-        File aaptFriendlyManifest = getAaptFriendlyManifestOutputFile();
-        return aaptFriendlyManifest != null ? aaptFriendlyManifest : getManifestOutputFile();
+    @Deprecated
+    @Internal
+    public File getManifestOutputFile() {
+        throw new RuntimeException(
+                "Manifest Tasks does not support the manifestOutputFile property any more, please"
+                        + " use the manifestOutputDirectory instead.\nFor more information, please check "
+                        + "https://developer.android.com/studio/build/gradle-plugin-3-0-0-migration.html");
     }
 
+    // Workaround for https://issuetracker.google.com/67418335
+    @Override
+    @Input
+    @NonNull
+    public String getCombinedInput() {
+        return new CombinedInput(super.getCombinedInput())
+                .add("instantRunManifestOutputDirectory", getInstantRunManifestOutputDirectory())
+                .add(
+                        "aaptFriendlyManifestOutputDirectory",
+                        getAaptFriendlyManifestOutputDirectory())
+                .add("reportFile", getReportFile())
+                .toString();
+    }
 }

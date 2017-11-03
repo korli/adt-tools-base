@@ -16,15 +16,11 @@
 
 package com.android.build.gradle.integration.databinding;
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAtomBundle;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.runner.FilterableParameterized;
-import com.android.build.gradle.integration.common.truth.AtomBundleSubject;
-import com.android.ide.common.process.ProcessException;
-import com.android.testutils.truth.DexBackedDexFileSubject;
-import java.io.IOException;
+import com.android.testutils.truth.DexSubject;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.Rule;
@@ -44,15 +40,15 @@ public class DataBindingWithDaggerTest {
 
     private final String buildSuffix;
 
-    @Parameterized.Parameters(name = "specify_processor_class_{0} use_jack_{1}")
+    @Parameterized.Parameters(name = "specify_processor_class_{0}")
     public static List<Object[]> parameters() {
-        return Arrays.asList(new Object[]{true, true},
-                new Object[]{true, false},
-                new Object[]{false, true},
-                new Object[]{false, false});
+        return Arrays.asList(
+                new Object[][] {
+                    {false}, {true},
+                });
     }
 
-    public DataBindingWithDaggerTest(boolean specifyProcessor, boolean useJack) {
+    public DataBindingWithDaggerTest(boolean specifyProcessor) {
         if (specifyProcessor) {
             buildSuffix = ".specifyprocessor.gradle";
         } else {
@@ -62,28 +58,16 @@ public class DataBindingWithDaggerTest {
         project = GradleTestProject.builder()
                 .fromTestProject("databindingAndDagger")
                 .useExperimentalGradleVersion(false)
-                .withJack(useJack)
                 .create();
     }
 
     @Test
-    public void testApp() throws IOException, ProcessException {
+    public void testApp() throws Exception {
         project.setBuildFile("build" + buildSuffix);
         project.execute("assembleDebug");
 
-        DexBackedDexFileSubject mainDex = assertThatApk(project.getApk("debug"))
-                .hasMainDexFile().that();
+        DexSubject mainDex = assertThat(project.getApk("debug")).hasMainDexFile().that();
         mainDex.containsClass(MAIN_ACTIVITY_BINDING_CLASS);
         mainDex.containsClass(DAGGER_APP_COMPONENT);
-    }
-
-    @Test
-    public void testAtom() throws IOException, ProcessException {
-        project.setBuildFile("build.atom" + buildSuffix);
-        project.execute("assembleDebug");
-
-        AtomBundleSubject atombundle = assertThatAtomBundle(project.getAtomBundle("debug"));
-        atombundle.containsClass(MAIN_ACTIVITY_BINDING_CLASS);
-        atombundle.containsClass(DAGGER_APP_COMPONENT);
     }
 }

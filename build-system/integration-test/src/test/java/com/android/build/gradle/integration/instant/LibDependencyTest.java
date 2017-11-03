@@ -17,6 +17,7 @@
 package com.android.build.gradle.integration.instant;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.TestFileUtils.appendToFile;
 import static com.android.build.gradle.integration.instant.InstantRunTestUtils.getInstantRunModel;
 import static com.android.testutils.truth.MoreTruth.assertThatDex;
@@ -25,26 +26,19 @@ import static com.android.utils.FileUtils.mkdirs;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
-import com.android.build.gradle.integration.common.truth.ApkSubject;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.base.Charsets;
-import com.google.common.base.Joiner;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
-import com.google.common.truth.Expect;
 import java.io.File;
-import java.io.IOException;
-import java.util.List;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -57,15 +51,11 @@ public class LibDependencyTest {
     @Rule
     public GradleTestProject project =
             GradleTestProject.builder()
-                .fromTestProject("libDependency")
-                .create();
-
-    @Rule
-    public Expect expect = Expect.createAndEnableStackTrace();
+                    .fromTestProject("libDependency")
+                    .create();
 
     @Before
-    public void activityClass() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
+    public void activityClass() throws Exception {
         createLibraryClass("Before");
     }
 
@@ -76,12 +66,14 @@ public class LibDependencyTest {
         InstantRun instantRunModel = getInstantRunModel(modelContainer.getModelMap().get(":app"));
 
         // Check that original class is included.
-        project.execute(getInstantRunArgs(), "clean", "assembleRelease", "assembleDebug");
-        expect.about(ApkSubject.FACTORY)
-                .that(project.getSubproject("app").getApk("debug"))
-                .hasClass("Lcom/android/tests/libstest/lib/MainActivity;",
-                        AbstractAndroidSubject.ClassFileScope.INSTANT_RUN)
-                .that().hasMethod("onCreate");
+        project.executor()
+                .withInstantRun(new AndroidVersion(23, null))
+                .run("clean", "assembleRelease", "assembleDebug");
+
+        assertThat(InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel))
+                .hasClass("Lcom/android/tests/libstest/lib/MainActivity;")
+                .that()
+                .hasMethod("onCreate");
 
         checkHotSwapCompatibleChange(instantRunModel);
     }
@@ -105,11 +97,10 @@ public class LibDependencyTest {
         ModelContainer<AndroidProject> modelContainer = project.model().getMulti();
         InstantRun instantRunModel = getInstantRunModel(modelContainer.getModelMap().get(":app"));
         project.executor()
-                .withInstantRun(23, ColdswapMode.MULTIDEX, OptionalCompilationStep.RESTART_ONLY)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.RESTART_ONLY)
                 .run("clean", ":app:assembleDebug");
         createJavaLibraryClass("changed");
-        project.executor().withInstantRun(23, ColdswapMode.MULTIDEX)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
         assertThat(context.getVerifierStatus()).isEqualTo(
                 InstantRunVerifierStatus.COMPATIBLE.toString());
@@ -128,23 +119,25 @@ public class LibDependencyTest {
         InstantRun instantRunModel = getInstantRunModel(modelContainer.getModelMap().get(":app"));
 
         // Check that original class is included.
-        project.execute(getInstantRunArgs(), "clean", "assembleDebug");
-        expect.about(ApkSubject.FACTORY)
-                .that(project.getSubproject("app").getApk("debug"))
-                .hasClass("Lcom/android/tests/libstest/lib/MainActivity;",
-                        AbstractAndroidSubject.ClassFileScope.INSTANT_RUN)
-                .that().hasMethod("onCreate");
+        project.executor()
+                .withInstantRun(new AndroidVersion(23, null))
+                .run("clean", "assembleDebug");
+
+        assertThat(InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel))
+                .hasClass("Lcom/android/tests/libstest/lib/MainActivity;")
+                .that()
+                .hasMethod("onCreate");
 
         Files.write("changed java resource", resource, Charsets.UTF_8);
 
-        project.execute(getInstantRunArgs(), "assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
         assertThat(context.getVerifierStatus()).isEqualTo(
                 InstantRunVerifierStatus.JAVA_RESOURCES_CHANGED.toString());
         assertThat(context.getArtifacts()).hasSize(1);
-        assertThat(context.getArtifacts().get(0).type).isEqualTo(InstantRunArtifactType.MAIN);
-        expect.about(ApkSubject.FACTORY)
-                .that(context.getArtifacts().get(0).file)
+        assertThat(context.getArtifacts().get(0).type).isEqualTo(InstantRunArtifactType.SPLIT_MAIN);
+
+        assertThatApk(new Apk(context.getArtifacts().get(0).file))
                 .containsFileWithContent("properties.txt", "changed java resource");
     }
 
@@ -155,19 +148,18 @@ public class LibDependencyTest {
             throws Exception {
         createLibraryClass("Hot swap change");
 
-        project.execute(getInstantRunArgs(), "assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
 
         assertThat(context.getArtifacts()).hasSize(1);
         InstantRunArtifact artifact = Iterables.getOnlyElement(context.getArtifacts());
-        expect.that(artifact.type).isEqualTo(InstantRunArtifactType.RELOAD_DEX);
+        assertThat(artifact.type).isEqualTo(InstantRunArtifactType.RELOAD_DEX);
         assertThatDex(artifact.file).containsClass("Lcom/android/tests/libstest/lib/Lib$override;");
     }
 
 
-    private void createLibraryClass(String message)
-            throws IOException {
+    private void createLibraryClass(String message) throws Exception {
         String javaCompile = "package com.android.tests.libstest.lib;\n"
             +"public class Lib {\n"
                 +"public static String someString() {\n"
@@ -179,8 +171,7 @@ public class LibDependencyTest {
                 Charsets.UTF_8);
     }
 
-    private void createJavaLibraryClass(String message)
-            throws IOException {
+    private void createJavaLibraryClass(String message) throws Exception {
         File dir = project.file("javalib/src/main/java/com/example/javalib");
         mkdirs(dir);
         String java = "package com.example.javalib;\n"
@@ -190,12 +181,5 @@ public class LibDependencyTest {
                 +"    }\n"
                 +"}\n";
         Files.write(java, new File(dir, "A.java"), Charsets.UTF_8);
-    }
-
-    private static List<String> getInstantRunArgs(OptionalCompilationStep... flags) {
-        String property = "-P" + AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS + "=" +
-                OptionalCompilationStep.INSTANT_DEV + "," + Joiner.on(',').join(flags);
-        return ImmutableList.of(property,
-                "-P" + AndroidProject.PROPERTY_BUILD_API + "=23");
     }
 }

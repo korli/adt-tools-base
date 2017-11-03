@@ -30,25 +30,20 @@ import com.android.repository.api.RepoManager;
 import com.android.repository.api.Uninstaller;
 import com.android.repository.impl.manager.RepoManagerImpl;
 import com.android.repository.impl.meta.RepositoryPackages;
-import com.android.repository.testframework.FakeDownloader;
-import com.android.repository.testframework.FakeProgressIndicator;
-import com.android.repository.testframework.FakeProgressRunner;
-import com.android.repository.testframework.FakeSettingsController;
-import com.android.repository.testframework.MockFileOp;
+import com.android.repository.testframework.*;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
-
-import junit.framework.TestCase;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import junit.framework.TestCase;
 
 /**
  * Tests for {@link BasicInstallerFactory}.
@@ -83,11 +78,46 @@ public class BasicInstallerTest extends TestCase {
         // Uninstall it
         InstallerFactory factory = new BasicInstallerFactory();
         Uninstaller uninstaller = factory.createUninstaller(p, mgr, fop);
-        uninstaller.prepare(new FakeProgressIndicator());
-        uninstaller.complete(new FakeProgressIndicator());
+        uninstaller.prepare(new FakeProgressIndicator(true));
+        uninstaller.complete(new FakeProgressIndicator(true));
         // Verify that the deleted dir is gone.
         assertFalse(fop.exists(new File("/repo/dummy/foo")));
         assertTrue(fop.exists(new File("/repo/dummy/bar/package.xml")));
+    }
+
+    public void testDeleteNonstandardLocation() throws Exception {
+        File toDeleteDir = new File("/sdk/foo with space");
+        File otherDir1 = new File("/sdk/foo");
+        File otherDir2 = new File("/sdk/bar");
+        MockFileOp fop = new MockFileOp();
+        fop.mkdirs(otherDir1);
+        fop.mkdirs(otherDir2);
+        fop.mkdirs(toDeleteDir);
+        File toDeleteFile = new File(toDeleteDir, "a");
+        fop.recordExistingFile(toDeleteFile);
+        File otherFile1 = new File(otherDir1, "b");
+        fop.recordExistingFile(otherFile1);
+        File otherFile2 = new File(otherDir2, "c");
+        fop.recordExistingFile(otherFile2);
+
+        LocalPackage localPackage = new FakePackage.FakeLocalPackage("foo");
+        localPackage.setInstalledPath(toDeleteDir);
+        RepositoryPackages packages =
+                new RepositoryPackages(
+                        ImmutableList.of(new FakePackage.FakeLocalPackage("bar"), localPackage),
+                        ImmutableList.of());
+        RepoManager mgr = new FakeRepoManager(new File("/sdk"), packages);
+        InstallerFactory factory = new BasicInstallerFactory();
+        Uninstaller uninstaller = factory.createUninstaller(localPackage, mgr, fop);
+        FakeProgressIndicator progress = new FakeProgressIndicator();
+        uninstaller.prepare(progress);
+        uninstaller.complete(progress);
+        assertFalse(fop.exists(toDeleteFile));
+        assertFalse(fop.exists(toDeleteDir));
+        assertTrue(fop.exists(otherFile1));
+        assertTrue(fop.exists(otherFile2));
+        assertTrue(fop.exists(otherDir1));
+        assertTrue(fop.exists(otherDir2));
     }
 
     // Test installing a new package
@@ -136,14 +166,16 @@ public class BasicInstallerTest extends TestCase {
         assertEquals(1, pkgs.getLocalPackages().size());
         assertEquals(2, pkgs.getRemotePackages().size());
 
+        FakeProgressIndicator progress = new FakeProgressIndicator(true);
         // Install one of the packages.
         RemotePackage p = pkgs.getRemotePackages().get("dummy;bar");
         Installer basicInstaller =
                 new BasicInstallerFactory().createInstaller(p, mgr, downloader, fop);
-        basicInstaller.prepare(runner.getProgressIndicator());
-        basicInstaller.complete(runner.getProgressIndicator());
-        runner.getProgressIndicator().assertNoErrorsOrWarnings();
+        basicInstaller.prepare(progress.createSubProgress(0.5));
+        basicInstaller.complete(progress.createSubProgress(1));
+        progress.assertNoErrorsOrWarnings();
 
+        runner = new FakeProgressRunner();
         // Reload the packages.
         mgr.load(0, ImmutableList.<RepoManager.RepoLoadedCallback>of(),
                 ImmutableList.<RepoManager.RepoLoadedCallback>of(), ImmutableList.<Runnable>of(),
@@ -326,7 +358,7 @@ public class BasicInstallerTest extends TestCase {
         RemotePackage p = mgr.getPackages().getRemotePackages().get("dummy;bar");
         Installer basicInstaller =
                 new BasicInstallerFactory().createInstaller(p, mgr, downloader, fop);
-        FakeProgressIndicator firstInstallProgress = new FakeProgressIndicator();
+        FakeProgressIndicator firstInstallProgress = new FakeProgressIndicator(true);
         boolean result = basicInstaller.prepare(firstInstallProgress);
 
         // be sure it was actually cancelled
@@ -343,7 +375,7 @@ public class BasicInstallerTest extends TestCase {
 
             @Nullable
             @Override
-            public File downloadFully(@NonNull URL url, @NonNull ProgressIndicator indicator)
+            public Path downloadFully(@NonNull URL url, @NonNull ProgressIndicator indicator)
                     throws IOException {
                 fail();
                 return null;
@@ -361,7 +393,7 @@ public class BasicInstallerTest extends TestCase {
         basicInstaller =
                 new BasicInstallerFactory().createInstaller(p, mgr, failingDownloader, fop);
         // Try again with the failing downloader; it should not be called.
-        FakeProgressIndicator secondInstallProgress = new FakeProgressIndicator();
+        FakeProgressIndicator secondInstallProgress = new FakeProgressIndicator(true);
         result = basicInstaller.prepare(secondInstallProgress);
         assertTrue(result);
         result = basicInstaller.complete(secondInstallProgress);

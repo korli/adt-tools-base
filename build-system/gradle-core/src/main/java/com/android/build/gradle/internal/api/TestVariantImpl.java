@@ -18,15 +18,14 @@ package com.android.build.gradle.internal.api;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.api.BaseVariant;
+import com.android.build.gradle.api.BaseVariantOutput;
 import com.android.build.gradle.api.TestVariant;
-import com.android.build.gradle.internal.variant.ApkVariantData;
-import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.TestVariantData;
 import com.android.builder.core.AndroidBuilder;
-
-import org.gradle.api.DefaultTask;
-
 import java.util.List;
+import org.gradle.api.DefaultTask;
+import org.gradle.api.NamedDomainObjectContainer;
+import org.gradle.api.model.ObjectFactory;
 
 /**
  * implementation of the {@link TestVariant} interface around an {@link TestVariantData} object.
@@ -44,22 +43,18 @@ public class TestVariantImpl extends ApkVariantImpl implements TestVariant {
     public TestVariantImpl(
             @NonNull TestVariantData variantData,
             @NonNull BaseVariant testedVariantData,
+            @NonNull ObjectFactory objectFactory,
             @NonNull AndroidBuilder androidBuilder,
-            @NonNull ReadOnlyObjectProvider readOnlyObjectProvider) {
-        super(androidBuilder, readOnlyObjectProvider);
+            @NonNull ReadOnlyObjectProvider readOnlyObjectProvider,
+            @NonNull NamedDomainObjectContainer<BaseVariantOutput> outputs) {
+        super(objectFactory, androidBuilder, readOnlyObjectProvider, outputs);
         this.variantData = variantData;
         this.testedVariantData = testedVariantData;
     }
 
     @Override
     @NonNull
-    protected BaseVariantData getVariantData() {
-        return variantData;
-    }
-
-    @Override
-    @NonNull
-    protected ApkVariantData getApkVariantData() {
+    public TestVariantData getVariantData() {
         return variantData;
     }
 

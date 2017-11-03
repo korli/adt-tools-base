@@ -33,14 +33,16 @@ import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
 import com.android.build.api.transform.TransformOutputProvider;
-import com.android.build.gradle.internal.dsl.AaptOptions;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
 import com.android.build.gradle.internal.scope.PackagingScope;
 import com.android.builder.core.AndroidBuilder;
+import com.android.builder.internal.aapt.AaptOptions;
 import com.android.builder.packaging.PackagerException;
 import com.android.builder.sdk.TargetInfo;
+import com.android.builder.utils.FileCache;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.signing.KeytoolException;
 import com.android.sdklib.BuildToolInfo;
@@ -72,11 +74,10 @@ public class InstantRunSlicesSplitApkBuilderTest {
 
     @Mock Logger logger;
     @Mock Project project;
-    @Mock InstantRunBuildContext instantRunBuildContext;
+    @Mock InstantRunBuildContext buildContext;
     @Mock AndroidBuilder androidBuilder;
     @Mock PackagingScope packagingScope;
     @Mock CoreSigningConfig coreSigningConfig;
-    @Mock AaptOptions aaptOptions;
 
     @Mock TargetInfo targetInfo;
     @Mock BuildToolInfo buildTools;
@@ -84,8 +85,9 @@ public class InstantRunSlicesSplitApkBuilderTest {
     @Rule public TemporaryFolder outputDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder supportDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder dexFileFolder = new TemporaryFolder();
+    @Rule public TemporaryFolder fileCacheDirectory = new TemporaryFolder();
 
-
+    FileCache fileCache;
     InstantRunSliceSplitApkBuilder instantRunSliceSplitApkBuilder;
     final List<InstantRunSplitApkBuilder.DexFiles> dexFilesList =
             new CopyOnWriteArrayList<>();
@@ -102,27 +104,32 @@ public class InstantRunSlicesSplitApkBuilderTest {
     }
 
     @Before
-    public void setup() {
-        instantRunSliceSplitApkBuilder = new InstantRunSliceSplitApkBuilder(
-                logger,
-                project,
-                instantRunBuildContext,
-                androidBuilder,
-                packagingScope,
-                coreSigningConfig,
-                aaptOptions,
-                outputDirectory.getRoot(),
-                supportDirectory.getRoot()
-        ) {
-            @Override
-            @NonNull
-            protected File generateSplitApk(@NonNull DexFiles dexFiles)
-                    throws IOException, KeytoolException, PackagerException, InterruptedException,
-                    ProcessException, TransformException {
-                dexFilesList.add(dexFiles);
-                return new File("/dev/null");
-            }
-        };
+    public void setup() throws IOException {
+        fileCache = FileCache.getInstanceWithSingleProcessLocking(fileCacheDirectory.getRoot());
+        instantRunSliceSplitApkBuilder =
+                new InstantRunSliceSplitApkBuilder(
+                        logger,
+                        project,
+                        buildContext,
+                        androidBuilder,
+                        fileCache,
+                        packagingScope,
+                        coreSigningConfig,
+                        AaptGeneration.AAPT_V2_DAEMON_MODE,
+                        new AaptOptions(null, false, null),
+                        outputDirectory.getRoot(),
+                        supportDirectory.newFolder("instant-run"),
+                        supportDirectory.newFolder("aapt-temp"), /* runAapt2Serially */
+                        false) {
+                    @Override
+                    @NonNull
+                    protected File generateSplitApk(@NonNull DexFiles dexFiles)
+                            throws IOException, KeytoolException, PackagerException,
+                                    InterruptedException, ProcessException, TransformException {
+                        dexFilesList.add(dexFiles);
+                        return new File("/dev/null");
+                    }
+                };
     }
 
     @Test

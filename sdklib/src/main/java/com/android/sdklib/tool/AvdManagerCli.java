@@ -16,6 +16,8 @@
 
 package com.android.sdklib.tool;
 
+import static com.google.common.base.Verify.verifyNotNull;
+
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -25,7 +27,7 @@ import com.android.repository.api.ConsoleProgressIndicator;
 import com.android.repository.api.LocalPackage;
 import com.android.repository.api.ProgressIndicator;
 import com.android.repository.api.ProgressIndicatorAdapter;
-import com.android.repository.io.FileOpUtils;
+import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.ISystemImage;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.sdklib.devices.Device;
@@ -40,8 +42,11 @@ import com.android.sdklib.repository.targets.SystemImage;
 import com.android.sdklib.util.CommandLineParser;
 import com.android.utils.ILogger;
 import com.android.utils.IReaderLogger;
+import com.google.common.base.Joiner;
+import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -56,7 +61,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-
 
 /**
  * Specific command-line flags for the AVD Manager CLI
@@ -141,6 +145,7 @@ class AvdManagerCli extends CommandLineParser {
      * List of valid characters for an AVD name. Used for display purposes.
      */
     private static final String CHARS_AVD_NAME = "a-z A-Z 0-9 . _ -"; //$NON-NLS-1$
+    private InputStream mInput;
 
     /**
      * Path to the SDK folder. This is the parent of {@link #TOOLSDIR}.
@@ -150,7 +155,7 @@ class AvdManagerCli extends CommandLineParser {
     /**
      * Logger object. Use this to print normal output, warnings or errors.
      */
-    private ILogger mSdkLog;
+    private final ILogger mSdkLog;
 
     /**
      * The SDK manager parses the SDK folder and gives access to the content.
@@ -158,6 +163,7 @@ class AvdManagerCli extends CommandLineParser {
     private AndroidSdkHandler mSdkHandler;
 
     private AvdManager mAvdManager;
+    private String mAvdFolder;
 
     /**
      * Action definitions for AvdManager command line.
@@ -186,20 +192,26 @@ class AvdManagerCli extends CommandLineParser {
     };
 
     public static void main(String[] args) {
-        AtomicReference<AvdManagerCli> reference = new AtomicReference<>();
-        ILogger logger = createLogger(reference);
-        AvdManagerCli instance = new AvdManagerCli(logger);
-        reference.set(instance);
-        instance.run(args);
+        try {
+            AtomicReference<AvdManagerCli> reference = new AtomicReference<>();
+            ILogger logger = createLogger(reference);
+            AvdManagerCli instance = new AvdManagerCli(logger);
+            reference.set(instance);
+            instance.run(args);
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            System.exit(1);
+        }
     }
 
-    /**
-     * Runs the sdk manager app
-     */
-    private void run(String[] args) {
+    /** Runs the sdk manager app */
+    @VisibleForTesting
+    void run(String[] args) {
         init();
         parseArgs(args);
-        parseSdk();
+        if (mSdkHandler == null) {
+            mSdkHandler = AndroidSdkHandler.getInstance(new File(mOsSdkFolder));
+        }
         doAction();
     }
 
@@ -250,7 +262,7 @@ class AvdManagerCli extends CommandLineParser {
              * {@inheritDoc}
              */
             @Override
-            public int readLine(byte[] inputBuffer) throws IOException {
+            public int readLine(@NonNull byte[] inputBuffer) throws IOException {
                 return System.in.read(inputBuffer);
             }
         };
@@ -261,40 +273,53 @@ class AvdManagerCli extends CommandLineParser {
      * SDK.
      */
     private void init() {
-        // We get passed a property for the tools dir
-        String toolsDirProp = System.getProperty(TOOLSDIR);
-        if (toolsDirProp == null) {
-            // for debugging, it's easier to override using the process environment
-            toolsDirProp = System.getenv(TOOLSDIR);
-        }
-
-        if (toolsDirProp != null) {
-            // got back a level for the SDK folder
-            File tools;
-            if (toolsDirProp.length() > 0) {
-                try {
-                    tools = new File(toolsDirProp).getCanonicalFile();
-                    mOsSdkFolder = tools.getParent();
-                }
-                catch (IOException e) {
-                    // try using "." below
-                }
-            }
-            if (mOsSdkFolder == null) {
-                try {
-                    tools = new File(".").getCanonicalFile();
-                    mOsSdkFolder = tools.getParent();
-                } catch (IOException e) {
-                    // Will print an error below since mSdkFolder is not defined
-                }
+        if (mAvdFolder == null) {
+            try {
+                mAvdFolder = AndroidLocation.getAvdFolder();
+            } catch (AndroidLocation.AndroidLocationException e) {
+                // We'll print an error out later since the folder isn't defined.
             }
         }
-
         if (mOsSdkFolder == null) {
-            String cmdName = "avdmanager" + (FileOpUtils.create().isWindows() ? ".bat" : "");
+            // We get passed a property for the tools dir
+            String toolsDirProp = System.getProperty(TOOLSDIR);
+            if (toolsDirProp == null) {
+                // for debugging, it's easier to override using the process environment
+                toolsDirProp = System.getenv(TOOLSDIR);
+            }
 
-            errorAndExit("The tools directory property is not set, please make sure you are " +
-                    "executing %1$s", cmdName);
+            if (toolsDirProp != null) {
+                // got back a level for the SDK folder
+                File tools;
+                if (!toolsDirProp.isEmpty()) {
+                    try {
+                        tools = new File(toolsDirProp).getCanonicalFile();
+                        mOsSdkFolder = tools.getParent();
+                    } catch (IOException e) {
+                        // try using "." below
+                    }
+                }
+                if (mOsSdkFolder == null) {
+                    try {
+                        tools = new File(".").getCanonicalFile();
+                        mOsSdkFolder = tools.getParent();
+                    } catch (IOException e) {
+                        // Will print an error below since mSdkFolder is not defined
+                    }
+                }
+            }
+
+            if (mOsSdkFolder == null) {
+                String cmdName = "avdmanager" + (mSdkHandler.getFileOp().isWindows() ? ".bat" : "");
+
+                errorAndExit(
+                        "The tools directory property is not set, please make sure you are "
+                                + "executing %1$s",
+                        cmdName);
+            }
+        }
+        if (mInput == null) {
+            mInput = System.in;
         }
 
         // We might get passed a property for the working directory
@@ -320,13 +345,6 @@ class AvdManagerCli extends CommandLineParser {
     }
 
     /**
-     * Does the basic SDK parsing required for all actions
-     */
-    private void parseSdk() {
-        mSdkHandler = AndroidSdkHandler.getInstance(new File(mOsSdkFolder));
-    }
-
-    /**
      * Lazily creates and returns an instance of the AVD Manager. The same instance is reused
      * later.
      *
@@ -335,7 +353,9 @@ class AvdManagerCli extends CommandLineParser {
     @NonNull
     private AvdManager getAvdManager() throws AndroidLocation.AndroidLocationException {
         if (mAvdManager == null) {
-            mAvdManager = AvdManager.getInstance(mSdkHandler, mSdkLog);
+            mAvdManager =
+                    verifyNotNull(
+                            AvdManager.getInstance(mSdkHandler, new File(mAvdFolder), mSdkLog));
         }
         return mAvdManager;
     }
@@ -343,7 +363,6 @@ class AvdManagerCli extends CommandLineParser {
     /**
      * Actually do an action...
      */
-    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
     private void doAction() {
 
         String verb = getVerb();
@@ -353,15 +372,15 @@ class AvdManagerCli extends CommandLineParser {
             // list action.
             if (AvdManagerCli.OBJECT_AVD.equals(directObject)) {
                 displayAvdList();
-
             } else if (AvdManagerCli.OBJECT_DEVICE.equals(directObject)) {
                 displayDeviceList();
-
+            } else if (AvdManagerCli.OBJECT_TARGET.equals(directObject)) {
+                displayTargetList();
             } else {
                 displayAvdList();
                 displayDeviceList();
+                displayTargetList();
             }
-
         } else if (AvdManagerCli.VERB_CREATE.equals(verb)) {
             if (AvdManagerCli.OBJECT_AVD.equals(directObject)) {
                 createAvd();
@@ -369,11 +388,9 @@ class AvdManagerCli extends CommandLineParser {
         } else if (AvdManagerCli.VERB_DELETE.equals(verb) &&
                 AvdManagerCli.OBJECT_AVD.equals(directObject)) {
             deleteAvd();
-
         } else if (AvdManagerCli.VERB_MOVE.equals(verb) &&
                 AvdManagerCli.OBJECT_AVD.equals(directObject)) {
             moveAvd();
-
         } else {
             printHelpAndExit(null);
         }
@@ -382,7 +399,7 @@ class AvdManagerCli extends CommandLineParser {
     /**
      * Displays the tags & ABIs valid for the given images.
      */
-    private void displayTagAbiList(Collection<SystemImage> systemImages, String message) {
+    private void displayTagAbiList(@NonNull Collection<? extends ISystemImage> systemImages, @NonNull String message) {
         mSdkLog.info(message);
         if (!systemImages.isEmpty()) {
             boolean first = true;
@@ -403,7 +420,6 @@ class AvdManagerCli extends CommandLineParser {
     /**
      * Displays the list of available AVDs for the given AvdManager.
      */
-    @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
     private void displayAvdList(AvdManager avdManager) {
 
         AvdInfo[] avds = avdManager.getValidAvds();
@@ -521,6 +537,68 @@ class AvdManagerCli extends CommandLineParser {
     }
 
     /**
+     * Displays the list of available Targets (Platforms and Add-ons)
+     */
+    void displayTargetList() {
+        ProgressIndicator progress = new ConsoleProgressIndicator() {
+            @Override
+            public void logVerbose(@NonNull String s) {
+                // don't log verbose messages
+            }
+        };
+
+        Collection<IAndroidTarget> targets = mSdkHandler.getAndroidTargetManager(progress)
+                .getTargets(progress);
+
+        // Compact output, suitable for scripts.
+        if (getFlagCompact()) {
+            char eol = getFlagEolNull() ? '\0' : '\n';
+            for (IAndroidTarget target : targets) {
+                mSdkLog.info("%1$s%2$c", target.hashString(), eol);
+            }
+            return;
+        }
+        mSdkLog.info("Available Android targets:\n");
+        int index = 1;
+        for (IAndroidTarget target : targets) {
+            mSdkLog.info("----------\n");
+            mSdkLog.info("id: %1$d or \"%2$s\"\n", index, target.hashString());
+            mSdkLog.info("     Name: %s\n", target.getName());
+            if (target.isPlatform()) {
+                mSdkLog.info("     Type: Platform\n");
+                mSdkLog.info("     API level: %s\n", target.getVersion().getApiString());
+                mSdkLog.info("     Revision: %d\n", target.getRevision());
+            } else {
+                mSdkLog.info("     Type: Add-On\n");
+                mSdkLog.info("     Vendor: %s\n", target.getVendor());
+                mSdkLog.info("     Revision: %d\n", target.getRevision());
+                if (target.getDescription() != null) {
+                    mSdkLog.info("     Description: %s\n", target.getDescription());
+                }
+                mSdkLog.info("     Based on Android %s (API level %s)\n",
+                        target.getVersionName(), target.getVersion().getApiString());
+                // display the optional libraries.
+                List<IAndroidTarget.OptionalLibrary> libraries = target.getAdditionalLibraries();
+                if (!libraries.isEmpty()) {
+                    mSdkLog.info("     Libraries:\n");
+                    for (IAndroidTarget.OptionalLibrary library : libraries) {
+                        mSdkLog.info("      * %1$s (%2$s)\n",
+                                library.getName(), library.getJar().getName());
+                        mSdkLog.info("          %1$s\n", library.getDescription());
+                    }
+                }
+            }
+            // get the target tags & ABIs
+            File targetLocation = new File(target.getLocation());
+            ISystemImage image =
+                    mSdkHandler.getSystemImageManager(progress).getImageAt(targetLocation);
+            if (image != null) {
+                displayTagAbiList(ImmutableList.of(image), " Tag/ABIs : ");
+            }
+            index++;
+        }
+    }
+    /**
      * Displays the list of available devices.
      */
     private void displayDeviceList() {
@@ -567,11 +645,7 @@ class AvdManagerCli extends CommandLineParser {
             mSdkLog.warning(e.getMessage());
             androidFolder = null;
         }
-        return DeviceManager.createInstance(
-                new File(mOsSdkFolder),
-                androidFolder,
-                mSdkLog,
-                mSdkHandler.getFileOp());
+        return DeviceManager.createInstance(mSdkHandler, mSdkLog);
     }
 
     private String getValidImagePaths() {
@@ -593,6 +667,11 @@ class AvdManagerCli extends CommandLineParser {
             }
         };
         String packagePath = getParamPkgPath();
+        if (packagePath == null) {
+            errorAndExit(
+                    "Package path (-k) not specified. Valid system image paths are:\n"
+                            + getValidImagePaths());
+        }
         LocalPackage imagePkg = mSdkHandler.getLocalPackage(packagePath, progress);
 
         if (imagePkg == null) {
@@ -640,13 +719,19 @@ class AvdManagerCli extends CommandLineParser {
             if (paramFolderPath != null) {
                 avdFolder = new File(paramFolderPath);
             } else {
-                avdFolder = AvdInfo
-                        .getDefaultAvdFolder(avdManager, avdName, FileOpUtils.create(), false);
+                avdFolder =
+                        AvdInfo.getDefaultAvdFolder(
+                                avdManager, avdName, mSdkHandler.getFileOp(), false);
             }
 
             IdDisplay tag = SystemImage.DEFAULT_TAG;
             String abiType = getParamAbi();
             String cmdTag = getParamTag();
+            if (cmdTag == null) {
+                DetailsTypes.SysImgDetailsType details =
+                        (DetailsTypes.SysImgDetailsType) imagePkg.getTypeDetails();
+                tag = details.getTag();
+            }
 
             if (abiType != null && abiType.indexOf('/') != -1) {
                 String[] segments = abiType.split("/");
@@ -669,7 +754,7 @@ class AvdManagerCli extends CommandLineParser {
             }
 
             // if no tag was specified, "default" is implied
-            if (cmdTag == null || cmdTag.length() == 0) {
+            if (cmdTag == null || cmdTag.isEmpty()) {
                 cmdTag = tag.getId();
             }
 
@@ -680,14 +765,14 @@ class AvdManagerCli extends CommandLineParser {
             }
 
             if (!tags.contains(cmdTag)) {
-                errorAndExit("Invalid --%1$s %2$s for the selected package.",
-                        AvdManagerCli.KEY_TAG,
-                        cmdTag);
+                errorAndExit(
+                        "Invalid --%1$s %2$s for the selected package. Valid tags are:\n%3$s",
+                        AvdManagerCli.KEY_TAG, cmdTag, Joiner.on("\n").join(tags));
             }
 
             SystemImage img = null;
 
-            if (abiType == null || abiType.length() == 0) {
+            if (abiType == null || abiType.isEmpty()) {
                 if (sysImgs.size() == 1) {
                     // Auto-select the single ABI available
                     abiType = sysImgs.iterator().next().getAbiType();
@@ -774,6 +859,7 @@ class AvdManagerCli extends CommandLineParser {
                     getParamSdCard(),
                     hardwareConfig,
                     device == null ? null : device.getBootProps(),
+                    false,
                     getFlagSnapshot(),
                     removePrevious,
                     false,
@@ -920,7 +1006,7 @@ class AvdManagerCli extends CommandLineParser {
 
         result = readLine(readLineBuffer).trim();
         // handle default:
-        if (result.length() == 0) {
+        if (result.isEmpty()) {
             result = defaultAnswer;
         }
 
@@ -971,7 +1057,7 @@ class AvdManagerCli extends CommandLineParser {
             }
 
             result = readLine(readLineBuffer);
-            if (result.length() == 0) {
+            if (result.isEmpty()) {
                 if (defaultValue != null) {
                     mSdkLog.info("\n"); // empty line
                     i++; // go to the next property if we have a valid default value.
@@ -1014,6 +1100,16 @@ class AvdManagerCli extends CommandLineParser {
                     map.put(property.getName(), result);
                     i++; // valid reply, move to next property
                     break;
+                case INTEGER_ENUM:
+                    // We will need to implement this if an INTEGER_ENUM field is
+                    // added to SdkConstants.FN_HARDWARE_INI
+                    errorAndExit("Program error: INTEGER_ENUM is not supported");
+                    break;
+                case STRING_ENUM:
+                    // We will need to implement this if a STRING_ENUM field is
+                    // added to SdkConstants.FN_HARDWARE_INI
+                    errorAndExit("Program error: STRING_ENUM is not supported");
+                    break;
             }
 
             mSdkLog.info("\n"); // empty line
@@ -1022,11 +1118,9 @@ class AvdManagerCli extends CommandLineParser {
         return map;
     }
 
-    /**
-     * Reads a line from the input stream.
-     */
+    /** Reads a line from the input stream. */
     private String readLine(byte[] buffer) throws IOException {
-        int count = System.in.read(buffer);
+        int count = mInput.read(buffer);
 
         // is the input longer than the buffer?
         if (count == buffer.length && buffer[count - 1] != 10) {
@@ -1048,9 +1142,7 @@ class AvdManagerCli extends CommandLineParser {
         return new String(buffer, 0, count);
     }
 
-    /**
-     * Reads a line from the input stream, masking it as much as possible.
-     */
+    /** Reads a line from the input stream, masking it as much as possible. */
     @SuppressWarnings("unused")
     private String promptPassword(String prompt) throws IOException {
 
@@ -1091,7 +1183,7 @@ class AvdManagerCli extends CommandLineParser {
      *
      * @throws IOException If the value is not a boolean string.
      */
-    private boolean getBooleanReply(String reply) throws IOException {
+    private static boolean getBooleanReply(String reply) throws IOException {
 
         for (String valid : BOOLEAN_YES_REPLIES) {
             if (valid.equalsIgnoreCase(reply)) {
@@ -1110,11 +1202,21 @@ class AvdManagerCli extends CommandLineParser {
 
     private void errorAndExit(String format, Object... args) {
         mSdkLog.error(null, format, args);
-        exit(1);
+        throw new RuntimeException();
     }
 
-    private void exit(int code) {
-        System.exit(code);
+    @VisibleForTesting
+    AvdManagerCli(
+            ILogger logger,
+            @Nullable AndroidSdkHandler sdkHandler,
+            @Nullable String sdkRoot,
+            @Nullable String avdRoot,
+            @Nullable InputStream input) {
+        this(logger);
+        mSdkHandler = sdkHandler;
+        mOsSdkFolder = sdkRoot;
+        mInput = input;
+        mAvdFolder = avdRoot;
     }
 
     private AvdManagerCli(ILogger logger) {
@@ -1173,9 +1275,15 @@ class AvdManagerCli extends CommandLineParser {
         define(Mode.STRING, true,
                 VERB_CREATE, OBJECT_AVD, "n", KEY_NAME,
                 "Name of the new AVD.", null);
-        define(Mode.STRING, true,
-                VERB_CREATE, OBJECT_AVD, "k", KEY_IMAGE_PACKAGE,
-                "Package path of the system image for this AVD (e.g. 'system-images;android-19;google_apis;x86').", null);
+        define(
+                Mode.STRING,
+                false, // Not mandatory so we can print a custom message
+                VERB_CREATE,
+                OBJECT_AVD,
+                "k",
+                KEY_IMAGE_PACKAGE,
+                "Package path of the system image for this AVD (e.g. 'system-images;android-19;google_apis;x86').",
+                null);
         define(Mode.STRING, false,
                 VERB_CREATE, OBJECT_AVD, "c", KEY_SDCARD,
                 "Path to a shared SD card image, or size of a new sdcard for the new AVD.", null);

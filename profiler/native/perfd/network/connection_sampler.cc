@@ -15,115 +15,59 @@
  */
 #include "connection_sampler.h"
 
-#include "utils/file_reader.h"
-#include "utils/tokenizer.h"
+#include <inttypes.h>
 
 namespace {
 
-using profiler::Tokenizer;
-using std::string;
-
-// Returns whether the next token is a valid heading which is the same as
-// regex "[0-9]+:". For example, a valid heading is "01:"
-//
-// If successful, the heading token is consumed; otherwise, the tokenizer will
-// be left wherever it failed and you shouldn't continue to use it.
-bool EatValidHeading(Tokenizer *t) {
-  char separator;
-  return (t->EatNextToken(Tokenizer::IsDigit) && t->GetNextChar(&separator) &&
-          separator == ':');
-}
-
-// Returns whether the next token is a valid IP address, which is the same as
-// regex "[0-9]+:[0-9A-Za-z]{4}". If valid, the parameter |address| will be set
-// to its value.
-//
-// If successful, the address is consumed; otherwise, the tokenizer will
-// be left wherever it failed and you shouldn't continue to use it.
-bool GetAddress(Tokenizer *t, string *address) {
-  char separator;
-  std::string port;
-  if (t->GetNextToken(Tokenizer::IsAlphaNum, address) &&
-      t->GetNextChar(&separator) && separator == ':' &&
-      t->GetNextToken(Tokenizer::IsAlphaNum, &port) && port.size() == 4) {
-    return true;
-  }
-  return false;
-}
-
-// Returns whether the next token is the ip address "127.0.0.1", coverted to
+// Returns whether the given address is the ip address "127.0.0.1", coverted to
 // ipv4 or ipv6 byte string. In other words, this will match either
-// "0100007F:[0-9A-Za-z]{4}" or
-// 0000000000000000FFFF00000100007F:[0-9A-Za-z]{4}".
-//
-// If successful, the IP address is consumed; otherwise, the tokenizer will
-// be left wherever it failed and you shouldn't continue to use it.
-bool EatLoopbackAddress(Tokenizer *t) {
-  std::string address;
-  if (GetAddress(t, &address)) {
-    return address == "0100007F" ||
-           address == "0000000000000000FFFF00000100007F";
-  }
-  return false;
+// "0100007F" or "0000000000000000FFFF00000100007F".
+bool isLoopbackAddress(const char* address) {
+  return strcmp("0100007F", address) == 0 ||
+         strcmp("0000000000000000FFFF00000100007F", address) == 0;
 }
 
-// Returns whether the tokenizer is pointing at a line which represents a
-// connection on a local interface (essentially, one loopback address talking
-// to another).
-//
-// If successful, the tokenizer will be moved to right after the status code
-// (the fourth token in the line); otherwise, the tokenizer will be left
-// wherever it failed and you shouldn't continue to use it.
-bool IsLocalInterface(Tokenizer *t) {
-  // It's possible to have empty space in the beginning, for example, " 1:" has
-  // empty space and "100:" does not have empty space.
-  bool valid_heading = t->EatWhile(Tokenizer::IsWhitespace) &&
-                       EatValidHeading(t) &&
-                       t->EatWhile(Tokenizer::IsWhitespace);
-
-  if (!valid_heading) {
-    return false;
-  }
-
-  if (EatLoopbackAddress(t) && t->EatWhile(Tokenizer::IsWhitespace) &&
-      EatLoopbackAddress(t) && t->EatWhile(Tokenizer::IsWhitespace)) {
-    return true;
-  }
-
-  return false;
-}
-}  // namespace
+} // namespace
 
 namespace profiler {
 
-using std::string;
-using std::vector;
+void ConnectionSampler::Refresh() {
+  char buffer[kLineBufferSize];
+  char localAddress[kAddressStringSize];
+  char remoteAddress[kAddressStringSize];
+  uint32_t idx, uid, number;
 
-void ConnectionSampler::GetData(profiler::proto::NetworkProfilerData *data) {
-  int connection_number = 0;
-  for (auto &file_name : files_) {
-    connection_number += ReadConnectionNumber(file_name);
-  }
-  data->mutable_connection_data()->set_connection_number(connection_number);
-}
+  connections_.erase(connections_.begin(), connections_.end());
+  for (auto &file : files_) {
+    FILE *fp = fopen(file.c_str(), "r");
+    if (fp == nullptr) {
+      continue;
+    }
 
-int ConnectionSampler::ReadConnectionNumber(const string &file) {
-  vector<string> lines;
-  FileReader::Read(file, &lines);
-
-  int count = 0;
-  for (const string &line : lines) {
-    Tokenizer t(line);
-    if (!IsLocalInterface(&t)) {
-      t.set_index(0);
-      string uid;
-      if (t.EatTokens(kUidTokenIndex) && t.GetNextToken(&uid) && uid == uid_) {
-        count++;
+    while(fgets(buffer, kLineBufferSize * sizeof(char), fp) != NULL) {
+      if (sscanf(buffer,
+          " %" SCNu32 ": %32[^:]:%x %32[^:]:%x %x %x:%x %x:%x %x %" SCNu32,
+          &idx, localAddress, &number, remoteAddress, &number, &number,
+          &number, &number, &number, &number, &number, &uid) == 12 &&
+          !isLoopbackAddress(localAddress) &&
+          !isLoopbackAddress(remoteAddress)) {
+        connections_[uid]++;
       }
     }
+    fclose(fp);
   }
+}
 
-  return count;
+proto::NetworkProfilerData ConnectionSampler::Sample(const uint32_t uid) {
+  proto::NetworkProfilerData data;
+  if (connections_.find(uid) != connections_.end()) {
+    data.mutable_connection_data()->set_connection_number(connections_[uid]);
+  } else {
+    // Returns zero if app does not have any open connections, for example
+    // for example when both wifi and mobile radio are turned off.
+    data.mutable_connection_data()->set_connection_number(0);
+  }
+  return data;
 }
 
 }  // namespace profiler

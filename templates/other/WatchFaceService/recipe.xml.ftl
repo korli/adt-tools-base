@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
+<#import "root://activities/common/kotlin_macros.ftl" as kt>
 <recipe>
-
-    <dependency mavenUrl="com.google.android.support:wearable:1.1.+" />
+    <@kt.addAllKotlinDependencies />
+    <dependency mavenUrl="com.google.android.support:wearable:+" />
 
     <merge from="root/AndroidManifest.xml.ftl"
              to="${escapeXmlAttribute(manifestOut)}/AndroidManifest.xml" />
@@ -11,6 +12,9 @@
     <merge from="root/AndroidManifestPermissions.xml"
              to="${escapeXmlAttribute(appManifestOut)}/AndroidManifest.xml" />
 </#if>
+
+    <merge from="root/build.gradle.ftl"
+             to="${escapeXmlAttribute(projectOut)}/build.gradle" />
 
     <merge from="root/res/values/strings.xml.ftl"
              to="${escapeXmlAttribute(resOut)}/values/strings.xml" />
@@ -36,13 +40,15 @@
             to="${escapeXmlAttribute(resOut)}/drawable-nodpi/preview_digital_circular.png" />
 </#if>
 
+<#assign ext=generateKotlin?string('kt', 'java')>
 <#if style == "analog">
-    <instantiate from="root/src/app_package/MyAnalogWatchFaceService.java.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${serviceClass}.java" />
+    <instantiate from="root/src/app_package/MyAnalogWatchFaceService.${ext}.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${serviceClass}.${ext}" />
+    <open file="${escapeXmlAttribute(srcOut)}/${serviceClass}.${ext}" />
 <#elseif style == "digital">
-    <instantiate from="root/src/app_package/MyDigitalWatchFaceService.java.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${serviceClass}.java" />
+    <instantiate from="root/src/app_package/MyDigitalWatchFaceService.${ext}.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${serviceClass}.${ext}" />
+    <open file="${escapeXmlAttribute(srcOut)}/${serviceClass}.${ext}" />
 </#if>
 
-    <open file="${escapeXmlAttribute(srcOut)}/${serviceClass}.java" />
 </recipe>

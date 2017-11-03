@@ -26,7 +26,8 @@ import com.android.build.gradle.managed.ProductFlavor;
 import com.android.build.gradle.model.internal.AndroidBinaryInternal;
 import com.android.build.gradle.ndk.internal.NdkNamingScheme;
 import com.android.utils.StringHelper;
-
+import java.io.File;
+import java.util.List;
 import org.gradle.api.Named;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
@@ -39,9 +40,6 @@ import org.gradle.model.Path;
 import org.gradle.model.RuleSource;
 import org.gradle.model.Validate;
 import org.gradle.nativeplatform.NativeBinarySpec;
-
-import java.io.File;
-import java.util.List;
 
 /**
  * Plugin for compiling native source code to create a shared object.
@@ -114,6 +112,18 @@ public class StandaloneNdkComponentModelPlugin implements Plugin<Project> {
             }
         }
 
+        @Mutate
+        public static void createAssembleTasksForProductFlavorCombos(
+                ModelMap<Task> tasks, List<ProductFlavorCombo<ProductFlavor>> flavorCombos) {
+            for (final ProductFlavorCombo<ProductFlavor> combo : flavorCombos) {
+                if (combo.getFlavorList().size() <= 1) {
+                    // Tasks should already be created.
+                    break;
+                }
+                createAssembleTaskForFlavorCombo(tasks, combo.getFlavorList());
+            }
+        }
+
         /**
          * Create assemble tasks for each AndroidBinary and configure their dependencies
          */
@@ -132,7 +142,6 @@ public class StandaloneNdkComponentModelPlugin implements Plugin<Project> {
                     }
 
                     if (binary.getProductFlavors().size() > 1) {
-                        createAssembleTaskForFlavorCombo(tasks, binary.getProductFlavors());
                         dependsOn(tasks, getAssembleTaskName(binary.getProductFlavors()), binaryAssembleTaskName);
                     }
                 }

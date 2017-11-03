@@ -21,12 +21,16 @@
 
 namespace profiler {
 
+// Absolute on-device path to 'run-as'.
+const char *const kRunAsExecutable = "/system/bin/run-as";
+
 // Run bash commands.
 class BashCommandRunner {
  public:
   // Expected executable_path can be either absolute, relative or even
   // executable name only path.
   explicit BashCommandRunner(const std::string &executable_path);
+  virtual ~BashCommandRunner() = default;
   // Returns true if the command runs successfully (exiting with 0).
   // If |output| is not null, it is populated with stdin and stderr from
   // running command.
@@ -37,7 +41,7 @@ class BashCommandRunner {
 
  private:
   const std::string executable_path_;
-  bool RunAndReadOutput(const std::string &cmd, std::string *output) const;
+  virtual bool RunAndReadOutput(const std::string &cmd, std::string *output) const;
 };
 }  // namespace profiler
 #endif  // UTILS_PROFILER_BASH_COMMAND_RUNNER_H

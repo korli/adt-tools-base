@@ -21,24 +21,63 @@
 #include "perfd/daemon.h"
 #include "proto/profiler_service.grpc.pb.h"
 #include "utils/clock.h"
+#include "utils/file_cache.h"
+
+#include <unordered_map>
 
 namespace profiler {
 
 class ProfilerServiceImpl final
     : public profiler::proto::ProfilerService::Service {
  public:
-  explicit ProfilerServiceImpl(const Daemon& daemon) : clock_(daemon.clock()) {}
+  explicit ProfilerServiceImpl(
+      Daemon::Utilities* utilities,
+      std::unordered_map<int32_t, int64_t>* heartbeat_timestamp_map)
+      : clock_(utilities->clock()),
+        config_(utilities->config()),
+        file_cache_(*utilities->file_cache()),
+        heartbeat_timestamp_map_(*heartbeat_timestamp_map) {}
 
-  grpc::Status GetTimes(grpc::ServerContext* context,
-                        const profiler::proto::TimesRequest* request,
-                        profiler::proto::TimesResponse* reply) override;
+  grpc::Status GetCurrentTime(grpc::ServerContext* context,
+                              const profiler::proto::TimeRequest* request,
+                              profiler::proto::TimeResponse* response) override;
 
   grpc::Status GetVersion(grpc::ServerContext* context,
                           const profiler::proto::VersionRequest* request,
-                          profiler::proto::VersionResponse* reply) override;
+                          profiler::proto::VersionResponse* response) override;
+
+  grpc::Status GetBytes(grpc::ServerContext* context,
+                        const profiler::proto::BytesRequest* request,
+                        profiler::proto::BytesResponse* response) override;
+
+  grpc::Status GetAgentStatus(
+      grpc::ServerContext* context,
+      const profiler::proto::AgentStatusRequest* request,
+      profiler::proto::AgentStatusResponse* response) override;
+
+  grpc::Status GetDevices(
+      grpc::ServerContext* context,
+      const profiler::proto::GetDevicesRequest* request,
+      profiler::proto::GetDevicesResponse* response) override;
+
+  grpc::Status AttachAgent(
+      grpc::ServerContext* context,
+      const profiler::proto::AgentAttachRequest* request,
+      profiler::proto::AgentAttachResponse* response) override;
+
  private:
+  // True if an JVMTI agent has been attached to an app. False otherwise.
+  bool IsAppAgentAlive(int app_pid, const char* app_name);
+  // True if perfd has received a heartbeat from an app within the last
+  // time interval (as specified by |GenericComponent::kHeartbeatThresholdNs|.
+  // False otherwise.
+  bool CheckAppHeartBeat(int app_pid);
+
   // Clock knows about timestamps.
   const Clock& clock_;
+  const Config& config_;
+  FileCache& file_cache_;
+  std::unordered_map<int32_t, int64_t>& heartbeat_timestamp_map_;
 };
 
 }  // namespace profiler

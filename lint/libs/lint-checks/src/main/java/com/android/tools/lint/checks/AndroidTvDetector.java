@@ -20,7 +20,7 @@ import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_NAME;
 import static com.android.SdkConstants.TAG_USES_FEATURE;
 import static com.android.SdkConstants.TAG_USES_PERMISSION;
-import static com.android.tools.lint.detector.api.TextFormat.RAW;
+import static com.android.SdkConstants.VALUE_FALSE;
 import static com.android.xml.AndroidManifest.ATTRIBUTE_REQUIRED;
 import static com.android.xml.AndroidManifest.NODE_ACTIVITY;
 import static com.android.xml.AndroidManifest.NODE_ACTIVITY_ALIAS;
@@ -37,12 +37,12 @@ import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.TextFormat;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.utils.XmlUtils;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -194,14 +194,6 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
             "android.hardware.sensors"
     };
 
-    /**
-     * If you change number of parameters or order, update
-     * {@link #getHardwareFeature(String, TextFormat)}
-     */
-    private static final String USES_HARDWARE_ERROR_MESSAGE_FORMAT =
-            "Permission exists without corresponding hardware `<uses-feature "
-                    + "android:name=\"%1$s\" required=\"false\">` tag.";
-
     /** Constructs a new {@link AndroidTvDetector} check */
     public AndroidTvDetector() {
     }
@@ -297,10 +289,11 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
                     && xmlContext.isEnabled(MISSING_BANNER)) {
                 Node applicationElement = getApplicationElement(xmlContext.document);
                 if (applicationElement != null) {
+                    LintFix fix = fix().set().todo(ANDROID_URI, "banner").build();
                     xmlContext.report(MISSING_BANNER, applicationElement,
                             xmlContext.getLocation(applicationElement),
                             "Expecting `android:banner` with the `<application>` tag or each "
-                                    + "Leanback launcher activity.");
+                                    + "Leanback launcher activity.", fix);
                 }
             }
 
@@ -314,10 +307,11 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
                 for (Element element : usesFeatureElements) {
                     Attr attrRequired = element.getAttributeNodeNS(ANDROID_URI, ATTRIBUTE_REQUIRED);
                     Node location = attrRequired == null ? element : attrRequired;
+                    LintFix fix = fix().set(ANDROID_URI, ATTRIBUTE_REQUIRED, VALUE_FALSE).build();
                     xmlContext.report(UNSUPPORTED_TV_HARDWARE, location,
                             xmlContext.getLocation(location),
                             "Expecting `android:required=\"false\"` for this hardware "
-                                    + "feature that may not be supported by all Android TVs.");
+                                    + "feature that may not be supported by all Android TVs.", fix);
                 }
             }
 
@@ -357,10 +351,12 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
                     if (unsupportedHardwareName != null) {
                         String message = String.format(
-                                USES_HARDWARE_ERROR_MESSAGE_FORMAT, unsupportedHardwareName);
+                                "Permission exists without corresponding hardware `<uses-feature "
+                                        + "android:name=\"%1$s\" required=\"false\">` tag.", unsupportedHardwareName);
+                        LintFix fix = fix().data(unsupportedHardwareName);
                         xmlContext.report(PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE,
                                 permissionElement,
-                                xmlContext.getLocation(permissionElement), message);
+                                xmlContext.getLocation(permissionElement), message, fix);
                     }
                 }
             }
@@ -412,7 +408,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
             return Collections.emptyList();
         }
         List<Element> nodes = new ArrayList<>(permissions.size());
-        for (Element child : LintUtils.getChildren(manifestElement)) {
+        for (Element child : XmlUtils.getSubTags(manifestElement)) {
             if (TAG_USES_PERMISSION.equals(child.getTagName())
                     && permissions.contains(child.getAttributeNS(ANDROID_URI, ATTR_NAME))) {
                 nodes.add(child);
@@ -439,7 +435,7 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
             return Collections.emptyList();
         }
         List<Element> nodes = new ArrayList<>(featureNames.size());
-        for (Element child : LintUtils.getChildren(manifestElement)) {
+        for (Element child : XmlUtils.getSubTags(manifestElement)) {
             if (TAG_USES_FEATURE.equals(child.getTagName())
                     && featureNames.contains(child.getAttributeNS(ANDROID_URI, ATTR_NAME))) {
                 nodes.add(child);
@@ -520,9 +516,9 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
 
     private static boolean hasLeanbackIntentFilter(@NonNull Node activityNode) {
         // Visit every intent filter
-        for (Element activityChild : LintUtils.getChildren(activityNode)) {
+        for (Element activityChild : XmlUtils.getSubTags(activityNode)) {
             if (NODE_INTENT.equals(activityChild.getNodeName())) {
-                for (Element intentFilterChild : LintUtils.getChildren(activityChild)) {
+                for (Element intentFilterChild : XmlUtils.getSubTags(activityChild)) {
                     // Check to see if the category is the leanback launcher
                     String attrName = intentFilterChild.getAttributeNS(ANDROID_URI, ATTR_NAME);
                     if (NODE_CATEGORY.equals(intentFilterChild.getNodeName())
@@ -539,32 +535,10 @@ public class AndroidTvDetector extends Detector implements Detector.XmlScanner {
      * Assumes that the node is a direct child of the given Node.
      */
     private static Node getElementWithTagName(@NonNull String tagName, @NonNull Node node) {
-        for (Element child : LintUtils.getChildren(node)) {
+        for (Element child : XmlUtils.getSubTags(node)) {
             if (tagName.equals(child.getTagName())) {
                 return child;
             }
-        }
-        return null;
-    }
-
-    /**
-     * Given an error message created by this lint check, return the corresponding featureName
-     * that it suggests should be added.
-     * (Intended to support quickfix implementations for this lint check.)
-     *
-     * @param errorMessage The error message originally produced by this detector.
-     * @param format The format of the error message.
-     * @return the corresponding featureName, or null if not recognized
-     */
-    @SuppressWarnings("unused") // Used by the IDE
-    @Nullable
-    public static String getHardwareFeature(@NonNull String errorMessage,
-            @NonNull TextFormat format) {
-        List<String> parameters = LintUtils.getFormattedParameters(
-                RAW.convertTo(USES_HARDWARE_ERROR_MESSAGE_FORMAT, format),
-                errorMessage);
-        if (parameters.size() == 1) {
-            return parameters.get(0);
         }
         return null;
     }

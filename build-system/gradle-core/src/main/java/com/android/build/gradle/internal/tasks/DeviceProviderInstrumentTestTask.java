@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.android.build.gradle.internal.tasks;
 
 import static com.android.builder.core.BuilderConstants.CONNECTED;
@@ -24,20 +25,23 @@ import static com.android.builder.core.BuilderConstants.FD_REPORTS;
 import static com.android.builder.model.AndroidProject.FD_OUTPUTS;
 import static com.android.sdklib.BuildToolInfo.PathId.SPLIT_SELECT;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
-import com.android.build.gradle.AndroidGradleOptions;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.internal.test.AbstractTestDataImpl;
 import com.android.build.gradle.internal.test.report.ReportType;
 import com.android.build.gradle.internal.test.report.TestReport;
 import com.android.build.gradle.internal.variant.TestVariantData;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.IntegerOption;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.internal.testing.SimpleTestCallable;
-import com.android.builder.sdk.SdkInfo;
 import com.android.builder.sdk.TargetInfo;
 import com.android.builder.testing.ConnectedDeviceProvider;
+import com.android.builder.testing.OnDeviceOrchestratorTestRunner;
+import com.android.builder.testing.ShardedTestRunner;
 import com.android.builder.testing.SimpleTestRunner;
-import com.android.builder.testing.TestData;
 import com.android.builder.testing.TestRunner;
 import com.android.builder.testing.api.DeviceException;
 import com.android.builder.testing.api.DeviceProvider;
@@ -45,54 +49,72 @@ import com.android.builder.testing.api.TestException;
 import com.android.ide.common.process.ProcessExecutor;
 import com.android.utils.FileUtils;
 import com.android.utils.StringHelper;
+import com.google.common.base.Joiner;
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-
-import org.gradle.api.GradleException;
-import org.gradle.api.Nullable;
-import org.gradle.api.Task;
-import org.gradle.api.plugins.JavaBasePlugin;
-import org.gradle.api.specs.Spec;
-import org.gradle.api.tasks.OutputDirectory;
-import org.gradle.api.tasks.TaskAction;
-import org.gradle.internal.logging.ConsoleRenderer;
-
+import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
-import java.util.concurrent.Callable;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import javax.xml.parsers.ParserConfigurationException;
+import org.gradle.api.GradleException;
+import org.gradle.api.InvalidUserDataException;
+import org.gradle.api.Nullable;
+import org.gradle.api.Project;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.plugins.JavaBasePlugin;
+import org.gradle.api.tasks.InputFile;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Optional;
+import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.TaskAction;
+import org.gradle.internal.logging.ConsoleRenderer;
+import org.xml.sax.SAXException;
 
 /**
  * Run instrumentation tests for a given variant
  */
 public class DeviceProviderInstrumentTestTask extends BaseTask implements AndroidTestTask {
 
-    private File reportsDir;
-    private File resultsDir;
-    private File coverageDir;
+    private static final Predicate<File> IS_APK =
+            file -> SdkConstants.EXT_ANDROID_PACKAGE.equals(Files.getFileExtension(file.getName()));
 
-    private String flavorName;
-
-    @Nullable
-    private Collection<String> installOptions;
+    private interface TestRunnerFactory {
+        TestRunner build(@Nullable File splitSelectExec, @NonNull ProcessExecutor processExecutor);
+    }
 
     private DeviceProvider deviceProvider;
-    private TestData testData;
-
-    private File adbExec;
-    @Nullable
-    private File splitSelectExec;
+    private File coverageDir;
+    private File reportsDir;
+    private File resultsDir;
+    private FileCollection buddyApks;
+    private FileCollection testTargetManifests;
     private ProcessExecutor processExecutor;
-
+    private String flavorName;
+    private Supplier<File> splitSelectExec;
+    private AbstractTestDataImpl testData;
+    private TestRunnerFactory testRunnerFactory;
     private boolean ignoreFailures;
     private boolean testFailed;
-    private boolean enableSharding;
 
-    @Nullable
-    private Integer numShards;
+    @Nullable private Collection<String> installOptions;
 
     @TaskAction
     protected void runTests() throws DeviceException, IOException, InterruptedException,
-            TestRunner.NoAuthorizedDeviceFoundException, TestException {
+            TestRunner.NoAuthorizedDeviceFoundException, TestException,
+            ParserConfigurationException, SAXException {
+        checkForNonApks(
+                buddyApks.getFiles(),
+                message -> {
+                    throw new InvalidUserDataException(message);
+                });
 
         File resultsOutDir = getResultsDir();
         FileUtils.cleanOutputDir(resultsOutDir);
@@ -100,7 +122,12 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
         File coverageOutDir = getCoverageDir();
         FileUtils.cleanOutputDir(coverageOutDir);
 
-        boolean success = false;
+        // populate the TestData from the tested variant build output.
+        if (!testTargetManifests.isEmpty()) {
+            testData.loadFromMetadataFile(testTargetManifests.getSingleFile());
+        }
+
+        boolean success;
         // If there are tests to run, and the test runner returns with no results, we fail (since
         // this is most likely a problem with the device setup). If no, the task will succeed.
         if (!testsFound()) {
@@ -110,30 +137,28 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
             emptyCoverageFile.createNewFile();
             success = true;
         } else {
-            File testApk = testData.getTestApk();
-            String flavor = getFlavorName();
-
-            final TestRunner testRunner;
-            testRunner = new SimpleTestRunner(
-                    getSplitSelectExec(),
-                    getProcessExecutor(),
-                    enableSharding,
-                    numShards);
             deviceProvider.init();
 
-            Collection<String> extraArgs = installOptions == null || installOptions.isEmpty()
-                    ? ImmutableList.<String>of() : installOptions;
+            TestRunner testRunner =
+                    testRunnerFactory.build(splitSelectExec.get(), getProcessExecutor());
+
+            Collection<String> extraArgs =
+                    installOptions == null || installOptions.isEmpty()
+                            ? ImmutableList.of()
+                            : installOptions;
             try {
-                success = testRunner.runTests(getProject().getName(), flavor,
-                        testApk,
-                        testData,
-                        deviceProvider.getDevices(),
-                        deviceProvider.getMaxThreads(),
-                        deviceProvider.getTimeoutInMs(),
-                        extraArgs,
-                        resultsOutDir,
-                        coverageOutDir,
-                        getILogger());
+                success =
+                        testRunner.runTests(
+                                getProject().getName(),
+                                getFlavorName(),
+                                testData,
+                                buddyApks.getFiles(),
+                                deviceProvider.getDevices(),
+                                deviceProvider.getTimeoutInMs(),
+                                extraArgs,
+                                resultsOutDir,
+                                coverageOutDir,
+                                getILogger());
             } finally {
                 deviceProvider.terminate();
             }
@@ -164,12 +189,19 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
         testFailed = false;
     }
 
-    public void setEnableSharding(boolean enableSharding) {
-        this.enableSharding = enableSharding;
-    }
-
-    public void setNumShards(Integer numShards) {
-        this.numShards = numShards;
+    public static void checkForNonApks(
+            @NonNull Collection<File> buddyApksFiles, @NonNull Consumer<String> errorHandler) {
+        List<File> nonApks =
+                buddyApksFiles.stream().filter(IS_APK.negate()).collect(Collectors.toList());
+        if (!nonApks.isEmpty()) {
+            Collections.sort(nonApks);
+            String message =
+                    String.format(
+                            "Not all files in %s configuration are APKs: %s",
+                            SdkConstants.GRADLE_ANDROID_TEST_UTIL_CONFIGURATION,
+                            Joiner.on(' ').join(nonApks));
+            errorHandler.accept(message);
+        }
     }
 
     /**
@@ -234,28 +266,17 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
         this.deviceProvider = deviceProvider;
     }
 
-    public TestData getTestData() {
+    public AbstractTestDataImpl getTestData() {
         return testData;
     }
 
-    public void setTestData(TestData testData) {
+    public void setTestData(@NonNull AbstractTestDataImpl testData) {
         this.testData = testData;
     }
 
-    public File getAdbExec() {
-        return adbExec;
-    }
-
-    public void setAdbExec(File adbExec) {
-        this.adbExec = adbExec;
-    }
-
+    @InputFile
     public File getSplitSelectExec() {
-        return splitSelectExec;
-    }
-
-    public void setSplitSelectExec(File splitSelectExec) {
-        this.splitSelectExec = splitSelectExec;
+        return splitSelectExec.get();
     }
 
     public ProcessExecutor getProcessExecutor() {
@@ -281,6 +302,32 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
         return testFailed;
     }
 
+    /**
+     * Indirectly used through the TestData, declare it as a dependency so the wiring is done
+     * correctly.
+     *
+     * @return tested variant metadata file.
+     */
+    @InputFiles
+    FileCollection getTestTargetManifests() {
+        return testTargetManifests;
+    }
+
+    @InputFiles
+    public FileCollection getBuddyApks() {
+        return buddyApks;
+    }
+
+    @InputFiles
+    FileCollection getTestApkDir() {
+        return testData.getTestApkDir();
+    }
+
+    @InputFiles
+    @Optional
+    FileCollection getTestedApksDir() {
+        return testData.getTestedApksDir();
+    }
 
     public static class ConfigAction implements TaskConfigAction<DeviceProviderInstrumentTestTask> {
 
@@ -288,16 +335,18 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
         private final VariantScope scope;
         @NonNull
         private final DeviceProvider deviceProvider;
-        @NonNull
-        private final TestData testData;
+        @NonNull private final AbstractTestDataImpl testData;
+        @NonNull private final FileCollection testTargetManifests;
 
         public ConfigAction(
                 @NonNull VariantScope scope,
                 @NonNull DeviceProvider deviceProvider,
-                @NonNull TestData testData) {
+                @NonNull AbstractTestDataImpl testData,
+                @NonNull FileCollection testTargetManifests) {
             this.scope = scope;
             this.deviceProvider = deviceProvider;
             this.testData = testData;
+            this.testTargetManifests = testTargetManifests;
         }
 
         @NonNull
@@ -314,6 +363,9 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
 
         @Override
         public void execute(@NonNull DeviceProviderInstrumentTestTask task) {
+            Project project = scope.getGlobalScope().getProject();
+            ProjectOptions projectOptions = scope.getGlobalScope().getProjectOptions();
+
             final boolean connected = deviceProvider instanceof ConnectedDeviceProvider;
             String variantName = scope.getTestedVariantData() != null ?
                     scope.getTestedVariantData().getName() : scope.getVariantData().getName();
@@ -331,17 +383,41 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
             task.setTestData(testData);
             task.setFlavorName(testData.getFlavorName());
             task.setDeviceProvider(deviceProvider);
+            task.testTargetManifests = testTargetManifests;
             task.setInstallOptions(
                     scope.getGlobalScope().getExtension().getAdbOptions().getInstallOptions());
             task.setProcessExecutor(
                     scope.getGlobalScope().getAndroidBuilder().getProcessExecutor());
-            boolean shardBetweenDevices = AndroidGradleOptions
-                    .getShardAndroidTestsBetweenDevices(task.getProject());
-            task.setEnableSharding(shardBetweenDevices);
-            if (shardBetweenDevices) {
-                task.setNumShards(AndroidGradleOptions.getInstrumentationShardCount(
-                        task.getProject()));
+
+            boolean shardBetweenDevices = projectOptions.get(BooleanOption.ENABLE_TEST_SHARDING);
+
+            switch (scope.getGlobalScope().getExtension().getTestOptions().getExecutionEnum()) {
+                case ANDROID_TEST_ORCHESTRATOR:
+                    Preconditions.checkArgument(
+                            !shardBetweenDevices, "Sharding is not supported with Odo.");
+                    task.testRunnerFactory = OnDeviceOrchestratorTestRunner::new;
+                    break;
+                case HOST:
+                    if (shardBetweenDevices) {
+                        Integer numShards =
+                                projectOptions.get(IntegerOption.ANDROID_TEST_SHARD_COUNT);
+                        task.testRunnerFactory =
+                                (splitSelect, processExecutor) ->
+                                        new ShardedTestRunner(
+                                                splitSelect, processExecutor, numShards);
+                    } else {
+                        task.testRunnerFactory = SimpleTestRunner::new;
+                    }
+                    break;
+                default:
+                    throw new AssertionError(
+                            "Unknown value "
+                                    + scope.getGlobalScope()
+                                            .getExtension()
+                                            .getTestOptions()
+                                            .getExecutionEnum());
             }
+
             String flavorFolder = testData.getFlavorName();
             if (!flavorFolder.isEmpty()) {
                 flavorFolder = FD_FLAVORS + "/" + flavorFolder;
@@ -349,58 +425,38 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
             String providerFolder = connected ? CONNECTED : DEVICE + "/" + deviceProvider.getName();
             final String subFolder = "/" + providerFolder + "/" + flavorFolder;
 
-            ConventionMappingHelper.map(task, "adbExec", new Callable<File>() {
-                @Override
-                public File call() {
-                    final SdkInfo info = scope.getGlobalScope().getSdkHandler()
-                            .getSdkInfo();
-                    return (info == null ? null : info.getAdb());
-                }
-            });
-            ConventionMappingHelper.map(task, "splitSelectExec", new Callable<File>() {
-                @Override
-                public File call() throws Exception {
-                    final TargetInfo info = scope.getGlobalScope().getAndroidBuilder()
-                            .getTargetInfo();
-                    String path = info == null ? null : info.getBuildTools().getPath(SPLIT_SELECT);
-                    if (path != null) {
-                        File splitSelectExe = new File(path);
-                        return splitSelectExe.exists() ? splitSelectExe : null;
-                    } else {
-                        return null;
-                    }
+            task.splitSelectExec = TaskInputHelper.memoize(() -> {
+                // SDK is loaded somewhat dynamically, plus we don't want to do all this logic
+                // if the task is not going to run, so use a supplier.
+                final TargetInfo info = scope.getGlobalScope().getAndroidBuilder()
+                        .getTargetInfo();
+                String path = info == null ? null : info.getBuildTools().getPath(SPLIT_SELECT);
+                if (path != null) {
+                    File splitSelectExe = new File(path);
+                    return splitSelectExe.exists() ? splitSelectExe : null;
+                } else {
+                    return null;
                 }
             });
 
-            ConventionMappingHelper.map(task, "resultsDir", new Callable<File>() {
-                @Override
-                public File call() {
-                    String rootLocation = scope.getGlobalScope().getExtension().getTestOptions()
-                            .getResultsDir();
-                    if (rootLocation == null) {
-                        rootLocation = scope.getGlobalScope().getBuildDir() + "/" +
-                                FD_OUTPUTS + "/" + FD_ANDROID_RESULTS;
-                    }
-                    return scope.getGlobalScope().getProject().file(rootLocation + subFolder);
-                }
-            });
+            String rootLocation = scope.getGlobalScope().getExtension().getTestOptions()
+                    .getResultsDir();
+            if (rootLocation == null) {
+                rootLocation = scope.getGlobalScope().getBuildDir() + "/" +
+                        FD_OUTPUTS + "/" + FD_ANDROID_RESULTS;
+            }
+            task.resultsDir = project.file(rootLocation + subFolder);
 
-            ConventionMappingHelper.map(task, "reportsDir", new Callable<File>() {
-                @Override
-                public File call() {
-                    String rootLocation = scope.getGlobalScope().getExtension().getTestOptions()
-                            .getReportDir();
-                    if (rootLocation == null) {
-                        rootLocation = scope.getGlobalScope().getBuildDir() + "/" +
-                                FD_REPORTS + "/" + FD_ANDROID_TESTS;
-                    }
-                    return scope.getGlobalScope().getProject().file(rootLocation + subFolder);
-                }
-            });
+            rootLocation = scope.getGlobalScope().getExtension().getTestOptions().getReportDir();
+            if (rootLocation == null) {
+                rootLocation = scope.getGlobalScope().getBuildDir() + "/" +
+                        FD_REPORTS + "/" + FD_ANDROID_TESTS;
+            }
+            task.reportsDir = project.file(rootLocation + subFolder);
 
-            String rootLocation = scope.getGlobalScope().getBuildDir() + "/" + FD_OUTPUTS
+            rootLocation = scope.getGlobalScope().getBuildDir() + "/" + FD_OUTPUTS
                     + "/code-coverage";
-            task.setCoverageDir(scope.getGlobalScope().getProject().file(rootLocation + subFolder));
+            task.setCoverageDir(project.file(rootLocation + subFolder));
 
             if (scope.getVariantData() instanceof TestVariantData) {
                 TestVariantData testVariantData = (TestVariantData) scope.getVariantData();
@@ -411,15 +467,19 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
                 }
             }
 
+            // The configuration is not created by the experimental plugin, so just create an empty
+            // FileCollection in this case.
+            task.buddyApks =
+                    MoreObjects.firstNonNull(
+                            project.getConfigurations()
+                                    .findByName(
+                                            SdkConstants.GRADLE_ANDROID_TEST_UTIL_CONFIGURATION),
+                            project.files());
+
             task.setEnabled(deviceProvider.isConfigured());
 
             // outputs are never up-to-date
-            task.getOutputs().upToDateWhen(new Spec<Task>() {
-                @Override
-                public boolean isSatisfiedBy(Task task) {
-                    return false;
-                }
-            });
+            task.getOutputs().upToDateWhen(t -> false);
         }
     }
 }

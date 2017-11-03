@@ -24,19 +24,15 @@ import com.android.SdkConstants;
 import com.android.utils.StdLogger;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
-
+import java.io.IOException;
+import java.util.List;
+import java.util.logging.Logger;
+import javax.xml.parsers.ParserConfigurationException;
 import junit.framework.TestCase;
-
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.xml.sax.SAXException;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.logging.Logger;
-
-import javax.xml.parsers.ParserConfigurationException;
 
 /**
  * Tests for the {@link XmlElement}
@@ -677,9 +673,11 @@ public class XmlElementTest extends TestCase {
         Optional<XmlDocument> result = refDocument.merge(otherDocument, mergingReportBuilder);
         assertTrue(result.isPresent());
         // run the instruction cleaner to get rid of all unwanted attributes, nodes.
-        XmlDocument resultDocument = ToolsInstructionsCleaner.cleanToolsReferences(
+        ToolsInstructionsCleaner.cleanToolsReferences(
                 ManifestMerger2.MergeType.APPLICATION,
-                result.get(), mergingReportBuilder.getLogger());
+                result.get().getXml(),
+                mergingReportBuilder.getLogger());
+        XmlDocument resultDocument = result.get().reparse();
 
         Optional<XmlElement> activityOne = resultDocument.getRootNode()
                 .getNodeByTypeAndKey(ManifestModel.NodeTypes.ACTIVITY,

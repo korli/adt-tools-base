@@ -21,23 +21,22 @@ import com.android.annotations.Nullable;
 import com.android.ide.common.blame.SourcePosition;
 import com.android.utils.PositionXmlParser;
 import com.google.common.base.Strings;
-import org.w3c.dom.Document;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-
 import java.awt.geom.AffineTransform;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.util.ArrayList;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.w3c.dom.Document;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
 
 /**
  * Represent the SVG file in an internal data structure as a tree.
  */
 class SvgTree {
-    private static Logger logger = Logger.getLogger(SvgTree.class.getSimpleName());
+    private static final Logger logger = Logger.getLogger(SvgTree.class.getSimpleName());
 
     public static final String SVG_WIDTH = "width";
     public static final String SVG_HEIGHT = "height";
@@ -45,16 +44,18 @@ class SvgTree {
 
     private float w = -1;
     private float h = -1;
-    private AffineTransform mRootTransform = new AffineTransform();
+    private final AffineTransform mRootTransform = new AffineTransform();
     private float[] viewBox;
     private float mScaleFactor = 1;
 
     private SvgGroupNode mRoot;
     private String mFileName;
 
-    private ArrayList<String> mErrorLines = new ArrayList<String>();
+    private final ArrayList<String> mErrorLines = new ArrayList<>();
 
     private boolean mHasLeafNode = false;
+
+    private boolean mHasGradient = false;
 
 
     public float getWidth() { return w; }
@@ -64,14 +65,33 @@ class SvgTree {
         mHasLeafNode = hasLeafNode;
     }
 
+    public void setHasGradient(boolean hasGradient) {
+        mHasGradient = hasGradient;
+    }
+
     public float[] getViewBox() { return viewBox; }
 
-    /**
-     * From the root, top down, pass the transformation (TODO: attributes)
-     * down the children.
-     */
-    public void flattern() {
-        mRoot.flattern(new AffineTransform());
+    // Map of SvgNode's id to the SvgNode.
+    private final HashMap<String, SvgNode> mIdMap = new HashMap<>();
+
+    // Set of SvgGroupNodes that contain use elements.
+    private final HashSet<SvgGroupNode> mUseGroupSet = new HashSet<>();
+
+    // Key is SvgNode that references a clipPath. Value is SvgGroupNode that is the parent of that
+    // SvgNode.
+    private final HashMap<SvgNode, SvgGroupNode> mClipPathAffectedNodes = new HashMap<>();
+
+    // Key is String that is the id of a style class.
+    // Value is set of SvgNodes referencing that class.
+    private final HashMap<String, HashSet<SvgNode>> mStyleAffectedNodes = new HashMap<>();
+
+    // Key is String that is the id of a style class. Value is a String that contains attribute
+    // information of that style class.
+    private final HashMap<String, String> mStyleClassAttributeMap = new HashMap<>();
+
+    /** From the root, top down, pass the transformation (TODO: attributes) down the children. */
+    public void flatten() {
+        mRoot.flatten(new AffineTransform());
     }
 
     public enum SvgLogLevel {
@@ -129,7 +149,7 @@ class SvgTree {
     public String getErrorLog() {
         StringBuilder errorBuilder = new StringBuilder();
         if (!mErrorLines.isEmpty()) {
-            errorBuilder.append("In " + mFileName + ":\n");
+            errorBuilder.append("In ").append(mFileName).append(":\n");
         }
         for (String log : mErrorLines) {
             errorBuilder.append(log);
@@ -144,7 +164,11 @@ class SvgTree {
         return mHasLeafNode;
     }
 
-    private SourcePosition getPosition(Node node) {
+    public boolean getHasGradient() {
+        return mHasGradient;
+    }
+
+    private static SourcePosition getPosition(Node node) {
         return PositionXmlParser.getPosition(node);
     }
 
@@ -156,7 +180,7 @@ class SvgTree {
 
     private enum SizeType {
         PIXEL,
-        PERCENTAGE;
+        PERCENTAGE
     }
 
     public void parseDimension(Node nNode) {
@@ -172,9 +196,9 @@ class SvgTree {
             SizeType currentType = SizeType.PIXEL;
             String unit = value.substring(Math.max(value.length() - 2, 0));
             if (unit.matches("em|ex|px|in|cm|mm|pt|pc")) {
-                subStringSize = subStringSize - 2;
+                subStringSize -= 2;
             } else if (value.endsWith("%")) {
-                subStringSize = subStringSize - 1;
+                subStringSize -= 1;
                 currentType = SizeType.PERCENTAGE;
             }
 
@@ -211,4 +235,56 @@ class SvgTree {
             h = viewBox[3] * h / 100;
         }
     }
+
+    public void addIdToMap(String id, SvgNode svgNode) {
+        mIdMap.put(id, svgNode);
+    }
+
+    public SvgNode getSvgNodeFromId(String id) {
+        return mIdMap.get(id);
+    }
+
+    public void addToUseSet(SvgGroupNode useGroup) {
+        mUseGroupSet.add(useGroup);
+    }
+
+    public Set<SvgGroupNode> getUseSet() {
+        return mUseGroupSet;
+    }
+
+    public void addClipPathAffectedNode(SvgNode child, SvgGroupNode currentGroup) {
+        mClipPathAffectedNodes.put(child, currentGroup);
+    }
+
+    public Set<Map.Entry<SvgNode, SvgGroupNode>> getClipPathAffectedNodesSet() {
+        return mClipPathAffectedNodes.entrySet();
+    }
+
+    /** Adds child to set of SvgNodes that reference the style class with id className. */
+    public void addAffectedNodeToStyleClass(String className, SvgNode child) {
+        if (mStyleAffectedNodes.containsKey(className)) {
+            mStyleAffectedNodes.get(className).add(child);
+        } else {
+            HashSet<SvgNode> styleNodesSet = new HashSet<>();
+            styleNodesSet.add(child);
+            mStyleAffectedNodes.put(className, styleNodesSet);
+        }
+    }
+
+    public void addStyleClassToTree(String className, String attributes) {
+        mStyleClassAttributeMap.put(className, attributes);
+    }
+
+    public boolean containsStyleClass(String classname) {
+        return mStyleClassAttributeMap.containsKey(classname);
+    }
+
+    public String getStyleClassAttr(String classname) {
+        return mStyleClassAttributeMap.get(classname);
+    }
+
+    public Set<Map.Entry<String, HashSet<SvgNode>>> getStyleAffectedNodes() {
+        return mStyleAffectedNodes.entrySet();
+    }
+
 }

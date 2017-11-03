@@ -21,18 +21,23 @@ import static com.android.SdkConstants.DOT_GRADLE;
 import static com.android.SdkConstants.DOT_JAVA;
 import static com.android.SdkConstants.DOT_JPEG;
 import static com.android.SdkConstants.DOT_JPG;
+import static com.android.SdkConstants.DOT_KT;
 import static com.android.SdkConstants.DOT_PNG;
+import static com.android.SdkConstants.DOT_XML;
 import static com.android.SdkConstants.FN_ANDROID_MANIFEST_XML;
 import static com.android.tools.lint.checks.infrastructure.BaseLintDetectorTest.makeTestFile;
 import static com.android.utils.SdkUtils.escapePropertyValue;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.tools.lint.Warning;
+import com.android.tools.lint.detector.api.Severity;
 import com.android.utils.SdkUtils;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.ByteStreams;
+import com.intellij.util.ArrayUtil;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -166,6 +171,11 @@ public class TestFile {
         return null;
     }
 
+    @Nullable
+    public String getRawContents() {
+        return contents;
+    }
+
     public TestFile withBytes(@NonNull byte[] bytes) {
         this.bytes = bytes;
         return this;
@@ -173,9 +183,9 @@ public class TestFile {
 
     public static class JavaTestFile extends LintDetectorTest.TestFile {
         private static final Pattern PACKAGE_PATTERN = Pattern.compile("package\\s+(.*)\\s*;");
-        private static final Pattern CLASS_PATTERN = Pattern
-                .compile("(class|interface|enum)\\s*(\\S+)\\s*(extends.*)?\\s*(implements.*)?\\{",
-                        Pattern.MULTILINE);
+        private static final Pattern CLASS_PATTERN = Pattern.compile(
+                "(class|interface|@interface|enum)\\s*(\\S+)\\s*(<.+>)?\\s*(extends.*)?\\s*(implements.*)?\\{",
+                Pattern.MULTILINE);
 
         public JavaTestFile() {
         }
@@ -189,9 +199,18 @@ public class TestFile {
             String pkg = matcher.group(1).trim();
             matcher = CLASS_PATTERN.matcher(source);
             boolean foundClass = matcher.find();
-            assert foundClass : "Couldn't find class declaration in source";
-            String cls = matcher.group(2).trim();
-            String to = pkg.replace('.', '/') + '/' + cls + DOT_JAVA;
+            String to;
+            if (!foundClass) {
+                assert !source.contains("{") : "Couldn't find class declaration in source";
+                to = pkg.replace('.', '/') + '/' + "package-info.java";
+            } else {
+                String cls = matcher.group(2).trim();
+                if (cls.contains("<")) {
+                    // Remove type variables
+                    cls = cls.substring(0, cls.indexOf('<'));
+                }
+                to = pkg.replace('.', '/') + '/' + cls + DOT_JAVA;
+            }
 
             return new JavaTestFile().to(to).within("src").withSource(source);
         }
@@ -203,6 +222,126 @@ public class TestFile {
                 throw new IllegalArgumentException("Expected .java suffix for Java test file");
             }
             return new JavaTestFile().to(to).withSource(source);
+        }
+    }
+
+    public static class KotlinTestFile extends LintDetectorTest.TestFile {
+        private static final Pattern PACKAGE_PATTERN = Pattern.compile("package\\s+([\\S&&[^;]]*)");
+        private static final Pattern CLASS_PATTERN = Pattern
+                .compile("(class|interface|enum)\\s*(\\S+)\\s*(extends.*)?\\s*(implements.*)?\\{",
+                        Pattern.MULTILINE);
+
+        public KotlinTestFile() {
+        }
+
+        @NonNull
+        public static LintDetectorTest.TestFile create(@NonNull @Language("kotlin") String source) {
+            // Figure out the "to" path: the package plus class name + kt in the src/ folder
+            Matcher matcher = PACKAGE_PATTERN.matcher(source);
+            boolean foundPackage = matcher.find();
+            assert foundPackage : "Couldn't find package declaration in source";
+            String pkg = matcher.group(1).trim();
+            matcher = CLASS_PATTERN.matcher(source);
+            boolean foundClass = matcher.find();
+            String cls;
+            if (foundClass) {
+                cls = matcher.group(2).trim();
+                if (cls.contains("<")) {
+                    // Remove type variables
+                    cls = cls.substring(0, cls.indexOf('<'));
+                }
+            } else {
+                // Don't require Kotlin test files to contain a class -- it could just be
+                // top level functions
+                cls = "test";
+            }
+            String to = pkg.replace('.', '/') + '/' + cls + DOT_KT;
+
+            return new KotlinTestFile().to(to).within("src").withSource(source);
+        }
+
+        @NonNull
+        public static LintDetectorTest.TestFile create(@NonNull String to,
+                @NonNull @Language("kotlin") String source) {
+            if (!to.endsWith(DOT_KT)) {
+                throw new IllegalArgumentException("Expected .kt suffix for Kotlin test file");
+            }
+            return new KotlinTestFile().to(to).withSource(source);
+        }
+    }
+
+    public static class XmlTestFile extends LintDetectorTest.TestFile {
+
+        public XmlTestFile() {
+        }
+
+        @NonNull
+        public static LintDetectorTest.TestFile create(@NonNull String to,
+                @NonNull @Language("XML") String source) {
+            if (!to.endsWith(DOT_XML)) {
+                throw new IllegalArgumentException("Expected .xml suffix for XML test file");
+            }
+
+            String plainSource = stripErrorMarkers(source);
+            return new XmlTestFile().withRawSource(source).to(to).withSource(plainSource);
+        }
+
+        private String rawSource;
+
+        private XmlTestFile withRawSource(String rawSource) {
+            this.rawSource = rawSource;
+            return this;
+        }
+
+        /** Normally, XML processing instructions (other than {@code <?xml?>} are
+         * taken to be inlined error messages and are stripped before being passed to
+         * the XML parser. This flag allows you to tell lint to leave your processing
+         * instructions alone, if needed by your test.
+         */
+        public XmlTestFile keepProcessingInstructions() {
+            withSource(rawSource);
+            return this;
+        }
+
+        @Nullable
+        @Override
+        public String getRawContents() {
+            return rawSource;
+        }
+
+        private static String stripErrorMarkers(@NonNull String source) {
+            if (source.contains("<?error")
+                    || source.contains("<?warning")
+                    || source.contains("?info")) {
+                StringBuilder sb = new StringBuilder(source.length());
+                int prev = 0;
+                int index = 0;
+                while (true) {
+                    index = source.indexOf("<?", index);
+                    if (index == -1) {
+                        break;
+                    }
+
+                    // Keep XML preprocessing instructions
+                    if (source.startsWith("<?xml", index)) {
+                        index += 4;
+                        continue;
+                    }
+
+                    sb.append(source.substring(prev, index));
+                    index = source.indexOf("?>", index);
+                    if (index == -1) {
+                        break;
+                    }
+                    index += 2;
+                    prev = index;
+                }
+
+                sb.append(source.substring(prev, source.length()));
+
+                return sb.toString();
+            }
+            return source;
         }
     }
 
@@ -371,8 +510,8 @@ public class TestFile {
 
     public static class ManifestTestFile extends LintDetectorTest.TestFile {
         public String pkg = "test.pkg";
-        public int minSdk;
-        public int targetSdk;
+        public String minSdk = "";
+        public String targetSdk = "";
         public String[] permissions;
 
         public ManifestTestFile() {
@@ -380,12 +519,22 @@ public class TestFile {
         }
 
         public ManifestTestFile minSdk(int min) {
-            minSdk = min;
+            minSdk = String.valueOf(min);
+            return this;
+        }
+
+        public ManifestTestFile minSdk(@NonNull String codename) {
+            minSdk = codename;
             return this;
         }
 
         public ManifestTestFile targetSdk(int target) {
-            targetSdk = target;
+            targetSdk = String.valueOf(target);
+            return this;
+        }
+
+        public ManifestTestFile targetSdk(@NonNull String codename) {
+            targetSdk = codename;
             return this;
         }
 
@@ -409,16 +558,13 @@ public class TestFile {
                 sb.append("    package=\"").append(pkg).append("\"\n");
                 sb.append("    android:versionCode=\"1\"\n");
                 sb.append("    android:versionName=\"1.0\" >\n");
-                if (minSdk > 0 || targetSdk > 0) {
+                if (!minSdk.isEmpty() || !targetSdk.isEmpty()) {
                     sb.append("    <uses-sdk ");
-                    if (minSdk > 0) {
-                        sb.append(" android:minSdkVersion=\"").append(Integer.toString(minSdk))
-                                .append("\"");
+                    if (!minSdk.isEmpty()) {
+                        sb.append(" android:minSdkVersion=\"").append(minSdk).append("\"");
                     }
-                    if (targetSdk > 0) {
-                        sb.append(" android:targetSdkVersion=\"")
-                                .append(Integer.toString(targetSdk))
-                                .append("\"");
+                    if (!targetSdk.isEmpty()) {
+                        sb.append(" android:targetSdkVersion=\"").append(targetSdk).append("\"");
                     }
                     sb.append(" />\n");
                 }

@@ -22,7 +22,6 @@ import com.android.builder.model.SyncIssue;
 import com.google.common.truth.FailureStrategy;
 import com.google.common.truth.Subject;
 import com.google.common.truth.SubjectFactory;
-
 import java.util.Collection;
 
 /**
@@ -53,6 +52,13 @@ public class ModelSubject extends Subject<ModelSubject, AndroidProject> {
         super(failureStrategy, subject);
     }
 
+    public void hasIssueSize(int size) {
+        Collection<SyncIssue> issues = getSubject().getSyncIssues();
+
+        check().that(issues)
+                .named("Issue count for project " + getSubject().getName())
+                .hasSize(size);
+    }
 
     /**
      * Asserts that the issue collection has only a single element with the given properties.

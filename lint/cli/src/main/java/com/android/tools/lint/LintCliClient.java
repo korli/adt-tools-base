@@ -16,17 +16,27 @@
 
 package com.android.tools.lint;
 
+import static com.android.manifmerger.MergingReport.MergedManifestKind.MERGED;
 import static com.android.tools.lint.LintCliFlags.ERRNO_CREATED_BASELINE;
 import static com.android.tools.lint.LintCliFlags.ERRNO_ERRORS;
 import static com.android.tools.lint.LintCliFlags.ERRNO_SUCCESS;
-import static com.android.tools.lint.client.api.IssueRegistry.BASELINE;
-import static com.android.tools.lint.client.api.IssueRegistry.LINT_ERROR;
-import static com.android.tools.lint.client.api.IssueRegistry.PARSER_ERROR;
-import static com.android.tools.lint.detector.api.CharSequences.indexOf;
+import static com.android.utils.CharSequences.indexOf;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
+import com.android.builder.model.AndroidProject;
+import com.android.builder.model.ApiVersion;
+import com.android.builder.model.JavaCompileOptions;
+import com.android.builder.model.ProductFlavor;
+import com.android.builder.model.SourceProvider;
+import com.android.manifmerger.ManifestMerger2;
+import com.android.manifmerger.ManifestMerger2.Invoker.Feature;
+import com.android.manifmerger.ManifestMerger2.MergeType;
+import com.android.manifmerger.MergingReport;
+import com.android.manifmerger.XmlDocument;
+import com.android.sdklib.IAndroidTarget;
 import com.android.tools.lint.Reporter.Stats;
 import com.android.tools.lint.checks.HardcodedValuesDetector;
 import com.android.tools.lint.client.api.Configuration;
@@ -38,24 +48,40 @@ import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.client.api.LintDriver;
 import com.android.tools.lint.client.api.LintListener;
 import com.android.tools.lint.client.api.LintRequest;
+import com.android.tools.lint.client.api.UastParser;
 import com.android.tools.lint.client.api.XmlParser;
+import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Position;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.TextFormat;
+import com.android.tools.lint.helpers.DefaultUastParser;
+import com.android.utils.CharSequences;
+import com.android.utils.StdLogger;
 import com.google.common.annotations.Beta;
 import com.google.common.base.Splitter;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import com.google.common.io.Closeables;
+import com.intellij.codeInsight.ExternalAnnotationsManager;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.roots.LanguageLevelProjectExtension;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.pom.java.LanguageLevel;
+import com.intellij.util.lang.UrlClassLoader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -64,6 +90,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import javax.xml.parsers.ParserConfigurationException;
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
 
 /**
  * Lint client for command line usage. Supports the flags in {@link LintCliFlags},
@@ -116,37 +145,22 @@ public class LintCliClient extends LintClient {
     public int run(@NonNull IssueRegistry registry, @NonNull List<File> files) throws IOException {
         assert !flags.getReporters().isEmpty();
         this.registry = registry;
-        driver = new LintDriver(registry, this);
 
-        driver.setAbbreviating(!flags.isShowEverything());
-
-        File baselineFile = flags.getBaselineFile();
-        LintBaseline baseline = null;
-        if (baselineFile != null) {
-            baseline = new LintBaseline(this, baselineFile);
-            driver.setBaseline(baseline);
-            if (flags.isRemoveFixedBaselineIssues()) {
-                baseline.setWriteOnClose(true);
-                baseline.setRemoveFixed(true);
-            }
-        }
+        LintRequest lintRequest = createLintRequest(files);
+        driver = createDriver(registry, lintRequest);
 
         addProgressPrinter();
-        driver.addLintListener((driver, type, context) -> {
-            if (type == LintListener.EventType.SCANNING_PROJECT && !validatedIds) {
-                // Make sure all the id's are valid once the driver is all set up and
-                // ready to run (such that custom rules are available in the registry etc)
-                validateIssueIds(context != null ? context.getProject() : null);
-            }
-        });
+        validateIssueIds();
 
-        driver.analyze(createLintRequest(files));
+        driver.analyze();
 
         Collections.sort(warnings);
 
         int baselineErrorCount = 0;
         int baselineWarningCount = 0;
         int fixedCount = 0;
+
+        LintBaseline baseline = driver.getBaseline();
         if (baseline != null) {
             baselineErrorCount = baseline.getFoundErrorCount();
             baselineWarningCount = baseline.getFoundWarningCount();
@@ -164,14 +178,26 @@ public class LintCliClient extends LintClient {
             }
         }
 
+        File baselineFile = flags.getBaselineFile();
         if (!flags.isQuiet() && !hasConsoleOutput) {
-            System.out.print(String.format("Lint found %1$s",
-                    LintUtils.describeCounts(errorCount, warningCount, true)));
             if (baselineErrorCount > 0 || baselineWarningCount > 0) {
+                if (errorCount == 0 && warningCount == 1) {
+                    // the warning is the warning about baseline issues having been filtered
+                    // out, don't list this as "1 warning"
+                    System.out.print("Lint found no new issues");
+                } else {
+                    System.out.print(String.format("Lint found %1$s",
+                            LintUtils.describeCounts(errorCount, Math.max(0, warningCount - 1),
+                                    true, false)));
+                }
+                assert baselineFile != null;
                 System.out.print(String.format(" (%1$s filtered by baseline %2$s)",
                         LintUtils.describeCounts(stats.baselineErrorCount,
-                                stats.baselineWarningCount, true),
-                        flags.getBaselineFile().getName()));
+                                stats.baselineWarningCount, true, true),
+                        baselineFile.getName()));
+            } else {
+                System.out.print(String.format("Lint found %1$s",
+                        LintUtils.describeCounts(errorCount, warningCount, true, false)));
             }
             System.out.println();
         }
@@ -197,12 +223,54 @@ public class LintCliClient extends LintClient {
                         + "If not, investigate the baseline path in the lintOptions config\n"
                         + "or verify that the baseline file has been checked into version\n"
                         + "control.\n";
+
+                if (LintClient.Companion.isGradle()) {
+                    message += ""
+                            + "\n"
+                            + "You can set the system property lint.baselines.continue=true\n"
+                            + "if you want to create many missing baselines in one go.";
+
+                }
+
                 System.err.println(message);
                 return ERRNO_CREATED_BASELINE;
             }
         }
 
         return flags.isSetExitCode() ? (hasErrors ? ERRNO_ERRORS : ERRNO_SUCCESS) : ERRNO_SUCCESS;
+    }
+
+    protected void validateIssueIds() {
+        driver.addLintListener((driver, type, project, context) -> {
+            if (type == LintListener.EventType.SCANNING_PROJECT && !validatedIds) {
+                // Make sure all the id's are valid once the driver is all set up and
+                // ready to run (such that custom rules are available in the registry etc)
+                validateIssueIds(project);
+            }
+        });
+    }
+
+    @NonNull
+    protected LintDriver createDriver(@NonNull IssueRegistry registry,
+            @NonNull LintRequest request) {
+        driver = new LintDriver(registry, this, request);
+        driver.setAbbreviating(!flags.isShowEverything());
+        driver.setCheckTestSources(flags.isCheckTestSources());
+        driver.setCheckGeneratedSources(flags.isCheckGeneratedSources());
+        driver.setFatalOnlyMode(flags.isFatalOnly());
+        driver.setCheckDependencies(flags.isCheckDependencies());
+
+        File baselineFile = flags.getBaselineFile();
+        if (baselineFile != null) {
+            LintBaseline baseline = new LintBaseline(this, baselineFile);
+            driver.setBaseline(baseline);
+            if (flags.isRemoveFixedBaselineIssues()) {
+                baseline.setWriteOnClose(true);
+                baseline.setRemoveFixed(true);
+            }
+        }
+
+        return driver;
     }
 
     protected void addProgressPrinter() {
@@ -237,9 +305,10 @@ public class LintCliClient extends LintClient {
         }
     }
 
+    @NonNull
     @Override
     public XmlParser getXmlParser() {
-        return new LintCliXmlParser();
+        return new LintCliXmlParser(this);
     }
 
     @NonNull
@@ -261,6 +330,12 @@ public class LintCliClient extends LintClient {
         return new EcjParser(this, project);
     }
 
+    @Nullable
+    @Override
+    public UastParser getUastParser(@Nullable Project project) {
+        return new LintCliUastParser(project);
+    }
+
     @Override
     public void report(
             @NonNull Context context,
@@ -268,8 +343,9 @@ public class LintCliClient extends LintClient {
             @NonNull Severity severity,
             @NonNull Location location,
             @NonNull String message,
-            @NonNull TextFormat format) {
-        assert context.isEnabled(issue) || issue == LINT_ERROR;
+            @NonNull TextFormat format,
+            @Nullable LintFix fix) {
+        assert context.isEnabled(issue) || issue.getCategory() == Category.LINT;
 
         if (severity.isError()) {
             hasErrors = true;
@@ -296,6 +372,7 @@ public class LintCliClient extends LintClient {
         File file = location.getFile();
         warning.file = file;
         warning.path = getDisplayPath(context.getProject(), file);
+        warning.quickfixData = fix;
 
         Position startPosition = location.getStart();
         if (startPosition != null) {
@@ -441,7 +518,8 @@ public class LintCliClient extends LintClient {
             }
 
             info = new ClassPathInfo(sources, classes, libraries, classPath.getLibraries(false),
-                    classPath.getTestSourceFolders(), classPath.getTestLibraries());
+                    classPath.getTestSourceFolders(), classPath.getTestLibraries(),
+                    classPath.getGeneratedFolders());
             mProjectInfo.put(project, info);
         }
 
@@ -570,13 +648,25 @@ public class LintCliClient extends LintClient {
                 return severity;
             }
 
-            if (check != null && issue != LINT_ERROR && issue != PARSER_ERROR &&
-                    issue != BASELINE) {
+            if (check != null && issue.getCategory() != Category.LINT) {
                 return Severity.IGNORE;
             }
 
             return severity;
         }
+    }
+
+    @NonNull
+    @Override
+    protected Project createProject(@NonNull File dir, @NonNull File referenceDir) {
+        Project project = super.createProject(dir, referenceDir);
+
+        String compileSdkVersion = flags.getCompileSdkVersionOverride();
+        if (compileSdkVersion != null) {
+            project.setBuildTargetHash(compileSdkVersion);
+        }
+
+        return project;
     }
 
     /**
@@ -631,12 +721,12 @@ public class LintCliClient extends LintClient {
         String message = String.format("Unknown issue id \"%1$s\"", id);
 
         if (driver != null && project != null) {
-            Location location = Location.create(project.getDir());
+            Location location = LintUtils.guessGradleLocation(this, project.getDir(), id);
             if (!isSuppressed(IssueRegistry.LINT_ERROR)) {
-                report(new Context(driver, project, project, project.getDir()),
+                report(new Context(driver, project, project, project.getDir(), ""),
                         IssueRegistry.LINT_ERROR,
                         project.getConfiguration(driver).getSeverity(IssueRegistry.LINT_ERROR),
-                        location, message, TextFormat.RAW);
+                        location, message, TextFormat.RAW, LintFix.create().data(id));
             }
         } else {
             log(Severity.ERROR, null, "Lint: %1$s", message);
@@ -648,6 +738,7 @@ public class LintCliClient extends LintClient {
         public void update(
                 @NonNull LintDriver lint,
                 @NonNull EventType type,
+                @Nullable Project project,
                 @Nullable Context context) {
             switch (type) {
                 case SCANNING_PROJECT: {
@@ -681,6 +772,7 @@ public class LintCliClient extends LintClient {
                 case COMPLETED:
                     System.out.println();
                     break;
+                case REGISTERED_PROJECT:
                 case STARTING:
                     // Ignored for now
                     break;
@@ -762,6 +854,8 @@ public class LintCliClient extends LintClient {
             }
         } else if (fullPath) {
             path = getCleanPath(file.getAbsoluteFile());
+        } else if (file.isAbsolute() && file.exists()) {
+            path = Reporter.getRelativePath(project.getReferenceDir(), file);
         }
 
         return path;
@@ -815,34 +909,133 @@ public class LintCliClient extends LintClient {
         return new CliConfiguration(file, flags.isFatalOnly());
     }
 
-    @Override
-    @Nullable
-    public String getClientRevision() {
-        File file = findResource("tools" + File.separator +
-                "source.properties");
-        if (file != null && file.exists()) {
-            FileInputStream input = null;
-            try {
-                input = new FileInputStream(file);
-                Properties properties = new Properties();
-                properties.load(input);
 
-                String revision = properties.getProperty("Pkg.Revision");
-                if (revision != null && !revision.isEmpty()) {
-                    return revision;
-                }
-            } catch (IOException e) {
-                // Couldn't find or read the version info: just print out unknown below
-            } finally {
-                try {
-                    Closeables.close(input, true /* swallowIOException */);
-                } catch (IOException e) {
-                    // cannot happen
+    @Nullable private com.intellij.openapi.project.Project ideaProject;
+    @Nullable private Disposable projectDisposer;
+
+    @Nullable
+    public com.intellij.openapi.project.Project getIdeaProject() {
+        return ideaProject;
+    }
+
+    @Override
+    public void initializeProjects(@NonNull Collection<? extends Project> knownProjects) {
+        // Initialize the associated idea project to use
+
+        LintCoreApplicationEnvironment appEnv = LintCoreApplicationEnvironment.get();
+        Disposable parentDisposable = Disposer.newDisposable();
+        projectDisposer = parentDisposable;
+
+        LintCoreProjectEnvironment projectEnvironment = LintCoreProjectEnvironment.create(
+                parentDisposable, appEnv);
+        ideaProject = projectEnvironment.getProject();
+
+        // knownProject only lists root projects, not dependencies
+        Set<Project> allProjects = Sets.newIdentityHashSet();
+        for (Project project : knownProjects) {
+            allProjects.add(project);
+            allProjects.addAll(project.getAllLibraries());
+        }
+
+        List<File> files = Lists.newArrayListWithCapacity(50);
+
+        for (Project project : allProjects) {
+            // Note that there could be duplicates here since we're including multiple library
+            // dependencies that could have the same dependencies (e.g. lib1 and lib2 both
+            // referencing guava.jar)
+            files.addAll(project.getJavaSourceFolders());
+            files.addAll(project.getGeneratedSourceFolders());
+            files.addAll(project.getJavaLibraries(true));
+            files.addAll(project.getTestLibraries());
+
+            // Don't include the class folders:
+            //  files.addAll(project.getJavaClassFolders());
+            // These are the outputs from the sources and generated sources, which we will
+            // parse directly with PSI/UAST anyway. Including them here leads lint to do
+            // a lot more work (e.g. when resolving symbols it looks at both .java and .class
+            // matches)
+        }
+
+        IAndroidTarget buildTarget = null;
+        for (Project project : knownProjects) {
+            IAndroidTarget t = project.getBuildTarget();
+            if (t != null) {
+                if (buildTarget == null) {
+                    buildTarget = t;
+                } else if (buildTarget.getVersion().compareTo(t.getVersion()) > 0) {
+                    buildTarget = t;
                 }
             }
         }
 
-        return null;
+        if (buildTarget != null) {
+            File file = buildTarget.getFile(IAndroidTarget.ANDROID_JAR);
+            if (file != null) {
+                files.add(file);
+            }
+        }
+
+        projectEnvironment.registerPaths(files);
+
+        LanguageLevel maxLevel = LanguageLevel.JDK_1_7;
+        for (Project project : knownProjects) {
+            AndroidProject model = project.getGradleProjectModel();
+            if (model != null) {
+                JavaCompileOptions javaCompileOptions = model.getJavaCompileOptions();
+                String sourceCompatibility = javaCompileOptions.getSourceCompatibility();
+                LanguageLevel level = LanguageLevel.parse(sourceCompatibility);
+                if (level != null && maxLevel.isLessThan(level)) {
+                    maxLevel = level;
+                }
+            }
+        }
+
+        com.intellij.openapi.project.Project ideaProject = getIdeaProject();
+        if (ideaProject != null) {
+            LanguageLevelProjectExtension languageLevelProjectExtension = ideaProject
+                    .getComponent(LanguageLevelProjectExtension.class);
+            if (languageLevelProjectExtension != null) {
+                languageLevelProjectExtension.setLanguageLevel(maxLevel);
+            }
+        }
+
+        super.initializeProjects(knownProjects);
+    }
+
+    @Override
+    public void disposeProjects(@NonNull Collection<? extends Project> knownProjects) {
+        if (projectDisposer != null) {
+            Disposer.dispose(projectDisposer);
+            LintCoreApplicationEnvironment.clearAccessorCache();
+        }
+        ideaProject = null;
+        projectDisposer = null;
+
+        super.disposeProjects(knownProjects);
+    }
+
+    @Override
+    @Nullable
+    public String getClientRevision() {
+        try {
+            File file = findResource("tools" + File.separator +
+                    "source.properties");
+            if (file != null && file.exists()) {
+                try (FileInputStream input = new FileInputStream(file)) {
+                    Properties properties = new Properties();
+                    properties.load(input);
+
+                    String revision = properties.getProperty("Pkg.Revision");
+                    if (revision != null && !revision.isEmpty()) {
+                        return revision;
+                    }
+                }
+            }
+        } catch (Throwable ignore) {
+            // dev builds, tests, etc: fall through to unknown
+        }
+
+        return "unknown";
     }
 
     @NonNull
@@ -860,7 +1053,170 @@ public class LintCliClient extends LintClient {
         errorCount = 0;
         warningCount = 0;
 
-        projectDirs = Sets.newHashSet();
-        dirToProject = null;
+        getProjectDirs().clear();
+        getDirToProject().clear();
+    }
+
+    @NonNull
+    @Override
+    public ClassLoader createUrlClassLoader(@NonNull URL[] urls, @NonNull ClassLoader parent) {
+        return UrlClassLoader.build().parent(parent).urls(urls).get();
+    }
+
+    @Nullable
+    @Override
+    public Document getMergedManifest(@NonNull Project project) {
+        List<File> manifests = Lists.newArrayList();
+        for (Project dependency : project.getAllLibraries()) {
+            manifests.addAll(dependency.getManifestFiles());
+        }
+
+        File injectedFile = new File("injected-from-gradle");
+        StringBuilder injectedXml = new StringBuilder();
+        if (project.getGradleProjectModel() != null && project.getCurrentVariant() != null) {
+            ProductFlavor mergedFlavor = project.getCurrentVariant().getMergedFlavor();
+            ApiVersion targetSdkVersion = mergedFlavor.getTargetSdkVersion();
+            ApiVersion minSdkVersion = mergedFlavor.getMinSdkVersion();
+            if (targetSdkVersion != null || minSdkVersion != null) {
+                injectedXml.append(""
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <uses-sdk");
+                if (minSdkVersion != null) {
+                    injectedXml.append(" android:minSdkVersion=\"")
+                            .append(minSdkVersion.getApiString()).append("\"");
+                }
+                if (targetSdkVersion != null) {
+                    injectedXml.append(" android:targetSdkVersion=\"")
+                            .append(targetSdkVersion.getApiString()).append("\"");
+                }
+                injectedXml.append(" />\n"
+                        + "</manifest>\n");
+                manifests.add(injectedFile);
+            }
+        }
+
+        File mainManifest = null;
+
+        if (project.getGradleProjectModel() != null && project.getCurrentVariant() != null) {
+            for (SourceProvider provider : LintUtils.getSourceProviders(
+                    project.getGradleProjectModel(), project.getCurrentVariant())) {
+                File manifestFile = provider.getManifestFile();
+                if (manifestFile.exists()) { // model returns path whether or not it exists
+                    if (mainManifest == null) {
+                        mainManifest = manifestFile;
+                    } else {
+                        manifests.add(manifestFile);
+                    }
+                }
+            }
+            if (mainManifest == null) {
+                return null;
+            }
+        } else {
+            List<File> projectManifests;
+            projectManifests = project.getManifestFiles();
+            if (projectManifests.isEmpty()) {
+                return null;
+            }
+            mainManifest = projectManifests.get(0);
+            for (int i = 1; i < projectManifests.size(); i++) {
+                manifests.add(projectManifests.get(i));
+            }
+        }
+
+        if (manifests.isEmpty()) {
+            // Only the main manifest: that's easy
+            try {
+                Document document = getXmlParser().parseXml(mainManifest);
+                if (document != null) {
+                    resolveMergeManifestSources(document, mainManifest);
+                }
+                return document;
+            } catch (IOException | SAXException | ParserConfigurationException e) {
+                log(Severity.WARNING, e, "Could not parse %1$s", mainManifest);
+            }
+
+            return null;
+        }
+
+        try {
+            StdLogger logger = new StdLogger(StdLogger.Level.INFO);
+            MergeType type = project.isLibrary() ? MergeType.LIBRARY : MergeType.APPLICATION;
+            MergingReport mergeReport = ManifestMerger2
+                    .newMerger(mainManifest, logger, type)
+                    .withFeatures(
+                            // TODO: How do we get the *opposite* of EXTRACT_FQCNS:
+                            // ensure that all names are made fully qualified?
+                            Feature.SKIP_BLAME,
+                            Feature.SKIP_XML_STRING,
+                            Feature.NO_PLACEHOLDER_REPLACEMENT)
+                    .addLibraryManifests(manifests.toArray(new File[manifests.size()]))
+                    .withFileStreamProvider(new ManifestMerger2.FileStreamProvider() {
+                        @Override
+                        protected InputStream getInputStream(@NonNull File file) throws
+                                FileNotFoundException {
+                            if (injectedFile.equals(file)) {
+                                return CharSequences.getInputStream(injectedXml.toString());
+                            }
+                            CharSequence text = readFile(file);
+                            // TODO: Avoid having to convert back and forth
+                            return CharSequences.getInputStream(text);
+                        }
+                    })
+                    .merge();
+
+            XmlDocument xmlDocument = mergeReport.getMergedXmlDocument(MERGED);
+            if (xmlDocument != null) {
+                Document document = xmlDocument.getXml();
+                if (document != null) {
+                    resolveMergeManifestSources(document, mergeReport.getActions());
+                    return document;
+                }
+            }
+        }
+        catch (ManifestMerger2.MergeFailureException e) {
+            log(Severity.ERROR, e, "Couldn't parse merged manifest");
+        }
+
+        return super.getMergedManifest(project);
+    }
+
+    protected class LintCliUastParser extends DefaultUastParser {
+
+        private final Project project;
+
+        public LintCliUastParser(Project project) {
+            //noinspection ConstantConditions
+            super(project, LintCliClient.this.ideaProject);
+            this.project = project;
+        }
+
+        @Override
+        public boolean prepare(@NonNull final List<? extends JavaContext> contexts) {
+            // If we're using Kotlin, ensure we initialize the bridge
+            for (JavaContext context : contexts) {
+                if (context.file.getPath().endsWith(SdkConstants.DOT_KT)) {
+                    LintCoreApplicationEnvironment.registerKotlinUastPlugin();
+                    break;
+                }
+            }
+
+            boolean ok = super.prepare(contexts);
+
+            if (project == null || contexts.isEmpty()) {
+                return ok;
+            }
+
+            // Now that we have a project context, ensure that the annotations manager
+            // is up to date
+            if (ideaProject != null) {
+                LintExternalAnnotationsManager annotationsManager =
+                    (LintExternalAnnotationsManager) ExternalAnnotationsManager.getInstance(
+                                ideaProject);
+                annotationsManager.updateAnnotationRoots(LintCliClient.this);
+            }
+
+            return ok;
+        }
     }
 }

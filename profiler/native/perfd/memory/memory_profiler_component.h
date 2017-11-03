@@ -26,20 +26,20 @@ namespace profiler {
 
 class MemoryProfilerComponent final : public ProfilerComponent {
  public:
-  explicit MemoryProfilerComponent(const Daemon& daemon)
-      : public_service_(daemon.clock(), &collectors_),
-        private_service_(&collectors_) {}
+  explicit MemoryProfilerComponent(Daemon::Utilities* utilities)
+      : private_service_(&collectors_),
+        public_service_(&private_service_, utilities, &collectors_) {}
 
   // Returns the service that talks to desktop clients (e.g., Studio).
   grpc::Service* GetPublicService() override { return &public_service_; }
 
-  // Returns the service that talks to device clients (e.g., perfa).
+  // Returns the service that talks to device clients (e.g., the agent).
   grpc::Service* GetInternalService() override { return &private_service_; }
 
  private:
-  MemoryServiceImpl public_service_;
-
   InternalMemoryServiceImpl private_service_;
+
+  MemoryServiceImpl public_service_;
 
   // Mapping pid->MemoryCollector.
   std::unordered_map<int32_t, MemoryCollector> collectors_;

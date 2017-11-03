@@ -16,21 +16,18 @@
 
 package com.android.build.gradle.integration.common.fixture;
 
-import static org.junit.Assert.fail;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.integration.common.fixture.app.AbstractAndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
-import com.android.build.gradle.integration.common.utils.SdkHelper;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.build.gradle.integration.performance.BenchmarkRecorder;
 import com.google.common.collect.Lists;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -39,17 +36,17 @@ public final class GradleTestProjectBuilder {
 
     @Nullable private String name;
     @Nullable private TestProject testProject = null;
-    @Nullable private File sdkDir = SdkHelper.findSdkDir();
-    @Nullable private File ndkDir = findNdkDir();
     @Nullable private String targetGradleVersion;
-    private boolean useJack = GradleTestProject.USE_JACK;
-    private boolean improvedDependencyEnabled = GradleTestProject.IMPROVED_DEPENDENCY_RESOLUTION;
     @Nullable private String buildToolsVersion;
-    private boolean useMinify = false;
+    private boolean withoutNdk = false;
     @NonNull private List<String> gradleProperties = Lists.newArrayList();
     @Nullable private String heapSize;
     @Nullable private BenchmarkRecorder benchmarkRecorder;
     @NonNull private Path relativeProfileDirectory = Paths.get("build", "android-profile");
+    private boolean withDependencyChecker = true;
+    // Indicates if we need to create a project without setting cmake.dir in local.properties.
+    private boolean withCmakeDirInLocalProp = false;
+    @NonNull String cmakeVersion;
 
     /** Create a GradleTestProject. */
     public GradleTestProject create() {
@@ -59,17 +56,16 @@ public final class GradleTestProjectBuilder {
         return new GradleTestProject(
                 name,
                 testProject,
-                useMinify,
-                useJack,
-                improvedDependencyEnabled,
                 targetGradleVersion,
-                sdkDir,
-                ndkDir,
+                withoutNdk,
+                withDependencyChecker,
                 gradleProperties,
                 heapSize,
                 buildToolsVersion,
                 benchmarkRecorder,
-                relativeProfileDirectory);
+                relativeProfileDirectory,
+                cmakeVersion,
+                withCmakeDirInLocalProp);
     }
 
     /**
@@ -92,7 +88,7 @@ public final class GradleTestProjectBuilder {
 
     /** Create a project without setting ndk.dir in local.properties. */
     public GradleTestProjectBuilder withoutNdk() {
-        this.ndkDir = null;
+        this.withoutNdk = true;
         return this;
     }
 
@@ -105,7 +101,9 @@ public final class GradleTestProjectBuilder {
     /** Create GradleTestProject from an existing test project. */
     public GradleTestProjectBuilder fromTestProject(@NonNull String project) {
         AndroidTestApp app = new EmptyTestApp();
-        name = project;
+        if (name == null) {
+            name = project;
+        }
         File projectDir = new File(GradleTestProject.TEST_PROJECT_DIR, project);
         addAllFiles(app, projectDir);
         return fromTestApp(app);
@@ -127,6 +125,12 @@ public final class GradleTestProjectBuilder {
                             .getParentFile();
             parentDir = new File(parentDir, "external");
             File projectDir = new File(parentDir, project);
+            if (!projectDir.exists()) {
+                projectDir = new File(parentDir, project.replace('-', '_'));
+            }
+            if (!projectDir.exists()) {
+                throw new RuntimeException("Project " + project + " not found in " + projectDir + ".");
+            }
             addAllFiles(app, projectDir);
             return fromTestApp(app);
         } catch (IOException e) {
@@ -168,24 +172,14 @@ public final class GradleTestProjectBuilder {
         return this;
     }
 
-    public GradleTestProjectBuilder withJack(boolean useJack) {
-        this.useJack = useJack;
-        return this;
-    }
-
-    public GradleTestProjectBuilder withImprovedDependencyResolution(
-            boolean improvedDependencyEnabled) {
-        this.improvedDependencyEnabled = improvedDependencyEnabled;
+    public GradleTestProjectBuilder withDependencyChecker(
+            boolean dependencyChecker) {
+        this.withDependencyChecker = dependencyChecker;
         return this;
     }
 
     public GradleTestProjectBuilder withBuildToolsVersion(String buildToolsVersion) {
         this.buildToolsVersion = buildToolsVersion;
-        return this;
-    }
-
-    public GradleTestProjectBuilder withMinify(boolean useMinify) {
-        this.useMinify = useMinify;
         return this;
     }
 
@@ -205,6 +199,18 @@ public final class GradleTestProjectBuilder {
         return this;
     }
 
+    /** Enables setting cmake.dir in local.properties */
+    public GradleTestProjectBuilder setWithCmakeDirInLocalProp(boolean withCmakeDirInLocalProp) {
+        this.withCmakeDirInLocalProp = withCmakeDirInLocalProp;
+        return this;
+    }
+
+    /** Sets the cmake version to use */
+    public GradleTestProjectBuilder setCmakeVersion(@NonNull String cmakeVersion) {
+        this.cmakeVersion = cmakeVersion;
+        return this;
+    }
+
     private static class EmptyTestApp extends AbstractAndroidTestApp {
         @Override
         public boolean containsFullBuildScript() {
@@ -212,33 +218,19 @@ public final class GradleTestProjectBuilder {
         }
     }
 
-    /** Returns the NDK folder as built from the Android source tree. */
-    private static File findNdkDir() {
-        String androidHome = System.getenv("ANDROID_NDK_HOME");
-        if (androidHome != null) {
-            File f = new File(androidHome);
-            if (f.isDirectory()) {
-                return f;
-            } else {
-                System.out.println("Failed to find NDK in ANDROID_NDK_HOME=" + androidHome);
-            }
-        }
-        return null;
-    }
-
     /** Add all files in a directory to an AndroidTestApp. */
     private static void addAllFiles(AndroidTestApp app, File projectDir) {
-        for (String filePath : TestFileUtils.listFiles(projectDir)) {
-            File file = new File(filePath);
-            try {
+        try {
+            for (String filePath : TestFileUtils.listFiles(projectDir.toPath())) {
+                File file = new File(filePath);
                 app.addFile(
                         new TestSourceFile(
                                 file.getParent(),
                                 file.getName(),
                                 Files.toByteArray(new File(projectDir, filePath))));
-            } catch (IOException e) {
-                fail(e.toString());
             }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 }

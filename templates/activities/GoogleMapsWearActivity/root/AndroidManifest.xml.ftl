@@ -3,6 +3,15 @@
 
     <application>
 
+        <!-- Set to true if app can function without mobile companion app. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <uses-library
+            android:name="com.google.android.wearable"
+            android:required="false" />
+
         <!--
              The API key for Google Maps-based APIs is defined as a string resource.
              (See the file "res/values/google_maps_api.xml").
@@ -13,7 +22,7 @@
          -->
         <meta-data android:name="com.google.android.geo.API_KEY" android:value="@string/google_maps_key"/>
 
-        <activity android:name="${relativePackage}.${activityClass}"
+        <activity android:name="${packageName}.${activityClass}"
             <#if isNewProject>
             android:label="@string/app_name"
             <#else>

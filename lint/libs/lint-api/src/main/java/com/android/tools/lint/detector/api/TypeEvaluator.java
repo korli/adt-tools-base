@@ -34,20 +34,14 @@ import com.android.tools.lint.client.api.JavaParser.ResolvedMethod;
 import com.android.tools.lint.client.api.JavaParser.ResolvedNode;
 import com.android.tools.lint.client.api.JavaParser.ResolvedVariable;
 import com.android.tools.lint.client.api.JavaParser.TypeDescriptor;
-import com.intellij.psi.PsiAssignmentExpression;
 import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiDeclarationStatement;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiExpressionStatement;
 import com.intellij.psi.PsiField;
 import com.intellij.psi.PsiLocalVariable;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiReference;
-import com.intellij.psi.PsiReferenceExpression;
-import com.intellij.psi.PsiStatement;
 import com.intellij.psi.PsiType;
-import com.intellij.psi.util.PsiTreeUtil;
 import java.util.ListIterator;
 import lombok.ast.BinaryExpression;
 import lombok.ast.BinaryOperator;
@@ -69,6 +63,15 @@ import lombok.ast.VariableDeclaration;
 import lombok.ast.VariableDefinition;
 import lombok.ast.VariableDefinitionEntry;
 import lombok.ast.VariableReference;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UMethod;
+import org.jetbrains.uast.UReferenceExpression;
+import org.jetbrains.uast.UVariable;
+import org.jetbrains.uast.UastContext;
+import org.jetbrains.uast.UastUtils;
+import org.jetbrains.uast.util.UastExpressionUtils;
 
 /**
  * Evaluates the types of nodes. This goes deeper than
@@ -242,6 +245,8 @@ public class TypeEvaluator {
                 case LESS:
                 case LESS_OR_EQUAL:
                     return new DefaultTypeDescriptor(TYPE_BOOLEAN);
+                default:
+                    // Deliberately not handling all the other operators here
             }
 
             TypeDescriptor type = evaluate(expression.astLeft());
@@ -295,45 +300,50 @@ public class TypeEvaluator {
             return field.getType();
         } else if (resolved instanceof PsiLocalVariable) {
             PsiLocalVariable variable = (PsiLocalVariable) resolved;
-            PsiStatement statement = PsiTreeUtil.getParentOfType(node, PsiStatement.class,
-                    false);
-            if (statement != null) {
-                PsiStatement prev = PsiTreeUtil.getPrevSiblingOfType(statement,
-                        PsiStatement.class);
-                String targetName = variable.getName();
-                if (targetName == null) {
-                    return null;
-                }
-                while (prev != null) {
-                    if (prev instanceof PsiDeclarationStatement) {
-                        for (PsiElement element : ((PsiDeclarationStatement)prev).getDeclaredElements()) {
-                            if (variable.equals(element)) {
-                                return evaluate(variable.getInitializer());
-                            }
-                        }
-                    } else if (prev instanceof PsiExpressionStatement) {
-                        PsiExpression expression = ((PsiExpressionStatement)prev).getExpression();
-                        if (expression instanceof PsiAssignmentExpression) {
-                            PsiAssignmentExpression assign = (PsiAssignmentExpression) expression;
-                            PsiExpression lhs = assign.getLExpression();
-                            if (lhs instanceof PsiReferenceExpression) {
-                                PsiReferenceExpression reference = (PsiReferenceExpression) lhs;
-                                if (targetName.equals(reference.getReferenceName()) &&
-                                        reference.getQualifier() == null) {
-                                    return evaluate(assign.getRExpression());
-                                }
-                            }
-                        }
-                    }
-                    prev = PsiTreeUtil.getPrevSiblingOfType(prev,
-                            PsiStatement.class);
-                }
+            PsiExpression last = ConstantEvaluator.findLastAssignment(node, variable);
+            if (last != null) {
+                return evaluate(last);
             }
 
             return variable.getType();
         } else if (node instanceof PsiExpression) {
             PsiExpression expression = (PsiExpression) node;
             return expression.getType();
+        }
+
+        return null;
+    }
+
+    @Nullable
+    public static PsiType evaluate(@Nullable UElement node) {
+        if (node == null) {
+            return null;
+        }
+
+        UElement resolved = node;
+        if (resolved instanceof UReferenceExpression) {
+            UastContext uastContext = UastUtils.getUastContext(node);
+            resolved = UastUtils.tryResolveUDeclaration(resolved, uastContext);
+        }
+
+        if (resolved instanceof UMethod) {
+            return ((UMethod) resolved).getPsi().getReturnType();
+        } else if (resolved instanceof UVariable) {
+            UVariable variable = (UVariable) resolved;
+            UElement lastAssignment = UastLintUtils.findLastAssignment(variable, node);
+            if (lastAssignment != null) {
+                return evaluate(lastAssignment);
+            }
+            return variable.getType();
+        } else if (resolved instanceof UCallExpression) {
+            if (UastExpressionUtils.isMethodCall(resolved)) {
+                PsiMethod resolvedMethod = ((UCallExpression) resolved).resolve();
+                return resolvedMethod != null ? resolvedMethod.getReturnType() : null;
+            } else {
+                return ((UCallExpression) resolved).getExpressionType();
+            }
+        } else if (resolved instanceof UExpression) {
+            return ((UExpression) resolved).getExpressionType();
         }
 
         return null;

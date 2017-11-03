@@ -45,35 +45,14 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
     }
 
     public void testBroken() throws Exception {
+        //noinspection all // Sample code
         assertEquals(""
                 + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares an intent-filter for a protected broadcast action string, which can only be sent by the system, not third-party applications. However, the receiver's onReceive method does not appear to call getAction to ensure that the received Intent's action string matches the expected value, potentially making it possible for another actor to send a spoofed intent with no action string or a different action string and cause undesired behavior. [UnsafeProtectedBroadcastReceiver]\n"
                 + "    public void onReceive(Context context, Intent intent) {\n"
                 + "                ~~~~~~~~~\n"
                 + "0 errors, 1 warnings\n",
             lintProject(
-                    xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"test.pkg\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "        <receiver\n"
-                            + "            android:label=\"@string/app_name\"\n"
-                            + "            android:name=\".TestReceiver\" >\n"
-                            + "                <intent-filter>\n"
-                            + "                    <action android:name=\"android.intent.action.BOOT_COMPLETED\"/>\n"
-                            + "                </intent-filter>\n"
-                            + "        </receiver>\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"
-                            + "\n"),
+                    manifest,
                     java("src/test/pkg/TestReceiver.java", ""
                             + "package test.pkg;\n"
                             + "\n"
@@ -100,68 +79,57 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
     }
 
     public void testBroken2() throws Exception {
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:12: Warning: BroadcastReceivers that declare an intent-filter for SMS_DELIVER or SMS_RECEIVED must ensure that the caller has the BROADCAST_SMS permission, otherwise it is possible for malicious actors to spoof intents. [UnprotectedSMSBroadcastReceiver]\n"
                 + "        <receiver\n"
                 + "        ^\n"
-                + "0 errors, 1 warnings\n",
-            lintProject(
-                    xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"test.pkg\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "        <receiver\n"
-                            + "            android:label=\"@string/app_name\"\n"
-                            + "            android:name=\".TestReceiver\" >\n"
-                            + "                <intent-filter>\n"
-                            + "                    <action android:name=\"android.provider.Telephony.SMS_RECEIVED\"/>\n"
-                            + "                </intent-filter>\n"
-                            + "        </receiver>\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"
-                            + "\n")
-            ));
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
+                xml("AndroidManifest.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"test.pkg\"\n"
+                        + "    android:versionCode=\"1\"\n"
+                        + "    android:versionName=\"1.0\" >\n"
+                        + "\n"
+                        + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                        + "        android:label=\"@string/app_name\" >\n"
+                        + "        <receiver\n"
+                        + "            android:label=\"@string/app_name\"\n"
+                        + "            android:name=\".TestReceiver\" >\n"
+                        + "                <intent-filter>\n"
+                        + "                    <action android:name=\"android.provider.Telephony.SMS_RECEIVED\"/>\n"
+                        + "                </intent-filter>\n"
+                        + "        </receiver>\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"
+                        + "\n"))
+                .run()
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for AndroidManifest.xml line 11: Set permission=\"android.permission.BROADCAST_SMS\":\n"
+                + "@@ -14 +14\n"
+                + "              android:name=\".TestReceiver\"\n"
+                + "-             android:label=\"@string/app_name\" >\n"
+                + "+             android:label=\"@string/app_name\"\n"
+                + "+             android:permission=\"android.permission.BROADCAST_SMS\" >\n"
+                + "              <intent-filter>\n");
     }
 
     public void testReferencesIntentVariable() throws Exception {
+        //noinspection all // Sample code
         assertEquals(""
                 + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares an intent-filter for a protected broadcast action string, which can only be sent by the system, not third-party applications. However, the receiver's onReceive method does not appear to call getAction to ensure that the received Intent's action string matches the expected value, potentially making it possible for another actor to send a spoofed intent with no action string or a different action string and cause undesired behavior. In this case, it is possible that the onReceive method passed the received Intent to another method that checked the action string. If so, this finding can safely be ignored. [UnsafeProtectedBroadcastReceiver]\n"
                 + "    public void onReceive(Context context, Intent intent) {\n"
                 + "                ~~~~~~~~~\n"
                 + "0 errors, 1 warnings\n",
                 lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"test.pkg\"\n"
-                                + "    android:versionCode=\"1\"\n"
-                                + "    android:versionName=\"1.0\" >\n"
-                                + "\n"
-                                + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:icon=\"@drawable/ic_launcher\"\n"
-                                + "        android:label=\"@string/app_name\" >\n"
-                                + "        <receiver\n"
-                                + "            android:label=\"@string/app_name\"\n"
-                                + "            android:name=\".TestReceiver\" >\n"
-                                + "                <intent-filter>\n"
-                                + "                    <action android:name=\"android.intent.action.BOOT_COMPLETED\"/>\n"
-                                + "                </intent-filter>\n"
-                                + "        </receiver>\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n"
-                                + "\n"),
+                        manifest,
                         java("src/test/pkg/TestReceiver.java", ""
                                 + "package test.pkg;\n"
                                 + "\n"
@@ -180,6 +148,7 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
     }
 
     public void testCorrect() throws Exception {
+        //noinspection all // Sample code
         assertEquals(
                 "No warnings.",
 
@@ -226,6 +195,7 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
     }
 
     public void testCorrect2() throws Exception {
+        //noinspection all // Sample code
         assertEquals(
                 "No warnings.",
 
@@ -255,6 +225,42 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
                                 + "</manifest>\n"
                                 + "\n")
                 ));
+    }
+
+    public void testBrokenIncremental() throws Exception {
+        String expected = ""
+                + "src/test/pkg/TestReceiver.java:10: Warning: This broadcast receiver declares an intent-filter for a protected broadcast action string, which can only be sent by the system, not third-party applications. However, the receiver's onReceive method does not appear to call getAction to ensure that the received Intent's action string matches the expected value, potentially making it possible for another actor to send a spoofed intent with no action string or a different action string and cause undesired behavior. [UnsafeProtectedBroadcastReceiver]\n"
+                + "    public void onReceive(Context context, Intent intent) {\n"
+                + "                ~~~~~~~~~\n"
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
+                manifest,
+                java("src/test/pkg/TestReceiver.java", ""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.content.BroadcastReceiver;\n"
+                        + "import android.content.Context;\n"
+                        + "import android.content.Intent;\n"
+                        + "\n"
+                        + "public class TestReceiver extends BroadcastReceiver {\n"
+                        + "\n"
+                        + "    @Override\n"
+                        + "    public void onReceive(Context context, Intent intent) {\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    // Anonymous classes should NOT be counted as a must-register\n"
+                        + "    private static BroadcastReceiver dummy() {\n"
+                        + "        return new BroadcastReceiver() {\n"
+                        + "            @Override\n"
+                        + "            public void onReceive(Context context, Intent intent) {\n"
+                        + "            }\n"
+                        + "        };\n"
+                        + "    }\n"
+                        + "}\n"))
+                .incremental("src/test/pkg/TestReceiver.java")
+                .run()
+                .expect(expected);
     }
 
     public static void testDbUpToDate() throws Exception {
@@ -301,4 +307,28 @@ public class UnsafeBroadcastReceiverDetectorTest extends AbstractCheckTest {
         Collections.sort(expected);
         return expected;
     }
+
+    private TestFile manifest = xml("AndroidManifest.xml", ""
+            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+            + "    package=\"test.pkg\"\n"
+            + "    android:versionCode=\"1\"\n"
+            + "    android:versionName=\"1.0\" >\n"
+            + "\n"
+            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+            + "\n"
+            + "    <application\n"
+            + "        android:icon=\"@drawable/ic_launcher\"\n"
+            + "        android:label=\"@string/app_name\" >\n"
+            + "        <receiver\n"
+            + "            android:label=\"@string/app_name\"\n"
+            + "            android:name=\".TestReceiver\" >\n"
+            + "                <intent-filter>\n"
+            + "                    <action android:name=\"android.intent.action.BOOT_COMPLETED\"/>\n"
+            + "                </intent-filter>\n"
+            + "        </receiver>\n"
+            + "    </application>\n"
+            + "\n"
+            + "</manifest>\n"
+            + "\n");
 }

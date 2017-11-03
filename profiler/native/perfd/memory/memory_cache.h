@@ -16,32 +16,51 @@
 #ifndef MEMORY_CACHE_H_
 #define MEMORY_CACHE_H_
 
-#include <cstdint>
-#include <memory>
+#include <climits>
 #include <mutex>
 #include <string>
 
+#include "proto/internal_memory.grpc.pb.h"
 #include "proto/memory.pb.h"
+#include "utils/circular_buffer.h"
 #include "utils/clock.h"
+#include "utils/file_cache.h"
 
 namespace profiler {
 
 // Class to provide memory data saving interface, this is an empty definition.
 class MemoryCache {
  public:
-  explicit MemoryCache(const Clock& clock, int32_t samples_capacity);
+  // Indicates that a heap dump is in progress.
+  static const int64_t kUnfinishedTimestamp = LLONG_MAX;
+
+  // TODO consider configuring cache sizes independently.
+  explicit MemoryCache(const Clock& clock, FileCache* file_cache,
+                       int32_t samples_capacity);
 
   void SaveMemorySample(const proto::MemoryData::MemorySample& sample);
-  void SaveVmStatsSample(const proto::MemoryData::VmStatsSample& sample);
-  bool StartHeapDump(const std::string& dump_file_path,
-                     int64_t request_time);
+  void SaveAllocStatsSample(const proto::MemoryData::AllocStatsSample& sample);
+  void SaveGcStatsSample(const proto::MemoryData::GcStatsSample& sample);
+  void SaveAllocationEvents(const proto::BatchAllocationSample* request);
+
+  // Saves a new HeapDumpInfo sample based on the dump_file_name and
+  // request_time parameters. This method returns false if a heap dump
+  // is still in progress (e.g. a matching EndHeapDump has not been
+  // called from a previous StartHeapDump). Otherwise this method returns
+  // true indicating a HeapDumpInfo has been added. On return, the response
+  // parameter is populated with the most recent HeapDumpInfo.
+  bool StartHeapDump(const std::string& dump_file_name, int64_t request_time,
+                     proto::TriggerHeapDumpResponse* response);
+
   bool EndHeapDump(int64_t end_time, bool success);
-  void TrackAllocations(bool enabled,
+  void TrackAllocations(int64_t request_time, bool enabled, bool legacy,
                         proto::TrackAllocationsResponse* response);
 
   void LoadMemoryData(int64_t start_time_exl, int64_t end_time_inc,
                       proto::MemoryData* response);
-  void ReadHeapDumpFileContents(int32_t dump_id,
+  void LoadMemoryJvmtiData(int64_t start_time_exl, int64_t end_time_inc,
+                      proto::MemoryData* response);
+  void ReadHeapDumpFileContents(int64_t dump_time,
                                 proto::DumpDataResponse* response);
 
  private:
@@ -51,28 +70,21 @@ class MemoryCache {
   int32_t GetNextSampleIndex(int32_t id);
 
   const Clock& clock_;
+  FileCache* file_cache_;
 
-  // TODO replace these with circular buffer class when it becomes available.
-  std::unique_ptr<proto::MemoryData::MemorySample[]> memory_samples_;
-  std::unique_ptr<proto::MemoryData::VmStatsSample[]> vm_stats_samples_;
-  std::unique_ptr<proto::HeapDumpInfo[]> heap_dump_infos_;
-  std::unique_ptr<proto::MemoryData::AllocationsInfo[]>
-      allocations_info_;
+  CircularBuffer<proto::MemoryData::MemorySample> memory_samples_;
+  CircularBuffer<proto::MemoryData::AllocStatsSample> alloc_stats_samples_;
+  CircularBuffer<proto::MemoryData::GcStatsSample> gc_stats_samples_;
+  CircularBuffer<proto::HeapDumpInfo> heap_dump_infos_;
+  CircularBuffer<proto::AllocationsInfo> allocations_info_;
+  CircularBuffer<proto::BatchAllocationSample> allocations_samples_;
   std::mutex memory_samples_mutex_;
-  std::mutex vm_stats_samples_mutex_;
+  std::mutex alloc_stats_samples_mutex_;
+  std::mutex gc_stats_samples_mutex_;
   std::mutex heap_dump_infos_mutex_;
   std::mutex allocations_info_mutex_;
+  std::mutex allocations_samples_mutex_;
 
-  int32_t put_memory_sample_index_;
-  int32_t put_vm_stats_sample_index_;
-  int32_t put_allocations_info_index_;
-  int32_t next_heap_dump_sample_id_;
-  // TODO consider configuring cache sizes independently.
-  int32_t samples_capacity_;
-
-  bool memory_samples_buffer_full_;
-  bool vm_stats_samples_buffer_full_;
-  bool allocations_info_buffer_full_;
   bool has_unfinished_heap_dump_;
   bool is_allocation_tracking_enabled_;
 };

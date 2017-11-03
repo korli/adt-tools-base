@@ -18,6 +18,8 @@ package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.api.JavaCompileOptions;
+import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.builder.model.BuildType;
 
 /**
@@ -31,16 +33,44 @@ public interface CoreBuildType extends BuildType {
     @Nullable
     CoreExternalNativeBuildOptions getExternalNativeBuildOptions();
 
+    /**
+     * The Jack toolchain is deprecated.
+     *
+     * <p>If you want to use Java 8 language features, use the improved support included in the
+     * default toolchain. To learn more, read <a
+     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
+     * features</a>.
+     */
+    @Deprecated
     @NonNull
     CoreJackOptions getJackOptions();
 
     @NonNull
-    CoreJavaCompileOptions getJavaCompileOptions();
+    JavaCompileOptions getJavaCompileOptions();
 
     @NonNull
     CoreShaderOptions getShaders();
 
+    /** @deprecated Use {@link VariantScope#useResourceShrinker()} instead. */
+    @Deprecated
     boolean isShrinkResources();
 
-    boolean isUseProguard();
+    /** @deprecated Use {@link VariantScope#getCodeShrinker()} instead. */
+    @Deprecated
+    Boolean isUseProguard();
+    /**
+     * Whether to crunch PNGs.
+     *
+     * <p>Setting this property to <code>true</code> reduces of PNG resources that are not already
+     * optimally compressed. However, this process increases build times.
+     *
+     * <p>PNG crunching is enabled by default in the release build type and disabled by default in
+     * the debug build type.
+     */
+    @Nullable
+    Boolean isCrunchPngs();
+
+    /** @deprecated Can go away once {@link AaptOptions#cruncherEnabled} is removed. */
+    @Deprecated
+    boolean isCrunchPngsDefault();
 }

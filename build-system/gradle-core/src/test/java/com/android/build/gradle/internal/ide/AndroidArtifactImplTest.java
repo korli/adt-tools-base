@@ -22,7 +22,7 @@ import org.junit.Test;
 public class AndroidArtifactImplTest {
 
     @Test
-    public void equals() throws Exception {
+    public void testEquals() throws Exception {
         EqualsVerifier.forClass(AndroidArtifactImpl.class).withRedefinedSuperclass().verify();
     }
 }

@@ -331,6 +331,7 @@ public abstract class BaseLintDetectorTest extends TestCase implements TestResou
             result = result.replace(File.separatorChar, '/');
         }
 
+        result = result.replace(System.lineSeparator(), "\n");
         return result;
     }
 

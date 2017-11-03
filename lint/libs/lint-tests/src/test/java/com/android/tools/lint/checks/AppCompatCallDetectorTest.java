@@ -16,19 +16,12 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.tools.lint.detector.api.TextFormat.RAW;
-import static com.android.tools.lint.detector.api.TextFormat.TEXT;
-
-import com.android.annotations.NonNull;
-import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.checks.infrastructure.TestFile.JarTestFile;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.Location;
-import com.android.tools.lint.detector.api.Severity;
 
 public class AppCompatCallDetectorTest extends AbstractCheckTest {
     public void testArguments() throws Exception {
-        assertEquals(""
+        String expected = ""
                 + "src/test/pkg/AppCompatTest.java:5: Warning: Should use getSupportActionBar instead of getActionBar name [AppCompatMethod]\n"
                 + "        getActionBar();                                     // ERROR\n"
                 + "        ~~~~~~~~~~~~~~\n"
@@ -47,86 +40,81 @@ public class AppCompatCallDetectorTest extends AbstractCheckTest {
                 + "src/test/pkg/AppCompatTest.java:16: Warning: Should use setSupportProgressBarIndeterminateVisibility instead of setProgressBarIndeterminateVisibility name [AppCompatMethod]\n"
                 + "        setProgressBarIndeterminateVisibility(true);        // ERROR\n"
                 + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 6 warnings\n",
-        lintProject(
+                + "0 errors, 6 warnings\n";
+        lint().files(
                 mAppCompatJar,
                 mAppCompatTest,
                 mIntermediateActivity,
                 // Stubs just to be able to do type resolution without needing the full appcompat jar
                 mActionBarActivity,
-                mActionMode
-        ));
+                mActionMode)
+                .run()
+                .expect(expected)
+                .expectFixDiffs(""
+                        + "Fix for src/test/pkg/AppCompatTest.java line 4: Replace with getSupportActionBar():\n"
+                        + "@@ -5 +5\n"
+                        + "-         getActionBar();                                     // ERROR\n"
+                        + "+         getSupportActionBar();                                     // ERROR\n"
+                        + "Fix for src/test/pkg/AppCompatTest.java line 7: Replace with startSupportActionMode():\n"
+                        + "@@ -8 +8\n"
+                        + "-         startActionMode(null);                              // ERROR\n"
+                        + "+         startSupportActionMode(null);                              // ERROR\n"
+                        + "Fix for src/test/pkg/AppCompatTest.java line 10: Replace with supportRequestWindowFeature():\n"
+                        + "@@ -11 +11\n"
+                        + "-         requestWindowFeature(0);                            // ERROR\n"
+                        + "+         supportRequestWindowFeature(0);                            // ERROR\n"
+                        + "Fix for src/test/pkg/AppCompatTest.java line 13: Replace with setSupportProgressBarVisibility():\n"
+                        + "@@ -14 +14\n"
+                        + "-         setProgressBarVisibility(true);                     // ERROR\n"
+                        + "+         setSupportProgressBarVisibility(true);                     // ERROR\n"
+                        + "Fix for src/test/pkg/AppCompatTest.java line 14: Replace with setSupportProgressBarIndeterminate():\n"
+                        + "@@ -15 +15\n"
+                        + "-         setProgressBarIndeterminate(true);                  // ERROR\n"
+                        + "+         setSupportProgressBarIndeterminate(true);                  // ERROR\n"
+                        + "Fix for src/test/pkg/AppCompatTest.java line 15: Replace with setSupportProgressBarIndeterminateVisibility():\n"
+                        + "@@ -16 +16\n"
+                        + "-         setProgressBarIndeterminateVisibility(true);        // ERROR\n"
+                        + "+         setSupportProgressBarIndeterminateVisibility(true);        // ERROR\n");
     }
 
     public void testNoWarningsWithoutAppCompat() throws Exception {
-        assertEquals("No warnings.",
-            lintProject(
-                    mAppCompatTest,
-                    mIntermediateActivity,
-                    mActionBarActivity,
-                    mActionMode
-            ));
+        lint().files(
+                mAppCompatTest,
+                mIntermediateActivity,
+                mActionBarActivity,
+                mActionMode)
+                .run()
+                .expectClean();
     }
 
     public void testNoCallWarningsInPreferenceActivitySubclass() throws Exception {
         // https://code.google.com/p/android/issues/detail?id=75700
         //noinspection all // Sample code
-        assertEquals("No warnings.",
-            lintProject(
-                    java(""
-                            + "package test.pkg;\n"
-                            + "\n"
-                            + "import android.annotation.TargetApi;\n"
-                            + "import android.os.Build;\n"
-                            + "import android.os.Bundle;\n"
-                            + "import android.preference.PreferenceActivity;\n"
-                            + "\n"
-                            + "public class AppCompatPrefTest extends PreferenceActivity {\n"
-                            + "    @TargetApi(Build.VERSION_CODES.HONEYCOMB)\n"
-                            + "    @Override\n"
-                            + "    protected void onCreate(Bundle savedInstanceState) {\n"
-                            + "        super.onCreate(savedInstanceState);\n"
-                            + "        getActionBar(); // Should not generate a warning\n"
-                            + "    }\n"
-                            + "}\n"),
-                    mAppCompatJar,
-                    mIntermediateActivity,
-                    // Stubs just to be able to do type resolution without needing the full appcompat jar
-                    mActionBarActivity,
-                    mActionMode
-            ));
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.annotation.TargetApi;\n"
+                        + "import android.os.Build;\n"
+                        + "import android.os.Bundle;\n"
+                        + "import android.preference.PreferenceActivity;\n"
+                        + "\n"
+                        + "public class AppCompatPrefTest extends PreferenceActivity {\n"
+                        + "    @TargetApi(Build.VERSION_CODES.HONEYCOMB)\n"
+                        + "    @Override\n"
+                        + "    protected void onCreate(Bundle savedInstanceState) {\n"
+                        + "        super.onCreate(savedInstanceState);\n"
+                        + "        getActionBar(); // Should not generate a warning\n"
+                        + "    }\n"
+                        + "}\n"),
+                mAppCompatJar,
+                mIntermediateActivity,
+                // Stubs just to be able to do type resolution without needing the full appcompat jar
+                mActionBarActivity,
+                mActionMode)
+                .run()
+                .expectClean();
     }
-
-    public void testGetOldCall() throws Exception {
-        assertEquals("setProgressBarVisibility", AppCompatCallDetector.getOldCall(
-            "Should use setSupportProgressBarVisibility instead of setProgressBarVisibility name",
-                TEXT));
-        assertEquals("getActionBar", AppCompatCallDetector.getOldCall(
-                "Should use getSupportActionBar instead of getActionBar name", TEXT));
-        assertNull(AppCompatCallDetector.getOldCall("No match", TEXT));
-        assertEquals("setProgressBarVisibility", AppCompatCallDetector.getOldCall(
-                "Should use `setSupportProgressBarVisibility` instead of `setProgressBarVisibility` name",
-                RAW));
-    }
-
-    public void testGetNewCall() throws Exception {
-        assertEquals("setSupportProgressBarVisibility", AppCompatCallDetector.getNewCall(
-                "Should use setSupportProgressBarVisibility instead of setProgressBarVisibility name",
-                TEXT));
-        assertEquals("getSupportActionBar", AppCompatCallDetector.getNewCall(
-                "Should use getSupportActionBar instead of getActionBar name", TEXT));
-        assertEquals("getSupportActionBar", AppCompatCallDetector.getNewCall(
-                "Should use `getSupportActionBar` instead of `getActionBar` name", RAW));
-        assertNull(AppCompatCallDetector.getNewCall("No match", TEXT));
-    }
-
-    @Override
-    protected void checkReportedError(@NonNull Context context, @NonNull Issue issue,
-            @NonNull Severity severity, @NonNull Location location, @NonNull String message) {
-        assertNotNull(message, AppCompatCallDetector.getOldCall(message, TEXT));
-        assertNotNull(message, AppCompatCallDetector.getNewCall(message, TEXT));
-    }
-
     @Override
     protected Detector getDetector() {
         return new AppCompatCallDetector();
@@ -203,7 +191,7 @@ public class AppCompatCallDetectorTest extends AbstractCheckTest {
             + "}\n");
 
     // Dummy file
-    private final TestFile mAppCompatJar = base64gzip("libs/appcompat-v7-18.0.0.jar", "");
+    private final JarTestFile mAppCompatJar = jar("libs/appcompat-v7-18.0.0.jar");
 
     @SuppressWarnings("all") // Sample code
     private TestFile mIntermediateActivity = java(""

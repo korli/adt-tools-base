@@ -19,28 +19,30 @@ package com.android.build.gradle.integration.common.performance;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
-import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
+import com.android.build.gradle.integration.common.fixture.app.KotlinHelloWorldApp;
 import com.android.build.gradle.integration.performance.BenchmarkRecorder;
 import com.android.build.gradle.integration.performance.ProjectScenario;
 import com.android.ide.common.util.ReferenceHolder;
-import com.google.common.collect.ImmutableSet;
+import com.android.testutils.TestUtils;
 import com.google.protobuf.Timestamp;
 import com.google.protobuf.util.Timestamps;
 import com.google.wireless.android.sdk.gradlelogging.proto.Logging;
 import com.google.wireless.android.sdk.gradlelogging.proto.Logging.BenchmarkMode;
+import com.google.wireless.android.sdk.stats.GradleBuildProject;
+import com.google.wireless.android.sdk.stats.GradleBuildVariant;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.Description;
-import org.junit.runner.RunWith;
 import org.junit.runners.model.Statement;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
 /** Smoke test for the performance test infrastructure. */
-@RunWith(MockitoJUnitRunner.class)
 public class PerformanceInfrastructureTest {
+    @Rule public MockitoRule rule = MockitoJUnit.rule();
 
     private final List<Logging.GradleBenchmarkResult> benchmarkResults = new ArrayList<>();
 
@@ -51,11 +53,11 @@ public class PerformanceInfrastructureTest {
 
         GradleTestProject project =
                 GradleTestProject.builder()
-                        .fromTestApp(HelloWorldApp.forPlugin("com.android.application"))
+                        .fromTestApp(KotlinHelloWorldApp.forPlugin("com.android.application"))
                         .forBenchmarkRecording(
                                 new BenchmarkRecorder(
                                         Logging.Benchmark.ANTENNA_POD,
-                                        ImmutableSet.of(ProjectScenario.DEX_OUT_OF_PROCESS),
+                                        ProjectScenario.DEX_OUT_OF_PROCESS,
                                         benchmarkResults::addAll))
                         .create();
 
@@ -97,6 +99,14 @@ public class PerformanceInfrastructureTest {
         assertThat(benchmarkResults.get(1).getProfile().getSpanCount()).isGreaterThan(0);
         assertThat(benchmarkResults.get(2).getProfile().getSpanCount()).isGreaterThan(0);
 
+        // Check that the variant info is populated
+        GradleBuildProject aProject = benchmarkResults.get(0).getProfile().getProject(0);
+        assertThat(aProject.getCompileSdk()).isEqualTo(GradleTestProject.getCompileSdkHash());
+        assertThat(aProject.getKotlinPluginVersion()).isEqualTo(TestUtils.KOTLIN_VERSION_FOR_TESTS);
+        GradleBuildVariant aVariant = aProject.getVariant(0);
+        assertThat(aVariant.getMinSdkVersion().getApiLevel()).isEqualTo(3);
+        assertThat(aVariant.hasTargetSdkVersion()).named("has target sdk version").isFalse();
+        assertThat(aVariant.hasMaxSdkVersion()).named("has max sdk version").isFalse();
         // Check that the timestamp is written after the build.
         assertThat(benchmarkResults.get(0).getTimestamp().getSeconds())
                 .isAtLeast(minimumTimestamp.getValue().getSeconds());

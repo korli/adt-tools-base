@@ -74,7 +74,6 @@ import com.android.utils.SdkUtils;
 import com.google.common.annotations.Beta;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
-import com.google.common.io.Closer;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -377,16 +376,9 @@ public abstract class Reporter {
             nameToFile.put(base, new File(url.toExternalForm()));
 
             File target = new File(resourceDir, base);
-            Closer closer = Closer.create();
-            try {
-                FileOutputStream output = closer.register(new FileOutputStream(target));
-                InputStream input = closer.register(url.openStream());
+            try (FileOutputStream output = new FileOutputStream(target);
+                 InputStream input = url.openStream()) {
                 ByteStreams.copy(input, output);
-            } catch (Throwable e) {
-                //noinspection ThrowableResultOfMethodCallIgnored
-                closer.rethrow(e);
-            } finally {
-                closer.close();
             }
             return resourceDir.getName() + '/' + encodeUrl(base);
         }
@@ -430,7 +422,7 @@ public abstract class Reporter {
         }
         int len = 0;
         int lastSeparatorIndex = 0;
-        // bug in inspection; see https://youtrack.jetbrains.com/issue/IDEA-118971
+        // bug in inspection; see http://youtrack.jetbrains.com/issue/IDEA-118971
         //noinspection ConstantConditions
         while (len < filePath.length() && len < basePath.length()
                 && filePathToCompare.charAt(len) == basePathToCompare.charAt(len)) {
@@ -497,7 +489,7 @@ public abstract class Reporter {
                     AppCompatCallDetector.ISSUE,
                     AppIndexingApiDetector.ISSUE_APP_INDEXING,
                     AppIndexingApiDetector.ISSUE_APP_INDEXING_API,
-                    AppIndexingApiDetector.ISSUE_URL_ERROR,
+                    //AppIndexingApiDetector.ISSUE_URL_ERROR,
                     ByteOrderMarkDetector.BOM,
                     CleanupDetector.SHARED_PREF,
                     CommentDetector.STOP_SHIP,
@@ -509,9 +501,9 @@ public abstract class Reporter {
                     GradleDetector.NOT_INTERPOLATED,
                     GradleDetector.PLUS,
                     GradleDetector.REMOTE_VERSION,
+                    GradleDetector.MIN_SDK_TOO_LOW,
                     GradleDetector.STRING_INTEGER,
                     GridLayoutDetector.ISSUE,
-                    IconDetector.ICON_LAUNCHER_FORMAT,
                     IconDetector.WEBP_ELIGIBLE,
                     IconDetector.WEBP_UNSUPPORTED,
                     IncludeDetector.ISSUE,

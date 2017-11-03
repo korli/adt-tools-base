@@ -19,7 +19,6 @@ package com.android.ddmlib.testrunner;
 import com.android.ddmlib.IShellOutputReceiver;
 import com.android.ddmlib.Log;
 import com.android.ddmlib.MultiLineReceiver;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -77,6 +76,9 @@ public class InstrumentationResultParser extends MultiLineReceiver {
         private static final String SHORTMSG = "shortMsg";
     }
 
+    /** known occuring key: stream */
+    private static final String STREAM = "stream";
+
     /** The set of expected status keys. Used to filter which keys should be stored as metrics */
     private static final Set<String> KNOWN_KEYS = new HashSet<String>();
     static {
@@ -87,7 +89,7 @@ public class InstrumentationResultParser extends MultiLineReceiver {
         KNOWN_KEYS.add(StatusKeys.ERROR);
         KNOWN_KEYS.add(StatusKeys.SHORTMSG);
         // unused, but regularly occurring status keys.
-        KNOWN_KEYS.add("stream");
+        KNOWN_KEYS.add(STREAM);
         KNOWN_KEYS.add("id");
         KNOWN_KEYS.add("current");
     }
@@ -175,7 +177,7 @@ public class InstrumentationResultParser extends MultiLineReceiver {
     private boolean mTestRunFailReported = false;
 
     /** The elapsed time of the test run, in milliseconds. */
-    private long mTestTime = 0;
+    private Long mTestTime = null;
 
     /** True if current test run has been canceled by user. */
     private boolean mIsCancelled = false;
@@ -190,8 +192,17 @@ public class InstrumentationResultParser extends MultiLineReceiver {
     private boolean mInInstrumentationResultKey = false;
 
     /**
-     * Stores key-value pairs under INSTRUMENTATION_RESULT header, these are printed at the
-     * end of a test run, if applicable
+     * True if the parser is enforcing a final time stamp to be present, for example: the Android
+     * JUnit Runner (AJUR) does always output the time stamp.
+     */
+    private boolean mEnforceTimeStamp = false;
+
+    /** Contains the full error available in 'stream=' in case of test runner fatal exception. */
+    private String mStreamError = null;
+
+    /**
+     * Stores key-value pairs under INSTRUMENTATION_RESULT header, these are printed at the end of a
+     * test run, if applicable
      */
     private Map<String, String> mInstrumentationResultBundle = new HashMap<String, String>();
 
@@ -212,6 +223,13 @@ public class InstrumentationResultParser extends MultiLineReceiver {
 
     /** Error message supplied when the test run is incomplete. */
     static final String INCOMPLETE_RUN_ERR_MSG_PREFIX = "Test run failed to complete";
+
+    /** Error message supplied from the test runner when some critical failure occurred */
+    static final String FATAL_EXCEPTION_MSG = "Fatal exception when running tests";
+
+    /** Error message supplied when the test run output doesn't contain a valid time stamp. */
+    public static final String INVALID_OUTPUT_ERR_MSG =
+            "Output from instrumentation is missing its time stamp";
 
     /**
      * Creates the InstrumentationResultParser.
@@ -318,6 +336,10 @@ public class InstrumentationResultParser extends MultiLineReceiver {
                     // test run must have failed
                     handleTestRunFailed(String.format("Instrumentation run failed due to '%1$s'",
                             statusValue));
+                } else if (STREAM.equals(mCurrentKey)) {
+                    if (statusValue != null && statusValue.contains(FATAL_EXCEPTION_MSG)) {
+                        mStreamError = statusValue;
+                    }
                 }
             } else {
                 TestResult testInfo = getCurrentTestInfo();
@@ -476,7 +498,6 @@ public class InstrumentationResultParser extends MultiLineReceiver {
             case StatusCodes.IGNORED:
                 metrics = getAndResetTestMetrics();
                 for (ITestRunListener listener : mTestListeners) {
-                    listener.testStarted(testId);
                     listener.testIgnored(testId);
                     listener.testEnded(testId, metrics);
                 }
@@ -586,6 +607,10 @@ public class InstrumentationResultParser extends MultiLineReceiver {
                 listener.testRunStarted(mTestRunName, 0);
             }
             listener.testRunFailed(errorMsg);
+            if (mTestTime == null) {
+                // We don't report an extra failure due to missing time stamp.
+                mTestTime = 0l;
+            }
             listener.testRunEnded(mTestTime, mInstrumentationResultBundle);
         }
         mTestStartReported = true;
@@ -622,8 +647,25 @@ public class InstrumentationResultParser extends MultiLineReceiver {
                     // no tests
                     listener.testRunStarted(mTestRunName, 0);
                 }
+                if (mTestTime == null) {
+                    // Report a test run failure since the output was invalid
+                    if (mEnforceTimeStamp) {
+                        if (mStreamError == null) {
+                            listener.testRunFailed(INVALID_OUTPUT_ERR_MSG);
+                        } else {
+                            listener.testRunFailed(
+                                    String.format("%s: %s", INVALID_OUTPUT_ERR_MSG, mStreamError));
+                        }
+                    }
+                    mTestTime = 0l;
+                }
                 listener.testRunEnded(mTestTime, mInstrumentationResultBundle);
             }
         }
+    }
+
+    /** Set to True to enforce searching for a final time stamp, and fail the run if missing. */
+    public void setEnforceTimeStamp(boolean isEnforced) {
+        mEnforceTimeStamp = isEnforced;
     }
 }

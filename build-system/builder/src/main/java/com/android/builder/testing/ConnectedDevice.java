@@ -32,9 +32,7 @@ import com.android.utils.ILogger;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -117,8 +115,14 @@ public class ConnectedDevice extends DeviceConnector {
             int timeout,
             ILogger logger) throws DeviceException {
         try {
-            iDevice.installPackage(apkFile.getAbsolutePath(), true /*reinstall*/,
-                    options.isEmpty() ? null : options.toArray(new String[options.size()]));
+            // Prepend -t to install apk marked as testOnly.
+            List<String> installOptions = Lists.newArrayListWithCapacity(1 + options.size());
+            installOptions.add("-t");
+            installOptions.addAll(options);
+            iDevice.installPackage(
+                    apkFile.getAbsolutePath(),
+                    true /*reinstall*/,
+                    installOptions.toArray(new String[installOptions.size()]));
         } catch (Exception e) {
             logger.error(e, "Unable to install " + apkFile.getAbsolutePath());
             throw new DeviceException(e);
@@ -133,8 +137,16 @@ public class ConnectedDevice extends DeviceConnector {
             throws DeviceException {
 
         try {
-            iDevice.installPackages(splitApkFiles, true /*reinstall*/,
-                    ImmutableList.copyOf(options), timeoutInMs, TimeUnit.MILLISECONDS);
+            // Prepend -t to install apk marked as testOnly.
+            List<String> installOptions = Lists.newArrayListWithCapacity(1 + options.size());
+            installOptions.add("-t");
+            installOptions.addAll(options);
+            iDevice.installPackages(
+                    splitApkFiles,
+                    true /*reinstall*/,
+                    installOptions,
+                    timeoutInMs,
+                    TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             List<String> apkFileNames =
                     Lists.transform(
@@ -161,6 +173,19 @@ public class ConnectedDevice extends DeviceConnector {
                                     throws TimeoutException, AdbCommandRejectedException,
                                     ShellCommandUnresponsiveException, IOException {
         iDevice.executeShellCommand(command, receiver, maxTimeToOutputResponse, maxTimeUnits);
+    }
+
+    @Override
+    public void executeShellCommand(
+            String command,
+            IShellOutputReceiver receiver,
+            long maxTimeout,
+            long maxTimeToOutputResponse,
+            TimeUnit maxTimeUnits)
+            throws TimeoutException, AdbCommandRejectedException, ShellCommandUnresponsiveException,
+                    IOException {
+        iDevice.executeShellCommand(
+                command, receiver, maxTimeout, maxTimeToOutputResponse, maxTimeUnits);
     }
 
     @NonNull
@@ -334,5 +359,13 @@ public class ConnectedDevice extends DeviceConnector {
         } catch (Exception e) {
             throw new DeviceException(e);
         }
+    }
+
+    /**
+     * Returns the corresponding {@link IDevice}. Used in packages common to Studio and the Plugin.
+     */
+    @NonNull
+    public IDevice getIDevice() {
+        return iDevice;
     }
 }

@@ -18,6 +18,8 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.TAG_APPLICATION;
+import static com.android.SdkConstants.VALUE_FALSE;
+import static com.android.xml.AndroidManifest.ATTRIBUTE_EXTRACT_NATIVE_LIBS;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -27,23 +29,23 @@ import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ClassContext;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.xml.AndroidManifest;
-import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import org.jetbrains.uast.UCallExpression;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
@@ -57,7 +59,7 @@ import org.w3c.dom.Node;
  * to adjust your code for the next tools release.</b>
  */
 public class UnpackedNativeCodeDetector extends ResourceXmlDetector implements Detector.XmlScanner,
-        JavaPsiScanner, Detector.ClassScanner {
+        UastScanner, Detector.ClassScanner {
 
     public static final Issue ISSUE = Issue.create(
             "UnpackedNativeCode",
@@ -152,8 +154,8 @@ public class UnpackedNativeCodeDetector extends ResourceXmlDetector implements D
     }
 
     @Override
-    public void visitMethod(@NonNull JavaContext context, @Nullable JavaElementVisitor visitor,
-                            @NonNull PsiMethodCallExpression call, @NonNull PsiMethod method) {
+    public void visitMethod(@NonNull JavaContext context, @NonNull UCallExpression call,
+            @NonNull PsiMethod method) {
         // Identify calls to Runtime.loadLibrary() and System.loadLibrary()
         if (LOAD_LIBRARY.equals(method.getName())) {
             JavaEvaluator evaluator = context.getEvaluator();
@@ -201,9 +203,11 @@ public class UnpackedNativeCodeDetector extends ResourceXmlDetector implements D
                 && !context.getMainProject().isLibrary()
                 && mApplicationTagHandle != null) {
             if (!mSuppress && mHasNativeLibs) {
+                LintFix fix = fix().set(ANDROID_URI, ATTRIBUTE_EXTRACT_NATIVE_LIBS, VALUE_FALSE)
+                        .build();
                 context.report(ISSUE, mApplicationTagHandle.resolve(),
                         "Missing attribute android:extractNativeLibs=\"false\"" +
-                                " on the `<application>` tag.");
+                                " on the `<application>` tag.", fix);
             }
         }
     }

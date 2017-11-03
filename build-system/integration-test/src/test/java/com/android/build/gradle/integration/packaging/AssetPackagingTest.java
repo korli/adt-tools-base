@@ -16,14 +16,13 @@
 
 package com.android.build.gradle.integration.packaging;
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAar;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.TemporaryProjectModification;
 import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
+import com.android.build.gradle.integration.common.truth.ApkSubject;
+import com.android.build.gradle.integration.common.truth.TruthHelper;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
@@ -36,6 +35,7 @@ import java.util.Arrays;
 import java.util.zip.GZIPOutputStream;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -47,6 +47,7 @@ public class AssetPackagingTest {
     @Rule
     public GradleTestProject project = GradleTestProject.builder()
             .fromTestProject("projectWithModules")
+            .withDependencyChecker(false)
             .create();
 
     private GradleTestProject appProject;
@@ -55,7 +56,7 @@ public class AssetPackagingTest {
     private GradleTestProject testProject;
 
     @Before
-    public void setUp() throws IOException {
+    public void setUp() throws Exception {
         appProject = project.getSubproject("app");
         libProject = project.getSubproject("library");
         libProject2 = project.getSubproject("library2");
@@ -118,7 +119,7 @@ public class AssetPackagingTest {
         libProject2 = null;
     }
 
-    private void execute(@NonNull String... tasks) {
+    private void execute(@NonNull String... tasks) throws IOException, InterruptedException {
         project.executor().run(tasks);
     }
 
@@ -126,15 +127,18 @@ public class AssetPackagingTest {
             @NonNull File projectFolder,
             @NonNull String dimension,
             @NonNull String filename,
-            @NonNull String content) throws IOException {
+            @NonNull String content)
+            throws Exception {
         createOriginalAsset(projectFolder, dimension, filename, content.getBytes(Charsets.UTF_8));
     }
 
+    @SuppressWarnings("SameParameterValue") // Helper function, ready for future tests.
     private static void createOriginalGzippedAsset(
             @NonNull File projectFolder,
             @NonNull String dimension,
             @NonNull String filename,
-            @NonNull byte[] content) throws IOException {
+            @NonNull byte[] content)
+            throws Exception {
         ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
         try (GZIPOutputStream out = new GZIPOutputStream(byteArrayOutputStream)) {
             out.write(content);
@@ -146,7 +150,8 @@ public class AssetPackagingTest {
             @NonNull File projectFolder,
             @NonNull String dimension,
             @NonNull String filename,
-            @NonNull byte[] content) throws IOException {
+            @NonNull byte[] content)
+            throws Exception {
         Path assetFolder = FileUtils.join(projectFolder, "src", dimension, "assets").toPath();
         Files.createDirectories(assetFolder);
         Path assetFile = assetFolder.resolve(filename);
@@ -154,7 +159,7 @@ public class AssetPackagingTest {
     }
 
     @Test
-    public void testNonIncrementalPackaging() throws IOException {
+    public void testNonIncrementalPackaging() throws Exception {
         execute("clean", "assembleDebug", "assembleAndroidTest");
 
         // chek the files are there. Start from the bottom of the dependency graph
@@ -305,6 +310,7 @@ public class AssetPackagingTest {
     }
 
     @Test
+    @Ignore("http://b.android.com/238185")
     public void testAppProjectWithAddedAndRemovedAsset() throws Exception {
         execute("clean", "app:assembleDebug");
 
@@ -566,67 +572,76 @@ public class AssetPackagingTest {
 
         execute("app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).doesNotContain("assets/aa");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("assets/ab", abData);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("assets/ba");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("assets/bb");
+        TruthHelper.assertThat(appProject.getApk("debug")).doesNotContain("assets/aa");
+        TruthHelper.assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("assets/ab", abData);
+        TruthHelper.assertThat(appProject.getApk("debug")).doesNotContain("assets/ba");
+        TruthHelper.assertThat(appProject.getApk("debug")).doesNotContain("assets/bb");
     }
 
     /**
      * check an apk has (or not) the given asset file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
-     * @param project  the project
+     * @param project the project
      * @param filename the filename
-     * @param content  the content
+     * @param content the content
      */
     private static void checkApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException {
-        check(assertThatApk(project.getApk("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(TruthHelper.assertThat(project.getApk("debug")), filename, content);
     }
 
     /**
      * check a test apk has (or not) the given asset file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
-     * @param project  the project
+     * @param project the project
      * @param filename the filename
-     * @param content  the content
+     * @param content the content
      */
-    private void checkTestApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException {
-        check(assertThatApk(project.getTestApk("debug")), filename, content);
+    private static void checkTestApk(
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(TruthHelper.assertThat(project.getTestApk()), filename, content);
     }
 
     /**
      * check an aat has (or not) the given asset file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
-     * @param project  the project
+     * @param project the project
      * @param filename the filename
-     * @param content  the content
+     * @param content the content
      */
     private static void checkAar(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException {
-        check(assertThatAar(project.getAar("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(TruthHelper.assertThat(project.getAar("debug")), filename, content);
     }
 
     private static void check(
             @NonNull AbstractAndroidSubject subject,
             @NonNull String filename,
-            @Nullable String content) throws IOException {
+            @Nullable String content)
+            throws Exception {
+        if (content != null) {
+            subject.containsFileWithContent("assets/" + filename, content);
+        } else {
+            subject.doesNotContain("assets/" + filename);
+        }
+    }
+
+    private static void check(
+            @NonNull ApkSubject subject, @NonNull String filename, @Nullable String content)
+            throws Exception {
         if (content != null) {
             subject.containsFileWithContent("assets/" + filename, content);
         } else {

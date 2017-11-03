@@ -23,11 +23,9 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
 import com.google.common.hash.Hashing;
 import com.google.common.io.Files;
-
-import org.apache.commons.codec.binary.Base64;
-
 import java.io.File;
 import java.io.IOException;
+import org.apache.commons.codec.binary.Base64;
 
 /**
  * File cache that stored files based on their origin path. The general contract of the
@@ -61,7 +59,8 @@ public class FileCacheByPath {
      * @param directory the directory where the cache is stored
      */
     public FileCacheByPath(@NonNull File directory) {
-        Preconditions.checkArgument(directory.isDirectory(), "!directory.isDirectory()");
+        Preconditions.checkArgument(
+                directory.isDirectory(), directory.getAbsolutePath() + "!.isDirectory()");
 
         this.directory = directory;
     }

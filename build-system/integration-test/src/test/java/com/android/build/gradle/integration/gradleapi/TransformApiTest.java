@@ -21,25 +21,24 @@ import static com.android.builder.core.BuilderConstants.DEBUG;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+import com.android.SdkConstants;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidArtifactOutput;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
-import com.android.ide.common.process.ProcessException;
+import com.android.testutils.apk.Apk;
 import com.google.common.collect.Iterators;
-import java.io.File;
-import java.io.IOException;
+import com.google.common.io.Files;
 import java.util.Collection;
-import org.junit.Assume;
-import org.junit.BeforeClass;
+import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 
-/**
- * Test for building a transform against version 1.5.
- */
+/** Test for building a transform against version 1.5. */
+@Ignore("http://b/37529666")
 public class TransformApiTest {
 
     @Rule
@@ -47,14 +46,20 @@ public class TransformApiTest {
             .fromTestProject("transformApiTest")
             .create();
 
-    @BeforeClass
-    public static void setUp() throws IOException {
-        Assume.assumeFalse("Transform api cannot be used with jack.", GradleTestProject.USE_JACK);
+    @Before
+    public void moveLocalProperties() throws Exception {
+        // Only one of the projects is an Android project, and there is no top-level
+        // settings.gradle, so local.properties ends up not being picked up. Just move
+        // it to the project that needs it.
+        Files.move(
+                wholeProject.file(SdkConstants.FN_LOCAL_PROPERTIES),
+                wholeProject
+                        .getSubproject("androidproject")
+                        .file(SdkConstants.FN_LOCAL_PROPERTIES));
     }
 
     @Test
-    public void checkRepackagedGsonLibrary() throws IOException, ProcessException {
-
+    public void checkRepackagedGsonLibrary() throws Exception {
         wholeProject.getSubproject("plugin").execute("uploadArchives");
 
         AndroidProject model = wholeProject.getSubproject("androidproject")
@@ -76,8 +81,8 @@ public class TransformApiTest {
         assertEquals(1, debugOutputs.size());
 
         // make sure the Gson library has been renamed and the original one is not present.
-        File outputFile = Iterators.getOnlyElement(debugOutputs.iterator()).getMainOutputFile().
-                getOutputFile();
+        Apk outputFile = new Apk(Iterators.getOnlyElement(debugOutputs.iterator()).getMainOutputFile().
+                getOutputFile());
         assertThatApk(outputFile).containsClass("Lcom/google/repacked/gson/Gson;");
         assertThatApk(outputFile).doesNotContainClass("Lcom/google/gson/Gson;");
     }

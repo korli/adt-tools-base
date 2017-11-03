@@ -16,6 +16,7 @@
 package com.android.sdklib.repository.installer;
 
 import static com.android.sdklib.IAndroidTarget.SOURCES;
+import static com.android.utils.FileUtils.toSystemDependentPath;
 import static com.google.common.truth.Truth.assertThat;
 
 import com.android.annotations.NonNull;
@@ -59,6 +60,7 @@ public class SourceInstallListenerTest extends TestCase {
         FakePackage.FakeRemotePackage remote = new FakePackage.FakeRemotePackage("sources;android-23");
         URL archiveUrl = new URL("http://www.example.com/plat23/sources.zip");
         remote.setCompleteUrl(archiveUrl.toString());
+
         DetailsTypes.SourceDetailsType sourceDetails =
                 AndroidSdkHandler.getRepositoryModule().createLatestFactory()
                         .createSourceDetailsType();
@@ -92,7 +94,8 @@ public class SourceInstallListenerTest extends TestCase {
         IAndroidTarget target = mockHandler.getAndroidTargetManager(progress)
                 .getTargetFromHashString("android-23", progress);
         assertNotNull(target);
-        assertThat(target.getPath(SOURCES)).isEqualTo("/sdk/platforms/android-23/sources");
+        assertThat(target.getPath(SOURCES))
+                .isEqualTo(toSystemDependentPath("/sdk/platforms/android-23/sources"));
 
         // Install
         InstallerFactory factory = SdkInstallerUtil.findBestInstallerFactory(remote, mockHandler);
@@ -102,7 +105,8 @@ public class SourceInstallListenerTest extends TestCase {
 
         // Assert that source path is updated to correct value
         progress.assertNoErrorsOrWarnings();
-        assertThat(target.getPath(SOURCES)).isEqualTo("/sdk/sources/android-23");
+        assertThat(target.getPath(SOURCES))
+                .isEqualTo(toSystemDependentPath("/sdk/sources/android-23"));
     }
 
     public void testSourcePathUpdatedWithUnInstall() throws Exception {
@@ -125,7 +129,8 @@ public class SourceInstallListenerTest extends TestCase {
         IAndroidTarget target = mockHandler.getAndroidTargetManager(progress)
                 .getTargetFromHashString("android-23", progress);
         assertNotNull(target);
-        assertThat(target.getPath(SOURCES)).isEqualTo("/sdk/sources/android-23");
+        assertThat(target.getPath(SOURCES))
+                .isEqualTo(toSystemDependentPath("/sdk/sources/android-23"));
 
         // Uninstall
         BasicInstallerFactory factory = new BasicInstallerFactory();
@@ -141,7 +146,8 @@ public class SourceInstallListenerTest extends TestCase {
 
         // Assert that source path is set back to null thus deprecated value is returned
         progress.assertNoErrorsOrWarnings();
-        assertThat(target.getPath(SOURCES)).isEqualTo("/sdk/platforms/android-23/sources");
+        assertThat(target.getPath(SOURCES))
+                .isEqualTo(toSystemDependentPath("/sdk/platforms/android-23/sources"));
     }
 
     @NonNull

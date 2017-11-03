@@ -16,17 +16,19 @@
 
 package com.android.ide.common.blame;
 
-import com.google.common.collect.Maps;
+import static com.google.common.truth.Truth.assertThat;
 
+import com.google.common.base.Charsets;
+import com.google.common.collect.Maps;
+import com.google.common.io.Files;
+import java.io.File;
+import java.io.IOException;
+import java.util.Map;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Map;
 
 public class MergingLogTest {
 
@@ -111,6 +113,59 @@ public class MergingLogTest {
         Assert.assertEquals("", noMatch2, mergingLog.find(noMatch2));
 
         mergingLog.write();
+    }
+
+    @Test
+    public void testMinimalPersistence() throws IOException {
+        SourcePosition sourcePosition1 = new SourcePosition(7, 8, 20);
+        File sourceFile1 = absoluteFile("exploded/a/values/values.xml");
+        final SourceFilePosition position1 =
+                new SourceFilePosition(new SourceFile(sourceFile1), sourcePosition1);
+
+        SourcePosition sourcePosition2 = new SourcePosition(2, 3, 14);
+        File sourceFile2 = absoluteFile("exploded/b/values/values.xml");
+        final SourceFilePosition position2 =
+                new SourceFilePosition(new SourceFile(sourceFile2), sourcePosition2);
+
+        File tempDir = mTemporaryFolder.newFolder();
+        MergingLog mergingLog = new MergingLog(tempDir);
+
+        Map<SourcePosition, SourceFilePosition> map = Maps.newLinkedHashMap();
+        File outputFile = absoluteFile("merged/values/values.xml");
+        map.put(sourcePosition1, position1);
+        map.put(sourcePosition2, position2);
+        mergingLog.logSource(new SourceFile(outputFile), map);
+
+        mergingLog.write();
+        assertThat(tempDir.listFiles()).isNotEmpty();
+        File expectedLogFile = new File(new File(tempDir, "multi-v2"), "values.json");
+        assertThat(expectedLogFile.exists()).isTrue();
+        String log = Files.asCharSource(expectedLogFile, Charsets.UTF_8).read();
+        assertThat(log).doesNotContain("\"to\"");
+        assertThat(log).doesNotContain("endLines");
+
+        // now reload the minimal log and assert that memory model is correct.
+        Map<SourceFile, Map<SourcePosition, SourceFilePosition>> values =
+                MergingLogPersistUtil.loadFromMultiFileVersion2(tempDir, "values");
+
+        assertThat(values).hasSize(1);
+        Map<SourcePosition, SourceFilePosition> loadedMap = values.get(new SourceFile(outputFile));
+        assertThat(loadedMap).isNotNull();
+        assertThat(loadedMap).hasSize(2);
+
+        SourceFilePosition sourceFilePosition1 = loadedMap.get(sourcePosition1);
+        assertThat(sourceFilePosition1).isNotNull();
+        assertThat(sourceFilePosition1.getPosition()).isEqualTo(sourcePosition1);
+        assertThat(sourceFilePosition1.getFile().getSourceFile()).isEqualTo(sourceFile1);
+        assertThat(sourceFilePosition1.getPosition().getEndLine())
+                .isEqualTo(position1.getPosition().getEndLine());
+
+        SourceFilePosition sourceFilePosition2 = loadedMap.get(sourcePosition2);
+        assertThat(sourceFilePosition2).isNotNull();
+        assertThat(sourceFilePosition2.getPosition()).isEqualTo(sourcePosition2);
+        assertThat(sourceFilePosition2.getFile().getSourceFile()).isEqualTo(sourceFile2);
+        assertThat(sourceFilePosition2.getPosition().getEndLine())
+                .isEqualTo(position2.getPosition().getEndLine());
     }
 
     private File testPath;

@@ -257,51 +257,67 @@ public class SecurityDetectorTest extends AbstractCheckTest {
 
     // exportprovider1.xml has two exported content providers with no permissions
     public void testContentProvider1() throws Exception {
-        //noinspection all // Sample code
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:14: Warning: Exported content providers can provide access to potentially sensitive data [ExportedContentProvider]\n"
                 + "        <provider\n"
                 + "        ^\n"
                 + "AndroidManifest.xml:20: Warning: Exported content providers can provide access to potentially sensitive data [ExportedContentProvider]\n"
                 + "        <provider\n"
                 + "        ^\n"
-                + "0 errors, 2 warnings\n",
-             lintProject(
-                    xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"foo.bar2\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "\n"
-                            + "        <!-- exported implicitly, fail -->\n"
-                            + "        <provider\n"
-                            + "            android:name=\"com.sample.provider.providerClass1\"\n"
-                            + "            android:authorities=\"com.sample.provider.providerData\">\n"
-                            + "        </provider>\n"
-                            + "\n"
-                            + "        <!-- exported explicitly, fail -->\n"
-                            + "        <provider\n"
-                            + "            android:exported=\"true\"\n"
-                            + "            android:name=\"com.sample.provider.providerClass2\"\n"
-                            + "            android:authorities=\"com.sample.provider.providerData\">\n"
-                            + "        </provider>\n"
-                            + "\n"
-                            + "        <!-- not exported, win -->\n"
-                            + "        <provider\n"
-                            + "            android:exported=\"false\"\n"
-                            + "            android:name=\"com.sample.provider.providerClass3\"\n"
-                            + "            android:authorities=\"com.sample.provider.providerData\">\n"
-                            + "        </provider>\n"
-                            + "    </application>\n"
-                            + "</manifest>\n"),
-                    mStrings));
+                + "0 errors, 2 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
+                xml("AndroidManifest.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"foo.bar2\"\n"
+                        + "    android:versionCode=\"1\"\n"
+                        + "    android:versionName=\"1.0\" >\n"
+                        + "\n"
+                        + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                        + "        android:label=\"@string/app_name\" >\n"
+                        + "\n"
+                        + "        <!-- exported implicitly, fail -->\n"
+                        + "        <provider\n"
+                        + "            android:name=\"com.sample.provider.providerClass1\"\n"
+                        + "            android:authorities=\"com.sample.provider.providerData\">\n"
+                        + "        </provider>\n"
+                        + "\n"
+                        + "        <!-- exported explicitly, fail -->\n"
+                        + "        <provider\n"
+                        + "            android:exported=\"true\"\n"
+                        + "            android:name=\"com.sample.provider.providerClass2\"\n"
+                        + "            android:authorities=\"com.sample.provider.providerData\">\n"
+                        + "        </provider>\n"
+                        + "\n"
+                        + "        <!-- not exported, win -->\n"
+                        + "        <provider\n"
+                        + "            android:exported=\"false\"\n"
+                        + "            android:name=\"com.sample.provider.providerClass3\"\n"
+                        + "            android:authorities=\"com.sample.provider.providerData\">\n"
+                        + "        </provider>\n"
+                        + "    </application>\n"
+                        + "</manifest>\n"),
+                mStrings)
+                .run()
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for AndroidManifest.xml line 13: Set exported=\"false\":\n"
+                + "@@ -16 +16\n"
+                + "              android:name=\"com.sample.provider.providerClass1\"\n"
+                + "-             android:authorities=\"com.sample.provider.providerData\" >\n"
+                + "+             android:authorities=\"com.sample.provider.providerData\"\n"
+                + "+             android:exported=\"false\" >\n"
+                + "          </provider>\n"
+                + "Fix for AndroidManifest.xml line 19: Set exported=\"false\":\n"
+                + "@@ -23 +23\n"
+                + "              android:authorities=\"com.sample.provider.providerData\"\n"
+                + "-             android:exported=\"true\" >\n"
+                + "+             android:exported=\"false\" >\n"
+                + "          </provider>\n");
     }
 
     // exportprovider2.xml has no un-permissioned exported content providers
@@ -366,8 +382,8 @@ public class SecurityDetectorTest extends AbstractCheckTest {
                 + "            out = openFileOutput(mFile.getName(), MODE_WORLD_READABLE);\n"
                 + "                                                  ~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/WorldWriteableFile.java:32: Warning: Using MODE_WORLD_READABLE when creating files can be risky, review carefully [WorldReadableFiles]\n"
-                + "            prefs = getSharedPreferences(mContext, MODE_WORLD_READABLE);\n"
-                + "                                                   ~~~~~~~~~~~~~~~~~~~\n"
+                + "            prefs = getSharedPreferences(mFile.getName(), MODE_WORLD_READABLE);\n"
+                + "                                                          ~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/WorldWriteableFile.java:36: Warning: Using MODE_WORLD_READABLE when creating files can be risky, review carefully [WorldReadableFiles]\n"
                 + "            dir = getDir(mFile.getName(), MODE_WORLD_READABLE);\n"
                 + "                                          ~~~~~~~~~~~~~~~~~~~\n"
@@ -375,8 +391,8 @@ public class SecurityDetectorTest extends AbstractCheckTest {
                 + "            out = openFileOutput(mFile.getName(), MODE_WORLD_WRITEABLE);\n"
                 + "                                                  ~~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/WorldWriteableFile.java:31: Warning: Using MODE_WORLD_WRITEABLE when creating files can be risky, review carefully [WorldWriteableFiles]\n"
-                + "            prefs = getSharedPreferences(mContext, MODE_WORLD_WRITEABLE);\n"
-                + "                                                   ~~~~~~~~~~~~~~~~~~~~\n"
+                + "            prefs = getSharedPreferences(mFile.getName(), MODE_WORLD_WRITEABLE);\n"
+                + "                                                          ~~~~~~~~~~~~~~~~~~~~\n"
                 + "src/test/pkg/WorldWriteableFile.java:35: Warning: Using MODE_WORLD_WRITEABLE when creating files can be risky, review carefully [WorldWriteableFiles]\n"
                 + "            dir = getDir(mFile.getName(), MODE_WORLD_WRITEABLE);\n"
                 + "                                          ~~~~~~~~~~~~~~~~~~~~\n"
@@ -396,7 +412,7 @@ public class SecurityDetectorTest extends AbstractCheckTest {
                             + "import android.app.Activity;\n"
                             + "import android.os.Bundle;\n"
                             + "\n"
-                            + "public class WorldWriteableFile {\n"
+                            + "public class WorldWriteableFile extends Activity {\n"
                             + "    File mFile;\n"
                             + "    Context mContext;\n"
                             + "\n"
@@ -407,15 +423,15 @@ public class SecurityDetectorTest extends AbstractCheckTest {
                             + "\n"
                             + "        boolean success = false;\n"
                             + "        try {\n"
-                            + "            out = openFileOutput(mFile.getName()); // ok\n"
+                            + "            //out = openFileOutput(mFile.getName()); // ok\n"
                             + "            out = openFileOutput(mFile.getName(), MODE_PRIVATE); // ok\n"
                             + "            out = openFileOutput(mFile.getName(), MODE_WORLD_WRITEABLE);\n"
                             + "            out = openFileOutput(mFile.getName(), MODE_WORLD_READABLE);\n"
                             + "\n"
-                            + "            prefs = getSharedPreferences(mContext, 0); // ok\n"
-                            + "            prefs = getSharedPreferences(mContext, MODE_PRIVATE); // ok\n"
-                            + "            prefs = getSharedPreferences(mContext, MODE_WORLD_WRITEABLE);\n"
-                            + "            prefs = getSharedPreferences(mContext, MODE_WORLD_READABLE);\n"
+                            + "            prefs = getSharedPreferences(mFile.getName(), 0); // ok\n"
+                            + "            prefs = getSharedPreferences(mFile.getName(), MODE_PRIVATE); // ok\n"
+                            + "            prefs = getSharedPreferences(mFile.getName(), MODE_WORLD_WRITEABLE);\n"
+                            + "            prefs = getSharedPreferences(mFile.getName(), MODE_WORLD_READABLE);\n"
                             + "\n"
                             + "            dir = getDir(mFile.getName(), MODE_PRIVATE); // ok\n"
                             + "            dir = getDir(mFile.getName(), MODE_WORLD_WRITEABLE);\n"
@@ -474,38 +490,48 @@ public class SecurityDetectorTest extends AbstractCheckTest {
     }
 
     public void testReceiver1() throws Exception {
-        //noinspection all // Sample code
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:12: Warning: Exported receiver does not require permission [ExportedReceiver]\n"
                 + "        <receiver\n"
                 + "        ^\n"
-                + "0 errors, 1 warnings\n",
-            lintProject(
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
                 xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"foo.bar2\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "        <receiver\n"
-                            + "            android:label=\"@string/app_name\"\n"
-                            + "            android:name=\"com.sample.service.serviceClass\" >\n"
-                            + "            <intent-filter >\n"
-                            + "                <action android:name=\"com.sample.service.serviceClass\" >\n"
-                            + "                </action>\n"
-                            + "            </intent-filter>\n"
-                            + "        </receiver>\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"
-                            + "\n"),
-                mStrings));
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"foo.bar2\"\n"
+                        + "    android:versionCode=\"1\"\n"
+                        + "    android:versionName=\"1.0\" >\n"
+                        + "\n"
+                        + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                        + "        android:label=\"@string/app_name\" >\n"
+                        + "        <receiver\n"
+                        + "            android:label=\"@string/app_name\"\n"
+                        + "            android:name=\"com.sample.service.serviceClass\" >\n"
+                        + "            <intent-filter >\n"
+                        + "                <action android:name=\"com.sample.service.serviceClass\" >\n"
+                        + "                </action>\n"
+                        + "            </intent-filter>\n"
+                        + "        </receiver>\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"
+                        + "\n"),
+                mStrings)
+                .run()
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for AndroidManifest.xml line 11: Set permission:\n"
+                + "@@ -14 +14\n"
+                + "              android:name=\"com.sample.service.serviceClass\"\n"
+                + "-             android:label=\"@string/app_name\" >\n"
+                + "+             android:label=\"@string/app_name\"\n"
+                + "+             android:permission=\"|\" >\n"
+                + "              <intent-filter>\n");
     }
 
     public void testReceiver2() throws Exception {
@@ -578,39 +604,47 @@ public class SecurityDetectorTest extends AbstractCheckTest {
 
     public void testReceiver4() throws Exception {
         // Not defining exported, but have intent-filters
-        //noinspection all // Sample code
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:12: Warning: Exported receiver does not require permission [ExportedReceiver]\n"
                 + "        <receiver\n"
                 + "        ^\n"
-                + "0 errors, 1 warnings\n",
-            lintProject(
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
                 xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"foo.bar2\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "        <receiver\n"
-                            + "            android:label=\"@string/app_name\"\n"
-                            + "            android:name=\"com.sample.service.serviceClass\"\n"
-                            + "            android:process=\":remote\" >\n"
-                            + "            <intent-filter >\n"
-                            + "                <action android:name=\"com.sample.service.serviceClass\" >\n"
-                            + "                </action>\n"
-                            + "            </intent-filter>\n"
-                            + "        </receiver>\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"
-                            + "\n"),
-                mStrings));
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"foo.bar2\"\n"
+                        + "    android:versionCode=\"1\"\n"
+                        + "    android:versionName=\"1.0\" >\n"
+                        + "\n"
+                        + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                        + "        android:label=\"@string/app_name\" >\n"
+                        + "        <receiver\n"
+                        + "            android:label=\"@string/app_name\"\n"
+                        + "            android:name=\"com.sample.service.serviceClass\"\n"
+                        + "            android:process=\":remote\" >\n"
+                        + "            <intent-filter >\n"
+                        + "                <action android:name=\"com.sample.service.serviceClass\" >\n"
+                        + "                </action>\n"
+                        + "            </intent-filter>\n"
+                        + "        </receiver>\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"
+                        + "\n"),
+                mStrings)
+                .run()
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for AndroidManifest.xml line 11: Set permission:\n"
+                + "@@ -15 +15\n"
+                + "              android:label=\"@string/app_name\"\n"
+                + "+             android:permission=\"|\"\n"
+                + "              android:process=\":remote\" >\n");
     }
 
     public void testReceiver5() throws Exception {

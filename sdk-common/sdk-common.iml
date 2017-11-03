@@ -6,6 +6,7 @@
       <sourceFolder url="file://$MODULE_DIR$/src/main/java" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/test/java" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/src/test/resources" type="java-test-resource" />
+      <sourceFolder url="file://$MODULE_DIR$/src/main/resources" type="java-resource" />
     </content>
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="inheritedJdk" />
@@ -31,5 +32,20 @@
     <orderEntry type="library" name="bouncy-castle-provider" level="project" />
     <orderEntry type="library" scope="TEST" name="Mocks" level="project" />
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
+    <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
+    <orderEntry type="library" scope="PROVIDED" name="auto-value-1.4.1" level="project" />
+    <orderEntry type="library" name="jimfs" level="project" scope="TEST" />
+    <orderEntry type="module" module-name="android-annotations" />
+    <orderEntry type="module" module-name="ddmlib" />
+    <orderEntry type="library" name="Guava" level="project" />
+    <orderEntry type="module-library">
+      <library>
+        <CLASSES>
+          <root url="jar://$MODULE_DIR$/lib/aia-manifest-proto-1.0-jarjar.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+      </library>
+    </orderEntry>
   </component>
 </module>

@@ -1,168 +1,7 @@
-load(":utils.bzl", "create_java_compiler_args", "explicit_target")
-
-def _kotlin_jar_impl(ctx):
-
-  class_jar = ctx.outputs.class_jar
-
-  all_deps = set(ctx.files.deps)
-  all_deps += set(ctx.files._kotlin)
-  for this_dep in ctx.attr.deps:
-    if hasattr(this_dep, "java"):
-      all_deps += this_dep.java.transitive_runtime_deps
-
-  args, option_files = create_java_compiler_args(ctx, class_jar.path,
-                                                 all_deps)
-
-  cmd = ctx.executable._kotlinc.path + " " + " ".join(args)
-  ctx.action(
-    inputs = [ctx.executable._kotlinc] + ctx.files.srcs + list(all_deps) + option_files,
-    outputs = [class_jar],
-    mnemonic = "kotlinc",
-    command = cmd,
-  )
-
-_kotlin_jar = rule(
-    attrs = {
-        "srcs": attr.label_list(
-            non_empty = True,
-            allow_files = True,
-        ),
-        "deps": attr.label_list(
-            mandatory = False,
-            allow_files = FileType([".jar"]),
-        ),
-        "_kotlinc": attr.label(
-            executable = True,
-            cfg = "host",
-            default = Label("//tools/base/bazel:kotlinc"),
-            allow_files = True),
-        "_kotlin": attr.label(
-            default = Label("//tools/base/bazel:kotlin-runtime"),
-            allow_files = True),
-    },
-    outputs = {
-        "class_jar": "lib%{name}.jar",
-    },
-    implementation = _kotlin_jar_impl,
-)
-
-def _groovy_jar_impl(ctx):
-  all_deps = set(ctx.files.deps)
-  for this_dep in ctx.attr.deps:
-    if hasattr(this_dep, "java"):
-      # Groovy needs the class to be loadable so it cannot work with ijars and needs the full jars.
-      all_deps += this_dep.java.transitive_runtime_deps
-
-  class_jar = ctx.outputs.class_jar
-
-  args, option_files = create_java_compiler_args(ctx, class_jar.path,
-                                                 all_deps)
-
-  cmd = ctx.executable._groovy.path + " " + " ".join(args)
-  ctx.action(
-      inputs = [ctx.executable._groovy] + ctx.files.srcs + list(all_deps) + option_files,
-      outputs = [class_jar],
-      mnemonic = "groovyc",
-      command = cmd
-  )
-
-_groovy_jar = rule(
-    attrs = {
-        "srcs": attr.label_list(
-            non_empty = True,
-            allow_files = True,
-        ),
-        "deps": attr.label_list(
-            mandatory = False,
-            allow_files = FileType([".jar"]),
-        ),
-        "_groovy": attr.label(
-            executable = True,
-            cfg = "host",
-            default = Label("//tools/base/bazel:groovyc"),
-            allow_files = True),
-    },
-    outputs = {
-        "class_jar": "lib%{name}.jar",
-    },
-    implementation = _groovy_jar_impl,
-)
-
-def _fileset_impl(ctx):
-  srcs = set(order="compile")
-  for src in ctx.attr.srcs:
-    srcs += src.files
-
-  remap = {}
-  for a, b in ctx.attr.maps.items():
-    if a.startswith("//"):
-      key = a[2:].replace(':', '/')
-    else:
-      key = ctx.label.package + "/" + a
-    remap[key] = b
-
-  cmd = ""
-  for f in ctx.files.srcs:
-    if f.path in remap:
-      dest = remap[f.path]
-      fd = ctx.new_file(dest)
-      cmd += "mkdir -p " + fd.dirname + "\n"
-      cmd += "cp -f " + f.path + " " + fd.path + "\n"
-
-  script = ctx.new_file(ctx.label.name + ".cmd.sh")
-  ctx.file_action(output = script, content = cmd)
-
-  # Execute the command
-  ctx.action(
-    inputs = (
-      ctx.files.srcs +
-      [script]
-    ),
-    outputs = ctx.outputs.outs,
-    mnemonic = "fileset",
-    command = "set -e; sh " + script.path,
-    use_default_shell_env = True,
-  )
-
-
-_fileset = rule(
-    executable=False,
-    attrs = {
-      "srcs": attr.label_list(allow_files=True),
-      "maps": attr.string_dict(mandatory=True, non_empty=True),
-      "outs": attr.output_list(mandatory=True, non_empty=True),
-    },
-    implementation = _fileset_impl,
-)
-
-def fileset(name, srcs=[], mappings={}, **kwargs):
-  outs = []
-  maps = {}
-  rem = []
-  for src in srcs:
-    done = False
-    for prefix, destination in mappings.items():
-      if src.startswith(prefix):
-        f = destination + src[len(prefix):];
-        maps[src] = f
-        outs += [f]
-        done = True
-    if not done:
-      rem += [src]
-
-  if outs:
-    _fileset(
-      name = name + ".map",
-      srcs = srcs,
-      maps = maps,
-      outs = outs
-    )
-
-  native.filegroup(
-    name = name,
-    srcs = outs + rem,
-    **kwargs
-  )
+load(":functions.bzl", "create_java_compiler_args", "explicit_target")
+load(":groovy.bzl", "groovy_jar", "groovy_stubs")
+load(":kotlin.bzl", "kotlin_jar")
+load(":utils.bzl", "fileset", "java_jarjar", "singlejar")
 
 def _form_jar_impl(ctx):
   all_deps = set(ctx.files.deps)
@@ -173,15 +12,14 @@ def _form_jar_impl(ctx):
 
   class_jar = ctx.outputs.class_jar
 
-  args, option_files = create_java_compiler_args(ctx, class_jar.path,
-                                                 all_deps)
+  args, option_files = create_java_compiler_args(ctx, class_jar.path, all_deps)
 
-  cmd = ctx.executable._formc.path + " " + " ".join(args)
   ctx.action(
-      inputs = [ctx.executable._formc] + ctx.files.srcs + list(all_deps) + option_files,
+      inputs = ctx.files.srcs + list(all_deps) + option_files,
       outputs = [class_jar],
       mnemonic = "formc",
-      command = cmd
+      arguments = args,
+      executable = ctx.executable._formc,
   )
 
 _form_jar = rule(
@@ -207,12 +45,10 @@ _form_jar = rule(
 )
 
 def _iml_resources(name, resources, srcs):
-  res_exclude = ["**/*.java", "**/*.kt", "**/*.groovy", "**/.DS_Store"]
-  # Temporarily remove file names not supported by bazel
-  # https://github.com/bazelbuild/bazel/issues/167
-  res_exclude += ["**/* *", "**/*$*"]
-
   iml_resource_dirs = resources + srcs
+  res_exclude = ["**/*.java", "**/*.kt", "**/*.groovy", "**/.DS_Store"]
+  res_exclude = res_exclude + [ d + "/META-INF/MANIFEST.MF" for d in iml_resource_dirs]
+
   iml_resources = native.glob(
         include = [r + "/**/*" for r in iml_resource_dirs],
         exclude = res_exclude)
@@ -230,16 +66,8 @@ def _iml_resources(name, resources, srcs):
   else:
     return []
 
-def _groovy_stubs(name, srcs=[]):
-  native.genrule(
-    name = name,
-    srcs = srcs,
-    outs = [name + ".jar"],
-    cmd = "./$(location //tools/base/bazel:groovy_stub_gen) -o $(@D)/" + name + ".jar $(SRCS);",
-    tools = ["//tools/base/bazel:groovy_stub_gen"],
-  )
 
-def _iml_library(name, srcs=[], exclude=[], deps=[], exports=[], visibility=[], javacopts=[], **kwargs):
+def _iml_library(name, srcs=[], package_prefixes=[], res_zips=[], exclude=[], deps=[], exports=[], visibility=[], javacopts=[], **kwargs):
 
   kotlins = native.glob([src + "/**/*.kt" for src in srcs], exclude=exclude)
   groovies = native.glob([src + "/**/*.groovy" for src in srcs], exclude=exclude)
@@ -249,9 +77,11 @@ def _iml_library(name, srcs=[], exclude=[], deps=[], exports=[], visibility=[], 
   jars = []
 
   if kotlins:
-    _kotlin_jar(
+    kotlin_jar(
         name = name + ".kotlins",
         srcs = srcs,
+        package_prefixes = package_prefixes,
+        inputs = kotlins + javas,
         deps = ["@local_jdk//:langtools-neverlink"] + deps,
     )
     deps += ["//tools/base/bazel:kotlin-runtime", "lib" + name + ".kotlins.jar"]
@@ -259,11 +89,11 @@ def _iml_library(name, srcs=[], exclude=[], deps=[], exports=[], visibility=[], 
 
   if groovies:
     stub = name + ".groovies.stubs"
-    _groovy_stubs(
+    groovy_stubs(
         name = stub,
         srcs = groovies
     )
-    _groovy_jar(
+    groovy_jar(
         name = name + ".groovies",
         srcs = groovies,
         deps = ["@local_jdk//:langtools-neverlink"] + deps + [":" + name + ".javas"],
@@ -276,7 +106,6 @@ def _iml_library(name, srcs=[], exclude=[], deps=[], exports=[], visibility=[], 
     name = name + ".javas" if not forms else name + ".pjavas",
     srcs = javas,
     javacopts = javacopts,
-    visibility = visibility,
     deps = None if not javas else deps + ["@local_jdk//:langtools-neverlink"],
     **kwargs
   )
@@ -288,19 +117,12 @@ def _iml_library(name, srcs=[], exclude=[], deps=[], exports=[], visibility=[], 
     )
   jars += ["lib" + name + ".javas.jar"]
 
-  native.genrule(
-    name = name + ".deploy",
-    srcs = jars,
-    outs = [name + ".jar"],
-    tools = ["//tools/base/bazel:singlejar"],
-    cmd = "$(location //tools/base/bazel:singlejar) --jvm_flag=-Xmx1g $@ $(SRCS)",
-  )
-
-  native.java_library(
-    name = name,
-    runtime_deps = deps + [":" + name + ".deploy"],
-    exports = exports + [":" + name + ".deploy"],
-    visibility = visibility,
+  singlejar(
+      name = name,
+      jars = jars + res_zips,
+      runtime_deps = deps,
+      exports = exports,
+      visibility = visibility,
   )
 
 
@@ -319,6 +141,59 @@ def _get_label_and_tags(label):
     return label, []
   return label[:rfind], [tag.strip() for tag in label[rfind+1:-1].split(",")]
 
+
+def _iml_module_impl(ctx):
+  names = [iml.basename[:-4] for iml in ctx.files.iml_files if iml.basename.endswith(".iml")]
+
+  module_jars = dict()
+  module_runtime = dict()
+  transitive_runtime_deps = set()
+  transitive_data = set()
+
+  for this_dep in ctx.attr.deps:
+    if hasattr(this_dep, "java"):
+      transitive_runtime_deps += this_dep.java.transitive_runtime_deps
+    if hasattr(this_dep, "module"):
+      transitive_runtime_deps += this_dep.module.transitive_runtime_deps
+      transitive_data += this_dep.module.transitive_data
+      module_jars.update(this_dep.module.module_jars)
+      module_runtime.update(this_dep.module.module_runtime)
+
+  for name in names:
+    module_jars[name] = ctx.file.production_jar
+    module_runtime[name] = transitive_runtime_deps
+  transitive_data += set(ctx.files.iml_files + ctx.files.data)
+  transitive_runtime_deps += set([ctx.file.production_jar])
+
+
+  return struct(
+    module = struct(
+      module_jars = module_jars,
+      module_runtime = module_runtime,
+      transitive_runtime_deps = transitive_runtime_deps,
+      transitive_data = transitive_data,
+    )
+  )
+
+_iml_module = rule(
+    attrs = {
+      "iml_files" : attr.label_list(
+        allow_files = True,
+        allow_empty = False,
+        mandatory = True,
+      ),
+      "production_jar" : attr.label(
+        allow_files = True,
+        single_file = True,
+      ),
+      "deps" : attr.label_list(
+      ),
+      "data" : attr.label_list(
+        allow_files = True,
+      ),
+    },
+    implementation = _iml_module_impl,
+)
 
 # Macro implementation of an iml_module "rule".
 # This rule corresponds to the building artifacts needed to build an IntelliJ module.
@@ -355,14 +230,18 @@ def _get_label_and_tags(label):
 # "module_name_tests": A java test rule that runs the tests found in "libmodule_name_testlib.jar"
 def iml_module(name,
     srcs=[],
+    package_prefixes={},
     test_srcs=[],
     exclude=[],
     resources=[],
+    res_zips=[],
     test_resources=[],
     deps=[],
+    runtime_deps=[],
     test_runtime_deps=[],
     visibility=[],
     exports=[],
+    plugins=[],
     javacopts=[],
     test_data=[],
     test_timeout="moderate",
@@ -371,12 +250,15 @@ def iml_module(name,
     tags=None,
     test_tags=None,
     back_target=0,
+    iml_files=None,
+    bundle_data=[],
     back_deps=[]):
 
   # Create the explicit lists of main, tests and exports the same way IntelliJ does
   main_deps = []
   test_deps = [":" + name]
   test_exports = []
+  module_deps = []
   for dep in deps:
     label, tags = _get_label_and_tags(dep)
     if "test" not in tags:
@@ -384,25 +266,32 @@ def iml_module(name,
     new_test_deps = [label]
     if "module" in tags:
       new_test_deps += [explicit_target(label) + "_testlib"]
+      module_deps += [explicit_target(label)]
     test_deps += new_test_deps
     if label in exports:
       test_exports += new_test_deps
 
+  prefixes = [package_prefixes[src] if src in package_prefixes else "" for src in srcs]
   _iml_library(
     name = name,
     srcs = srcs,
+    package_prefixes = prefixes,
     exclude = exclude,
     exports = exports,
     deps = main_deps,
     javacopts = javacopts,
+    plugins = plugins,
     resource_strip_prefix = PACKAGE_NAME + "/" + name + ".res.root",
     resources = _iml_resources(name, resources, srcs),
+    res_zips = res_zips,
     visibility = visibility,
   )
 
+  test_prefixes = [package_prefixes[src] if src in package_prefixes else "" for src in test_srcs]
   _iml_library(
     name = name + "_testlib",
     srcs = test_srcs,
+    package_prefixes = test_prefixes,
     deps = test_deps,
     visibility = visibility,
     exports = test_exports,
@@ -422,48 +311,18 @@ def iml_module(name,
       timeout = test_timeout,
       shard_count = test_shard_count,
       data = test_data,
-      jvm_flags = ["-Dtest.suite.jar=" + name + "_testlib.jar"],
+      jvm_flags = ["-Dtest.suite.jar=lib" + name + "_testlib.jar"],
       tags = test_tags,
       test_class = test_class,
       visibility = ["//visibility:public"],
     )
 
-# Usage:
-# java_jarjar(
-#     name = <the name of the rule. The output of the rule will be ${name}.jar.
-#     srcs = <a list of all the jars to jarjar and include into the output jar>
-#     rules = <the rule file to apply>
-# )
-#
-# TODO: This rule is using anarres jarjar which doesn't produce stable zips (timestamps)
-# jarjar is available in bazel but the current version is old and uses ASM4, so no Java8
-# will migrate to it when it's fixed.
-def java_jarjar(name, rules, srcs=[], visibility=None):
-  native.genrule(
-      name = name,
-      srcs = srcs + [rules],
-      outs = [name + ".jar"],
-      tools = ["//tools/base/bazel:jarjar"],
-      cmd = ("$(location //tools/base/bazel:jarjar) --rules " +
-             "$(location " + rules + ") " +
-             " ".join(["$(location " + src + ")" for src in srcs]) + " " +
-             "--output '$@'"),
-      visibility = visibility,
+  _iml_module(
+    name = name + "_module",
+    visibility = ["//visibility:public"],
+    iml_files = iml_files,
+    production_jar = name,
+    deps = [dep + "_module" for dep in module_deps] + list(set(test_deps + main_deps + runtime_deps)),
+    data = bundle_data
   )
 
-# Creates a filegroup for a given platform directory in the SDK.
-#
-# It excludes files that are not necessary for testing and take up space in the sandbox.
-def platform_filegroup(name, visibility = ["//visibility:public"]):
-  pattern = "*/" + name
-
-  native.filegroup(
-      name = name,
-      srcs = native.glob(
-          include = [pattern + "/**"],
-          exclude = [
-              pattern + "/skins/**",
-          ]
-      ),
-      visibility = visibility
-   )

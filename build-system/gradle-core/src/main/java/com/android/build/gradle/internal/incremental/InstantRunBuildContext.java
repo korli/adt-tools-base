@@ -18,8 +18,10 @@ package com.android.build.gradle.internal.incremental;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.builder.Version;
 import com.android.ide.common.xml.XmlPrettyPrinter;
+import com.android.sdklib.AndroidVersion;
 import com.android.utils.XmlUtils;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.CaseFormat;
@@ -31,17 +33,21 @@ import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
+import org.gradle.internal.impldep.org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
@@ -49,7 +55,22 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-/** Context object for all InstantRun related information. */
+/**
+ * Context object for all build related information that will be persisted at the completion
+ *
+ * <p>Information persisted will have the following purposes :
+ *
+ * <ul>
+ *   For all types of builds, the list of produced artifacts will contain the filters used when
+ *   producing pure or full splits. This can be used to determine which artifact should be
+ *   installed.
+ * </ul>
+ *
+ * <ul>
+ *   In Instant Run mode, on top of the list of artifacts produced, the verifier status etc. It is
+ *   also read in subsequent builds to keep artifacts history.
+ * </ul>
+ */
 public class InstantRunBuildContext {
 
     private static final Logger LOG = Logging.getLogger(InstantRunBuildContext.class);
@@ -71,6 +92,7 @@ public class InstantRunBuildContext {
     static final String ATTR_ABI = "abi";
     static final String ATTR_TOKEN = "token";
     static final String ATTR_BUILD_MODE = "build-mode";
+    static final String ATTR_IR_ELIGIBILITY = "ir-eligibility";
 
     // Keep roughly in sync with InstantRunBuildInfo#isCompatibleFormat:
     //
@@ -99,16 +121,19 @@ public class InstantRunBuildContext {
 
         private final long buildId;
         @NonNull private InstantRunVerifierStatus verifierStatus;
+        @Nullable private InstantRunVerifierStatus eligibilityStatus;
         private InstantRunBuildMode buildMode;
         private final List<Artifact> artifacts = new ArrayList<>();
 
         public Build(
                 long buildId,
                 @NonNull InstantRunVerifierStatus verifierStatus,
-                @NonNull InstantRunBuildMode buildMode) {
+                @NonNull InstantRunBuildMode buildMode,
+                @Nullable InstantRunVerifierStatus eligibilityStatus) {
             this.buildId = buildId;
             this.verifierStatus = verifierStatus;
             this.buildMode = buildMode;
+            this.eligibilityStatus = eligibilityStatus;
         }
 
         @Nullable
@@ -131,6 +156,9 @@ public class InstantRunBuildContext {
             element.setAttribute(ATTR_TIMESTAMP, String.valueOf(buildId));
             element.setAttribute(ATTR_VERIFIER, verifierStatus.name());
             element.setAttribute(ATTR_BUILD_MODE, buildMode.name());
+            if (eligibilityStatus != null) {
+                element.setAttribute(ATTR_IR_ELIGIBILITY, eligibilityStatus.name());
+            }
             for (Artifact artifact : artifacts) {
                 element.appendChild(artifact.toXml(document));
             }
@@ -141,11 +169,17 @@ public class InstantRunBuildContext {
             NamedNodeMap attributes = buildNode.getAttributes();
             Node verifierAttribute = attributes.getNamedItem(ATTR_VERIFIER);
             Node buildModeAttribute = attributes.getNamedItem(ATTR_BUILD_MODE);
+            Node eligibilityAttribute = attributes.getNamedItem(ATTR_IR_ELIGIBILITY);
+            InstantRunVerifierStatus eligibility =
+                    eligibilityAttribute == null
+                            ? null
+                            : InstantRunVerifierStatus.valueOf(eligibilityAttribute.getNodeValue());
             Build build =
                     new Build(
                             Long.parseLong(attributes.getNamedItem(ATTR_TIMESTAMP).getNodeValue()),
                             InstantRunVerifierStatus.valueOf(verifierAttribute.getNodeValue()),
-                            InstantRunBuildMode.valueOf(buildModeAttribute.getNodeValue()));
+                            InstantRunBuildMode.valueOf(buildModeAttribute.getNodeValue()),
+                            eligibility);
             NodeList childNodes = buildNode.getChildNodes();
             for (int i = 0; i < childNodes.getLength(); i++) {
                 Node artifactNode = childNodes.item(i);
@@ -179,8 +213,8 @@ public class InstantRunBuildContext {
 
     /** A build artifact defined by its type and location. */
     public static class Artifact {
-        private final FileType fileType;
-        private File location;
+        @NonNull private final FileType fileType;
+        @NonNull private File location;
 
         public Artifact(@NonNull FileType fileType, @NonNull File location) {
             this.fileType = fileType;
@@ -191,8 +225,7 @@ public class InstantRunBuildContext {
         public Node toXml(@NonNull Document document) {
             Element artifact = document.createElement(TAG_ARTIFACT);
             artifact.setAttribute(ATTR_TYPE, fileType.name());
-            artifact.setAttribute(
-                    ATTR_LOCATION, XmlUtils.toXmlAttributeValue(location.getAbsolutePath()));
+            artifact.setAttribute(ATTR_LOCATION, location.getAbsolutePath());
             return artifact;
         }
 
@@ -235,35 +268,62 @@ public class InstantRunBuildContext {
         }
     }
 
-    private final long[] taskStartTime = new long[TaskType.values().length];
-    private final long[] taskDurationInMs = new long[TaskType.values().length];
-    private InstantRunPatchingPolicy patchingPolicy;
-    /** Null until setApiLevel is called. */
-    @Nullable private Integer featureLevel = null;
+    @NonNull private final long[] taskStartTime = new long[TaskType.values().length];
+    @NonNull private final long[] taskDurationInMs = new long[TaskType.values().length];
+    @NonNull private final InstantRunPatchingPolicy patchingPolicy;
+    @NonNull private final AndroidVersion androidVersion;
 
-    private String density = null;
-    private String abi = null;
-    private final Build currentBuild;
-    private final TreeMap<Long, Build> previousBuilds = new TreeMap<>();
-    private boolean isInstantRunMode = false;
-    private final AtomicLong token = new AtomicLong(0);
-    private boolean buildHasFailed = false;
+    @Nullable private final String density;
+    @Nullable private final String abi;
+    private final boolean createSeparateApkForResources;
+    @NonNull private final Build currentBuild;
+    @NonNull private final TreeMap<Long, Build> previousBuilds = new TreeMap<>();
+    private final boolean isInstantRunMode;
+    @NonNull private final AtomicLong token = new AtomicLong(0);
+    @NonNull private final AtomicBoolean buildHasFailed = new AtomicBoolean(false);
 
-    public InstantRunBuildContext() {
-        this(defaultBuildIdAllocator);
+    public InstantRunBuildContext(
+            boolean isInstantRunMode,
+            @NotNull AaptGeneration aaptGeneration,
+            @NonNull AndroidVersion androidVersion,
+            @Nullable String targetAbi,
+            @Nullable String density,
+            boolean createSeparateApkForResources) {
+        this(
+                defaultBuildIdAllocator,
+                isInstantRunMode,
+                aaptGeneration,
+                androidVersion,
+                targetAbi,
+                density,
+                createSeparateApkForResources);
     }
 
     @VisibleForTesting
-    InstantRunBuildContext(@NonNull BuildIdAllocator buildIdAllocator) {
-        currentBuild =  new Build(
-                buildIdAllocator.allocatedBuildId(),
-                InstantRunVerifierStatus.NO_CHANGES,
-                InstantRunBuildMode.HOT_WARM);
-    }
-
-
-    public void setInstantRunMode(boolean instantRunMode) {
-        isInstantRunMode = instantRunMode;
+    InstantRunBuildContext(
+            @NonNull BuildIdAllocator buildIdAllocator,
+            boolean isInstantRunMode,
+            @NotNull AaptGeneration aaptGeneration,
+            @NonNull AndroidVersion androidVersion,
+            @Nullable String targetAbi,
+            @Nullable String density,
+            boolean createSeparateApkForResources) {
+        currentBuild =
+                new Build(
+                        buildIdAllocator.allocatedBuildId(),
+                        InstantRunVerifierStatus.NO_CHANGES,
+                        InstantRunBuildMode.HOT_WARM,
+                        null /* eligibilityStatus */);
+        this.isInstantRunMode = isInstantRunMode;
+        this.androidVersion = androidVersion;
+        this.patchingPolicy =
+                InstantRunPatchingPolicy.getPatchingPolicy(
+                        androidVersion,
+                        aaptGeneration != AaptGeneration.AAPT_V1,
+                        createSeparateApkForResources);
+        this.abi = targetAbi;
+        this.density = density;
+        this.createSeparateApkForResources = createSeparateApkForResources;
     }
 
     public boolean isInInstantRunMode() {
@@ -271,11 +331,11 @@ public class InstantRunBuildContext {
     }
 
     public void setBuildHasFailed() {
-        buildHasFailed = true;
+        buildHasFailed.set(true);
     }
 
     public boolean getBuildHasFailed() {
-        return buildHasFailed;
+        return buildHasFailed.get();
     }
 
     /**
@@ -298,7 +358,7 @@ public class InstantRunBuildContext {
     }
 
     /**
-     * Setst the verifier status for the current build.
+     * Sets the verifier status for the current build.
      *
      * @param verifierStatus
      */
@@ -332,6 +392,17 @@ public class InstantRunBuildContext {
                 currentBuild.buildMode);
     }
 
+    /**
+     * Records the actual result of the verification pass, even if a cold swap was requested. This
+     * is status is reported to the IDE via build-info.xml, so the IDE can notify the user if their
+     * last build was eligible for a hot or warm swap (to encourage people to use it.)
+     *
+     * @param verifierStatus - the actual status recorded by the verifier
+     */
+    public void setInstantRunEligibilityStatus(@NonNull InstantRunVerifierStatus verifierStatus) {
+        currentBuild.eligibilityStatus = verifierStatus;
+    }
+
     /** Returns the verifier status if set for the current build being executed. */
     @NonNull
     public InstantRunVerifierStatus getVerifierResult() {
@@ -348,18 +419,9 @@ public class InstantRunBuildContext {
         return currentBuild.buildMode == InstantRunBuildMode.HOT_WARM;
     }
 
-    public void setApiLevel(
-            int featureLevel, @Nullable String coldswapMode, @Nullable String targetAbi) {
-        this.featureLevel = featureLevel;
-        // cache the patching policy.
-        this.patchingPolicy =
-                InstantRunPatchingPolicy.getPatchingPolicy(featureLevel, coldswapMode);
-        this.abi = targetAbi;
-    }
-
-    public int getFeatureLevel() {
-        return Preconditions.checkNotNull(
-                featureLevel, "setApiLevel should be called before any other actions.");
+    @NonNull
+    public AndroidVersion getAndroidVersion() {
+        return androidVersion;
     }
 
     @Nullable
@@ -367,11 +429,7 @@ public class InstantRunBuildContext {
         return density;
     }
 
-    public void setDensity(@Nullable String density) {
-        this.density = density;
-    }
-
-    @Nullable
+    @NonNull
     public InstantRunPatchingPolicy getPatchingPolicy() {
         return patchingPolicy;
     }
@@ -381,11 +439,7 @@ public class InstantRunBuildContext {
         return currentBuild.buildMode;
     }
 
-    public synchronized void addChangedFile(@NonNull FileType fileType, @NonNull File file)
-            throws IOException {
-        if (patchingPolicy == null) {
-            return;
-        }
+    public synchronized void addChangedFile(@NonNull FileType fileType, @NonNull File file) {
         if (currentBuild.getVerifierStatus() == InstantRunVerifierStatus.NO_CHANGES) {
             currentBuild.verifierStatus = InstantRunVerifierStatus.COMPATIBLE;
         }
@@ -399,18 +453,15 @@ public class InstantRunBuildContext {
 
         // validate the patching policy and the received file type to record the file or not.
         // RELOAD and MAIN are always record.
-        if (fileType != FileType.RELOAD_DEX
+        if (isInInstantRunMode()
+                && fileType != FileType.RELOAD_DEX
                 && fileType != FileType.MAIN
                 && fileType != FileType.RESOURCES) {
             switch (patchingPolicy) {
                 case PRE_LOLLIPOP:
                     return;
-                case MULTI_DEX:
-                    if (fileType != FileType.DEX) {
-                        return;
-                    }
-                    break;
                 case MULTI_APK:
+                case MULTI_APK_SEPARATE_RESOURCES:
                     if (fileType != FileType.SPLIT) {
                         return;
                     }
@@ -419,28 +470,24 @@ public class InstantRunBuildContext {
         if (fileType == FileType.MAIN) {
             // in case of MAIN, we need to disambiguate whether this is a SPLIT_MAIN or just a
             // MAIN. this is useful for the IDE so it knows which deployment method to use.
-            if (patchingPolicy == InstantRunPatchingPolicy.MULTI_APK) {
+            if (InstantRunPatchingPolicy.useMultiApk(patchingPolicy)) {
                 fileType = FileType.SPLIT_MAIN;
             }
 
-            // because of signing/aligning, we can be notified several times of the main APK
+            // because of signing/aligning, we can be notified several times of the main FULL_APK
             // construction, last one wins.
             Artifact previousArtifact = currentBuild.getArtifactForType(fileType);
             if (previousArtifact != null) {
                 currentBuild.artifacts.remove(previousArtifact);
             }
 
-            // also if we are in LOLLIPOP, the DEX files are packaged in the original main APK, so
-            // we can remove individual files.
-            if (patchingPolicy == InstantRunPatchingPolicy.MULTI_DEX) {
-                currentBuild.artifacts.clear();
-            }
-
-            // since the main APK is produced, no need to keep the RESOURCES record around.
-            Artifact resourcesApFile = currentBuild.getArtifactForType(FileType.RESOURCES);
-            while (resourcesApFile != null) {
-                currentBuild.artifacts.remove(resourcesApFile);
-                resourcesApFile = currentBuild.getArtifactForType(FileType.RESOURCES);
+            // since the main FULL_APK is produced, no need to keep the RESOURCES record around.
+            if (patchingPolicy != InstantRunPatchingPolicy.MULTI_APK_SEPARATE_RESOURCES) {
+                Artifact resourcesApFile = currentBuild.getArtifactForType(FileType.RESOURCES);
+                while (resourcesApFile != null) {
+                    currentBuild.artifacts.remove(resourcesApFile);
+                    resourcesApFile = currentBuild.getArtifactForType(FileType.RESOURCES);
+                }
             }
         }
         currentBuild.artifacts.add(new Artifact(fileType, file));
@@ -464,12 +511,14 @@ public class InstantRunBuildContext {
         return previousBuilds.values();
     }
 
+
     /**
      * Remove all unwanted changes :
      * - All reload.dex changes older than the last cold swap.
      * - Empty changes (unless it's the last one).
      */
     private void purge() {
+        LOG.debug("Purge");
         boolean foundColdRestart = false;
         Set<String> splitFilesAlreadyFound = new HashSet<>();
         // the oldest build is by definition the full build.
@@ -478,26 +527,52 @@ public class InstantRunBuildContext {
         // natural order of builds.
         for (Long aBuildId : new ArrayList<>(previousBuilds.descendingKeySet())) {
             Build previousBuild = previousBuilds.get(aBuildId);
+            LOG.debug(
+                    ""
+                            + "===================================================\n"
+                            + "Purge: build {}\n"
+                            + "Verifier status: {}\n"
+                            + "===================================================\n",
+                    aBuildId,
+                    previousBuild.verifierStatus);
             // initial builds are never purged in any way.
             if (previousBuild.buildId == initialFullBuild) {
+                LOG.debug(" --- Skipping initial build.");
                 continue;
             }
             if (previousBuild.verifierStatus == InstantRunVerifierStatus.COMPATIBLE) {
                 if (foundColdRestart) {
                     // Remove previous hot swap artifacts, they have been superseded by the cold
                     // swap artifact.
+
+                    LOG.debug("Removed this hot swap build as there are newer cold swaps.");
                     previousBuilds.remove(aBuildId);
                     continue;
                 }
             } else if (previousBuild.verifierStatus != InstantRunVerifierStatus.NO_CHANGES) {
+                LOG.debug("This is a cold swap build. Older hot swaps will be removed.");
                 foundColdRestart = true;
             }
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Artifacts for build: Size: {}\n  * {}",
+                        previousBuild.artifacts.size(),
+                        previousBuild
+                                .artifacts
+                                .stream()
+                                .map(Artifact::toString)
+                                .collect(Collectors.joining("\n  * ")));
+            }
+
             // when a coldswap build was found, remove all RESOURCES entries for previous builds
             // as the resource is redelivered as part of the main split.
-            if (foundColdRestart && patchingPolicy == InstantRunPatchingPolicy.MULTI_APK) {
+            if (foundColdRestart && patchingPolicy.useMultiApk()) {
                 Artifact resourceApArtifact = previousBuild.getArtifactForType(FileType.RESOURCES);
                 if (resourceApArtifact != null) {
                     previousBuild.artifacts.remove(resourceApArtifact);
+                    LOG.debug(
+                            "Removing resources from this build as superseded by later cold swap.");
                 }
             }
 
@@ -507,13 +582,34 @@ public class InstantRunBuildContext {
                 if (artifact.isAccumulative()) {
                     // we don't remove artifacts from the first build.
                     if (splitFilesAlreadyFound.contains(artifact.getLocation().getAbsolutePath())) {
+                        LOG.debug(
+                                "Found split is superseded by the same split in a newer build",
+                                artifact.getLocation().getAbsolutePath());
                         previousBuild.artifacts.remove(artifact);
                     } else {
+                        LOG.debug(
+                                "Found split {}, will be removed from older builds.",
+                                artifact.getLocation().getAbsolutePath());
                         splitFilesAlreadyFound.add(artifact.getLocation().getAbsolutePath());
                     }
                 }
             }
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Artifacts after purge: Size: {}\n  * {}",
+                        previousBuild.artifacts.size(),
+                        previousBuild
+                                .artifacts
+                                .stream()
+                                .map(Artifact::toString)
+                                .collect(Collectors.joining("\n  * ")));
+            }
         }
+
+        LOG.debug(
+                "Purge: SplitFilesAlreadyFound: {} ",
+                splitFilesAlreadyFound.stream().collect(Collectors.joining("\n")));
 
         // bunch of builds can be empty, either because we did nothing or all its artifact got
         // rebuilt in a more recent iteration, in such a case, remove it.
@@ -521,21 +617,25 @@ public class InstantRunBuildContext {
             Build aBuild = previousBuilds.get(aBuildId);
             // if the build artifacts are empty and it's not the current build.
             if (aBuild.artifacts.isEmpty() && aBuild.buildId != currentBuild.buildId) {
+                LOG.debug("Removing empty build: {}", aBuildId);
                 previousBuilds.remove(aBuildId);
             }
         }
 
         // check if we are using split apks on L or M, in that case, we need to add the main split
         // so deployment can be successful.
-        boolean inMultiAPKOnBefore24 = patchingPolicy == InstantRunPatchingPolicy.MULTI_APK
-                && featureLevel != null && featureLevel < 24;
+        boolean inMultiAPKOnBefore24 =
+                patchingPolicy == InstantRunPatchingPolicy.MULTI_APK
+                        && androidVersion.getFeatureLevel() < 24;
         if (inMultiAPKOnBefore24) {
+            LOG.debug("Adding split main if a split is present as deploying to a device < 24");
             // Re-add the SPLIT_MAIN if any SPLIT is present.
             if (currentBuild.getArtifactForType(FileType.SPLIT_MAIN) == null) {
                 boolean anySplitInCurrentBuild = currentBuild.artifacts.stream()
                         .anyMatch(artifact -> artifact.fileType == FileType.SPLIT);
 
                 if (anySplitInCurrentBuild) {
+                    LOG.debug("No split main and a split, re-adding split main.");
                     // find the SPLIT_MAIN, any is fine since the location does not vary.
                     for (Build previousBuild : previousBuilds.values()) {
                         Artifact main = previousBuild.getArtifactForType(FileType.SPLIT_MAIN);
@@ -547,13 +647,36 @@ public class InstantRunBuildContext {
                 }
             }
         }
-        if (currentBuild.buildMode == InstantRunBuildMode.FULL) {
-            collapseMainArtifactsIntoCurrentBuild();
+        switch (currentBuild.buildMode) {
+            case HOT_WARM:
+                break;
+            case COLD:
+                // If all the splits are built, report FULL, to support changes that cannot be
+                // partially
+                // installed.
+                // In this case we would have purged all of the intermediate history, so all the
+                // artifacts would be on the current build.
+                if (patchingPolicy == InstantRunPatchingPolicy.MULTI_APK
+                        && previousBuilds.keySet().size() == 2
+                        && previousBuilds.get(initialFullBuild).artifacts.size()
+                                == currentBuild.artifacts.size()) {
+                    currentBuild.buildMode = InstantRunBuildMode.FULL;
+                    collapseMainArtifactsIntoCurrentBuild();
+                }
+                break;
+            case FULL:
+                collapseMainArtifactsIntoCurrentBuild();
+                break;
         }
     }
 
     private void collapseMainArtifactsIntoCurrentBuild() {
-        if (patchingPolicy == InstantRunPatchingPolicy.MULTI_APK) {
+        LOG.debug(
+                ""
+                        + "=======================================\n"
+                        + "collapseMainArtifactsIntoCurrentBuild\n"
+                        + "=======================================");
+        if (patchingPolicy.useMultiApk()) {
             // Add all of the older splits to the current build,
             // as the older builds will be thrown away.
             Set<String> splitLocations = Sets.newHashSet();
@@ -569,6 +692,13 @@ public class InstantRunBuildContext {
                 }
             }
 
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Split locations  Count:{}.\n" + "{}",
+                        splitLocations.size(),
+                        splitLocations.stream().collect(Collectors.joining("\n")));
+            }
+
             // Don't re-add existing splits.
             for (Artifact artifact : currentBuild.artifacts) {
                 if (artifact.fileType == FileType.SPLIT) {
@@ -576,6 +706,13 @@ public class InstantRunBuildContext {
                 } else if (artifact.fileType == FileType.SPLIT_MAIN) {
                     main = null;
                 }
+            }
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Split locations, current build removed  Count: {}.\n" + "{}",
+                        splitLocations.size(),
+                        splitLocations.stream().collect(Collectors.joining("\n")));
             }
 
             for (String splitLocation : splitLocations) {
@@ -627,12 +764,13 @@ public class InstantRunBuildContext {
     }
 
     /** {@link #loadFromXmlFile(File)} but using a String */
+    @VisibleForTesting
     public void loadFromXml(@NonNull String persistedState)
             throws IOException, SAXException, ParserConfigurationException {
         loadFromDocument(XmlUtils.parseDocument(persistedState, false));
     }
 
-    private void loadFromDocument(@NonNull Document document) {
+    private synchronized void loadFromDocument(@NonNull Document document) {
         Element instantRun = document.getDocumentElement();
 
         if (!(Version.ANDROID_GRADLE_PLUGIN_VERSION.equals(
@@ -714,7 +852,7 @@ public class InstantRunBuildContext {
     }
 
     /** Close all activities related to InstantRun. */
-    public void close() {
+    public synchronized void close() {
         // add the current build to the list of builds to be persisted.
         previousBuilds.put(currentBuild.buildId, currentBuild);
 
@@ -759,10 +897,16 @@ public class InstantRunBuildContext {
 
         Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
         toXml(document, persistenceMode);
-        return XmlPrettyPrinter.prettyPrint(document, true);
+        String xml = XmlPrettyPrinter.prettyPrint(document, true);
+        LOG.debug(
+                "build-info.xml save version :  {} patching : {} content : \n {} ",
+                androidVersion,
+                patchingPolicy,
+                xml);
+        return xml;
     }
 
-    private Element toXml(Document document, PersistenceMode persistenceMode) {
+    private void toXml(Document document, PersistenceMode persistenceMode) {
         Element instantRun = document.createElement(TAG_INSTANT_RUN);
         document.appendChild(instantRun);
 
@@ -778,15 +922,26 @@ public class InstantRunBuildContext {
             instantRun.appendChild(taskTypeNode);
         }
 
+        if (LOG.isDebugEnabled()) {
+            instantRun.setAttribute("pid", ManagementFactory.getRuntimeMXBean().getName());
+            instantRun.setAttribute("version", androidVersion.getApiString());
+        }
+        //noinspection VariableNotUsedInsideIf
+        if (isInInstantRunMode()) {
+            instantRun.setAttribute(
+                    ATTR_API_LEVEL, String.valueOf(getAndroidVersion().getFeatureLevel()));
+            if (density != null) {
+                instantRun.setAttribute(ATTR_DENSITY, density);
+            }
+            if (abi != null) {
+                instantRun.setAttribute(ATTR_ABI, abi);
+            }
+            instantRun.setAttribute(ATTR_TOKEN, token.toString());
+        } else {
+            currentBuild.buildMode = InstantRunBuildMode.FULL;
+            currentBuild.verifierStatus = InstantRunVerifierStatus.NOT_RUN;
+        }
         currentBuild.toXml(document, instantRun);
-        instantRun.setAttribute(ATTR_API_LEVEL, String.valueOf(getFeatureLevel()));
-        if (density != null) {
-            instantRun.setAttribute(ATTR_DENSITY, density);
-        }
-        if (abi != null) {
-            instantRun.setAttribute(ATTR_ABI, abi);
-        }
-        instantRun.setAttribute(ATTR_TOKEN, token.toString());
         instantRun.setAttribute(ATTR_FORMAT, CURRENT_FORMAT);
         instantRun.setAttribute(ATTR_PLUGIN_VERSION, Version.ANDROID_GRADLE_PLUGIN_VERSION);
 
@@ -807,7 +962,6 @@ public class InstantRunBuildContext {
             default:
                 throw new RuntimeException("PersistenceMode not handled" + persistenceMode);
         }
-        return instantRun;
     }
 
     /**

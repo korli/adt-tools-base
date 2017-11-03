@@ -19,30 +19,27 @@ package com.android.build.gradle.tasks;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunBuildMode;
-import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
 import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.InstantRunVariantScope;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.TransformVariantScope;
 import com.android.build.gradle.internal.tasks.DefaultAndroidTask;
-
+import java.io.IOException;
 import org.gradle.api.Task;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.TaskAction;
-
-import java.io.IOException;
 
 /**
  * Task to disable execution of the InstantRun slicer, dexer and packager when they are not needed.
  *
  * <p>The next time they run they will pick up all intermediate changes.
  *
- * <p>With multi apk (N or above device) resources are packaged in the main split APK. However when a warm swap is possible, it is
- * not necessary to produce immediately the new main SPLIT since the runtime use directly the
- * resources.ap_ file. However, as soon as an incompatible change forcing a cold swap is
- * triggered, the main APK must be rebuilt (even if the resources were changed in a previous
- * build).
+ * <p>With multi apk (N or above device) resources are packaged in the main split APK. However when
+ * a warm swap is possible, it is not necessary to produce immediately the new main SPLIT since the
+ * runtime use directly the resources.ap_ file. However, as soon as an incompatible change forcing a
+ * cold swap is triggered, the main APK must be rebuilt (even if the resources were changed in a
+ * previous build).
  */
 public class PreColdSwapTask extends DefaultAndroidTask {
 
@@ -64,10 +61,6 @@ public class PreColdSwapTask extends DefaultAndroidTask {
                 disableTask(instantRunVariantScope.getPackageApplicationTask());
                 break;
             case COLD:
-                if (instantRunContext.getPatchingPolicy() == InstantRunPatchingPolicy.MULTI_DEX) {
-                    disableTask(instantRunVariantScope.getPackageApplicationTask());
-                }
-                break;
             case FULL:
                 // Leave everything enabled.
                 break;

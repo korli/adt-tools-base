@@ -30,6 +30,7 @@ import static com.android.SdkConstants.DRAWABLE_PREFIX;
 import static com.android.SdkConstants.PREFIX_RESOURCE_REF;
 import static com.android.SdkConstants.TAG_ACTIVITY;
 import static com.android.SdkConstants.TAG_APPLICATION;
+import static com.android.SdkConstants.TAG_CATEGORY;
 import static com.android.SdkConstants.TAG_INTENT_FILTER;
 import static com.android.SdkConstants.TAG_PERMISSION;
 import static com.android.SdkConstants.TAG_PROVIDER;
@@ -43,11 +44,14 @@ import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.SdkConstants.VALUE_FALSE;
 import static com.android.ide.common.repository.GradleCoordinate.COMPARE_PLUS_HIGHER;
 import static com.android.tools.lint.checks.GradleDetector.GMS_GROUP_ID;
+import static com.android.utils.XmlUtils.getFirstSubTagByName;
+import static com.android.utils.XmlUtils.getNextTagByName;
 import static com.android.xml.AndroidManifest.NODE_ACTION;
 import static com.android.xml.AndroidManifest.NODE_DATA;
 import static com.android.xml.AndroidManifest.NODE_METADATA;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.builder.model.AndroidLibrary;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.ApiVersion;
@@ -62,29 +66,30 @@ import com.android.ide.common.repository.GradleCoordinate;
 import com.android.ide.common.repository.MavenRepositories;
 import com.android.ide.common.repository.SdkMavenRepository;
 import com.android.ide.common.res2.AbstractResourceRepository;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.repository.io.FileOp;
 import com.android.repository.io.FileOpUtils;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.utils.XmlUtils;
 import com.google.common.collect.Maps;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -158,7 +163,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             "MultipleUsesSdk",
             "Multiple `<uses-sdk>` elements in the manifest",
 
-            "The `<uses-sdk>` element should appear just once; the tools will *not* merge the " +
+            "The `<uses-sdk>` element should appear just once; the tools will **not** merge the " +
             "contents of all the elements so if you split up the attributes across multiple " +
             "elements, only one of them will take effect. To fix this, just merge all the " +
             "attributes from the various elements into a single <uses-sdk> element.",
@@ -348,7 +353,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             "Using mock location provider in production",
 
             "Using a mock location provider (by requiring the permission " +
-            "`android.permission.ACCESS_MOCK_LOCATION`) should *only* be done " +
+            "`android.permission.ACCESS_MOCK_LOCATION`) should **only** be done " +
             "in debug builds (or from tests). In Gradle projects, that means you should only " +
             "request this permission in a test or debug source set specific manifest file.\n" +
             "\n" +
@@ -439,20 +444,6 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
     /** Features we've encountered */
     private Set<String> mUsesFeatures;
 
-    /** Permission basenames */
-    private Map<String, String> mPermissionNames;
-
-    /** Handle to the {@code <application>} tag */
-    private Location.Handle mApplicationTagHandle;
-
-    /** Whether we've seen an application icon definition in any of the manifest files (or
-     * if a manifest tag warning for this has been explicitly disabled) */
-    private boolean mSeenAppIcon;
-
-    /** Whether we've seen an allow backup definition in any of the manifest files (or
-     * if a manifest tag warning for this has been explicitly disabled) */
-    private boolean mSeenAllowBackup;
-
     @Override
     public void beforeCheckFile(@NonNull Context context) {
         mSeenApplication = false;
@@ -480,38 +471,92 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
         }
     }
 
-    @Override
-    public void afterCheckProject(@NonNull Context context) {
-        if (!mSeenAllowBackup && context.isEnabled(ALLOW_BACKUP)
-                && !context.getProject().isLibrary()
-                && context.getMainProject().getMinSdk() >= 4) {
-            Location location = getMainApplicationTagLocation(context);
-            context.report(ALLOW_BACKUP, location,
-                    "Should explicitly set `android:allowBackup` to `true` or " +
-                            "`false` (it's `true` by default, and that can have some security " +
-                            "implications for the application's data)");
+    /**
+     * Checks that the main {@code <application>} tag specifies both an icon and allowBackup,
+     * possibly merged from some upstream dependency
+     */
+    private static void checkMergedApplication(@NonNull XmlContext context,
+            Element sourceApplicationElement) {
+        if (context.getProject().isLibrary()) {
+            return;
         }
 
-        if (!context.getMainProject().isLibrary()
-                && !mSeenAppIcon && context.isEnabled(APPLICATION_ICON)) {
-            Location location = getMainApplicationTagLocation(context);
-            context.report(APPLICATION_ICON, location,
-                    "Should explicitly set `android:icon`, there is no default");
+        Project mainProject = context.getMainProject();
+        Document mergedManifest = mainProject.getMergedManifest();
+        if (mergedManifest == null) {
+            return;
         }
-    }
-
-    @NonNull
-    private Location getMainApplicationTagLocation(@NonNull Context context) {
-        if (mApplicationTagHandle != null) {
-            return mApplicationTagHandle.resolve();
+        Element root = mergedManifest.getDocumentElement();
+        if (root == null) {
+            return;
         }
-
-        List<File> manifestFiles = context.getMainProject().getManifestFiles();
-        if (!manifestFiles.isEmpty()) {
-            return Location.create(manifestFiles.get(0));
+        Element application = getFirstSubTagByName(root, TAG_APPLICATION);
+        if (application == null) {
+            return;
         }
 
-        return Location.NONE;
+        if (context.isEnabled(ALLOW_BACKUP)) {
+            String allowBackup = application.getAttributeNS(ANDROID_URI, ATTR_ALLOW_BACKUP);
+            Attr fullBackupNode = application.getAttributeNodeNS(ANDROID_URI,
+                    ATTR_FULL_BACKUP_CONTENT);
+            if (fullBackupNode != null
+                    && fullBackupNode.getValue().startsWith(PREFIX_RESOURCE_REF)
+                    && context.getClient().supportsProjectResources()) {
+                AbstractResourceRepository resources = context.getClient()
+                        .getResourceRepository(mainProject, true, false);
+                ResourceUrl url = ResourceUrl.parse(fullBackupNode.getValue());
+                if (url != null && !url.framework
+                        && resources != null
+                        && !resources.hasResourceItem(url.type, url.name)) {
+                    Attr sourceFullBackupNode = sourceApplicationElement.getAttributeNodeNS(
+                            ANDROID_URI, ATTR_FULL_BACKUP_CONTENT);
+                    if (sourceFullBackupNode != null) {
+                        // defined in this file, not merged from other file. Prefer it, since
+                        // we have better source offsets than from manifest merges.
+                        fullBackupNode = sourceFullBackupNode;
+                    }
+                    Location location = context.getValueLocation(fullBackupNode);
+                    context.report(ALLOW_BACKUP, fullBackupNode, location,
+                            MISSING_FULL_BACKUP_CONTENT_RESOURCE);
+                }
+            } else if (fullBackupNode == null && !VALUE_FALSE.equals(allowBackup)
+                    && mainProject.getTargetSdk() >= 23) {
+                if (hasGcmReceiver(application)) {
+                    Location location = context.getLocation(sourceApplicationElement);
+                    context.report(ALLOW_BACKUP, application, location, ""
+                            + "On SDK version 23 and up, your app data will be automatically "
+                            + "backed up, and restored on app install. Your GCM regid will not "
+                            + "work across restores, so you must ensure that it is excluded "
+                            + "from the back-up set. Use the attribute "
+                            + "`android:fullBackupContent` to specify an `@xml` resource which "
+                            + "configures which files to backup. More info: "
+                            + BACKUP_DOCUMENTATION_URL);
+                } else {
+                    Location location = context.getLocation(sourceApplicationElement);
+                    context.report(ALLOW_BACKUP, application, location, ""
+                            + "On SDK version 23 and up, your app data will be automatically "
+                            + "backed up and restored on app install. Consider adding the "
+                            + "attribute `android:fullBackupContent` to specify an `@xml` "
+                            + "resource which configures which files to backup. More info: "
+                            + BACKUP_DOCUMENTATION_URL);
+                }
+            }
+
+            if ((allowBackup == null || allowBackup.isEmpty()
+                    && mainProject.getMinSdk() >= 4)) {
+                context.report(ALLOW_BACKUP, context.getLocation(sourceApplicationElement),
+                        "Should explicitly set `android:allowBackup` to `true` or "
+                                + "`false` (it's `true` by default, and that can have some security "
+                                + "implications for the application's data)");
+            }
+        }
+
+        if (!application.hasAttributeNS(ANDROID_URI, ATTR_ICON)
+                && context.isEnabled(APPLICATION_ICON)) {
+            LintFix fix = fix().set(ANDROID_URI, ATTR_ICON, "@mipmap/").caretEnd().build();
+            context.report(APPLICATION_ICON, context.getLocation(sourceApplicationElement),
+                    "Should explicitly set `android:icon`, there is no default", fix);
+        }
     }
 
     private static void checkDocumentElement(XmlContext context, Element element) {
@@ -525,16 +570,20 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                 // Not required in Gradle projects; typically defined in build.gradle instead
                 // and inserted at build time
                 && !context.getMainProject().isGradleProject()) {
+            LintFix fix = fix().set(ANDROID_URI, ATTR_VERSION_CODE, "").build();
             context.report(SET_VERSION, element, context.getLocation(element),
-                    "Should set `android:versionCode` to specify the application version");
+                    "Should set `android:versionCode` to specify the application version",
+                    fix);
         }
         Attr nameNode = element.getAttributeNodeNS(ANDROID_URI, ATTR_VERSION_NAME);
         if (nameNode == null && context.isEnabled(SET_VERSION)
                 // Not required in Gradle projects; typically defined in build.gradle instead
                 // and inserted at build time
                 && !context.getMainProject().isGradleProject()) {
+            LintFix fix = fix().set(ANDROID_URI, ATTR_VERSION_NAME, "").build();
             context.report(SET_VERSION, element, context.getLocation(element),
-                    "Should set `android:versionName` to specify the application version");
+                    "Should set `android:versionName` to specify the application version",
+                    fix);
         }
 
         checkOverride(context, element, ATTR_VERSION_CODE);
@@ -668,9 +717,9 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             } else if (tag.equals(TAG_SERVICE)
                        && context.getMainProject().isGradleProject()) {
                 Attr bindListenerAttr = null;
-                for (Element child : LintUtils.getChildren(element)) {
+                for (Element child : XmlUtils.getSubTags(element)) {
                     if (child.getTagName().equals(TAG_INTENT_FILTER)) {
-                        for (Element innerChild : LintUtils.getChildren(child)) {
+                        for (Element innerChild : XmlUtils.getSubTags(child)) {
                             if (innerChild.getTagName().equals(NODE_ACTION)) {
                                 Attr nodeNS = innerChild.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
                                 if (nodeNS != null
@@ -809,12 +858,20 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                         String target = targetSdkVersionNode.getValue();
                         try {
                             int api = Integer.parseInt(target);
-                            if (api < context.getClient().getHighestKnownApiLevel()) {
-                                context.report(TARGET_NEWER, element,
-                                  context.getLocation(targetSdkVersionNode),
-                                  "Not targeting the latest versions of Android; compatibility " +
-                                  "modes apply. Consider testing and updating this version. " +
-                                  "Consult the `android.os.Build.VERSION_CODES` javadoc for details.");
+                            int highest = context.getClient().getHighestKnownApiLevel();
+                            if (api < highest) {
+                                LintFix fix = fix()
+                                        .name("Update targetSdkVersion to " + highest)
+                                        .replace()
+                                        .pattern("targetSdkVersion\\s*=\\s*[\"'](.*)[\"']")
+                                        .with(Integer.toString(highest))
+                                        .build();
+                                Location location = context.getLocation(targetSdkVersionNode);
+                                context.report(TARGET_NEWER, element, location,
+                                        "Not targeting the latest versions of Android; compatibility " +
+                                        "modes apply. Consider testing and updating this version. " +
+                                        "Consult the `android.os.Build.VERSION_CODES` javadoc for details.",
+                                        fix);
                             }
                         } catch (NumberFormatException nufe) {
                             // Ignore: AAPT will enforce this.
@@ -831,44 +888,9 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                                 + "a literal integer (or string if a preview codename)");
             }
         }
+
         if (tag.equals(TAG_PERMISSION)) {
-            Attr nameNode = element.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
-            if (nameNode != null) {
-                String name = nameNode.getValue();
-                String base = name.substring(name.lastIndexOf('.') + 1);
-                if (mPermissionNames == null) {
-                    mPermissionNames = Maps.newHashMap();
-                } else if (mPermissionNames.containsKey(base)) {
-                    String prevName = mPermissionNames.get(base);
-                    Location location = context.getLocation(nameNode);
-                    NodeList siblings = element.getParentNode().getChildNodes();
-                    for (int i = 0, n = siblings.getLength(); i < n; i++) {
-                        Node node = siblings.item(i);
-                        if (node == element) {
-                            break;
-                        } else if (node.getNodeType() == Node.ELEMENT_NODE) {
-                            Element sibling = (Element) node;
-                            String suffix = '.' + base;
-                            if (sibling.getTagName().equals(TAG_PERMISSION)) {
-                                String b = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
-                                if (b.endsWith(suffix)) {
-                                    Location prevLocation = context.getLocation(node);
-                                    prevLocation.setMessage("Previous permission here");
-                                    location.setSecondary(prevLocation);
-                                    break;
-                                }
-
-                            }
-                        }
-                    }
-
-                    String message = String.format("Permission name `%1$s` is not unique " +
-                            "(appears in both `%2$s` and `%3$s`)", base, prevName, name);
-                    context.report(UNIQUE_PERMISSION, element, location, message);
-                }
-
-                mPermissionNames.put(base, name);
-            }
+            ensureUniquePermission(context, element);
         }
 
         if (tag.equals(TAG_USES_PERMISSION)) {
@@ -886,61 +908,11 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
 
         if (tag.equals(TAG_APPLICATION)) {
             mSeenApplication = true;
-            boolean recordLocation = false;
-            String allowBackup = element.getAttributeNS(ANDROID_URI, ATTR_ALLOW_BACKUP);
-            if (allowBackup != null && !allowBackup.isEmpty()
-                    || context.getDriver().isSuppressed(context, ALLOW_BACKUP, element)) {
-                mSeenAllowBackup = true;
-            } else {
-                recordLocation = true;
-            }
-            if (element.hasAttributeNS(ANDROID_URI, ATTR_ICON)
-                    || context.getDriver().isSuppressed(context, APPLICATION_ICON, element)) {
+
+            checkMergedApplication(context, element);
+
+            if (element.hasAttributeNS(ANDROID_URI, ATTR_ICON)) {
                 checkMipmapIcon(context, element);
-                mSeenAppIcon = true;
-            } else {
-                recordLocation = true;
-            }
-            if (recordLocation && !context.getProject().isLibrary() &&
-                    (mApplicationTagHandle == null || isMainManifest(context, context.file))) {
-                mApplicationTagHandle = context.createLocationHandle(element);
-            }
-            Attr fullBackupNode = element.getAttributeNodeNS(ANDROID_URI, ATTR_FULL_BACKUP_CONTENT);
-            if (fullBackupNode != null &&
-                    fullBackupNode.getValue().startsWith(PREFIX_RESOURCE_REF) &&
-                    context.getClient().supportsProjectResources()) {
-                AbstractResourceRepository resources = context.getClient()
-                        .getResourceRepository(context.getProject(), true, false);
-                ResourceUrl url = ResourceUrl.parse(fullBackupNode.getValue());
-                if (url != null && !url.framework
-                        && resources != null
-                        && !resources.hasResourceItem(url.type, url.name)) {
-                    Location location = context.getValueLocation(fullBackupNode);
-                    context.report(ALLOW_BACKUP, fullBackupNode, location,
-                            MISSING_FULL_BACKUP_CONTENT_RESOURCE);
-                }
-            } else if (fullBackupNode == null && !VALUE_FALSE.equals(allowBackup)
-                    && !context.getProject().isLibrary()
-                    && context.getMainProject().getTargetSdk() >= 23) {
-                if (hasGcmReceiver(element)) {
-                    Location location = context.getLocation(element);
-                    context.report(ALLOW_BACKUP, element, location, ""
-                            + "On SDK version 23 and up, your app data will be automatically "
-                            + "backed up, and restored on app install. Your GCM regid will not "
-                            + "work across restores, so you must ensure that it is excluded "
-                            + "from the back-up set. Use the attribute "
-                            + "`android:fullBackupContent` to specify an `@xml` resource which "
-                            + "configures which files to backup. More info: "
-                            + BACKUP_DOCUMENTATION_URL);
-                } else {
-                    Location location = context.getLocation(element);
-                    context.report(ALLOW_BACKUP, element, location, ""
-                            + "On SDK version 23 and up, your app data will be automatically "
-                            + "backed up and restored on app install. Consider adding the "
-                            + "attribute `android:fullBackupContent` to specify an `@xml` "
-                            + "resource which configures which files to backup. More info: "
-                            + BACKUP_DOCUMENTATION_URL);
-                }
             }
         } else if (mSeenApplication) {
             if (context.isEnabled(ORDER)) {
@@ -970,10 +942,110 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
         }
     }
 
+    private boolean checkedUniquePermissions;
+
+    private void ensureUniquePermission(@NonNull XmlContext context,
+            @NonNull Element sourceElement) {
+        // Only check this for the first encountered manifest permission tag; it will consult
+        // the merged manifest to perform a global check and report errors it finds, so we don't
+        // need to repeat that for each sibling permission element
+        if (checkedUniquePermissions) {
+            return;
+        }
+        checkedUniquePermissions = true;
+
+        Project mainProject = context.getMainProject();
+        Document merge = mainProject.getMergedManifest();
+        if (merge == null) {
+            // This only happens when there is a parse error, for example if user
+            // is editing the manifest in the IDE and it's currently invalid
+            return;
+        }
+
+        Map<String,String> nameToFull = null;
+        for (Element element = getFirstSubTagByName(merge.getDocumentElement(), TAG_PERMISSION);
+                element != null;
+                element = getNextTagByName(element, TAG_PERMISSION)) {
+
+            Attr nameNode = element.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
+            if (nameNode == null) {
+                continue;
+            }
+
+            if (manifestMergerSkips(element)) {
+                continue;
+            }
+
+            String name = nameNode.getValue();
+            String base = name.substring(name.lastIndexOf('.') + 1);
+
+            if (name.contains("${applicationId}") && !mainProject.isLibrary() &&
+                    mainProject.getPackage() != null) {
+                name = name.replace("${applicationId}",  mainProject.getPackage());
+            }
+
+            if (name.contains("${")) {
+                // Unknown manifest placeholder: don't try to enforce uniqueness; we don't
+                // know whether the values turn out to be identical
+                continue;
+            }
+
+            if (nameToFull == null) {
+                nameToFull = Maps.newHashMap();
+            } else if (nameToFull.containsKey(base) && !name.equals(nameToFull.get(base))) {
+                String prevName = nameToFull.get(base);
+                Location location = context.getLocation(nameNode);
+                NodeList siblings = element.getParentNode().getChildNodes();
+                for (int i = 0, n = siblings.getLength(); i < n; i++) {
+                    Node node = siblings.item(i);
+                    if (node == element) {
+                        break;
+                    } else if (node.getNodeType() == Node.ELEMENT_NODE) {
+                        Element sibling = (Element) node;
+                        String suffix = '.' + base;
+                        if (sibling.getTagName().equals(TAG_PERMISSION)) {
+                            String b = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
+                            if (b.endsWith(suffix)) {
+                                Location prevLocation = context.getLocation(node);
+                                prevLocation.setMessage("Previous permission here");
+                                location.setSecondary(prevLocation);
+                                break;
+                            }
+
+                        }
+                    }
+                }
+
+                String message = String.format("Permission name `%1$s` is not unique " +
+                        "(appears in both `%2$s` and `%3$s`)", base, prevName, name);
+                context.report(UNIQUE_PERMISSION, element, location, message);
+            }
+
+            nameToFull.put(base, name);
+        }
+    }
+
+    /**
+     * Returns true if the manifest merger will skip this element due to
+     * a tools:node action attribute
+     */
+    private static boolean manifestMergerSkips(@NonNull Element element) {
+        Attr operation = element.getAttributeNodeNS(TOOLS_URI, "node");
+        if (operation != null) {
+            String action = operation.getValue();
+            if (action.startsWith("remove") || action.equals("replace")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Method to check if the app has a gms wearable dependency that
     // matches the specific criteria i.e >= MIN_WEARABLE_GMS_VERSION
     private static boolean hasWearableGmsDependency(AndroidLibrary library) {
         MavenCoordinates mc = library.getResolvedCoordinates();
+        // Annotated as non-null, but observed to be null after failed Gradle syncs
+        //noinspection ConstantConditions
         if (mc != null
                 && mc.getGroupId().equals(GMS_GROUP_ID)
                 && mc.getArtifactId().equals("play-services-wearable")) {
@@ -1045,36 +1117,31 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
         }
     }
 
-    @SuppressWarnings("SpellCheckingInspection")
-    private static boolean isLaunchableActivity(@NonNull Element element) {
-        if (!TAG_ACTIVITY.equals(element.getTagName())) {
-            return false;
-        }
-
-        for (Element child : LintUtils.getChildren(element)) {
-            if (child.getTagName().equals(TAG_INTENT_FILTER)) {
-                for (Element innerChild : LintUtils.getChildren(child)) {
-                    if (innerChild.getTagName().equals("category")) {
-                        String categoryString = innerChild.getAttributeNS(ANDROID_URI, ATTR_NAME);
-                        return "android.intent.category.LAUNCHER".equals(categoryString);
-                    }
-                }
-            }
-        }
-
-        return false;
+    static boolean isLaunchableActivity(@NonNull Element activity) {
+        return findLaunchableCategoryNode(activity) != null;
     }
 
-    /** Returns true iff the given manifest file is the main manifest file */
-    private static boolean isMainManifest(XmlContext context, File manifestFile) {
-        if (!context.getProject().isGradleProject()) {
-            // In non-gradle projects, just one manifest per project
-            return true;
+    @Nullable
+    static Attr findLaunchableCategoryNode(@NonNull Element activity) {
+        if (!TAG_ACTIVITY.equals(activity.getTagName())) {
+            return null;
         }
 
-        AndroidProject model = context.getProject().getGradleProjectModel();
-        return model == null || manifestFile
-                .equals(model.getDefaultConfig().getSourceProvider().getManifestFile());
+        Element child = getFirstSubTagByName(activity, TAG_INTENT_FILTER);
+        while (child != null) {
+            Element innerChild = getFirstSubTagByName(child, TAG_CATEGORY);
+            while (innerChild != null) {
+                Attr attribute = innerChild.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
+                if (attribute != null &&
+                        attribute.getValue().equals("android.intent.category.LAUNCHER")) {
+                    return attribute;
+                }
+                innerChild = getNextTagByName(innerChild, TAG_CATEGORY);
+            }
+            child = getNextTagByName(child, TAG_INTENT_FILTER);
+        }
+
+        return null;
     }
 
     /**
@@ -1123,16 +1190,15 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
     }
 
     private static void checkDeviceAdmin(XmlContext context, Element element) {
-        List<Element> children = LintUtils.getChildren(element);
         boolean requiredIntentFilterFound = false;
         boolean deviceAdmin = false;
         Attr locationNode = null;
-        for (Element child : children) {
+        for (Element child : XmlUtils.getSubTags(element)) {
             String tagName = child.getTagName();
             if (tagName.equals(TAG_INTENT_FILTER) && !requiredIntentFilterFound) {
                 boolean dataFound = false;
                 boolean actionFound = false;
-                for (Element filterChild : LintUtils.getChildren(child)) {
+                for (Element filterChild : XmlUtils.getSubTags(child)) {
                     String filterTag = filterChild.getTagName();
                     if (filterTag.equals(NODE_ACTION)) {
                         String name = filterChild.getAttributeNS(ANDROID_URI, ATTR_NAME);

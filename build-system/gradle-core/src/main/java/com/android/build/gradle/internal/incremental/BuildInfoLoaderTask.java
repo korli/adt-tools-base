@@ -24,12 +24,10 @@ import com.android.builder.packaging.PackagingUtils;
 import com.android.utils.FileUtils;
 import com.google.common.base.Throwables;
 import com.google.common.io.Files;
-
+import java.io.File;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.tasks.TaskAction;
-
-import java.io.File;
 
 /**
  * Task responsible for loading past iteration build-info.xml file and backup necessary files for
@@ -49,7 +47,7 @@ public class BuildInfoLoaderTask extends BaseTask {
     Logger logger;
 
     // Variant state that is modified.
-    InstantRunBuildContext instantRunBuildContext;
+    InstantRunBuildContext buildContext;
 
     @TaskAction
     public void executeAction() {
@@ -57,19 +55,19 @@ public class BuildInfoLoaderTask extends BaseTask {
         try {
             // load the persisted state, this will give us previous build-ids in case we need them.
             if (buildInfoFile.exists()) {
-                instantRunBuildContext.loadFromXmlFile(buildInfoFile);
+                buildContext.loadFromXmlFile(buildInfoFile);
             } else {
-                instantRunBuildContext.setVerifierStatus(InstantRunVerifierStatus.INITIAL_BUILD);
+                buildContext.setVerifierStatus(InstantRunVerifierStatus.INITIAL_BUILD);
             }
-            long token = instantRunBuildContext.getSecretToken();
+            long token = buildContext.getSecretToken();
             if (token == 0) {
                 token = PackagingUtils.computeApplicationHash(getProject().getBuildDir());
-                instantRunBuildContext.setSecretToken(token);
+                buildContext.setSecretToken(token);
             }
             // check for the presence of a temporary buildInfoFile and if it exists, merge its
             // artifacts into the current build.
             if (tmpBuildInfoFile.exists()) {
-                instantRunBuildContext.mergeFromFile(tmpBuildInfoFile);
+                buildContext.mergeFromFile(tmpBuildInfoFile);
                 FileUtils.delete(tmpBuildInfoFile);
             }
         } catch (Exception e) {
@@ -79,7 +77,7 @@ public class BuildInfoLoaderTask extends BaseTask {
         }
         try {
             // move last iteration artifacts to our back up folder.
-            InstantRunBuildContext.Build lastBuild = instantRunBuildContext.getLastBuild();
+            InstantRunBuildContext.Build lastBuild = buildContext.getLastBuild();
             if (lastBuild == null) {
                 return;
             }
@@ -145,7 +143,7 @@ public class BuildInfoLoaderTask extends BaseTask {
             task.tmpBuildInfoFile =
                     BuildInfoWriterTask.ConfigAction.getTmpBuildInfoFile(variantScope);
             task.pastBuildsFolder = variantScope.getInstantRunPastIterationsFolder();
-            task.instantRunBuildContext = variantScope.getInstantRunBuildContext();
+            task.buildContext = variantScope.getInstantRunBuildContext();
             task.logger = logger;
         }
     }

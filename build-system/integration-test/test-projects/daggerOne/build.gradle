@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 The Android Open Source Project
+ * Copyright (C) 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,17 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 apply from: "../commonHeader.gradle"
 buildscript { apply from: "../commonBuildScript.gradle" }
-apply plugin: 'com.android.library'
+
+apply plugin: 'com.android.application'
 
 apply from: "../commonLocalRepo.gradle"
 
 android {
-    compileSdkVersion 23
+    compileSdkVersion rootProject.latestCompileSdk
     buildToolsVersion = rootProject.buildToolsVersion
-    dataBinding {
-        enabled = true
-        addDefaultAdapters = false
-    }
+}
+
+dependencies {
+    compile "com.squareup.dagger:dagger:1.2.2"
+    compile "com.google.guava:guava:19.0" // Bump up used guava version.
+    annotationProcessor "com.squareup.dagger:dagger-compiler:1.2.2"
+    annotationProcessor "com.google.guava:guava:19.0" // Bump up used guava version.
 }

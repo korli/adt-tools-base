@@ -18,7 +18,6 @@ package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.fixture.BuildModel.Feature.FULL_DEPENDENCIES;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.COORDINATES;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.JAVA;
 import static com.android.build.gradle.integration.common.utils.TestFileUtils.appendToFile;
@@ -32,40 +31,37 @@ import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
 import com.android.builder.model.level2.GraphItem;
-import com.android.ide.common.process.ProcessException;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 
-/**
- * test for provided local jar in app
- */
+/** test for provided local jar in app */
 public class AppWithProvidedRemoteJarTest {
 
     @ClassRule
-    public static GradleTestProject project = GradleTestProject.builder()
-            .fromTestProject("projectWithLocalDeps")
-            .create();
+    public static GradleTestProject project =
+            GradleTestProject.builder().fromTestProject("projectWithLocalDeps").create();
+
     @BeforeClass
-    public static void setUp() throws IOException {
-        appendToFile(project.getBuildFile(),
-                "\n" +
-                "apply plugin: \"com.android.application\"\n" +
-                "\n" +
-                "android {\n" +
-                "    compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n" +
-                "    buildToolsVersion \"" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "\"\n" +
-                "}\n" +
-                "\n" +
-                "repositories {\n" +
-                "  maven { url System.env.CUSTOM_REPO }\n" +
-                "}\n" +
-                "\n" +
-                "dependencies {\n" +
-                "    provided \"com.google.guava:guava:17.0\"\n" +
-                "}\n");
+    public static void setUp() throws Exception {
+        appendToFile(
+                project.getBuildFile(),
+                "\n"
+                        + "apply plugin: \"com.android.application\"\n"
+                        + "apply from: '../commonLocalRepo.gradle'\n"
+                        + "\n"
+                        + "android {\n"
+                        + "    compileSdkVersion "
+                        + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
+                        + "\n"
+                        + "    buildToolsVersion \""
+                        + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION
+                        + "\"\n"
+                        + "}\n"
+                        + "dependencies {\n"
+                        + "    provided \"com.google.guava:guava:18.0\"\n"
+                        + "}\n");
 
         project.execute("clean", "assembleDebug");
     }
@@ -76,20 +72,20 @@ public class AppWithProvidedRemoteJarTest {
     }
 
     @Test
-    public void checkProvidedRemoteJarIsNotPackaged() throws IOException, ProcessException {
-        assertThatApk(project.getApk("debug"))
+    public void checkProvidedRemoteJarIsNotPackaged() throws Exception {
+        assertThat(project.getApk("debug"))
                 .doesNotContainClass("Lcom/example/android/multiproject/person/People;");
     }
 
     @Test
-    public void checkProvidedRemoteJarIsInTheMainArtifactDependency() {
-        GetAndroidModelAction.ModelContainer<AndroidProject> modelContainer = project.model()
-                .withFeature(FULL_DEPENDENCIES).getSingle();
+    public void checkProvidedRemoteJarIsInTheMainArtifactDependency() throws Exception {
+        GetAndroidModelAction.ModelContainer<AndroidProject> modelContainer =
+                project.model().withFeature(FULL_DEPENDENCIES).getSingle();
 
         LibraryGraphHelper helper = new LibraryGraphHelper(modelContainer);
 
-        Variant variant = ModelHelper.getVariant(
-                modelContainer.getOnlyModel().getVariants(), "debug");
+        Variant variant =
+                ModelHelper.getVariant(modelContainer.getOnlyModel().getVariants(), "debug");
 
         DependencyGraphs dependencyGraph = variant.getMainArtifact().getDependencyGraphs();
 
@@ -98,7 +94,7 @@ public class AppWithProvidedRemoteJarTest {
 
         assertThat(javaDependencies.mapTo(COORDINATES))
                 .named("java library dependencies")
-                .containsExactly("com.google.guava:guava:17.0@jar");
+                .containsExactly("com.google.guava:guava:18.0@jar");
         // and that it's provided
         GraphItem javaItem = javaDependencies.asSingleGraphItem();
         assertThat(dependencyGraph.getProvidedLibraries())

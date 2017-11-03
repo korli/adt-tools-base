@@ -16,46 +16,59 @@
 
 package com.android.ide.common.res2;
 
+import static com.android.SdkConstants.ATTR_NAME;
+import static com.android.SdkConstants.ATTR_TYPE;
+import static com.android.SdkConstants.DOT_XML;
+import static com.android.SdkConstants.RES_QUALIFIER_SEP;
+import static com.android.SdkConstants.TAG_RESOURCES;
+import static com.google.common.base.Preconditions.checkState;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.blame.MergingLog;
 import com.android.ide.common.blame.SourceFile;
 import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
-import com.android.ide.common.internal.PngException;
+import com.android.ide.common.internal.ResourceCompilationException;
+import com.android.ide.common.workers.WorkerExecutorFacade;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
 import com.android.utils.FileUtils;
 import com.android.utils.XmlUtils;
 import com.google.common.base.Charsets;
-import com.google.common.collect.*;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ListMultimap;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-import com.google.common.util.concurrent.ListenableFuture;
-import com.google.common.util.concurrent.MoreExecutors;
-import com.google.common.util.concurrent.SettableFuture;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.*;
+import java.io.Serializable;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-
-import static com.android.SdkConstants.*;
-import static com.google.common.base.Preconditions.checkState;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 
 /**
- * A {@link MergeWriter} for assets, using {@link ResourceItem}.
+ * A {@link MergeWriter} for assets, using {@link ResourceItem}. Also takes care of compiling
+ * resources and stripping data binding from layout files.
  */
-public class MergedResourceWriter extends MergeWriter<ResourceItem> {
+public class MergedResourceWriter
+        extends MergeWriter<ResourceItem, MergedResourceWriter.FileGenerationParameters> {
 
     @NonNull
     private final ResourcePreprocessor mPreprocessor;
@@ -106,41 +119,64 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
     @NonNull
     private final File mCompiledFileMapFile;
 
+    @Nullable private final SingleFileProcessor dataBindingExpressionRemover;
+
+    @Nullable private final File notCompiledOutputDirectory;
+
+    private final boolean pseudoLocalesEnabled;
+
+    private final boolean crunchPng;
+
     /**
      * Maps resource files to their compiled files. Used to compiled resources that no longer
      * exist.
      */
     private final Properties mCompiledFileMap;
 
-    private static class PngCrunchRequest {
-        private final File in;
-        private final File out;
-        private final String folderName;
-
-        private PngCrunchRequest(File in, File out, String folderName) {
-            this.in = in;
-            this.out = out;
-            this.folderName = folderName;
-        }
-    }
-
     @NonNull
-    private final ConcurrentLinkedQueue<PngCrunchRequest> mPngCrunchRequests =
+    private final ConcurrentLinkedQueue<CompileResourceRequest> mCompileResourceRequests =
             new ConcurrentLinkedQueue<>();
 
-    public MergedResourceWriter(@NonNull File rootFolder,
+    /**
+     * A {@link MergeWriter} for resources, using {@link ResourceItem}. Also takes care of compiling
+     * resources and stripping data binding from layout files.
+     *
+     * @param rootFolder merged resources directory to write to (e.g. {@code
+     *     intermediates/res/merged/debug})
+     * @param publicFile File that we should write public.txt to
+     * @param blameLog merging log for rewriting error messages
+     * @param preprocessor preprocessor for merged resources, such as vector drawable rendering
+     * @param resourceCompiler resource compiler, i.e. AAPT
+     * @param temporaryDirectory temporary directory for intermediate merged files
+     * @param dataBindingExpressionRemover removes data binding expressions from layout files
+     * @param notCompiledOutputDirectory for saved uncompiled resources for the resource shrinking
+     *     transform and for unit testing with resources.
+     * @param pseudoLocalesEnabled generate resources for pseudo-locales (en-XA and ar-XB)
+     * @param crunchPng should we crunch PNG files
+     */
+    public MergedResourceWriter(
+            @NonNull WorkerExecutorFacade<FileGenerationParameters> workerExecutor,
+            @NonNull File rootFolder,
             @Nullable File publicFile,
-            @Nullable File blameLogFolder,
+            @Nullable MergingLog blameLog,
             @NonNull ResourcePreprocessor preprocessor,
             @NonNull QueueableResourceCompiler resourceCompiler,
-            @NonNull File temporaryDirectory) {
-        super(rootFolder);
+            @NonNull File temporaryDirectory,
+            @Nullable SingleFileProcessor dataBindingExpressionRemover,
+            @Nullable File notCompiledOutputDirectory,
+            boolean pseudoLocalesEnabled,
+            boolean crunchPng) {
+        super(rootFolder, workerExecutor);
         mResourceCompiler = resourceCompiler;
         mPublicFile = publicFile;
-        mMergingLog = blameLogFolder != null ? new MergingLog(blameLogFolder) : null;
+        mMergingLog = blameLog;
         mPreprocessor = preprocessor;
         mCompiling = new ConcurrentLinkedDeque<>();
         mTemporaryDirectory = temporaryDirectory;
+        this.dataBindingExpressionRemover = dataBindingExpressionRemover;
+        this.notCompiledOutputDirectory = notCompiledOutputDirectory;
+        this.pseudoLocalesEnabled = pseudoLocalesEnabled;
+        this.crunchPng = crunchPng;
 
         mCompiledFileMapFile = new File(temporaryDirectory, "compile-file-map.properties");
         mCompiledFileMap = new Properties();
@@ -157,6 +193,9 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
         }
     }
 
+    /*
+     * Used in tests.
+     */
     public static MergedResourceWriter createWriterWithoutPngCruncher(
             @NonNull File rootFolder,
             @Nullable File publicFile,
@@ -164,32 +203,25 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
             @NonNull ResourcePreprocessor preprocessor,
             @NonNull File temporaryDirectory) {
         return new MergedResourceWriter(
+                new WorkerExecutorFacade<FileGenerationParameters>() {
+                    @Override
+                    public void submit(FileGenerationParameters parameter) {
+                        new FileGenerationWorkAction(parameter).run();
+                    }
+
+                    @Override
+                    public void await() {}
+                },
                 rootFolder,
                 publicFile,
-                blameLogFolder,
+                blameLogFolder != null ? new MergingLog(blameLogFolder) : null,
                 preprocessor,
-                new QueueableResourceCompiler() {
-
-                    @NonNull
-                    @Override
-                    public ListenableFuture<File> compile(@NonNull File file, @NonNull File output)
-                            throws Exception {
-                        SettableFuture<File> future = SettableFuture.create();
-                        future.set(null);
-                        return future;                    }
-
-                    @Override
-                    public void start() {
-
-                    }
-
-                    @Override
-                    public void end() throws InterruptedException {
-
-                    }
-                },
-                temporaryDirectory
-        );
+                QueueableResourceCompiler.NONE,
+                temporaryDirectory,
+                null,
+                null,
+                false,
+                false);
     }
 
     @Override
@@ -204,56 +236,80 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
     public void end() throws ConsumerException {
         // Make sure all PNGs are generated first.
         super.end();
-        // now perform all the PNG crunching.
+        // now perform all the databinding, PNG crunching (AAPT1) and resources compilation (AAPT2).
+        Map<Future, String> outstandingRequests = new HashMap<>();
         try {
-            mResourceCompiler.start();
-            while (!mPngCrunchRequests.isEmpty()) {
-                PngCrunchRequest request = mPngCrunchRequests.poll();
+            File tmpDir = new File(mTemporaryDirectory, "stripped.dir");
+            try {
+                FileUtils.cleanOutputDir(tmpDir);
+            } catch (IOException e) {
+                throw new ConsumerException(e);
+            }
+
+            while (!mCompileResourceRequests.isEmpty()) {
+                CompileResourceRequest request = mCompileResourceRequests.poll();
                 try {
-                    ListenableFuture<File> result = mResourceCompiler
-                            .compile(request.in, request.out);
+                    Future<File> result;
+                    File fileToCompile = request.getInput();
+
+                    if (mMergingLog != null) {
+                        mMergingLog.logCopy(
+                                request.getInput(), mResourceCompiler.compileOutputFor(request));
+                    }
+
+                    if (dataBindingExpressionRemover != null
+                            && request.getFolderName().startsWith("layout")
+                            && request.getInput().getName().endsWith(".xml")) {
+
+                        // Try to strip the layout. If stripping modified the file (there was data
+                        // binding in the layout), compile the stripped layout into merged resources
+                        // folder. Otherwise, compile into merged resources folder normally.
+
+                        File strippedLayoutFolder = new File(tmpDir, request.getFolderName());
+                        File strippedLayout =
+                                new File(strippedLayoutFolder, request.getInput().getName());
+
+                        boolean removedDataBinding =
+                                dataBindingExpressionRemover.processSingleFile(
+                                        request.getInput(), strippedLayout);
+
+                        if (removedDataBinding) {
+                            // Remember in case AAPT compile or link fails.
+                            if (mMergingLog != null) {
+                                mMergingLog.logCopy(request.getInput(), strippedLayout);
+                            }
+                            fileToCompile = strippedLayout;
+                        }
+                    }
+
+                    // Currently the resource shrinker and unit tests that use resources need
+                    // the final merged, but uncompiled file.
+                    if (notCompiledOutputDirectory != null) {
+                        File typeDir =
+                                new File(notCompiledOutputDirectory, request.getFolderName());
+                        FileUtils.mkdirs(typeDir);
+                        FileUtils.copyFileToDirectory(fileToCompile, typeDir);
+                    }
+
+                    result =
+                            mResourceCompiler.compile(
+                                    new CompileResourceRequest(
+                                            fileToCompile,
+                                            request.getOutput(),
+                                            request.getFolderName(),
+                                            pseudoLocalesEnabled,
+                                            crunchPng));
+
+                    outstandingRequests.put(result, request.getInput().getAbsolutePath());
+
                     // adding to the mCompiling seems unnecessary at this point, the end() call will
                     // take care of waiting for all requests to be processed.
                     mCompiling.add(result);
-                    result.addListener(() -> {
-                        try {
-                            File outFile = result.get();
-                            if (outFile == null) {
-                                File typeFolder = new File(getRootFolder(), request.folderName);
-                                FileUtils.mkdirs(typeFolder);
 
-                                outFile = new File(typeFolder, request.in.getName());
-                                Files.copy(request.in, outFile);
-                            }
-
-                            if (mMergingLog != null) {
-                                mMergingLog.logCopy(request.in, outFile);
-                            }
-
-                            mCompiledFileMap.put(
-                                    request.in.getAbsolutePath(),
-                                    outFile.getAbsolutePath());
-                        } catch (Exception e) {
-                            /*
-                             * We will detect any exceptions (or generate them during copy)
-                             * asynchronously, so we need to be careful to report them back.
-                             * Because end() will wait for all futures and report any
-                             * failures, we will register a new future that will throw the
-                             * exception when we fail. This ensures that end() will throw
-                             * the exception.
-                             */
-                            SettableFuture<File> failureSimulator =
-                                    SettableFuture.create();
-                            failureSimulator.setException(e);
-                            mCompiling.add(failureSimulator);
-                        }
-                    }, MoreExecutors.directExecutor());
-                } catch(PngException | IOException e) {
-                    throw MergingException.wrapException(e).withFile(request.in).build();
+                } catch (ResourceCompilationException | IOException e) {
+                    throw MergingException.wrapException(e).withFile(request.getInput()).build();
                 }
             }
-            mResourceCompiler.end();
-
         } catch (Exception e) {
             throw new ConsumerException(e);
         }
@@ -262,7 +318,8 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
         try {
             Future<File> first;
             while ((first = mCompiling.pollFirst()) != null) {
-                first.get();
+                File outFile = first.get();
+                mCompiledFileMap.put(outstandingRequests.get(first), outFile.getAbsolutePath());
             }
 
         } catch (InterruptedException|ExecutionException e) {
@@ -309,24 +366,61 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
             // This is a single value file or a set of generated files. Only write it if the state
             // is TOUCHED.
             if (item.isTouched()) {
-                getExecutor().execute(() -> {
-                    File file = item.getFile();
-                    String folderName = getFolderName(item);
+                File file = item.getFile();
+                String folderName = getFolderName(item);
 
-                    // TODO : make this also a request and use multi-threading for generation.
-                    if (type == DataFile.FileType.GENERATED_FILES) {
-                        try {
-                            mPreprocessor.generateFile(file, item.getSource().getFile());
-                        } catch (Exception e) {
-                            throw new ConsumerException(e, item.getSource().getFile());
+                // TODO : make this also a request and use multi-threading for generation.
+                if (type == DataFile.FileType.GENERATED_FILES) {
+                    try {
+                        FileGenerationParameters workItem =
+                                new FileGenerationParameters(item, mPreprocessor);
+                        if (workItem.resourceItem.getSource() != null) {
+                            getExecutor().submit(workItem);
                         }
+                    } catch (Exception e) {
+                        throw new ConsumerException(e, item.getSource().getFile());
                     }
+                }
 
-                    // enlist a new crunching request.
-                    mPngCrunchRequests.add(
-                            new PngCrunchRequest(file, getRootFolder(), folderName));
-                    return null;
-                });
+                // enlist a new crunching request.
+                mCompileResourceRequests.add(
+                        new CompileResourceRequest(file, getRootFolder(), folderName));
+            }
+        }
+    }
+
+    public static class FileGenerationParameters implements Serializable {
+        public final ResourceItem resourceItem;
+        public final ResourcePreprocessor resourcePreprocessor;
+
+        private FileGenerationParameters(
+                ResourceItem resourceItem, ResourcePreprocessor resourcePreprocessor) {
+            this.resourceItem = resourceItem;
+            this.resourcePreprocessor = resourcePreprocessor;
+        }
+    }
+
+    public static class FileGenerationWorkAction implements Runnable {
+
+        private final FileGenerationParameters workItem;
+
+        public FileGenerationWorkAction(FileGenerationParameters workItem) {
+            this.workItem = workItem;
+        }
+
+        @Override
+        public void run() {
+            try {
+                workItem.resourcePreprocessor.generateFile(
+                        workItem.resourceItem.getFile(),
+                        workItem.resourceItem.getSource().getFile());
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Error while processing "
+                                + workItem.resourceItem.getSource().getFile()
+                                + " : "
+                                + e.getMessage(),
+                        e);
             }
         }
     }
@@ -462,31 +556,42 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
                     rootNode.appendChild(document.createTextNode("\n"));
 
                     final String content;
+                    Map<SourcePosition, SourceFilePosition> blame =
+                            mMergingLog == null ? null : Maps.newLinkedHashMap();
 
-                    if (mMergingLog != null) {
-                        Map<SourcePosition, SourceFilePosition> blame = Maps.newLinkedHashMap();
+                    if (blame != null) {
                         content = XmlUtils.toXml(document, blame);
-                        mMergingLog.logSource(new SourceFile(outFile), blame);
                     } else {
                         content = XmlUtils.toXml(document);
                     }
 
                     Files.write(content, outFile, Charsets.UTF_8);
 
-                    /*
-                     * Now, compile the file using aapt.
-                     */
-                    Future<File> f = mResourceCompiler.compile(outFile, getRootFolder());
-                    File result = f.get();
-                    if (result == null) {
-                        /*
-                         * aapt cannot compile this file, copy it.
-                         */
-                        File copyFolder = new File(getRootFolder(), folderName);
-                        FileUtils.mkdirs(copyFolder);
-                        File copyOutput = new File(copyFolder, outFile.getName());
-                        Files.copy(outFile, copyOutput);
+                    CompileResourceRequest request =
+                            new CompileResourceRequest(
+                                    outFile,
+                                    getRootFolder(),
+                                    folderName,
+                                    pseudoLocalesEnabled,
+                                    crunchPng);
+
+                    // If we are going to shrink resources, the resource shrinker needs to have the
+                    // final merged uncompiled file.
+                    if (notCompiledOutputDirectory != null) {
+                        File typeDir = new File(notCompiledOutputDirectory, folderName);
+                        FileUtils.mkdirs(typeDir);
+                        FileUtils.copyFileToDirectory(outFile, typeDir);
                     }
+
+                    if (blame != null) {
+                        mMergingLog.logSource(
+                                new SourceFile(mResourceCompiler.compileOutputFor(request)), blame);
+
+                        mMergingLog.logSource(new SourceFile(outFile), blame);
+                    }
+
+                    mResourceCompiler.compile(request).get();
+
 
                     if (publicNodes != null && mPublicFile != null) {
                         // Generate public.txt:
@@ -525,7 +630,20 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
                     ResourceFolderType.VALUES.getName() + RES_QUALIFIER_SEP + key :
                     ResourceFolderType.VALUES.getName();
 
-            removeOutFile(FileUtils.join(getRootFolder(), folderName, folderName + DOT_XML));
+            if (notCompiledOutputDirectory != null) {
+                removeOutFile(
+                        FileUtils.join(
+                                notCompiledOutputDirectory, folderName, folderName + DOT_XML));
+            }
+
+            // Remove the intermediate (compiled) values file.
+            removeOutFile(
+                    mResourceCompiler.compileOutputFor(
+                            new CompileResourceRequest(
+                                    FileUtils.join(
+                                            getRootFolder(), folderName, folderName + DOT_XML),
+                                    getRootFolder(),
+                                    folderName)));
         }
     }
 
@@ -542,19 +660,53 @@ public class MergedResourceWriter extends MergeWriter<ResourceItem> {
         if (compiledFilePath != null) {
             return new File(compiledFilePath);
         } else {
-            return FileUtils.join(getRootFolder(), getFolderName(resourceItem), file.getName());
+            return mResourceCompiler.compileOutputFor(
+                    new CompileResourceRequest(file, getRootFolder(), getFolderName(resourceItem)));
         }
+    }
+
+    /**
+     * Removes possibly existing layout file from the data binding output folder. If the original
+     * file was a layout XML file it is possible that it contained data binding and was put into the
+     * data binding layout output folder for data binding tasks to process.
+     *
+     * @param resourceItem the source item that could have created the file to remove
+     */
+    private void removeLayoutFileFromDataBindingOutputFolder(@NonNull ResourceItem resourceItem) {
+        File originalFile = resourceItem.getFile();
+        // Only files that come from layout folders and are XML files could have been stripped.
+        if (!originalFile.getParentFile().getName().startsWith("layout")
+                || !originalFile.getName().endsWith(".xml")) {
+            return;
+        }
+        dataBindingExpressionRemover.processRemovedFile(originalFile);
+    }
+
+    private void removeFileFromNotCompiledOutputDir(@NonNull ResourceItem resourceItem) {
+        File originalFile = resourceItem.getFile();
+        File resTypeDir =
+                new File(notCompiledOutputDirectory, originalFile.getParentFile().getName());
+        File toRemove = new File(resTypeDir, originalFile.getName());
+        removeOutFile(toRemove);
     }
 
     /**
      * Removes a file that already exists in the out res folder. This has to be a non value file.
      *
-     * @param resourceItem the source item that created the file to remove, this item must have
-     * a file associated with it
+     * @param resourceItem the source item that created the file to remove, this item must have a
+     *     file associated with it
      * @return true if success.
      */
     private boolean removeOutFile(ResourceItem resourceItem) {
         File fileToRemove = getResourceOutputFile(resourceItem);
+        if (dataBindingExpressionRemover != null) {
+            // The file could have possibly been a layout file with data binding.
+            removeLayoutFileFromDataBindingOutputFolder(resourceItem);
+        }
+        if (notCompiledOutputDirectory != null) {
+            // The file was copied for the resource shrinking and needs to be removed from there.
+            removeFileFromNotCompiledOutputDir(resourceItem);
+        }
         return removeOutFile(fileToRemove);
     }
 

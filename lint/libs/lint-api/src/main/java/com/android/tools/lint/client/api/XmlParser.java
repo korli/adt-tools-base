@@ -22,9 +22,13 @@ import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.annotations.Beta;
+import java.io.File;
+import java.io.IOException;
+import javax.xml.parsers.ParserConfigurationException;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
+import org.xml.sax.SAXException;
 
 /**
  * A wrapper for an XML parser. This allows tools integrating lint to map directly
@@ -35,6 +39,29 @@ import org.w3c.dom.Node;
  */
 @Beta
 public abstract class XmlParser {
+    /**
+     * Parse the given XML content and returns as a Document
+     *
+     * @param file the file to be parsed
+     * @return the parsed DOM document
+     */
+    @Nullable
+    public abstract Document parseXml(@NonNull File file)
+            throws IOException, SAXException, ParserConfigurationException;
+
+    /**
+     * Parse the given XML string and return document, or null if any error
+     * occurs (does <b>not</b> throw parsing exceptions). Most clients should
+     * call {@link #parseXml(XmlContext)} instead.
+     *
+     * @param xml  the parsing string
+     * @param file the file corresponding to the XML string, <b>if known</b>.
+     *             May be null.
+     * @return the parsed DOM document, or null if parsing fails
+     */
+    @Nullable
+    public abstract Document parseXml(@NonNull CharSequence xml, @NonNull File file);
+
     /**
      * Parse the file pointed to by the given context and return as a Document
      *
@@ -56,6 +83,20 @@ public abstract class XmlParser {
      */
     @NonNull
     public abstract Location getLocation(@NonNull XmlContext context, @NonNull Node node);
+
+    /**
+     * Attempt to create a location for a given XML node. Note that since DOM does not normally
+     * provide offset information for nodes, this doesn't work if you pass in a random DOM node
+     * from your own parsing operations; you should only call this method with nodes provided
+     * by lint in the first place (internally it uses a special parser which tracks offset
+     * information.)
+     *
+     * @param file the file that contains the node that was parsed
+     * @param node the node itself
+     * @return a location for the node, if possible
+     */
+    @NonNull
+    public abstract Location getLocation(@NonNull File file, @NonNull Node node);
 
     /**
      * Returns a {@link Location} for the given DOM node. Like

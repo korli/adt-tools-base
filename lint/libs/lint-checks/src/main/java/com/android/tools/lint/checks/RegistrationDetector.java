@@ -16,8 +16,6 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.ANDROID_URI;
-import static com.android.SdkConstants.ATTR_NAME;
 import static com.android.SdkConstants.CLASS_ACTIVITY;
 import static com.android.SdkConstants.CLASS_APPLICATION;
 import static com.android.SdkConstants.CLASS_BROADCASTRECEIVER;
@@ -36,31 +34,32 @@ import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.SourceProviderContainer;
 import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.detector.api.Category;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LayoutDetector;
+import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
+import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.SdkUtils;
+import com.android.utils.XmlUtils;
 import com.google.common.collect.Maps;
-import com.intellij.psi.PsiClass;
 import java.io.File;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import org.jetbrains.uast.UClass;
+import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
 /**
  * Checks for missing manifest registrations for activities, services etc
  * and also makes sure that they are registered with the correct tag
  */
-public class RegistrationDetector extends LayoutDetector implements JavaPsiScanner {
+public class RegistrationDetector extends LayoutDetector implements UastScanner {
     /** Unregistered activities and services */
     public static final Issue ISSUE = Issue.create(
             "Registered",
@@ -77,7 +76,7 @@ public class RegistrationDetector extends LayoutDetector implements JavaPsiScann
             Severity.WARNING,
             new Implementation(
                     RegistrationDetector.class,
-                    EnumSet.of(Scope.MANIFEST, Scope.JAVA_FILE)))
+                    Scope.JAVA_FILE_SCOPE))
             .addMoreInfo(
             "http://developer.android.com/guide/topics/manifest/manifest-intro.html")
             // Temporary workaround for https://code.google.com/p/android/issues/detail?id=227579
@@ -90,60 +89,49 @@ public class RegistrationDetector extends LayoutDetector implements JavaPsiScann
     public RegistrationDetector() {
     }
 
-    // ---- Implements XmlScanner ----
+    @Nullable
+    private Map<String, String> getManifestRegistrations(@NonNull Project mainProject) {
+        if (mManifestRegistrations == null) {
+            Document mergedManifest = mainProject.getMergedManifest();
+            if (mergedManifest == null ||
+                    mergedManifest.getDocumentElement() == null) {
+                return null;
+            }
+            mManifestRegistrations = Maps.newHashMap();
+            Element application = XmlUtils.getFirstSubTagByName(
+                    mergedManifest.getDocumentElement(), TAG_APPLICATION);
+            if (application != null) {
+                registerElement(application);
+                for (Element c : XmlUtils.getSubTags(application)) {
+                    registerElement(c);
+                }
+            }
+        }
 
-    @Override
-    public Collection<String> getApplicableElements() {
-        return Arrays.asList(sTags);
+        return mManifestRegistrations;
     }
 
-    @Override
-    public void visitElement(@NonNull XmlContext context, @NonNull Element element) {
-        if (!element.hasAttributeNS(ANDROID_URI, ATTR_NAME)) {
-            // For example, application appears in manifest and doesn't always have a name
-            return;
-        }
-        String fqcn = getFqcn(context, element);
-        String tag = element.getTagName();
+    private void registerElement(Element c) {
+        String fqcn = LintUtils.resolveManifestName(c);
+        String tag = c.getTagName();
         String frameworkClass = tagToClass(tag);
         if (frameworkClass != null) {
-            String signature = fqcn;
-            if (mManifestRegistrations == null) {
-                mManifestRegistrations = Maps.newHashMap();
-            }
-            mManifestRegistrations.put(signature, frameworkClass);
-            if (signature.indexOf('$') != -1) {
-                signature = signature.replace('$', '.');
-                mManifestRegistrations.put(signature, frameworkClass);
+            mManifestRegistrations.put(fqcn, frameworkClass);
+            if (fqcn.indexOf('$') != -1) {
+                // The internal name contains a $ which means it's an inner class.
+                // The conversion from fqcn to internal name is a bit ambiguous:
+                // "a.b.C.D" usually means "inner class D in class C in package a.b".
+                // However, it can (see issue 31592) also mean class D in package "a.b.C".
+                // Place *both* of these possibilities in the registered map, since this
+                // is only used to check that an activity is registered, not the other way
+                // (so it's okay to have entries there that do not correspond to real classes).
+                fqcn = fqcn.replace('$', '.');
+                mManifestRegistrations.put(fqcn, frameworkClass);
             }
         }
     }
 
-    /**
-     * Returns the fully qualified class name for a manifest entry element that
-     * specifies a name attribute
-     *
-     * @param context the query context providing the project
-     * @param element the element
-     * @return the fully qualified class name
-     */
-    @NonNull
-    private static String getFqcn(@NonNull XmlContext context, @NonNull Element element) {
-        String className = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
-        if (className.startsWith(".")) {
-            return context.getProject().getPackage() + className;
-        } else if (className.indexOf('.') == -1) {
-            // According to the <activity> manifest element documentation, this is not
-            // valid ( http://developer.android.com/guide/topics/manifest/activity-element.html )
-            // but it appears in manifest files and appears to be supported by the runtime
-            // so handle this in code as well:
-            return context.getProject().getPackage() + '.' + className;
-        } // else: the class name is already a fully qualified class name
-
-        return className;
-    }
-
-    // ---- Implements JavaScanner ----
+    // ---- Implements UastScanner ----
 
     @Nullable
     @Override
@@ -157,7 +145,13 @@ public class RegistrationDetector extends LayoutDetector implements JavaPsiScann
     }
 
     @Override
-    public void checkClass(@NonNull JavaContext context, @NonNull PsiClass cls) {
+    public void visitClass(@NonNull JavaContext context, @NonNull UClass cls) {
+        // If a library project provides additional activities, it is not an error to
+        // not register all of those here
+        if (context.getProject().isLibrary()) {
+            return;
+        }
+
         if (cls.getName() == null) {
             // anonymous class; can't be registered
             return;
@@ -179,21 +173,21 @@ public class RegistrationDetector extends LayoutDetector implements JavaPsiScann
         if (className == null) {
             return;
         }
-        if (mManifestRegistrations != null) {
-            String framework = mManifestRegistrations.get(className);
+        Map<String, String> manifestRegistrations = getManifestRegistrations(
+                context.getMainProject());
+        if (manifestRegistrations != null) {
+            String framework = manifestRegistrations.get(className);
             if (framework == null) {
                 reportMissing(context, cls, className, rightTag);
             } else if (!evaluator.extendsClass(cls, framework, false)) {
                 reportWrongTag(context, cls, rightTag, className, framework);
             }
-        } else {
-            reportMissing(context, cls, className, rightTag);
         }
     }
 
     private static void reportWrongTag(
             @NonNull JavaContext context,
-            @NonNull PsiClass node,
+            @NonNull UClass node,
             @NonNull String rightTag,
             @NonNull String className,
             @NonNull String framework) {
@@ -215,7 +209,7 @@ public class RegistrationDetector extends LayoutDetector implements JavaPsiScann
 
     private static void reportMissing(
             @NonNull JavaContext context,
-            @NonNull PsiClass node,
+            @NonNull UClass node,
             @NonNull String className,
             @NonNull String tag) {
         if (tag.equals(TAG_RECEIVER)) {
@@ -262,7 +256,7 @@ public class RegistrationDetector extends LayoutDetector implements JavaPsiScann
         context.report(ISSUE, node, location, message);
     }
 
-    private static String getTag(@NonNull JavaEvaluator evaluator, @NonNull PsiClass cls) {
+    private static String getTag(@NonNull JavaEvaluator evaluator, @NonNull UClass cls) {
         String tag = null;
         for (String s : sClasses) {
             if (evaluator.extendsClass(cls, s, false)) {

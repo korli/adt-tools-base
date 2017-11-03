@@ -16,14 +16,14 @@
 
 package com.android.build.gradle.integration.common.fixture;
 
-
 import static com.google.common.truth.Truth.assertThat;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.AndroidGradleOptions;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
-import com.android.builder.model.AndroidProject;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.IntegerOption;
+import com.android.build.gradle.options.StringOption;
 import com.android.builder.model.OptionalCompilationStep;
 import com.android.builder.tasks.BooleanLatch;
 import com.android.ddmlib.IDevice;
@@ -35,64 +35,72 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
-import org.apache.commons.io.output.TeeOutputStream;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.stream.Collectors;
 import org.gradle.tooling.BuildLauncher;
 import org.gradle.tooling.GradleConnectionException;
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.ResultHandler;
+import org.gradle.tooling.events.OperationType;
+import org.gradle.tooling.events.ProgressEvent;
+import org.gradle.tooling.events.ProgressListener;
 
 /** A Gradle tooling api build builder. */
 public final class RunGradleTasks extends BaseGradleExecutor<RunGradleTasks> {
 
-    private final boolean isUseJack;
-    private final boolean isMinifyEnabled;
+    public static final int RETRY_COUNT = 5;
     @Nullable private final String buildToolsVersion;
-    private final boolean isImproveDependencyEnabled;
 
     private boolean isExpectingFailure = false;
-    private boolean isSdkAutoDownload = false;
+    private boolean allowStderr = true; // TODO: change default to false.
 
     RunGradleTasks(
             @NonNull GradleTestProject gradleTestProject,
             @NonNull ProjectConnection projectConnection) {
         super(
                 projectConnection,
+                gradleTestProject::setLastBuildResult,
                 gradleTestProject.getTestDir().toPath(),
                 gradleTestProject.getBuildFile().toPath(),
                 gradleTestProject.getBenchmarkRecorder(),
                 gradleTestProject.getProfileDirectory(),
                 gradleTestProject.getHeapSize());
-        isUseJack = gradleTestProject.isUseJack();
-        isMinifyEnabled = gradleTestProject.isMinifyEnabled();
         buildToolsVersion = gradleTestProject.getBuildToolsVersion();
-        isImproveDependencyEnabled = gradleTestProject.isImprovedDependencyEnabled();
     }
 
     /**
      * Assert that the task called fails.
      *
-     * The resulting exception is stored in the {@link GradleBuildResult}.
+     * <p>The resulting exception is stored in the {@link GradleBuildResult}.
      */
     public RunGradleTasks expectFailure() {
         isExpectingFailure = true;
+        allowStderr(true);
+        return this;
+    }
+
+    /** Disable or enable the assertion that there is no stderr. */
+    public RunGradleTasks allowStderr(boolean allowStderr) {
+        this.allowStderr = allowStderr;
         return this;
     }
 
     /**
      * Inject the instant run arguments.
      *
-     * @param apiLevel The device api level.
-     * @param coldswapMode The cold swap strategy to use.
+     * @param androidVersion The target device version
      * @param flags additional instant run flags, see {@link OptionalCompilationStep}.
      */
-    public RunGradleTasks withInstantRun(int apiLevel,
-            @NonNull ColdswapMode coldswapMode,
-            @NonNull OptionalCompilationStep... flags) {
-        setInstantRunArgs(
-                new AndroidVersion(apiLevel, null), null /* density */, coldswapMode, flags);
+    public RunGradleTasks withInstantRun(
+            AndroidVersion androidVersion, @NonNull OptionalCompilationStep... flags) {
+        setInstantRunArgs(androidVersion, null /* density */, flags);
         return this;
     }
 
@@ -100,113 +108,213 @@ public final class RunGradleTasks extends BaseGradleExecutor<RunGradleTasks> {
      * Inject the instant run arguments.
      *
      * @param device The connected device.
-     * @param coldswapMode The cold swap strategy to use.
      * @param flags additional instant run flags, see {@link OptionalCompilationStep}.
      */
     public RunGradleTasks withInstantRun(
             @NonNull IDevice device,
-            @NonNull ColdswapMode coldswapMode,
             @NonNull OptionalCompilationStep... flags) {
-        setInstantRunArgs(device.getVersion(),
-                Density.getEnum(device.getDensity()), coldswapMode, flags);
+        setInstantRunArgs(
+                device.getVersion(), Density.getEnum(device.getDensity()), flags);
         return this;
     }
 
     public RunGradleTasks withSdkAutoDownload() {
-        this.isSdkAutoDownload = true;
-        return this;
+        return with(BooleanOption.ENABLE_SDK_DOWNLOAD, true);
     }
 
     /**
      * Call connected check.
      *
-     * Uses deviceCheck in the background to support the device pool.
+     * <p>Uses deviceCheck in the background to support the device pool.
      */
-    public GradleBuildResult executeConnectedCheck() {
+    public GradleBuildResult executeConnectedCheck() throws IOException, InterruptedException {
         return run("deviceCheck");
     }
 
     /** Execute the specified tasks */
-    public GradleBuildResult run(@NonNull String... tasks) {
+    public GradleBuildResult run(@NonNull String... tasks)
+            throws IOException, InterruptedException {
         return run(ImmutableList.copyOf(tasks));
     }
 
-    public GradleBuildResult run(@NonNull List<String> tasksList) {
+    public GradleBuildResult run(@NonNull List<String> tasksList)
+            throws IOException, InterruptedException {
         assertThat(tasksList).named("tasks list").isNotEmpty();
 
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-
-        try {
-            TestUtils.waitForFileSystemTick();
-        } catch (InterruptedException | IOException e) {
-            throw new RuntimeException(e);
-        }
+        TestUtils.waitForFileSystemTick();
 
         List<String> args = Lists.newArrayList();
+        args.addAll(getArguments());
 
-        if (enableInfoLogging) {
-            args.add("-i"); // -i, --info Set log level to info.
-        }
-        args.add("-u"); // -u, --no-search-upward  Don't search in parent folders for a
-                        // settings.gradle file.
-        args.add("-P" + AndroidGradleOptions.PROPERTY_BUILD_CACHE_DIR + "=" + getBuildCacheDir());
-        args.add("-Pcom.android.build.gradle.integratonTest.useJack="
-                + Boolean.toString(isUseJack));
-        args.add("-Pcom.android.build.gradle.integratonTest.minifyEnabled="
-                + Boolean.toString(isMinifyEnabled));
-        if (isImproveDependencyEnabled) {
-            args.add("-P" + AndroidGradleOptions.PROPERTY_ENABLE_IMPROVED_DEPENDENCY_RESOLUTION
-                    + "=true");
-        }
         if (buildToolsVersion != null) {
             args.add("-PCUSTOM_BUILDTOOLS=" + buildToolsVersion);
         }
-
-        if (!isSdkAutoDownload) {
-            args.add(
-                    String.format(
-                            "-P%s=%s",
-                            AndroidGradleOptions.PROPERTY_USE_SDK_DOWNLOAD,
-                            "false"));
+        if (!isExpectingFailure) {
+            args.add("--stacktrace");
         }
 
-        args.addAll(getOfflineFlag());
+        int attempt = 0;
+        while (true) {
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            String message =
+                    "[GradleTestProject "
+                            + projectDirectory
+                            + "] Executing tasks: \ngradle "
+                            + Joiner.on(' ').join(args)
+                            + " "
+                            + Joiner.on(' ').join(tasksList)
+                            + "\n\n";
+            stdout.write(message.getBytes());
 
-        args.addAll(arguments);
+            BuildLauncher launcher =
+                    projectConnection
+                            .newBuild()
+                            .forTasks(Iterables.toArray(tasksList, String.class));
 
-        System.out.println("[GradleTestProject] Executing tasks: gradle "
-                + Joiner.on(' ').join(args) + " " + Joiner.on(' ').join(tasksList));
+            setJvmArguments(launcher);
+            setStandardOut(launcher, stdout);
+            setStandardError(launcher, stderr);
 
+            CollectingProgressListener progressListener = new CollectingProgressListener();
 
-        BuildLauncher launcher = projectConnection.newBuild()
-                .forTasks(Iterables.toArray(tasksList, String.class));
+            launcher.addProgressListener(progressListener, OperationType.TASK);
 
-        setJvmArguments(launcher);
-
-        launcher.setStandardOutput(new TeeOutputStream(stdout, System.out));
-        launcher.setStandardError(new TeeOutputStream(stderr, System.err));
-
-        GradleConnectionException failure;
-
-        // See ProfileCapturer javadoc for explanation.
-        try (Closeable ignored =
-                new ProfileCapturer(benchmarkRecorder, benchmarkMode, profilesDirectory)) {
+            ProfileCapturer profiler =
+                    new ProfileCapturer(benchmarkRecorder, benchmarkMode, profilesDirectory);
             launcher.withArguments(Iterables.toArray(args, String.class));
+
             WaitingResultHandler handler = new WaitingResultHandler();
             launcher.run(handler);
-            failure = handler.waitForResult();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            GradleConnectionException failure = handler.waitForResult();
+
+            if (failure != null && !isExpectingFailure) {
+                Throwable cause = failure.getCause();
+                if (cause != null) {
+                    if (cause.getClass()
+                            .getName()
+                            .equals(
+                                    "org.gradle.launcher.daemon.client.DaemonDisappearedException")) {
+                        System.err.println("Captured DaemonDisappearedException, retrying.");
+                        if (CAPTURE_JVM_LOGS && attempt == 0) {
+                            printJvmLogs();
+                        }
+                        if (attempt++ < RETRY_COUNT) {
+                            // Start the loop from scratch.
+                            continue;
+                        } else {
+                            throw failure;
+                        }
+                    }
+                }
+            }
+
+            GradleBuildResult result =
+                    new GradleBuildResult(stdout, stderr, progressListener.getEvents(), failure);
+            lastBuildResultConsumer.accept(result);
+            if (isExpectingFailure && failure == null) {
+                throw new AssertionError("Expecting build to fail");
+            } else if (!isExpectingFailure && failure != null) {
+                throw failure;
+            }
+            if (!allowStderr && !result.getStderr().isEmpty()) {
+                throw new AssertionError("Unexpected stderr: " + stderr);
+            }
+            profiler.recordProfile();
+
+            return result;
         }
-        if (isExpectingFailure && failure == null) {
-            throw new AssertionError("Expecting build to fail");
-        } else if (!isExpectingFailure && failure != null) {
-            throw failure;
-        }
-        return new GradleBuildResult(stdout, stderr, failure);
     }
 
+    private void printJvmLogs() throws IOException {
+        System.err.println("----------- JVM Log start -----------");
+        for (Path path : Files.list(getJvmLogDir()).collect(Collectors.toList())) {
+            System.err.print("---- Log file: ");
+            System.err.print(path);
+            System.err.println("----");
+            System.err.println();
+            for (String line : Files.readAllLines(path)) {
+                System.err.println(line);
+            }
+        }
+        System.err.println("------------ JVM Log end ------------");
+    }
+
+    private static class CollectingProgressListener implements ProgressListener {
+        final ConcurrentLinkedQueue<ProgressEvent> events;
+
+        private CollectingProgressListener() {
+            events = new ConcurrentLinkedQueue<>();
+        }
+
+        @Override
+        public void statusChanged(ProgressEvent progressEvent) {
+            events.add(progressEvent);
+        }
+
+        ImmutableList<ProgressEvent> getEvents() {
+            return ImmutableList.copyOf(events);
+        }
+    }
+
+    public RunGradleTasks withUseDexArchive(boolean useDexArchive) {
+        with(BooleanOption.ENABLE_DEX_ARCHIVE, useDexArchive);
+        return this;
+    }
+
+    public RunGradleTasks withNewResourceProcessing(boolean useNewResourceProcessing) {
+        with(BooleanOption.ENABLE_NEW_RESOURCE_PROCESSING, useNewResourceProcessing);
+        return this;
+    }
+
+    /**
+     * Makes the project execute with AAPT2 flag set to {@param enableAapt2}.
+     *
+     * <p>If param is {@code true} it will also trigger setting the new resource processing flag to
+     * {@code true}. To run AAPT2 without new resource processing, after this method also call
+     * {@link #withNewResourceProcessing(boolean)} with the {@code false} parameter.
+     */
+    public RunGradleTasks withEnabledAapt2(boolean enableAapt2) {
+        with(enableAapt2 ? AaptGeneration.AAPT_V2_DAEMON_MODE : AaptGeneration.AAPT_V1);
+        return this;
+    }
+
+    /**
+     * Makes the project execute with AAPT2 flag set to {@param enableAapt2}.
+     *
+     * <p>If param is {@code true} it will also trigger setting the new resource processing flag to
+     * {@code true}. To run AAPT2 without new resource processing, after this method also call
+     * {@link #withNewResourceProcessing(boolean)} with the {@code false} parameter.
+     */
+    @SuppressWarnings("deprecation") // AAPT_V2 should not be used, but if it is, we handle it.
+    public RunGradleTasks with(@NonNull AaptGeneration aaptGeneration) {
+        switch (aaptGeneration) {
+            case AAPT_V1:
+                with(BooleanOption.ENABLE_AAPT2, false);
+                break;
+            case AAPT_V2:
+                with(BooleanOption.ENABLE_AAPT2, true);
+                with(BooleanOption.ENABLE_NEW_RESOURCE_PROCESSING, true);
+                with(BooleanOption.ENABLE_IN_PROCESS_AAPT2, false);
+                with(BooleanOption.ENABLE_DAEMON_MODE_AAPT2, false);
+                break;
+            case AAPT_V2_JNI:
+                with(BooleanOption.ENABLE_AAPT2, true);
+                with(BooleanOption.ENABLE_NEW_RESOURCE_PROCESSING, true);
+                with(BooleanOption.ENABLE_IN_PROCESS_AAPT2, true);
+                with(BooleanOption.ENABLE_DAEMON_MODE_AAPT2, false);
+                break;
+            case AAPT_V2_DAEMON_MODE:
+                with(BooleanOption.ENABLE_AAPT2, true);
+                with(BooleanOption.ENABLE_NEW_RESOURCE_PROCESSING, true);
+                with(BooleanOption.ENABLE_IN_PROCESS_AAPT2, false);
+                with(BooleanOption.ENABLE_DAEMON_MODE_AAPT2, true);
+                break;
+            default:
+                throw new IllegalArgumentException("Unknown AAPT Generation");
+        }
+        return this;
+    }
 
     private static class WaitingResultHandler implements ResultHandler<Void> {
 
@@ -230,12 +338,8 @@ public final class RunGradleTasks extends BaseGradleExecutor<RunGradleTasks> {
          * @return null if the build passed, the GradleConnectionException if the build failed.
          */
         @Nullable
-        private GradleConnectionException waitForResult() {
-            try {
-                latch.await();
-            } catch (InterruptedException e) {
-                throw new AssertionError(e);
-            }
+        private GradleConnectionException waitForResult() throws InterruptedException {
+            latch.await();
             return failure;
         }
     }
@@ -243,25 +347,23 @@ public final class RunGradleTasks extends BaseGradleExecutor<RunGradleTasks> {
     private void setInstantRunArgs(
             @Nullable AndroidVersion androidVersion,
             @Nullable Density density,
-            @NonNull ColdswapMode coldswapMode,
             @NonNull OptionalCompilationStep[] flags) {
         if (androidVersion != null) {
-            withProperty(AndroidProject.PROPERTY_BUILD_API, androidVersion.getFeatureLevel());
+            with(IntegerOption.IDE_TARGET_DEVICE_API, androidVersion.getApiLevel());
+            if (androidVersion.getCodename() != null) {
+                with(StringOption.IDE_TARGET_DEVICE_CODENAME, androidVersion.getCodename());
+            }
         }
 
         if (density != null) {
-            withProperty(AndroidProject.PROPERTY_BUILD_DENSITY, density.getResourceValue());
+            with(StringOption.IDE_BUILD_TARGET_DENSITY, density.getResourceValue());
         }
 
-        withProperty(AndroidProject.PROPERTY_SIGNING_COLDSWAP_MODE, coldswapMode.name());
+        Set<OptionalCompilationStep> steps = EnumSet.of(OptionalCompilationStep.INSTANT_DEV);
+        steps.addAll(Arrays.asList(flags));
 
-        StringBuilder optionalSteps = new StringBuilder()
-                .append("-P").append("android.optional.compilation").append('=')
-                .append("INSTANT_DEV");
-        for (OptionalCompilationStep step : flags) {
-            optionalSteps.append(',').append(step);
-        }
-        arguments.add(optionalSteps.toString());
+        with(
+                StringOption.IDE_OPTIONAL_COMPILATION_STEPS,
+                steps.stream().map(OptionalCompilationStep::name).collect(Collectors.joining(",")));
     }
-
 }

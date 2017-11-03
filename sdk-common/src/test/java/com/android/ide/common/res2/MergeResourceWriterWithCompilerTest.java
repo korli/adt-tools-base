@@ -21,24 +21,22 @@ import static org.junit.Assert.assertTrue;
 
 import com.android.annotations.NonNull;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
+import com.android.ide.common.workers.WorkerExecutorFacade;
 import com.android.resources.ResourceType;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
-
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 public class MergeResourceWriterWithCompilerTest {
 
@@ -72,25 +70,25 @@ public class MergeResourceWriterWithCompilerTest {
             }
         };
 
-        mSimpleCompiler = new QueueableResourceCompiler() {
-            @NonNull
-            @Override
-            public ListenableFuture<File> compile(@NonNull File file, @NonNull File output)
-                    throws Exception {
-                File outputPath = new File(output, file.getName() + "-c");
-                Files.copy(file, outputPath);
-                return Futures.immediateFuture(outputPath);            }
+        mSimpleCompiler =
+                new QueueableResourceCompiler() {
+                    @NonNull
+                    @Override
+                    public ListenableFuture<File> compile(@NonNull CompileResourceRequest request)
+                            throws Exception {
+                        File outputPath = compileOutputFor(request);
+                        Files.copy(request.getInput(), outputPath);
+                        return Futures.immediateFuture(outputPath);
+                    }
 
-            @Override
-            public void start() {
+                    @Override
+                    public void close() {}
 
-            }
-
-            @Override
-            public void end() throws InterruptedException {
-
-            }
-        };
+                    @Override
+                    public File compileOutputFor(@NonNull CompileResourceRequest request) {
+                        return new File(request.getOutput(), request.getInput().getName() + "-c");
+                    }
+                };
 
         createSourceResourcesFiles();
     }
@@ -102,7 +100,6 @@ public class MergeResourceWriterWithCompilerTest {
      * raw
      *   + f1.txt ("foo")
      * </pre>
-     * @throws Exception
      */
     private void createSourceResourcesFiles() throws Exception {
         File resourceDir = mTemporaryFolder.newFolder();
@@ -111,14 +108,14 @@ public class MergeResourceWriterWithCompilerTest {
         File f1 = new File(rawRes, "f1.txt");
         Files.write("foo", f1, Charsets.US_ASCII);
 
-        ResourceItem f1Item = new ResourceItem("f1.txt", ResourceType.RAW, null, null);
+        ResourceItem f1Item = new ResourceItem("f1.txt", null, ResourceType.RAW, null, null);
         ResourceFile f1File = new ResourceFile(f1, f1Item, "", new FolderConfiguration());
         f1Item.setSource(f1File);
 
         File f2 = new File(rawRes, "f2.xml");
         Files.write("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n", f2, Charsets.US_ASCII);
 
-        ResourceItem f2Item = new ResourceItem("f2.xml", ResourceType.RAW, null, null);
+        ResourceItem f2Item = new ResourceItem("f2.xml", null, ResourceType.RAW, null, null);
         ResourceFile f2File = new ResourceFile(f2, f2Item, "", new FolderConfiguration());
         f2Item.setSource(f2File);
 
@@ -137,18 +134,35 @@ public class MergeResourceWriterWithCompilerTest {
         addAndDeleteFile("f2.xml");
     }
 
+    private WorkerExecutorFacade<MergedResourceWriter.FileGenerationParameters> facade =
+            new WorkerExecutorFacade<MergedResourceWriter.FileGenerationParameters>() {
+
+                @Override
+                public void submit(MergedResourceWriter.FileGenerationParameters parameter) {
+                    new MergedResourceWriter.FileGenerationWorkAction(parameter).run();
+                }
+
+                @Override
+                public void await() {}
+            };
+
     public void addAndDeleteFile(@NonNull String name) throws Exception {
         mRoot = mTemporaryFolder.newFolder();
         File tmpFolder = mTemporaryFolder.newFolder();
 
         MergedResourceWriter writer =
                 new MergedResourceWriter(
+                        facade,
                         mRoot,
                         null,
                         null,
                         mEmptyPreprocessor,
                         mSimpleCompiler,
-                        tmpFolder);
+                        tmpFolder,
+                        null,
+                        null,
+                        false,
+                        false);
 
         /*
          * Add the file.
@@ -169,12 +183,17 @@ public class MergeResourceWriterWithCompilerTest {
          */
         writer =
                 new MergedResourceWriter(
+                        facade,
                         mRoot,
                         null,
                         null,
                         mEmptyPreprocessor,
                         mSimpleCompiler,
-                        tmpFolder);
+                        tmpFolder,
+                        null,
+                        null,
+                        false,
+                        false);
 
         mResourceItems.get(name).setRemoved();
         writer.start(DocumentBuilderFactory.newInstance());

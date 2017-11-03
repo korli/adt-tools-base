@@ -45,89 +45,90 @@ public class CentralDirectoryHeader implements Cloneable {
      * Name of the file.
      */
     @Nonnull
-    private String mName;
+    private String name;
 
     /**
      * CRC32 of the data. 0 if not yet computed.
      */
-    private long mCrc32;
+    private long crc32;
 
     /**
      * Size of the file uncompressed. 0 if the file has no data.
      */
-    private long mUncompressedSize;
+    private long uncompressedSize;
 
     /**
      * Code of the program that made the zip. We actually don't care about this.
      */
-    private long mMadeBy;
+    private long madeBy;
 
     /**
      * General-purpose bit flag.
      */
     @Nonnull
-    private GPFlags mGpBit;
+    private GPFlags gpBit;
 
     /**
      * Last modification time in MS-DOS format (see {@link MsDosDateTimeUtils#packTime(long)}).
      */
-    private long mLastModTime;
+    private long lastModTime;
 
     /**
      * Last modification time in MS-DOS format (see {@link MsDosDateTimeUtils#packDate(long)}).
      */
-    private long mLastModDate;
+    private long lastModDate;
 
     /**
      * Extra data field contents. This field follows a specific structure according to the
      * specification.
      */
     @Nonnull
-    private ExtraField mExtraField;
+    private ExtraField extraField;
 
     /**
      * File comment.
      */
     @Nonnull
-    private byte[] mComment;
+    private byte[] comment;
 
     /**
      * File internal attributes.
      */
-    private long mInternalAttributes;
+    private long internalAttributes;
 
     /**
      * File external attributes.
      */
-    private long mExternalAttributes;
+    private long externalAttributes;
 
     /**
      * Offset in the file where the data is located. This will be -1 if the header corresponds to
      * a new file that is not yet written in the zip and, therefore, has no written data.
      */
-    private long mOffset;
+    private long offset;
 
     /**
      * Encoded file name.
      */
-    private byte[] mEncodedFileName;
+    private byte[] encodedFileName;
 
     /**
      * Compress information that may not have been computed yet due to lazy compression.
      */
     @Nonnull
-    private Future<CentralDirectoryHeaderCompressInfo> mCompressInfo;
+    private Future<CentralDirectoryHeaderCompressInfo> compressInfo;
 
     /**
      * The file this header belongs to.
      */
     @Nonnull
-    private final ZFile mFile;
+    private final ZFile file;
 
     /**
      * Creates data for a file.
      *
      * @param name the file name
+     * @param encodedFileName the encoded file name, this array will be owned by the header
      * @param uncompressedSize the uncompressed file size
      * @param compressInfo computation that defines the compression information
      * @param flags flags used in the entry
@@ -135,30 +136,31 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     CentralDirectoryHeader(
             @Nonnull String name,
+            @Nonnull byte[] encodedFileName,
             long uncompressedSize,
             @Nonnull Future<CentralDirectoryHeaderCompressInfo> compressInfo,
             @Nonnull GPFlags flags,
             @Nonnull ZFile zFile) {
-        mName = name;
-        mUncompressedSize = uncompressedSize;
-        mCrc32 = 0;
+        this.name = name;
+        this.uncompressedSize = uncompressedSize;
+        crc32 = 0;
 
         /*
          * Set sensible defaults for the rest.
          */
-        mMadeBy = DEFAULT_VERSION_MADE_BY;
+        madeBy = DEFAULT_VERSION_MADE_BY;
 
-        mGpBit = flags;
-        mLastModTime = MsDosDateTimeUtils.packCurrentTime();
-        mLastModDate = MsDosDateTimeUtils.packCurrentDate();
-        mExtraField = new ExtraField();
-        mComment = new byte[0];
-        mInternalAttributes = 0;
-        mExternalAttributes = 0;
-        mOffset = -1;
-        mEncodedFileName = EncodeUtils.encode(name, mGpBit);
-        mCompressInfo = compressInfo;
-        mFile = zFile;
+        gpBit = flags;
+        lastModTime = MsDosDateTimeUtils.packCurrentTime();
+        lastModDate = MsDosDateTimeUtils.packCurrentDate();
+        extraField = new ExtraField();
+        comment = new byte[0];
+        internalAttributes = 0;
+        externalAttributes = 0;
+        offset = -1;
+        this.encodedFileName = encodedFileName;
+        this.compressInfo = compressInfo;
+        file = zFile;
     }
 
     /**
@@ -168,7 +170,7 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     @Nonnull
     public String getName() {
-        return mName;
+        return name;
     }
 
     /**
@@ -177,7 +179,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @return the size of the file
      */
     public long getUncompressedSize() {
-        return mUncompressedSize;
+        return uncompressedSize;
     }
 
     /**
@@ -186,7 +188,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @return the CRC32, 0 if not yet computed
      */
     public long getCrc32() {
-        return mCrc32;
+        return crc32;
     }
 
     /**
@@ -195,7 +197,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param crc32 the CRC 32
      */
     void setCrc32(long crc32) {
-        mCrc32 = crc32;
+        this.crc32 = crc32;
     }
 
     /**
@@ -204,7 +206,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @return the code
      */
     public long getMadeBy() {
-        return mMadeBy;
+        return madeBy;
     }
 
     /**
@@ -213,7 +215,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param madeBy the code
      */
     void setMadeBy(long madeBy) {
-        mMadeBy = madeBy;
+        this.madeBy = madeBy;
     }
 
     /**
@@ -223,7 +225,7 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     @Nonnull
     public GPFlags getGpBit() {
-        return mGpBit;
+        return gpBit;
     }
 
     /**
@@ -233,7 +235,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * {@link MsDosDateTimeUtils#packTime(long)})
      */
     public long getLastModTime() {
-        return mLastModTime;
+        return lastModTime;
     }
 
     /**
@@ -243,7 +245,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * {@link MsDosDateTimeUtils#packTime(long)})
      */
     void setLastModTime(long lastModTime) {
-        mLastModTime = lastModTime;
+        this.lastModTime = lastModTime;
     }
 
     /**
@@ -253,7 +255,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * {@link MsDosDateTimeUtils#packDate(long)})
      */
     public long getLastModDate() {
-        return mLastModDate;
+        return lastModDate;
     }
 
     /**
@@ -263,7 +265,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * {@link MsDosDateTimeUtils#packDate(long)})
      */
     void setLastModDate(long lastModDate) {
-        mLastModDate = lastModDate;
+        this.lastModDate = lastModDate;
     }
 
     /**
@@ -273,7 +275,7 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     @Nonnull
     public ExtraField getExtraField() {
-        return mExtraField;
+        return extraField;
     }
 
     /**
@@ -283,7 +285,7 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     public void setExtraField(@Nonnull ExtraField extraField) {
         setExtraFieldNoNotify(extraField);
-        mFile.centralDirectoryChanged();
+        file.centralDirectoryChanged();
     }
 
     /**
@@ -293,7 +295,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param extraField the data to set
      */
     void setExtraFieldNoNotify(@Nonnull ExtraField extraField) {
-        mExtraField = extraField;
+        this.extraField = extraField;
     }
 
     /**
@@ -303,7 +305,7 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     @Nonnull
     public byte[] getComment() {
-        return mComment;
+        return comment;
     }
 
     /**
@@ -312,7 +314,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param comment the comment
      */
     void setComment(@Nonnull byte[] comment) {
-        mComment = comment;
+        this.comment = comment;
     }
 
     /**
@@ -321,7 +323,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @return the entry's internal attributes
      */
     public long getInternalAttributes() {
-        return mInternalAttributes;
+        return internalAttributes;
     }
 
     /**
@@ -330,7 +332,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param internalAttributes the entry's internal attributes
      */
     void setInternalAttributes(long internalAttributes) {
-        mInternalAttributes = internalAttributes;
+        this.internalAttributes = internalAttributes;
     }
 
     /**
@@ -339,7 +341,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @return the entry's external attributes
      */
     public long getExternalAttributes() {
-        return mExternalAttributes;
+        return externalAttributes;
     }
 
     /**
@@ -348,7 +350,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param externalAttributes the entry's external attributes
      */
     void setExternalAttributes(long externalAttributes) {
-        mExternalAttributes = externalAttributes;
+        this.externalAttributes = externalAttributes;
     }
 
     /**
@@ -358,7 +360,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * is stored in memory
      */
     public long getOffset() {
-        return mOffset;
+        return offset;
     }
 
     /**
@@ -367,7 +369,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @param offset the offset or {@code -1} if the file is new and has no data in the zip yet
      */
     void setOffset(long offset) {
-        mOffset = offset;
+        this.offset = offset;
     }
 
     /**
@@ -376,7 +378,7 @@ public class CentralDirectoryHeader implements Cloneable {
      * @return the encoded file name
      */
     public byte[] getEncodedFileName() {
-        return mEncodedFileName;
+        return encodedFileName;
     }
 
     /**
@@ -387,15 +389,15 @@ public class CentralDirectoryHeader implements Cloneable {
          * We actually create a new set of flags. Since the only information we care about is the
          * UTF-8 encoding, we'll just create a brand new object.
          */
-        mGpBit = GPFlags.make(mGpBit.isUtf8FileName());
+        gpBit = GPFlags.make(gpBit.isUtf8FileName());
     }
 
     @Override
     protected CentralDirectoryHeader clone() throws CloneNotSupportedException {
         CentralDirectoryHeader cdr = (CentralDirectoryHeader) super.clone();
-        cdr.mExtraField = mExtraField;
-        cdr.mComment = Arrays.copyOf(mComment, mComment.length);
-        cdr.mEncodedFileName = Arrays.copyOf(mEncodedFileName, mEncodedFileName.length);
+        cdr.extraField = extraField;
+        cdr.comment = Arrays.copyOf(comment, comment.length);
+        cdr.encodedFileName = Arrays.copyOf(encodedFileName, encodedFileName.length);
         return cdr;
     }
 
@@ -406,7 +408,7 @@ public class CentralDirectoryHeader implements Cloneable {
      */
     @Nonnull
     public Future<CentralDirectoryHeaderCompressInfo> getCompressionInfo() {
-        return mCompressInfo;
+        return compressInfo;
     }
 
     /**

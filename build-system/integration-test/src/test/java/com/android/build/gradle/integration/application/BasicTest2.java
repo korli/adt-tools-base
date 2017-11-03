@@ -25,6 +25,7 @@ import static com.android.build.gradle.integration.common.utils.LibraryGraphHelp
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.category.DeviceTests;
+import com.android.build.gradle.integration.common.category.DeviceTestsQuarantine;
 import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
@@ -38,18 +39,20 @@ import com.android.builder.model.AndroidProject;
 import com.android.builder.model.BuildTypeContainer;
 import com.android.builder.model.ClassField;
 import com.android.builder.model.ProductFlavor;
+import com.android.builder.model.SyncIssue;
 import com.android.builder.model.Variant;
-import com.android.builder.model.level2.Library;
 import com.android.builder.model.level2.DependencyGraphs;
-import com.google.common.collect.ImmutableMap;
+import com.android.builder.model.level2.Library;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import com.google.common.truth.Truth;
 import java.io.File;
-import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -66,14 +69,45 @@ public class BasicTest2 {
             .fromTestProject("basic")
             .create();
 
+    private static final Set<String> coordinates =
+            ImmutableSet.of(
+                    "com.google.android.gms:play-services-base:" + PLAY_SERVICES_VERSION + "@aar",
+                    "com.android.support:support-v13:" + SUPPORT_LIB_VERSION + "@aar",
+                    "com.android.support:support-v4:" + SUPPORT_LIB_VERSION + "@aar",
+                    "com.google.android.gms:play-services-tasks:" + PLAY_SERVICES_VERSION + "@aar",
+                    "com.google.android.gms:play-services-basement:"
+                            + PLAY_SERVICES_VERSION
+                            + "@aar",
+                    "com.google.android.gms:play-services-basement:"
+                            + PLAY_SERVICES_VERSION
+                            + "@aar",
+                    "com.android.support:support-fragment:" + SUPPORT_LIB_VERSION + "@aar",
+                    "com.android.support:support-media-compat:" + SUPPORT_LIB_VERSION + "@aar",
+                    "com.android.support:support-core-ui:" + SUPPORT_LIB_VERSION + "@aar",
+                    "com.android.support:support-core-utils:" + SUPPORT_LIB_VERSION + "@aar",
+                    "com.android.support:support-compat:" + SUPPORT_LIB_VERSION + "@aar");
+
+
     @Rule
     public Adb adb = new Adb();
 
     public static ModelContainer<AndroidProject> modelContainer;
 
     @BeforeClass
-    public static void getModel() throws IOException {
-        modelContainer = project.executeAndReturnModel("clean");
+    public static void getModel() throws Exception {
+        project.execute("clean", "assemble", "assembleAndroidTest");
+        // basic project overwrites buildConfigField which emits a sync warning
+        modelContainer = project.model().ignoreSyncIssues().getSingle();
+        modelContainer
+                .getOnlyModel()
+                .getSyncIssues()
+                .forEach(
+                        issue -> {
+                            Truth.assertThat(issue.getSeverity())
+                                    .isEqualTo(SyncIssue.SEVERITY_WARNING);
+                            Truth.assertThat(issue.getMessage())
+                                    .containsMatch(Pattern.compile(".*value is being replaced.*"));
+                        });
     }
 
     @AfterClass
@@ -83,7 +117,7 @@ public class BasicTest2 {
     }
 
     @Test
-    public void checkVariantDetails() throws Exception {
+    public void checkDebugVariant() throws Exception {
         LibraryGraphHelper helper = new LibraryGraphHelper(modelContainer);
         AndroidProject model = modelContainer.getOnlyModel();
 
@@ -134,7 +168,7 @@ public class BasicTest2 {
         assertThat(debugMainOutput.getMainOutputFile())
                 .named("debug output assemble task name")
                 .isNotNull();
-        assertThat(debugMainOutput.getMainOutputFile())
+        assertThat(debugMainOutput.getGeneratedManifest())
                 .named("debug output generate manifest task name")
                 .isNotNull();
         assertThat(debugMainOutput.getVersionCode())
@@ -145,18 +179,14 @@ public class BasicTest2 {
         DependencyGraphs compileGraph = debugMainInfo.getDependencyGraphs();
         assertThat(compileGraph).named("debug compile graph").isNotNull();
 
-        assertThat(helper.on(compileGraph).withType(JAVA).asList())
+        assertThat(helper.on(compileGraph).withType(JAVA).mapTo(COORDINATES))
                 .named("debug compile java libs")
-                .isEmpty();
+                .containsExactly(
+                        "com.android.support:support-annotations:" + SUPPORT_LIB_VERSION + "@jar");
 
         LibraryGraphHelper.Items androidItems = helper.on(compileGraph).withType(ANDROID);
 
-        Map<String, Integer> coordinates = ImmutableMap.of(
-                "com.google.android.gms:play-services-base:" + PLAY_SERVICES_VERSION + "@aar", 0,
-                "com.android.support:support-v13:" + SUPPORT_LIB_VERSION + "@aar", 1,
-                "com.android.support:support-v4:" + SUPPORT_LIB_VERSION + "@aar", 0);
-
-        Set<String> coordinateCopies = Sets.newHashSet(coordinates.keySet());
+        Set<String> coordinateCopies = Sets.newHashSet(coordinates);
 
         assertThat(androidItems.mapTo(COORDINATES))
                 .named("debug compile android libs")
@@ -164,15 +194,9 @@ public class BasicTest2 {
 
         for (Library androidLibrary : androidItems.asLibraries()) {
             assertThat(androidLibrary).isNotNull();
-            assertThat(androidLibrary.getArtifact())
-                    .named("Artifact for " + androidLibrary.getArtifactAddress())
-                    .isNotNull();
             assertThat(androidLibrary.getFolder())
                     .named("Folder for " + androidLibrary.getArtifactAddress())
-                    .isNotNull();
-            assertThat(androidLibrary.getArtifactAddress())
-                    .named("coordinates for " + androidLibrary.getArtifactAddress())
-                    .isIn(coordinateCopies);
+                    .isDirectory();
             coordinateCopies.remove(androidLibrary.getArtifactAddress());
         }
 
@@ -212,10 +236,7 @@ public class BasicTest2 {
         assertThat(debugTestOutput.getMainOutputFile())
                 .named("test output file")
                 .isNotNull();
-        assertThat(debugTestOutput.getMainOutputFile())
-                .named("test output assemble task name")
-                .isNotNull();
-        assertThat(debugTestOutput.getMainOutputFile())
+        assertThat(debugTestOutput.getGeneratedManifest())
                 .named("test output generate manifest task name")
                 .isNotNull();
 
@@ -251,6 +272,14 @@ public class BasicTest2 {
 
         resValues = mergedFlavor.getResValues();
         testMap(resValues, "mergedFlavor resValues", ClassField::getValue, "foo", "foo");
+    }
+
+    @Test
+    public void checkReleaseVariant() throws Exception {
+        LibraryGraphHelper helper = new LibraryGraphHelper(modelContainer);
+        AndroidProject model = modelContainer.getOnlyModel();
+
+        Collection<Variant> variants = model.getVariants();
 
         // release variant, not tested.
         Variant releaseVariant = ModelHelper.getVariant(variants, "release");
@@ -301,12 +330,13 @@ public class BasicTest2 {
         DependencyGraphs releaseGraph = relMainInfo.getDependencyGraphs();
         assertThat(releaseGraph).named("release compile graph").isNotNull();
 
-        assertThat(helper.on(releaseGraph).withType(JAVA).asList())
+        assertThat(helper.on(releaseGraph).withType(JAVA).mapTo(COORDINATES))
                 .named("release compile java libs")
-                .isEmpty();
+                .containsExactly(
+                        "com.android.support:support-annotations:" + SUPPORT_LIB_VERSION + "@jar");
 
-        androidItems = helper.on(releaseGraph).withType(ANDROID);
-        coordinateCopies = Sets.newHashSet(coordinates.keySet());
+        LibraryGraphHelper.Items androidItems = helper.on(releaseGraph).withType(ANDROID);
+        Set<String> coordinateCopies = Sets.newHashSet(coordinates);
 
         assertThat(androidItems.mapTo(COORDINATES))
                 .named("release compile android libs")
@@ -314,9 +344,6 @@ public class BasicTest2 {
 
         for (Library androidLibrary : androidItems.asLibraries()) {
             assertThat(androidLibrary).isNotNull();
-            assertThat(androidLibrary.getArtifact())
-                    .named("Artifact for " + androidLibrary.getArtifactAddress())
-                    .isNotNull();
             assertThat(androidLibrary.getFolder())
                     .named("Folder for " + androidLibrary.getArtifactAddress())
                     .isNotNull();
@@ -324,9 +351,9 @@ public class BasicTest2 {
                     .named("coordinates for " + androidLibrary.getArtifactAddress())
                     .isIn(coordinateCopies);
             coordinateCopies.remove(androidLibrary.getArtifactAddress());
-            assertThat(androidLibrary.getLocalJars().size())
+            assertThat(androidLibrary.getLocalJars())
                     .named("local jar count for " + androidLibrary.getArtifactAddress())
-                    .isEqualTo(coordinates.get(androidLibrary.getArtifactAddress()));
+                    .isEmpty();
         }
     }
 
@@ -355,16 +382,20 @@ public class BasicTest2 {
     }
 
     @Test
-    @Category(DeviceTests.class)
-    public void install() throws IOException {
+    @Category(DeviceTestsQuarantine.class)
+    public void install() throws Exception {
         project.execute("assembleDebug");
         adb.exclusiveAccess();
-        project.execute("installDebug", "uninstallAll");
+        try {
+            project.execute("installDebug");
+        } finally {
+            project.execute("uninstallAll");
+        }
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

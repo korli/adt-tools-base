@@ -17,7 +17,6 @@
 package com.android.build.gradle.internal.scope;
 
 import com.android.annotations.NonNull;
-
 import java.util.Collection;
 
 /**
@@ -60,4 +59,7 @@ public interface TransformVariantScope {
      */
     @NonNull
     Collection<String> getDirectorySegments();
+
+    @NonNull
+    OutputScope getOutputScope();
 }

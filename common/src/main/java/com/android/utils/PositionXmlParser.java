@@ -19,18 +19,30 @@ package com.android.utils;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.blame.SourcePosition;
-import org.w3c.dom.*;
-import org.xml.sax.*;
-import org.xml.sax.ext.DefaultHandler2;
-
-import javax.xml.parsers.*;
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.StringReader;
+import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import static com.android.SdkConstants.UTF_8;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Comment;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.w3c.dom.Text;
+import org.xml.sax.Attributes;
+import org.xml.sax.InputSource;
+import org.xml.sax.Locator;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+import org.xml.sax.ext.DefaultHandler2;
 
 /**
  * A simple DOM XML parser which can retrieve exact beginning and end offsets
@@ -630,7 +642,9 @@ public class PositionXmlParser {
         private int mCurrentLine = 0;
         private int mCurrentOffset;
         private int mCurrentColumn;
-        private final List<Element> mStack = new ArrayList<Element>();
+        private final List<Element> mStack = new ArrayList<>();
+        private boolean mCdata;
+        @SuppressWarnings("StringBufferField")
         private final StringBuilder mPendingText = new StringBuilder();
 
         private DomBuilder(String xml) throws ParserConfigurationException {
@@ -815,14 +829,31 @@ public class PositionXmlParser {
         }
 
         @Override
-        public void characters(char c[], int start, int length) throws SAXException {
+        public void startCDATA() throws SAXException {
+            flushText();
+            mCdata = true;
+        }
+
+        @Override
+        public void endCDATA() throws SAXException {
+            flushText();
+            mCdata = false;
+        }
+
+        @Override
+        public void characters(char[] c, int start, int length) throws SAXException {
             mPendingText.append(c, start, length);
         }
 
         private void flushText() {
-            if (mPendingText.length() > 0 && !mStack.isEmpty()) {
+            if ((mPendingText.length() > 0 || mCdata) && !mStack.isEmpty()) {
                 Element element = mStack.get(mStack.size() - 1);
-                Node textNode = mDocument.createTextNode(mPendingText.toString());
+                Node textNode;
+                if (mCdata) {
+                    textNode = mDocument.createCDATASection(mPendingText.toString());
+                } else {
+                    textNode = mDocument.createTextNode(mPendingText.toString());
+                }
                 element.appendChild(textNode);
                 mPendingText.setLength(0);
             }

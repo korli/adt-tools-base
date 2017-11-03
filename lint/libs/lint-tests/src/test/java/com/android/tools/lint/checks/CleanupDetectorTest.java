@@ -16,6 +16,8 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.tools.lint.checks.CleanupDetector.SHARED_PREF;
+
 import com.android.tools.lint.detector.api.Detector;
 
 @SuppressWarnings({"javadoc", "ClassNameDiffersFromFileName"})
@@ -1158,16 +1160,17 @@ public class CleanupDetectorTest extends AbstractCheckTest {
     }
 
     public void test8() throws Exception {
-        //noinspection all // Sample code
-        assertEquals(""
+        String expected = ""
                 + "src/test/pkg/SharedPrefsTest8.java:11: Warning: Consider using apply() instead; commit writes its data to persistent storage immediately, whereas apply will handle it in the background [ApplySharedPref]\n"
                 + "        editor.commit();\n"
                 + "        ~~~~~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
-
-                lintProject(
-                        manifest().minSdk(11),
-                        mSharedPrefsTest8));
+                + "0 errors, 1 warnings\n";
+        lint().files(manifest().minSdk(11), mSharedPrefsTest8).run().expect(expected)
+                .expectFixDiffs(""
+                        + "Fix for src/test/pkg/SharedPrefsTest8.java line 10: Replace commit() with apply():\n"
+                        + "@@ -11 +11\n"
+                        + "-         editor.commit();\n"
+                        + "+         editor.apply();\n");
     }
 
     public void testChainedCalls() throws Exception {
@@ -1393,6 +1396,7 @@ public class CleanupDetectorTest extends AbstractCheckTest {
 
     public void testFields() throws Exception {
         // Regression test for https://code.google.com/p/android/issues/detail?id=224435
+        //noinspection all // Sample code
         assertEquals("No warnings.",
                 lintProject(
                         java(""
@@ -1418,6 +1422,51 @@ public class CleanupDetectorTest extends AbstractCheckTest {
                                 + "    }\n"
                                 + "}\n")
                 ));
+    }
+
+    public void testUnrelatedSharedPrefEdit() {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=234868
+        //noinspection all // Sample code
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.content.SharedPreferences;\n"
+                        + "\n"
+                        + "public abstract class PrefTest {\n"
+                        + "    public static void something(SomePref pref) {\n"
+                        + "        pref.edit(1, 2, 3);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public interface SomePref extends SharedPreferences {\n"
+                        + "        void edit(Object...args);\n"
+                        + "    }\n"
+                        + "}"))
+                .issues(SHARED_PREF)
+                .run()
+                .expectClean();
+    }
+
+    public void testCommitVariable() {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=237776
+        //noinspection all // Sample code
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.app.Activity;\n"
+                        + "import android.app.Fragment;\n"
+                        + "\n"
+                        + "public class CommitTest extends Activity {\n"
+                        + "    public void test() {\n"
+                        + "        final int id = getFragmentManager().beginTransaction()\n"
+                        + "                .add(new Fragment(), null)\n"
+                        + "                .addToBackStack(null)\n"
+                        + "                .commit();\n"
+                        + "    }\n"
+                        + "}\n"))
+                .run()
+                .expectClean();
     }
 
     @SuppressWarnings("all") // Sample code

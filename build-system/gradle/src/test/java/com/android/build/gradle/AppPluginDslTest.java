@@ -17,134 +17,75 @@
 package com.android.build.gradle;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.fail;
 
-import com.android.annotations.NonNull;
-import com.android.build.gradle.api.ApkVariant;
-import com.android.build.gradle.api.ApkVariantOutput;
-import com.android.build.gradle.api.ApplicationVariant;
-import com.android.build.gradle.api.BaseVariantOutput;
-import com.android.build.gradle.api.TestVariant;
+import com.android.build.gradle.internal.dsl.BuildType;
+import com.android.build.gradle.internal.dsl.PostprocessingOptions;
+import com.android.build.gradle.internal.fixture.TestConstants;
+import com.android.build.gradle.internal.fixture.TestProjects;
+import com.android.build.gradle.internal.fixture.VariantChecker;
+import com.android.build.gradle.internal.fixture.VariantCheckers;
 import com.android.build.gradle.tasks.MergeResources;
+import com.android.builder.model.AndroidProject;
+import com.android.builder.model.OptionalCompilationStep;
 import groovy.util.Eval;
 import java.util.Arrays;
-import java.util.Collection;
-import java.util.Set;
-import org.codehaus.groovy.runtime.DefaultGroovyMethods;
-import org.gradle.api.DomainObjectSet;
-import org.junit.Assert;
+import org.gradle.api.GradleException;
+import org.gradle.api.Project;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
-/** Tests for the public DSL of the App plugin ("android") */
-public class AppPluginDslTest
-        extends AbstractAppPluginDslTest<AppPlugin, AppExtension, ApplicationVariant> {
+/** Tests for the public DSL of the App plugin ("com.android.application") */
+public class AppPluginDslTest {
 
-    private static void checkTasks(@NonNull ApkVariant variant) {
-        boolean isTestVariant = variant instanceof TestVariant;
+    public static final String PROGUARD_DEBUG = "transformClassesAndResourcesWithProguardForDebug";
+    public static final String SHRINKER_DEBUG =
+            "transformClassesWithAndroidGradleClassShrinkerForDebug";
+    public static final String PROGUARD_DEBUG_ANDROID_TEST =
+            "transformClassesAndResourcesWithProguardForDebugAndroidTest";
+    public static final String SHRINKER_DEBUG_ANDROID_TEST =
+            "transformClassesWithAndroidGradleClassShrinkerForDebugAndroidTest";
+    public static final String SHRINKER_RELEASE =
+            "transformClassesWithAndroidGradleClassShrinkerForRelease";
+    public static final String PROGUARD_RELEASE =
+            "transformClassesAndResourcesWithProguardForRelease";
 
-        assertNotNull(variant.getAidlCompile());
-        assertNotNull(variant.getMergeResources());
-        assertNotNull(variant.getMergeAssets());
-        assertNotNull(variant.getGenerateBuildConfig());
-        assertNotNull(variant.getJavaCompiler());
-        assertNotNull(variant.getProcessJavaResources());
-        assertNotNull(variant.getAssemble());
-        assertNotNull(variant.getUninstall());
+    @Rule public final TemporaryFolder projectDirectory = new TemporaryFolder();
 
-        Assert.assertFalse(variant.getOutputs().isEmpty());
+    protected AppPlugin plugin;
+    protected AppExtension android;
+    protected Project project;
+    protected VariantChecker checker;
+    private TestProjects.Plugin pluginType = TestProjects.Plugin.APP;
 
-        for (BaseVariantOutput baseVariantOutput : variant.getOutputs()) {
-            Assert.assertTrue(baseVariantOutput instanceof ApkVariantOutput);
-            ApkVariantOutput apkVariantOutput = (ApkVariantOutput) baseVariantOutput;
+    @Before
+    public void setUp() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("project").toPath())
+                        .withPlugin(pluginType)
+                        .build();
 
-            assertNotNull(apkVariantOutput.getProcessManifest());
-            assertNotNull(apkVariantOutput.getProcessResources());
-            assertNotNull(apkVariantOutput.getPackageApplication());
-        }
-
-        if (variant.isSigningReady()) {
-            assertNotNull(variant.getInstall());
-
-            for (BaseVariantOutput baseVariantOutput : variant.getOutputs()) {
-                ApkVariantOutput apkVariantOutput = (ApkVariantOutput) baseVariantOutput;
-
-                // Check if we did the right thing, depending on the default value of the flag.
-                Assert.assertNull(apkVariantOutput.getZipAlign());
-            }
-
-        } else {
-            Assert.assertNull(variant.getInstall());
-        }
-
-        if (isTestVariant) {
-            TestVariant testVariant = DefaultGroovyMethods.asType(variant, TestVariant.class);
-            assertNotNull(testVariant.getConnectedInstrumentTest());
-            assertNotNull(testVariant.getTestedVariant());
-        }
+        initFieldsFromProject();
     }
 
-    @Override
-    @NonNull
-    protected DomainObjectSet<TestVariant> getTestVariants() {
-        return android.getTestVariants();
+    private void initFieldsFromProject() {
+        android = (AppExtension) project.getExtensions().getByType(pluginType.getExtensionClass());
+        android.setCompileSdkVersion(TestConstants.COMPILE_SDK_VERSION);
+        android.setBuildToolsVersion(TestConstants.BUILD_TOOL_VERSION);
+        plugin = (AppPlugin) project.getPlugins().getPlugin(pluginType.getPluginClass());
+        checker = VariantCheckers.createAppChecker(android);
     }
 
-    @NonNull
-    @Override
-    protected DomainObjectSet<ApplicationVariant> getVariants() {
-        return android.getApplicationVariants();
-    }
-
-    @Override
-    @NonNull
-    protected Class<AppPlugin> getPluginClass() {
-        return AppPlugin.class;
-    }
-
-    @Override
-    @NonNull
-    protected Class<AppExtension> getExtensionClass() {
-        return AppExtension.class;
-    }
-
-    @Override
-    protected void checkTestedVariant(
-            @NonNull String variantName,
-            @NonNull String testedVariantName,
-            @NonNull Collection<ApplicationVariant> variants,
-            @NonNull Set<TestVariant> testVariants) {
-        ApplicationVariant variant = findVariant(variants, variantName);
-        assertNotNull(variant.getTestVariant());
-        assertEquals(testedVariantName, variant.getTestVariant().getName());
-        assertEquals(variant.getTestVariant(), findVariantMaybe(testVariants, testedVariantName));
-        checkTasks(variant);
-        checkTasks(variant.getTestVariant());
-    }
-
-    @Override
-    protected void checkNonTestedVariant(
-            @NonNull String variantName, @NonNull Set<ApplicationVariant> variants) {
-        ApplicationVariant variant = findVariant(variants, variantName);
-        Assert.assertNull(variant.getTestVariant());
-        checkTasks(variant);
-    }
-
-    @Override
-    @NonNull
-    protected String getPluginName() {
-        return "com.android.application";
-    }
-
-    @Override
-    @NonNull
-    protected String getReleaseJavacTaskName() {
-        return "compileReleaseJavaWithJavac";
-    }
-
+    @Test
     public void testGeneratedDensities() throws Exception {
         Eval.me(
                 "project",
                 project,
                 "\n"
                         + "project.android {\n"
+                        + "    flavorDimensions 'foo'\n"
                         + "    productFlavors {\n"
                         + "        f1 {\n"
                         + "        }\n"
@@ -179,6 +120,7 @@ public class AppPluginDslTest
         checkGeneratedDensities("mergeOldSyntaxDebugResources", "ldpi");
     }
 
+    @Test
     public void testUseSupportLibrary_default() throws Exception {
         plugin.createAndroidTasks(false);
 
@@ -186,6 +128,7 @@ public class AppPluginDslTest
                 .isFalse();
     }
 
+    @Test
     public void testUseSupportLibrary_flavors() throws Exception {
 
         Eval.me(
@@ -194,7 +137,7 @@ public class AppPluginDslTest
                 "\n"
                         + "project.android {\n"
                         + "\n"
-                        + "\n"
+                        + "    flavorDimensions 'foo'\n"
                         + "    productFlavors {\n"
                         + "        f1 {\n"
                         + "        }\n"
@@ -228,9 +171,353 @@ public class AppPluginDslTest
                 .isFalse();
     }
 
+    @Test
+    public void testPostprocessingBlock_noFeatures() throws Exception {
+        BuildType release = android.getBuildTypes().getByName("release");
+        release.getPostprocessing().setCodeShrinker("proguard");
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_RELEASE);
+    }
+
+    @Test
+    public void testPostprocessingBlock_proguard() throws Exception {
+        BuildType release = android.getBuildTypes().getByName("release");
+        release.getPostprocessing().setRemoveUnusedCode(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_RELEASE);
+    }
+
+    @Test
+    public void testPostprocessingBlock_justObfuscate() throws Exception {
+        BuildType release = android.getBuildTypes().getByName("release");
+        release.getPostprocessing().setObfuscate(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_RELEASE);
+    }
+
+    @Test
+    public void testPostprocessingBlock_builtInShrinker() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("release").getPostprocessing();
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setCodeShrinker("android_gradle");
+
+        assertThat(postprocessing.getCodeShrinker()).isEqualTo("android_gradle");
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(SHRINKER_RELEASE);
+    }
+
+    @Test
+    public void testPostprocessingBlock_builtInShrinker_dontshrink() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("release").getPostprocessing();
+        postprocessing.setCodeShrinker("android_gradle");
+        assertThat(postprocessing.getCodeShrinker()).isEqualTo("android_gradle");
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_RELEASE);
+    }
+
+    @Test
+    public void testPostprocessingBlock_builtInShrinker_shrinkAndObfuscate() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("release").getPostprocessing();
+        postprocessing.setCodeShrinker("android_gradle");
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setObfuscate(true); // This is set to true, but won't happen.
+
+        try {
+            plugin.createAndroidTasks(false);
+            fail();
+        } catch (GradleException e) {
+            assertThat(e.getMessage()).contains("obfuscating");
+        }
+    }
+
+    @Test
+    public void testPostprocessingBlock_mixingDsls_newOld() throws Exception {
+        BuildType release = android.getBuildTypes().getByName("release");
+        release.getPostprocessing().setCodeShrinker("android_gradle");
+
+        try {
+            release.setMinifyEnabled(true);
+            fail();
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("setMinifyEnabled");
+        }
+    }
+
+    @Test
+    public void testPostprocessingBlock_mixingDsls_oldNew() throws Exception {
+        BuildType release = android.getBuildTypes().getByName("release");
+        release.setMinifyEnabled(true);
+
+        try {
+            release.getPostprocessing().setCodeShrinker("android_gradle");
+            fail();
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("setMinifyEnabled");
+        }
+    }
+
+    @Test
+    public void testPostprocessingBlock_validating() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("release").getPostprocessing();
+        postprocessing.setCodeShrinker("android_gradle");
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setObfuscate(true);
+
+        try {
+            plugin.createAndroidTasks(false);
+            fail();
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("does not support obfuscating");
+        }
+    }
+
+    @Test
+    public void testPostprocessingBlock_resourceShrinker() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("release").getPostprocessing();
+        postprocessing.setCodeShrinker("android_gradle");
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setRemoveUnusedResources(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames())
+                .containsAllOf(SHRINKER_RELEASE, "transformClassesWithShrinkResForRelease");
+    }
+
+    @Test
+    public void testPostprocessingBlock_noCodeShrinking() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("release").getPostprocessing();
+        postprocessing.setCodeShrinker("android_gradle");
+        postprocessing.setRemoveUnusedCode(false);
+        postprocessing.setRemoveUnusedResources(true);
+
+        try {
+            plugin.createAndroidTasks(false);
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("requires unused code shrinking");
+        }
+    }
+
+    @Test
+    public void testPostprocessingBlock_noCodeShrinking_oldDsl() throws Exception {
+        BuildType release = android.getBuildTypes().getByName("release");
+        release.setShrinkResources(true);
+
+        try {
+            plugin.createAndroidTasks(false);
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("requires unused code shrinking");
+        }
+    }
+
+    @Test
+    public void testPostprocessingBlock_initWith() throws Exception {
+        BuildType debug = android.getBuildTypes().getByName("debug");
+        BuildType release = android.getBuildTypes().getByName("release");
+
+        debug.setMinifyEnabled(true);
+        release.getPostprocessing().setRemoveUnusedCode(true);
+
+        BuildType debugCopy = android.getBuildTypes().create("debugCopy");
+        debugCopy.initWith(debug);
+
+        BuildType releaseCopy = android.getBuildTypes().create("releaseCopy");
+        releaseCopy.initWith(release);
+    }
+
+    @Test
+    public void testShrinkerChoice_oldDsl_instantRun() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("oldDsl_instantRun").toPath())
+                        .withPlugin(pluginType)
+                        .withProperty(
+                                AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
+                                OptionalCompilationStep.INSTANT_DEV.name())
+                        .build();
+        initFieldsFromProject();
+
+        android.getBuildTypes().getByName("debug").setMinifyEnabled(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG);
+
+        assertThat(project.getTasks().getNames()).contains(SHRINKER_DEBUG);
+    }
+
+    @Test
+    public void testShrinkerChoice_oldDsl_override() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("oldDsl_instantRun").toPath())
+                        .withPlugin(pluginType)
+                        .withProperty(
+                                AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
+                                OptionalCompilationStep.INSTANT_DEV.name())
+                        .build();
+        initFieldsFromProject();
+
+        BuildType debug = android.getBuildTypes().getByName("debug");
+        debug.setMinifyEnabled(true);
+        debug.setUseProguard(true);
+
+        plugin.createAndroidTasks(false);
+
+        // If the user insists on ProGuard, they get a warning a no shrinking at all.
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG);
+    }
+
+    @Test
+    public void testShrinkerChoice_oldDsl_noInstantRun() throws Exception {
+        android.getBuildTypes().getByName("debug").setMinifyEnabled(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG);
+    }
+
+    @Test
+    public void testShrinkerChoice_newDsl_instantRun() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("newDsl_instantRun").toPath())
+                        .withPlugin(pluginType)
+                        .withProperty(
+                                AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
+                                OptionalCompilationStep.INSTANT_DEV.name())
+                        .build();
+        initFieldsFromProject();
+
+        android.getBuildTypes().getByName("debug").getPostprocessing().setRemoveUnusedCode(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG);
+
+        assertThat(project.getTasks().getNames()).contains(SHRINKER_DEBUG);
+    }
+
+    @Test
+    public void testShrinkerChoice_newDsl_override() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("newDsl_override").toPath())
+                        .withPlugin(pluginType)
+                        .withProperty(
+                                AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
+                                OptionalCompilationStep.INSTANT_DEV.name())
+                        .build();
+        initFieldsFromProject();
+
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("debug").getPostprocessing();
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setCodeShrinker("proguard");
+
+        plugin.createAndroidTasks(false);
+
+        // If the user insists on ProGuard, they get a warning a no shrinking at all.
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG);
+    }
+
+    @Test
+    public void testShrinkerChoice_newDsl_noInstantRun() throws Exception {
+        android.getBuildTypes().getByName("debug").getPostprocessing().setRemoveUnusedCode(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG);
+    }
+
+    @Test
+    public void testApkShrinker_oldDsl_proguard() throws Exception {
+        android.getBuildTypes().getByName("debug").setMinifyEnabled(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG);
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG_ANDROID_TEST);
+    }
+
+    @Test
+    public void testApkShrinker_oldDsl_builtInShrinker() throws Exception {
+        BuildType debug = android.getBuildTypes().getByName("debug");
+        debug.setMinifyEnabled(true);
+        debug.setUseProguard(false);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(SHRINKER_DEBUG);
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG_ANDROID_TEST);
+    }
+
+    @Test
+    public void testApkShrinker_newDsl_builtInShrinker() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("debug").getPostprocessing();
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setCodeShrinker("android_gradle");
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(SHRINKER_DEBUG);
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG_ANDROID_TEST);
+    }
+
+    @Test
+    public void testApkShrinker_newDsl_proguard_noObfuscation() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("debug").getPostprocessing();
+        postprocessing.setRemoveUnusedCode(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG);
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG_ANDROID_TEST);
+    }
+
+    @Test
+    public void testApkShrinker_newDsl_proguard_obfuscation() throws Exception {
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("debug").getPostprocessing();
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setObfuscate(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG);
+        assertThat(project.getTasks().getNames()).contains(PROGUARD_DEBUG_ANDROID_TEST);
+    }
+
     private void checkGeneratedDensities(String taskName, String... densities) {
         MergeResources mergeResources = getTask(taskName, MergeResources.class);
         assertThat(mergeResources.getGeneratedDensities())
                 .containsExactlyElementsIn(Arrays.asList(densities));
+    }
+
+    protected <T> T getTask(String name, @SuppressWarnings("unused") Class<T> klass) {
+        //noinspection unchecked
+        return (T) project.getTasks().getByName(name);
     }
 }

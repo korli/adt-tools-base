@@ -22,19 +22,25 @@ import com.android.tools.lint.detector.api.Detector;
 public class AccessibilityDetectorTest extends AbstractCheckTest {
     public void testAccessibility() throws Exception {
         String expected = ""
-                + "res/layout/accessibility.xml:4: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "res/layout/accessibility.xml:4: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageView android:id=\"@+id/android_logo\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "res/layout/accessibility.xml:5: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "res/layout/accessibility.xml:5: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageButton android:importantForAccessibility=\"yes\" android:id=\"@+id/android_logo2\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "res/layout/accessibility.xml:9: Warning: Do not set both contentDescription and hint: the contentDescription will mask the hint [ContentDescription]\n"
                 + "    <EditText android:hint=\"@string/label\" android:id=\"@+android:id/summary\" android:contentDescription=\"@string/label\" />\n"
                 + "                                                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "res/layout/accessibility.xml:12: Warning: [Accessibility] Empty contentDescription attribute on image [ContentDescription]\n"
+                + "res/layout/accessibility.xml:12: Warning: Empty contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageButton android:id=\"@+android:id/summary\" android:contentDescription=\"TODO\" />\n"
                 + "                                                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 4 warnings\n";
+                + "res/layout/accessibility.xml:13: Warning: Empty contentDescription attribute on image [ContentDescription]\n"
+                + "    <ImageButton android:id=\"@+id/summary2\" android:contentDescription=\"\" />\n"
+                + "                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "res/layout/accessibility.xml:14: Warning: Empty contentDescription attribute on image [ContentDescription]\n"
+                + "    <ImageButton android:id=\"@+id/summary3\" android:contentDescription=\"TODO\" />\n"
+                + "                                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                + "0 errors, 6 warnings\n";
 
         lint().files(
                 xml("res/layout/accessibility.xml", ""
@@ -50,9 +56,40 @@ public class AccessibilityDetectorTest extends AbstractCheckTest {
                         + "    <EditText android:id=\"@+android:id/summary\" android:contentDescription=\"@string/label\" />\n"
                         + "    <EditText tools:ignore=\"ContentDescription\" android:hint=\"@string/label\" android:id=\"@+android:id/summary\" android:contentDescription=\"@string/label\" />\n"
                         + "    <ImageButton android:id=\"@+android:id/summary\" android:contentDescription=\"TODO\" />\n"
+                        + "    <ImageButton android:id=\"@+id/summary2\" android:contentDescription=\"\" />\n"
+                        + "    <ImageButton android:id=\"@+id/summary3\" android:contentDescription=\"TODO\" />\n"
                         + "</LinearLayout>\n"))
                 .run()
-                .expect(expected);
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for res/layout/accessibility.xml line 3: Set contentDescription:\n"
+                + "@@ -21 +21\n"
+                + "          android:clickable=\"false\"\n"
+                + "+         android:contentDescription=\"[TODO]|\"\n"
+                + "          android:focusable=\"false\"\n"
+                + "Fix for res/layout/accessibility.xml line 4: Set contentDescription:\n"
+                + "@@ -30 +30\n"
+                + "          android:clickable=\"false\"\n"
+                + "+         android:contentDescription=\"[TODO]|\"\n"
+                + "          android:focusable=\"false\"\n"
+                + "Fix for res/layout/accessibility.xml line 11: Set contentDescription:\n"
+                + "@@ -70 +70\n"
+                + "          android:id=\"@+android:id/summary\"\n"
+                + "-         android:contentDescription=\"TODO\" />\n"
+                + "+         android:contentDescription=\"[TODO]|\" />\n"
+                + "  \n"
+                + "Fix for res/layout/accessibility.xml line 12: Set contentDescription:\n"
+                + "@@ -74 +74\n"
+                + "          android:id=\"@+id/summary2\"\n"
+                + "-         android:contentDescription=\"\" />\n"
+                + "+         android:contentDescription=\"[TODO]|\" />\n"
+                + "  \n"
+                + "Fix for res/layout/accessibility.xml line 13: Set contentDescription:\n"
+                + "@@ -78 +78\n"
+                + "          android:id=\"@+id/summary3\"\n"
+                + "-         android:contentDescription=\"TODO\" />\n"
+                + "+         android:contentDescription=\"[TODO]|\" />\n"
+                + "  \n");
     }
 
     @Override

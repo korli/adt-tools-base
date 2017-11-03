@@ -17,7 +17,6 @@
 package com.android.build.gradle.integration.application;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 
 import com.android.build.gradle.integration.common.fixture.GradleBuildResult;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
@@ -25,9 +24,8 @@ import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
 import com.android.build.gradle.integration.common.utils.DexInProcessHelper;
+import com.android.testutils.apk.Apk;
 import com.android.utils.FileUtils;
-import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import org.junit.Before;
@@ -73,8 +71,8 @@ public class DexLimitTest {
     }
 
     @Before
-    public void disableDexInProcess() throws IOException {
-        if (mDexInProcess) {
+    public void disableDexInProcess() throws Exception {
+        if (!mDexInProcess) {
             DexInProcessHelper.disableDexInProcess(mProject.getBuildFile());
         }
     }
@@ -82,22 +80,17 @@ public class DexLimitTest {
     @Test
     public void checkDexErrorMessage() throws Exception {
         GradleBuildResult result = mProject.executor().expectFailure().run("assembleDebug");
-        if (GradleTestProject.USE_JACK) {
-            assertThat(result.getStderr()).contains(
-                    "Dex writing phase: classes.dex has too many IDs.");
-        } else {
-            assertThat(result.getStderr()).contains(
-                    "https://developer.android.com/tools/building/multidex.html");
-        }
+        assertThat(result.getStderr())
+                .contains("https://developer.android.com/tools/building/multidex.html");
 
         // Check that when dexing in-process, we don't keep bad state after a failure
         if (mDexInProcess) {
             FileUtils.delete(mProject.file("src/main/java/com/example/A.java"));
             mProject.execute("assembleDebug");
 
-            File apk = mProject.getApk("debug");
-            assertThatApk(apk).doesNotContainClass("Lcom/example/A;");
-            assertThatApk(apk).containsClass("Lcom/example/B;");
+            Apk apk = mProject.getApk("debug");
+            assertThat(apk).doesNotContainClass("Lcom/example/A;");
+            assertThat(apk).containsClass("Lcom/example/B;");
         }
     }
 }

@@ -22,9 +22,11 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -75,7 +77,25 @@ public class FileUtilsTest {
     }
 
     @Test
-    public void testIsFileInDirectory() throws IOException {
+    public void testParentDirExists() throws IOException {
+        // Test absolute paths
+        File rootDir = mTemporaryFolder.newFolder();
+        File fooFile = new File(rootDir, "foo");
+        assertThat(FileUtils.parentDirExists(fooFile)).isTrue();
+
+        File barFile = FileUtils.join(rootDir, "foo", "bar");
+        assertThat(FileUtils.parentDirExists(barFile)).isFalse();
+
+        // Test relative paths
+        fooFile = new File("foo");
+        assertThat(FileUtils.parentDirExists(fooFile)).isTrue();
+
+        barFile = new File(FileUtils.join("foo", "bar"));
+        assertThat(FileUtils.parentDirExists(barFile)).isFalse();
+    }
+
+    @Test
+    public void testIsFileInDirectory() {
         assertTrue(
                 FileUtils.isFileInDirectory(
                         new File(FileUtils.join("foo", "bar", "baz")), new File("foo")));
@@ -90,20 +110,47 @@ public class FileUtilsTest {
     }
 
     @Test
-    public void testGetCaseSensitivityAwareCanonicalPath() throws IOException {
-        assertThat(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("foo/bar/..")))
-                .isEqualTo(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("foo")));
-        assertThat(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("foo")))
-                .isNotEqualTo(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("bar")));
+    public void testIsSameFile() throws IOException {
+        // Test basic case
+        assertThat(FileUtils.isSameFile(new File("foo"), new File("foo"))).isTrue();
+        assertThat(FileUtils.isSameFile(new File("foo"), new File("bar"))).isFalse();
 
+        // Test absolute and relative paths
+        assertThat(FileUtils.isSameFile(new File("foo").getAbsoluteFile(), new File("foo")))
+                .isTrue();
+        assertThat(FileUtils.isSameFile(new File("foo").getAbsoluteFile(), new File("bar")))
+                .isFalse();
+
+        // Test upper-case and lower-case paths
         boolean isFileSystemCaseSensitive = !new File("a").equals(new File("A"));
         if (isFileSystemCaseSensitive) {
-            assertThat(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("foo")))
-                    .isNotEqualTo(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("Foo")));
+            assertThat(FileUtils.isSameFile(new File("foo").getAbsoluteFile(), new File("FOO")))
+                    .isFalse();
         } else {
-            assertThat(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("foo")))
-                    .isEqualTo(FileUtils.getCaseSensitivityAwareCanonicalPath(new File("Foo")));
+            assertThat(FileUtils.isSameFile(new File("foo").getAbsoluteFile(), new File("FOO")))
+                    .isTrue();
         }
+
+        // Test ".." in paths
+        assertThat(
+                        FileUtils.isSameFile(
+                                new File(FileUtils.join("foo", "bar", "..")), new File("foo")))
+                .isTrue();
+        assertThat(
+                        FileUtils.isSameFile(
+                                new File(FileUtils.join("foo", "bar", "..")), new File("bar")))
+                .isFalse();
+
+        // Test hard links
+        File fooFile = mTemporaryFolder.newFile("foo");
+        File fooHardLinkFile = new File(mTemporaryFolder.getRoot(), "fooHardLink");
+        java.nio.file.Files.createLink(fooHardLinkFile.toPath(), fooFile.toPath());
+        assertThat(FileUtils.isSameFile(fooHardLinkFile, fooFile)).isTrue();
+
+        // Test symbolic links
+        File fooSymbolicLinkFile = new File(mTemporaryFolder.getRoot(), "fooSymbolicLink");
+        java.nio.file.Files.createSymbolicLink(fooSymbolicLinkFile.toPath(), fooFile.toPath());
+        assertThat(FileUtils.isSameFile(fooSymbolicLinkFile, fooFile)).isTrue();
     }
 
     @Test
@@ -132,5 +179,45 @@ public class FileUtilsTest {
                         "playback",
                         "CameraPlaybackGlue$CameraPlaybackHost.class"),
                 FileUtils.relativePossiblyNonExistingPath(fileToProcess, inputDir));
+    }
+
+    @Test
+    public void testPathDelete() throws IOException {
+        Path root = mTemporaryFolder.getRoot().toPath().resolve("root");
+        java.nio.file.Files.createDirectories(root.resolve("a/a"));
+        java.nio.file.Files.createDirectories(root.resolve("b"));
+        java.nio.file.Files.createDirectories(root.resolve("c/c/c"));
+
+        java.nio.file.Files.write(root.resolve("a/a/t.txt"), ImmutableList.of("content"));
+        java.nio.file.Files.write(root.resolve("b/t.txt"), ImmutableList.of("content"));
+
+        PathUtils.deleteIfExists(root);
+
+        assertThat(java.nio.file.Files.notExists(root)).isTrue();
+    }
+
+    @Test
+    public void testPathDeleteOnlyDirs() throws IOException {
+        Path root = mTemporaryFolder.getRoot().toPath().resolve("root");
+        java.nio.file.Files.createDirectories(root.resolve("a/a"));
+        java.nio.file.Files.createDirectories(root.resolve("b"));
+        java.nio.file.Files.createDirectories(root.resolve("c/c/c"));
+
+        PathUtils.deleteIfExists(root);
+        assertThat(java.nio.file.Files.notExists(root)).isTrue();
+    }
+
+    @Test
+    public void testPathDeleteNonExisting() throws IOException {
+        PathUtils.deleteIfExists(mTemporaryFolder.getRoot().toPath().resolve("non-existing"));
+    }
+
+    @Test
+    public void testPathDeleteFile() throws IOException {
+        Path root = mTemporaryFolder.getRoot().toPath();
+        java.nio.file.Files.write(root.resolve("t.txt"), ImmutableList.of("content"));
+
+        PathUtils.deleteIfExists(root.resolve("t.txt"));
+        assertThat(java.nio.file.Files.notExists(root.resolve("t.txt"))).isTrue();
     }
 }

@@ -21,6 +21,8 @@
       <w>aosp</w>
       <w>apkbuilder</w>
       <w>apks</w>
+      <w>apksig</w>
+      <w>apksigner</w>
       <w>apos</w>
       <w>appname</w>
       <w>areturn</w>
@@ -58,6 +60,7 @@
       <w>checkable</w>
       <w>checksums</w>
       <w>chksum</w>
+      <w>chunkio</w>
       <w>classfile</w>
       <w>classname</w>
       <w>classpathentry</w>
@@ -75,6 +78,7 @@
       <w>cygpath</w>
       <w>cygwin</w>
       <w>dalvik</w>
+      <w>databinding</w>
       <w>ddmlib</w>
       <w>ddms</w>
       <w>debuggable</w>
@@ -82,6 +86,7 @@
       <w>defs</w>
       <w>densityless</w>
       <w>deps</w>
+      <w>deserializing</w>
       <w>designtime</w>
       <w>dest</w>
       <w>dexdump</w>
@@ -140,6 +145,8 @@
       <w>iaload</w>
       <w>iastore</w>
       <w>iconst</w>
+      <w>iface</w>
+      <w>incrementality</w>
       <w>inexistent</w>
       <w>inflater</w>
       <w>infos</w>
@@ -151,6 +158,8 @@
       <w>instrumentations</w>
       <w>interpolator</w>
       <w>ints</w>
+      <w>invokeinterface</w>
+      <w>invokenonvirtual</w>
       <w>invokespecial</w>
       <w>invokestatic</w>
       <w>invokevirtual</w>
@@ -202,6 +211,7 @@
       <w>manifmerger</w>
       <w>mdpi</w>
       <w>memalign</w>
+      <w>minification</w>
       <w>minified</w>
       <w>minsdk</w>
       <w>mipmap</w>
@@ -214,6 +224,8 @@
       <w>multiflavor</w>
       <w>multipart</w>
       <w>multitouch</w>
+      <w>namespaced</w>
+      <w>namespacing</w>
       <w>nano</w>
       <w>nativelib</w>
       <w>navexposed</w>
@@ -254,6 +266,8 @@
       <w>proguard</w>
       <w>proguarded</w>
       <w>prolog</w>
+      <w>protobuf</w>
+      <w>protoc</w>
       <w>pseudolocalization</w>
       <w>qemu</w>
       <w>quickfix</w>
@@ -272,6 +286,7 @@
       <w>resampling</w>
       <w>resizability</w>
       <w>resized</w>
+      <w>robolectric</w>
       <w>rrggbb</w>
       <w>runnables</w>
       <w>sccs</w>
@@ -287,9 +302,11 @@
       <w>serialnumber</w>
       <w>severities</w>
       <w>shaders</w>
+      <w>sharding</w>
       <w>shrinker</w>
       <w>sparsearray</w>
       <w>sqrt</w>
+      <w>srcs</w>
       <w>stacktrace</w>
       <w>stderr</w>
       <w>stdout</w>

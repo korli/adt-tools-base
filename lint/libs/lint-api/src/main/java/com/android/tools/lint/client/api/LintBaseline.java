@@ -29,18 +29,22 @@ import com.android.tools.lint.detector.api.TextFormat;
 import com.android.utils.XmlUtils;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileReader;
+import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import org.kxml2.io.KXmlParser;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -119,6 +123,19 @@ public class LintBaseline {
         readBaselineFile();
     }
 
+    public static String describeBaselineFilter(int errors, int warnings,
+            String baselineDisplayPath) {
+        String counts = LintUtils.describeCounts(errors, warnings, false, true);
+        // Keep in sync with isFilteredMessage() below
+        if (errors + warnings == 1) {
+            return String.format("%1$s was filtered out because it is listed in the " +
+                    "baseline file, %2$s\n", counts, baselineDisplayPath);
+        } else {
+            return String.format("%1$s were filtered out because they are listed in the " +
+                            "baseline file, %2$s\n", counts, baselineDisplayPath);
+        }
+    }
+
     /**
      * Checks if we should report baseline activity (filtered out issues, found fixed issues etc
      * and if so reports them
@@ -127,29 +144,58 @@ public class LintBaseline {
         if (foundErrorCount > 0 || foundWarningCount > 0) {
             LintClient client = driver.getClient();
             File baselineFile = getFile();
-            // Keep in sync with isFilteredMessage() below
-            String message = String.format("%1$s were filtered out because "
-                            + "they were listed in the baseline file, %2$s",
-                    LintUtils.describeCounts(foundErrorCount, foundWarningCount, false),
-                    getDisplayPath(project, baselineFile));
-            client.report(new Context(driver, project, project, baselineFile),
+            String message = describeBaselineFilter(foundErrorCount,
+                    foundWarningCount, getDisplayPath(project, baselineFile));
+            client.report(new Context(driver, project, project, baselineFile, null),
                     IssueRegistry.BASELINE,
                     client.getConfiguration(project, driver).getSeverity(IssueRegistry.BASELINE),
-                    Location.create(baselineFile), message, TextFormat.RAW);
+                    Location.create(baselineFile), message, TextFormat.RAW, null);
         }
 
         int fixedCount = getFixedCount();
         if (fixedCount > 0 && !(writeOnClose && removeFixed)) {
             LintClient client = driver.getClient();
             File baselineFile = getFile();
+            Map<String, Integer> ids = Maps.newHashMap();
+            for (Entry entry : messageToEntry.values()) {
+                Integer count = ids.get(entry.issueId);
+                if (count == null) {
+                    count = 1;
+                } else {
+                    count = count+1;
+                }
+                ids.put(entry.issueId, count);
+            }
+            List<String> sorted = Lists.newArrayList(ids.keySet());
+            Collections.sort(sorted);
+            StringBuilder issueTypes = new StringBuilder();
+            for (String id : sorted) {
+                if (issueTypes.length() > 0) {
+                    issueTypes.append(", ");
+                }
+                issueTypes.append(id);
+                Integer count = ids.get(id);
+                if (count > 1) {
+                    issueTypes.append(" (").append(Integer.toString(count)).append(")");
+                }
+            }
+
             // Keep in sync with isFixedMessage() below
             String message = String.format("%1$d errors/warnings were listed in the "
                     + "baseline file (%2$s) but not found in the project; perhaps they have "
                     + "been fixed?", fixedCount, getDisplayPath(project, baselineFile));
-            client.report(new Context(driver, project, project, baselineFile),
+            if (LintClient.Companion.isGradle() && project.getGradleProjectModel() != null &&
+                    !project.getGradleProjectModel().getLintOptions().isCheckDependencies()) {
+                message += " Another possible explanation is that lint recently stopped " +
+                        "analyzing (and including results from) dependent projects by default. " +
+                        "You can turn this back on with " +
+                        "`android.lintOptions.checkDependencies=true`.";
+            }
+            message += " Unmatched issue types: " + issueTypes;
+            client.report(new Context(driver, project, project, baselineFile, null),
                     IssueRegistry.BASELINE,
                     client.getConfiguration(project, driver).getSeverity(IssueRegistry.BASELINE),
-                    Location.create(baselineFile), message, TextFormat.RAW);
+                    Location.create(baselineFile), message, TextFormat.RAW, null);
         }
     }
 
@@ -164,9 +210,7 @@ public class LintBaseline {
     @SuppressWarnings("unused") // Used from the IDE
     public static boolean isFilteredMessage(@NonNull String errorMessage,
             @NonNull TextFormat format) {
-        errorMessage = format.toText(errorMessage);
-
-        return errorMessage.contains("were filtered out");
+        return format.toText(errorMessage).contains("filtered out because");
     }
 
     /**
@@ -284,10 +328,20 @@ public class LintBaseline {
     static boolean isSamePathSuffix(@NonNull String path, @NonNull String suffix) {
         int i = path.length() - 1;
         int j = suffix.length() - 1;
-        if (j > i) {
+
+        int begin = 0;
+        for (; begin < j; begin++) {
+            char c = suffix.charAt(begin);
+            if (c != '.' && c != '/' && c != '\\') {
+                break;
+            }
+        }
+
+        if (j - begin > i) {
             return false;
         }
-        for (; j > 0; i--, j--) {
+
+        for (; j > begin; i--, j--) {
             char c1 = path.charAt(i);
             char c2 = suffix.charAt(j);
             if (c1 != c2) {
@@ -312,7 +366,8 @@ public class LintBaseline {
             return;
         }
 
-        try (Reader reader = new BufferedReader(new FileReader(baselineFile))) {
+        try (Reader reader = new BufferedReader(new InputStreamReader(
+                new FileInputStream(baselineFile), StandardCharsets.UTF_8))) {
             KXmlParser parser = new KXmlParser();
             parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true);
             parser.setInput(reader);
@@ -354,7 +409,18 @@ public class LintBaseline {
                     String value = parser.getAttributeValue(i);
                     switch (name) {
                         case ATTR_ID: issue = value; break;
-                        case ATTR_MESSAGE: message = value; break;
+                        case ATTR_MESSAGE: {
+                            message = value;
+                            // Error message changed recently; let's stay compatible
+                            if (message.startsWith("[")) {
+                                if (message.startsWith("[I18N] ")) {
+                                    message = message.substring("[I18N] ".length());
+                                } else if (message.startsWith("[Accessibility] ")) {
+                                    message = message.substring("[Accessibility] ".length());
+                                }
+                            }
+                            break;
+                        }
                         case ATTR_FILE: path = value; break;
                         case ATTR_LINE: line = value; break;
                     }

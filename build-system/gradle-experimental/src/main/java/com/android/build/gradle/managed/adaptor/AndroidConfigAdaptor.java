@@ -17,11 +17,14 @@
 package com.android.build.gradle.managed.adaptor;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.build.api.transform.Transform;
 import com.android.build.api.variant.VariantFilter;
+import com.android.build.gradle.TestAndroidConfig;
 import com.android.build.gradle.api.AndroidSourceDirectorySet;
 import com.android.build.gradle.api.AndroidSourceFile;
 import com.android.build.gradle.api.AndroidSourceSet;
+import com.android.build.gradle.api.BaseVariantOutput;
 import com.android.build.gradle.internal.CompileOptions;
 import com.android.build.gradle.internal.coverage.JacocoOptions;
 import com.android.build.gradle.internal.dsl.AaptOptions;
@@ -45,18 +48,19 @@ import com.android.repository.Revision;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-
+import com.google.common.collect.Iterators;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.gradle.api.Action;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.file.SourceDirectorySet;
 import org.gradle.language.base.FunctionalSourceSet;
 import org.gradle.language.base.LanguageSourceSet;
 import org.gradle.model.ModelMap;
-
-import java.io.File;
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
 
 /**
  * An adaptor to convert a managed.AndroidConfig to an model.AndroidConfig.
@@ -87,11 +91,6 @@ public class AndroidConfigAdaptor implements com.android.build.gradle.AndroidCon
     @Override
     public Revision getBuildToolsRevision() {
         return model.getBuildToolsRevision();
-    }
-
-    @Override
-    public boolean getEnforceUniquePackageName() {
-        return false;
     }
 
     @Override
@@ -129,11 +128,6 @@ public class AndroidConfigAdaptor implements com.android.build.gradle.AndroidCon
     }
 
     @Override
-    public boolean getPublishNonDefault() {
-        return model.getPublishNonDefault();
-    }
-
-    @Override
     public Action<VariantFilter> getVariantFilter() {
         return model.getVariantFilter();
     }
@@ -145,7 +139,12 @@ public class AndroidConfigAdaptor implements com.android.build.gradle.AndroidCon
 
     @Override
     public List<String> getFlavorDimensionList() {
-        return null;
+        return getProductFlavors().stream()
+                .filter(flavor -> flavor.getDimension() != null)
+                .map(CoreProductFlavor::getDimension)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -179,6 +178,11 @@ public class AndroidConfigAdaptor implements com.android.build.gradle.AndroidCon
     @Override
     public Boolean getPackageBuildConfig() {
         return true;
+    }
+
+    @Override
+    public Boolean getBaseFeature() {
+        return model.getBaseFeature();
     }
 
     public ModelMap<FunctionalSourceSet> getSources() {
@@ -245,6 +249,13 @@ public class AndroidConfigAdaptor implements com.android.build.gradle.AndroidCon
     }
 
     @Override
+    public Collection<BaseVariantOutput> getBuildOutputs() {
+        ArrayList<BaseVariantOutput> buildOutputs = new ArrayList<>();
+        Iterators.addAll(buildOutputs, model.getBuildOutputs().iterator());
+        return buildOutputs;
+    }
+
+    @Override
     public Collection<LibraryRequest> getLibraryRequests() {
         return model.getLibraryRequests();
     }
@@ -252,6 +263,16 @@ public class AndroidConfigAdaptor implements com.android.build.gradle.AndroidCon
     @Override
     public Collection<String> getAidlPackageWhiteList() {
         return ImmutableSet.copyOf(model.getAidlPackageWhitelist());
+    }
+
+    @Nullable
+    @Override
+    public String getTestBuildType() {
+        if (model instanceof TestAndroidConfig) {
+            return ((TestAndroidConfig) model).getTestBuildType();
+        }
+
+        return null;
     }
 
     private void applyProjectSourceSet() {

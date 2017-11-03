@@ -10,6 +10,24 @@ new_local_repository(
     path = 'external/googletest/googletest'
 )
 
+new_local_repository(
+    name = 'AntennaPod',
+    build_file = 'tools/base/build-system/integration-test/AntennaPod.BUILD',
+    path = 'external/AntennaPod'
+)
+
+new_local_repository(
+    name = 'gradle_perf_android_medium',
+    build_file = 'tools/base/build-system/integration-test/gradle_perf_android_medium.BUILD',
+    path = 'external/gradle-perf-android-medium'
+)
+
+new_local_repository(
+    name = 'android_studio_gradle_test',
+    build_file = 'tools/base/build-system/integration-test/android_studio_gradle_test.BUILD',
+    path = 'external/android-studio-gradle-test'
+)
+
 local_repository(
     name = "protobuf_repo",
     path = "external/protobuf",
@@ -29,6 +47,13 @@ local_repository(
     name = "grpc_repo",
     path = "external/grpc-grpc",
 )
+
+local_repository(
+      name = "blaze",
+      path = "tools/vendor/google3/blaze",
+)
+load("@blaze//:bind.bzl", "blaze_binds")
+blaze_binds()
 
 bind(
     name = "gtest_main",
@@ -78,4 +103,9 @@ bind(
 bind(
     name = "grpc++_unsecure",
     actual = "@grpc_repo//:grpc++_unsecure",
+)
+
+android_ndk_repository(
+    name = "androidndk",
+    api_level = 21,
 )

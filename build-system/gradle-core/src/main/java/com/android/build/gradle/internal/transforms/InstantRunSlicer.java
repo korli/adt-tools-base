@@ -41,10 +41,6 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Strings;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
-import org.gradle.api.logging.Logger;
-import org.objectweb.asm.ClassWriter;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -52,6 +48,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.gradle.api.logging.Logger;
+import org.objectweb.asm.ClassWriter;
 
 /**
  * Transform that slices the project's classes into approximately 10 slices for
@@ -62,7 +60,7 @@ import java.util.Set;
 public class InstantRunSlicer extends Transform {
 
     @VisibleForTesting
-    static final String PACKAGE_FOR_GUARD_CLASS = "com/android/tools/fd/dummy";
+    static final String PACKAGE_FOR_GUARD_CLASS = "com/android/tools/ir/dummy";
 
     // since we use the last digit of the FQCN hashcode() as the bucket, 10 is the appropriate
     // number of slices.
@@ -195,7 +193,8 @@ public class InstantRunSlicer extends Transform {
                         Files.write(
                                 String.valueOf(
                                         variantScope.getInstantRunBuildContext().getBuildId()),
-                                new File(sliceOutputLocation, "buildId.txt"), Charsets.UTF_8);
+                                new File(sliceOutputLocation, "buildId.txt"),
+                                Charsets.UTF_8);
                         logger.verbose("Writing buildId in %s because of %s",
                                 sliceOutputLocation.getAbsolutePath(),
                                 changedFile.toString());

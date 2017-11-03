@@ -18,14 +18,15 @@ package com.android.build.gradle.internal.transforms;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.PostprocessingFeatures;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
-
 import proguard.ClassPath;
 import proguard.ClassPathEntry;
 import proguard.ClassSpecification;
@@ -43,6 +44,12 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
 
     protected final Configuration configuration = new Configuration();
 
+    // keep hold of the file that are added as inputs, to avoid duplicates. This is mainly because
+    // of the handling of local jars for library projects where they show up both in the LOCAL_DEPS
+    // and the EXTERNAL stream
+    ListMultimap<File, List<String>> fileToFilter = ArrayListMultimap.create();
+
+
     public BaseProguardAction(@NonNull VariantScope scope) {
         super(scope);
         configuration.useMixedCaseClassNames = false;
@@ -52,6 +59,7 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
 
     public void runProguard() throws IOException {
         new ProGuard(configuration).execute();
+        fileToFilter.clear();
     }
 
     @Override
@@ -82,18 +90,6 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
                 classSpecification));
     }
 
-    public void dontshrink() {
-        configuration.shrink = false;
-    }
-
-    public void dontobfuscate() {
-        configuration.obfuscate = false;
-    }
-
-    public void dontoptimize() {
-        configuration.optimize = false;
-    }
-
     public void dontpreverify() {
         configuration.preverify = false;
     }
@@ -114,6 +110,13 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
         configuration.warn.addAll(ListUtil.commaSeparatedList(dontwarn));
     }
 
+    @Override
+    public void setActions(@NonNull PostprocessingFeatures actions) {
+        configuration.obfuscate = actions.isObfuscate();
+        configuration.optimize = actions.isOptimize();
+        configuration.shrink = actions.isRemoveUnusedCode();
+    }
+
     public void dontwarn() {
         configuration.warn = Lists.newArrayList("**");
     }
@@ -131,6 +134,12 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
     }
 
     public void applyConfigurationFile(@NonNull File file) throws IOException, ParseException {
+        // file might not actually exist if it comes from a sub-module library where publication
+        // happen whether the file is there or not.
+        if (!file.isFile()) {
+            return;
+        }
+
         ConfigurationParser parser =
                 new ConfigurationParser(file, System.getProperties());
         try {
@@ -144,8 +153,8 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
         configuration.printConfiguration = file;
     }
 
-    protected void inJar(@NonNull File jarFile) {
-        inputJar(configuration.programJars, jarFile, null);
+    protected void inJar(@NonNull File jarFile, @Nullable List<String> filter) {
+        inputJar(configuration.programJars, jarFile, filter);
     }
 
     protected void outJar(@NonNull File file) {
@@ -157,10 +166,15 @@ public abstract class BaseProguardAction extends ProguardConfigurable {
         inputJar(configuration.libraryJars, jarFile, null);
     }
 
-    protected static void inputJar(
-            @NonNull ClassPath classPath,
-            @NonNull File file,
-            @Nullable List<String> filter) {
+    protected void inputJar(
+            @NonNull ClassPath classPath, @NonNull File file, @Nullable List<String> filter) {
+
+        if (!file.exists() || fileToFilter.containsEntry(file, filter)) {
+            return;
+        }
+
+        fileToFilter.put(file, filter);
+
         ClassPathEntry classPathEntry = new ClassPathEntry(file, false /*output*/);
 
         if (filter != null) {

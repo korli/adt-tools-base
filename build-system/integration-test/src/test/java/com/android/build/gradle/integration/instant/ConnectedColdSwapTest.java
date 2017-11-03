@@ -27,37 +27,36 @@ import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.build.gradle.integration.common.utils.UninstallOnClose;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
 import com.android.builder.packaging.PackagingUtils;
 import com.android.ddmlib.IDevice;
-import com.android.tools.fd.client.AppState;
-import com.android.tools.fd.client.InstantRunBuildInfo;
-import com.android.tools.fd.client.InstantRunClient;
-import com.android.tools.fd.client.UpdateMode;
+import com.android.tools.ir.client.AppState;
+import com.android.tools.ir.client.InstantRunBuildInfo;
+import com.android.tools.ir.client.InstantRunClient;
 import com.android.utils.ILogger;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import com.google.common.truth.Expect;
-import java.io.IOException;
+import java.io.Closeable;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
-import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
 /**
  * Connected smoke test for cold swap.
  */
 @Category(DeviceTests.class)
-@RunWith(MockitoJUnitRunner.class)
 public class ConnectedColdSwapTest {
+    @Rule public MockitoRule rule = MockitoJUnit.rule();
 
     @Rule
     public GradleTestProject project = GradleTestProject.builder()
@@ -84,95 +83,75 @@ public class ConnectedColdSwapTest {
     ILogger iLogger;
 
     @Before
-    public void activityClass() throws IOException {
+    public void activityClass() throws Exception {
         createActivityClass("Logger.getLogger(\"coldswaptest\").warning(\"coldswaptest_before\");\n");
     }
 
     @Test
     public void dalvikTest() throws Exception {
-        doTest(ColdswapMode.DEFAULT, adb.getDevice(thatUsesDalvik()));
+        doTest(adb.getDevice(thatUsesDalvik()));
     }
 
     @Test
     public void multiApkTest() throws Exception {
-        doTest(ColdswapMode.MULTIAPK, adb.getDevice(thatUsesArt()));
-    }
-
-    @Test
-    public void multidexTest() throws Exception {
-        doTest(ColdswapMode.MULTIDEX, adb.getDevice(thatUsesArt()));
+        doTest(adb.getDevice(thatUsesArt()));
     }
 
     private InstantRun instantRunModel;
 
-    private void doTest(@NonNull ColdswapMode coldswapMode, @NonNull IDevice device)
+    private void doTest(@NonNull IDevice device)
             throws Exception {
-        // Set up
-        device.uninstallPackage(HelloWorldApp.APP_ID);
-        logcat.start(device, "coldswaptest");
-        AndroidProject model = project.model().getSingle().getOnlyModel();
-        instantRunModel = InstantRunTestUtils.getInstantRunModel(model);
-        long token = PackagingUtils.computeApplicationHash(model.getBuildFolder());
+        try (Closeable ignored = new UninstallOnClose(device, HelloWorldApp.APP_ID)) {
+            // Set up
+            device.uninstallPackage(HelloWorldApp.APP_ID);
+            logcat.start(device, "coldswaptest");
+            AndroidProject model = project.model().getSingle().getOnlyModel();
+            instantRunModel = InstantRunTestUtils.getInstantRunModel(model);
+            long token = PackagingUtils.computeApplicationHash(model.getBuildFolder());
 
-        // Initial build
-        project.executor()
-                .withInstantRun(device, coldswapMode, OptionalCompilationStep.RESTART_ONLY)
-                .run("clean", "assembleDebug");
+            // Initial build
+            project.executor()
+                    .withInstantRun(device, OptionalCompilationStep.RESTART_ONLY)
+                    .run("clean", "assembleDebug");
 
-        InstantRunBuildInfo info = InstantRunTestUtils.loadContext(instantRunModel);
-        InstantRunTestUtils.doInstall(device, info.getArtifacts());
-        InstantRunTestUtils.unlockDevice(device);
-        Logcat.MessageListener messageListener = logcat.listenForMessage("coldswaptest_before");
-        InstantRunTestUtils.runApp(device, HelloWorldApp.APP_ID + "/.HelloWorld");
+            InstantRunBuildInfo info = InstantRunTestUtils.loadContext(instantRunModel);
+            InstantRunTestUtils.doInstall(device, info);
+            InstantRunTestUtils.unlockDevice(device);
+            Logcat.MessageListener messageListener = logcat.listenForMessage("coldswaptest_before");
+            InstantRunTestUtils.runApp(device, HelloWorldApp.APP_ID + "/.HelloWorld");
+            // Connect to device
+            InstantRunClient client =
+                    new InstantRunClient(
+                            HelloWorldApp.APP_ID,
+                            iLogger,
+                            token,
+                            PORTS.get(ConnectedColdSwapTest.class.getSimpleName()));
 
-        //Connect to device
-        InstantRunClient client =
-                new InstantRunClient(
-                        HelloWorldApp.APP_ID,
-                        iLogger,
-                        token,
-                        PORTS.get(ConnectedColdSwapTest.class.getSimpleName()));
+            // Give the app a chance to start
+            messageListener.await();
 
-        // Give the app a chance to start
-        messageListener.await();
+            // Check the app is running
+            assertThat(client.getAppState(device)).isEqualTo(AppState.FOREGROUND);
 
-        // Check the app is running
-        assertThat(client.getAppState(device)).isEqualTo(AppState.FOREGROUND);
+            // Cold swap
+            makeColdSwapChange();
+            project.executor().withInstantRun(device).run("assembleDebug");
 
-        // Cold swap
-        makeColdSwapChange();
-        project.executor()
-                .withInstantRun(device, coldswapMode)
-                .run("assembleDebug");
+            InstantRunBuildInfo coldSwapContext = InstantRunTestUtils.loadContext(instantRunModel);
 
-        InstantRunBuildInfo coldSwapContext = InstantRunTestUtils.loadContext(instantRunModel);
+            InstantRunTestUtils.doInstall(device, info);
 
-        if (coldswapMode == ColdswapMode.MULTIAPK || thatUsesDalvik().matches(device.getVersion())) {
-            InstantRunTestUtils.doInstall(device, info.getArtifacts());
-        } else {
-            UpdateMode updateMode = client
-                    .pushPatches(device, coldSwapContext,
-                            UpdateMode.HOT_SWAP,
-                            /* NB: Intentionally HOT_SWAP, pushPatches should automatically
-                               determine that the changes cannot be hot-swapped */
-                            false /*restartActivity*/,
-                            true /*showToast*/);
+            Logcat.MessageListener afterMessageListener =
+                    logcat.listenForMessage("coldswaptest_after");
 
-            assertThat(updateMode).named("updateMode").isEqualTo(UpdateMode.COLD_SWAP);
+            InstantRunTestUtils.runApp(device, HelloWorldApp.APP_ID + "/.HelloWorld");
+            // Check the app is running
+            afterMessageListener.await();
+            InstantRunTestUtils.waitForAppStart(client, device);
         }
-
-        Logcat.MessageListener afterMessageListener = logcat.listenForMessage("coldswaptest_after");
-
-        InstantRunTestUtils.runApp(device, HelloWorldApp.APP_ID + "/.HelloWorld");
-
-        // Check the app is running
-        afterMessageListener.await();
-        InstantRunTestUtils.waitForAppStart(client, device);
-
-        device.uninstallPackage(HelloWorldApp.APP_ID);
     }
 
-    private void makeColdSwapChange() throws IOException {
+    private void makeColdSwapChange() throws Exception {
         createActivityClass("newMethod();\n"
                 + "    }\n"
                 + "    public void newMethod() {\n"
@@ -180,8 +159,7 @@ public class ConnectedColdSwapTest {
                 + "");
     }
 
-    private void createActivityClass(@NonNull String newMethodBody)
-            throws IOException {
+    private void createActivityClass(@NonNull String newMethodBody) throws Exception {
         String javaCompile = "package com.example.helloworld;\n"
                 + "\n"
                 + "import java.util.logging.Logger;\n" +

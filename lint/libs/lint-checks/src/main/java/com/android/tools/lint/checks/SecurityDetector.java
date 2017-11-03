@@ -33,32 +33,35 @@ import static com.android.SdkConstants.TAG_PATH_PERMISSION;
 import static com.android.SdkConstants.TAG_PROVIDER;
 import static com.android.SdkConstants.TAG_RECEIVER;
 import static com.android.SdkConstants.TAG_SERVICE;
+import static com.android.SdkConstants.VALUE_FALSE;
 import static com.android.xml.AndroidManifest.NODE_ACTION;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Detector.XmlScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
-import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
-import com.intellij.psi.JavaElementVisitor;
-import com.intellij.psi.PsiExpression;
+import com.android.utils.XmlUtils;
 import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
-import com.intellij.psi.PsiReferenceExpression;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.USimpleNameReferenceExpression;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -66,7 +69,7 @@ import org.w3c.dom.Node;
 /**
  * Checks that exported services request a permission.
  */
-public class SecurityDetector extends Detector implements XmlScanner, JavaPsiScanner {
+public class SecurityDetector extends Detector implements XmlScanner, UastScanner {
 
     private static final Implementation IMPLEMENTATION_MANIFEST = new Implementation(
             SecurityDetector.class,
@@ -204,14 +207,19 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
     @Override
     public void visitElement(@NonNull XmlContext context, @NonNull Element element) {
         String tag = element.getTagName();
-        if (tag.equals(TAG_SERVICE)) {
-            checkService(context, element);
-        } else if (tag.equals(TAG_GRANT_PERMISSION)) {
-            checkGrantPermission(context, element);
-        } else if (tag.equals(TAG_PROVIDER)) {
-            checkProvider(context, element);
-        } else if (tag.equals(TAG_RECEIVER)) {
-            checkReceiver(context, element);
+        switch (tag) {
+            case TAG_SERVICE:
+                checkService(context, element);
+                break;
+            case TAG_GRANT_PERMISSION:
+                checkGrantPermission(context, element);
+                break;
+            case TAG_PROVIDER:
+                checkProvider(context, element);
+                break;
+            case TAG_RECEIVER:
+                checkReceiver(context, element);
+                break;
         }
     }
 
@@ -221,7 +229,7 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
         if (exportValue != null && !exportValue.isEmpty()) {
             return Boolean.valueOf(exportValue);
         } else {
-            for (Element child : LintUtils.getChildren(element)) {
+            for (Element child : XmlUtils.getSubTags(element)) {
                 if (child.getTagName().equals(TAG_INTENT_FILTER)) {
                     return true;
                 }
@@ -262,9 +270,9 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
         // Checks whether a service has an action for a WearableListenerService
         // see developers.google.com/android/reference/com/google/android/gms/wearable/WearableListenerService
         // for details on the applicable actions.
-        for (Element child : LintUtils.getChildren(element)) {
+        for (Element child : XmlUtils.getSubTags(element)) {
             if (child.getTagName().equals(TAG_INTENT_FILTER)) {
-                for (Element innerChild : LintUtils.getChildren(child)) {
+                for (Element innerChild : XmlUtils.getSubTags(child)) {
                     if (innerChild.getTagName().equals(NODE_ACTION)) {
                         String name = innerChild.getAttributeNS(ANDROID_URI, ATTR_NAME);
                         if ("com.google.android.gms.wearable.BIND_LISTENER".equals(name) // deprecated
@@ -291,9 +299,9 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
         }
 
         // Checks whether a broadcast receiver receives a standard Android action
-        for (Element child : LintUtils.getChildren(element)) {
+        for (Element child : XmlUtils.getSubTags(element)) {
             if (child.getTagName().equals(TAG_INTENT_FILTER)) {
-                for (Element innerChild : LintUtils.getChildren(child)) {
+                for (Element innerChild : XmlUtils.getSubTags(child)) {
                     if (innerChild.getTagName().equals(NODE_ACTION)) {
                         String categoryString = innerChild.getAttributeNS(ANDROID_URI, ATTR_NAME);
                         return categoryString.startsWith("android.");
@@ -309,8 +317,9 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
         if (getExported(element) && isUnprotectedByPermission(element) &&
                 !isStandardReceiver(element)) {
             // No declared permission for this exported receiver: complain
+            LintFix fix = fix().set(ANDROID_URI, ATTR_PERMISSION, "").build();
             context.report(EXPORTED_RECEIVER, element, context.getLocation(element),
-                           "Exported receiver does not require permission");
+                           "Exported receiver does not require permission", fix);
         }
     }
 
@@ -318,8 +327,9 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
         if (getExported(element) && isUnprotectedByPermission(element)
                 && !isWearableListenerServiceAction(element)) {
             // No declared permission for this exported service: complain
+            LintFix fix = fix().set(ANDROID_URI, ATTR_PERMISSION, "").build();
             context.report(EXPORTED_SERVICE, element, context.getLocation(element),
-                           "Exported service does not require permission");
+                           "Exported service does not require permission", fix);
         }
     }
 
@@ -364,7 +374,7 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
                         // TODO: Add a Lint check to ensure the path-permission is good, similar to
                         // the grant-uri-permission check.
                         boolean hasPermission = false;
-                        for (Element child : LintUtils.getChildren(element)) {
+                        for (Element child : XmlUtils.getSubTags(element)) {
                             String tag = child.getTagName();
                             if (tag.equals(TAG_PATH_PERMISSION)) {
                                 hasPermission = true;
@@ -373,10 +383,12 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
                         }
 
                         if (!hasPermission) {
+                            LintFix fix = fix()
+                                    .set(ANDROID_URI, ATTR_EXPORTED, VALUE_FALSE).build();
                             context.report(EXPORTED_PROVIDER, element,
                                     context.getLocation(element),
                                     "Exported content providers can provide access to " +
-                                            "potentially sensitive data");
+                                            "potentially sensitive data", fix);
                         }
                     }
                 }
@@ -388,80 +400,74 @@ public class SecurityDetector extends Detector implements XmlScanner, JavaPsiSca
 
     @Override
     public List<String> getApplicableMethodNames() {
-        // These are the API calls that can accept a MODE_WORLD_READABLE/MODE_WORLD_WRITEABLE
-        // argument.
-        List<String> values = new ArrayList<>(3);
-        values.add("openFileOutput");
-        values.add("getSharedPreferences");
-        values.add("getDir");
-        // These API calls can be used to set files world-readable or world-writable
-        values.add("setReadable");
-        values.add("setWritable");
-        return values;
+        return Arrays.asList(
+                // These are the API calls that can accept a MODE_WORLD_READABLE/MODE_WORLD_WRITEABLE
+                // argument.
+                "openFileOutput",
+                "getSharedPreferences",
+                "getDir",
+                // These API calls can be used to set files world-readable or world-writable
+                "setReadable",
+                "setWritable");
     }
 
     @Override
-    public void visitMethod(@NonNull JavaContext context, @Nullable JavaElementVisitor visitor,
-            @NonNull PsiMethodCallExpression node, @NonNull PsiMethod method) {
-        PsiExpression[] args = node.getArgumentList().getExpressions();
-        String methodName = node.getMethodExpression().getReferenceName();
+    public void visitMethod(@NonNull JavaContext context, @NonNull UCallExpression node,
+            @NonNull PsiMethod method) {
+        List<UExpression> args = node.getValueArguments();
+        String methodName = node.getMethodName();
         if (context.getEvaluator().isMemberInSubClassOf(method, FILE_CLASS, false)) {
             // Report calls to java.io.File.setReadable(true, false) or
             // java.io.File.setWritable(true, false)
             if ("setReadable".equals(methodName)) {
-                if (args.length == 2 &&
-                        Boolean.TRUE.equals(ConstantEvaluator.evaluate(context, args[0])) &&
-                        Boolean.FALSE.equals(ConstantEvaluator.evaluate(context, args[1]))) {
+                if (args.size() == 2 &&
+                        Boolean.TRUE.equals(ConstantEvaluator.evaluate(context, args.get(0))) &&
+                        Boolean.FALSE.equals(ConstantEvaluator.evaluate(context, args.get(1)))) {
                     context.report(SET_READABLE, node, context.getLocation(node),
                             "Setting file permissions to world-readable can be " +
                                     "risky, review carefully");
                 }
-                return;
             } else if ("setWritable".equals(methodName)) {
-                if (args.length == 2 &&
-                        Boolean.TRUE.equals(ConstantEvaluator.evaluate(context, args[0])) &&
-                        Boolean.FALSE.equals(ConstantEvaluator.evaluate(context, args[1]))) {
+                if (args.size() == 2 &&
+                        Boolean.TRUE.equals(ConstantEvaluator.evaluate(context, args.get(0))) &&
+                        Boolean.FALSE.equals(ConstantEvaluator.evaluate(context, args.get(1)))) {
                     context.report(SET_WRITABLE, node, context.getLocation(node),
                             "Setting file permissions to world-writable can be " +
                                     "risky, review carefully");
                 }
-                return;
             }
         }
+    }
 
-        assert visitor != null;
-        for (PsiExpression arg : args) {
-            arg.accept(visitor);
-        }
+    @Override
+    public List<Class<? extends UElement>> getApplicableUastTypes() {
+        return Collections.singletonList(USimpleNameReferenceExpression.class);
     }
 
     @Nullable
     @Override
-    public JavaElementVisitor createPsiVisitor(@NonNull JavaContext context) {
+    public UElementHandler createUastHandler(@NonNull JavaContext context) {
         return new IdentifierVisitor(context);
     }
 
-    private static class IdentifierVisitor extends JavaElementVisitor {
-        private final JavaContext mContext;
+    private static class IdentifierVisitor extends UElementHandler {
+        private final JavaContext context;
 
         public IdentifierVisitor(JavaContext context) {
-            super();
-            mContext = context;
+            this.context = context;
         }
 
         @Override
-        public void visitReferenceExpression(PsiReferenceExpression node) {
-            super.visitReferenceExpression(node);
-
-            String name = node.getReferenceName();
+        public void visitSimpleNameReferenceExpression(@NonNull USimpleNameReferenceExpression node) {
+            String name = node.getIdentifier();
             if ("MODE_WORLD_WRITEABLE".equals(name)) {
-                Location location = mContext.getLocation(node);
-                mContext.report(WORLD_WRITEABLE, node, location,
+                Location location = context.getLocation(node);
+                context.report(WORLD_WRITEABLE, node, location,
                         "Using `MODE_WORLD_WRITEABLE` when creating files can be " +
                                 "risky, review carefully");
             } else if ("MODE_WORLD_READABLE".equals(name)) {
-                Location location = mContext.getLocation(node);
-                mContext.report(WORLD_READABLE, node, location,
+                Location location = context.getLocation(node);
+                context.report(WORLD_READABLE, node, location,
                         "Using `MODE_WORLD_READABLE` when creating files can be " +
                                 "risky, review carefully");
             }

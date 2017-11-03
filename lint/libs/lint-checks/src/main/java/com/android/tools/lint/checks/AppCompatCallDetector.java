@@ -15,23 +15,29 @@
  */
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.APPCOMPAT_LIB_ARTIFACT;
+import static com.android.SdkConstants.CLASS_ACTIVITY;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.client.api.JavaEvaluator;
-import com.android.tools.lint.detector.api.*;
-import com.intellij.psi.JavaElementVisitor;
-import com.intellij.psi.PsiClass;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.detector.api.Detector;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintFix;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
 import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
-import com.intellij.psi.util.PsiTreeUtil;
 import java.util.Arrays;
 import java.util.List;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UClass;
+import org.jetbrains.uast.UastUtils;
 
-import static com.android.SdkConstants.APPCOMPAT_LIB_ARTIFACT;
-import static com.android.SdkConstants.CLASS_ACTIVITY;
-import static com.android.tools.lint.detector.api.TextFormat.RAW;
-
-public class AppCompatCallDetector extends Detector implements Detector.JavaPsiScanner {
+public class AppCompatCallDetector extends Detector implements Detector.UastScanner {
     public static final Issue ISSUE = Issue.create(
             "AppCompatMethod",
             "Using Wrong AppCompat Method",
@@ -50,8 +56,6 @@ public class AppCompatCallDetector extends Detector implements Detector.JavaPsiS
     private static final String SET_PROGRESS_BAR_IN_VIS = "setProgressBarIndeterminateVisibility";
     private static final String SET_PROGRESS_BAR_INDETERMINATE = "setProgressBarIndeterminate";
     private static final String REQUEST_WINDOW_FEATURE = "requestWindowFeature";
-    /** If you change number of parameters or order, update {@link #getMessagePart(String, int,TextFormat)} */
-    private static final String ERROR_MESSAGE_FORMAT = "Should use `%1$s` instead of `%2$s` name";
 
     private boolean mDependsOnAppCompat;
 
@@ -77,8 +81,8 @@ public class AppCompatCallDetector extends Detector implements Detector.JavaPsiS
     }
 
     @Override
-    public void visitMethod(@NonNull JavaContext context, @Nullable JavaElementVisitor visitor,
-            @NonNull PsiMethodCallExpression node, @NonNull PsiMethod method) {
+    public void visitMethod(@NonNull JavaContext context, @NonNull UCallExpression node,
+            @NonNull PsiMethod method) {
         if (mDependsOnAppCompat && isAppBarActivityCall(context, node, method)) {
             String name = method.getName();
             String replace = null;
@@ -97,64 +101,26 @@ public class AppCompatCallDetector extends Detector implements Detector.JavaPsiS
             }
 
             if (replace != null) {
-                String message = String.format(ERROR_MESSAGE_FORMAT, replace, name);
-                context.report(ISSUE, node, context.getLocation(node), message);
+                String message = String.format("Should use `%1$s` instead of `%2$s` name", replace,
+                        name);
+                LintFix fix = fix().name("Replace with " + replace + "()").replace()
+                        .text(name).with(replace).build();
+                context.report(ISSUE, node, context.getLocation(node), message, fix);
             }
         }
     }
 
     private static boolean isAppBarActivityCall(@NonNull JavaContext context,
-            @NonNull PsiMethodCallExpression node, @NonNull PsiMethod method) {
+            @NonNull UCallExpression node, @NonNull PsiMethod method) {
         JavaEvaluator evaluator = context.getEvaluator();
         if (evaluator.isMemberInSubClassOf(method, CLASS_ACTIVITY, false)) {
             // Make sure that the calling context is a subclass of ActionBarActivity;
             // we don't want to flag these calls if they are in non-appcompat activities
             // such as PreferenceActivity (see b.android.com/58512)
-            PsiClass cls = PsiTreeUtil.getParentOfType(node, PsiClass.class, true);
+            UClass cls = UastUtils.getParentOfType(node, UClass.class, true);
             return cls != null && evaluator.extendsClass(cls,
                     "android.support.v7.app.ActionBarActivity", false);
         }
         return false;
-    }
-
-    /**
-     * Given an error message created by this lint check, return the corresponding old method name
-     * that it suggests should be deleted. (Intended to support quickfix implementations
-     * for this lint check.)
-     *
-     * @param errorMessage the error message originally produced by this detector
-     * @param format the format of the error message
-     * @return the corresponding old method name, or null if not recognized
-     */
-    @Nullable
-    public static String getOldCall(@NonNull String errorMessage, @NonNull TextFormat format) {
-        return getMessagePart(errorMessage, 2, format);
-    }
-
-    /**
-     * Given an error message created by this lint check, return the corresponding new method name
-     * that it suggests replace the old method name. (Intended to support quickfix implementations
-     * for this lint check.)
-     *
-     * @param errorMessage the error message originally produced by this detector
-     * @param format the format of the error message
-     * @return the corresponding new method name, or null if not recognized
-     */
-    @Nullable
-    public static String getNewCall(@NonNull String errorMessage, @NonNull TextFormat format) {
-        return getMessagePart(errorMessage, 1, format);
-    }
-
-    @Nullable
-    private static String getMessagePart(@NonNull String errorMessage, int group,
-            @NonNull TextFormat format) {
-        List<String> parameters = LintUtils.getFormattedParameters(
-                RAW.convertTo(ERROR_MESSAGE_FORMAT, format),
-                errorMessage);
-        if (parameters.size() == 2 && group <= 2) {
-            return parameters.get(group - 1);
-        }
-
-        return null;
     }
 }

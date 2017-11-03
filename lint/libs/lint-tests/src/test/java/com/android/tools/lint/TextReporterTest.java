@@ -62,13 +62,13 @@ public class TextReporterTest extends AbstractCheckTest {
             warning1.location.setSecondary(secondary);
 
             Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
-                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    "Hardcoded string \"Fooo\", should use @string resource",
                     Severity.WARNING, project);
             warning2.line = 11;
             warning2.file = new File("/foo/bar/Foo/res/layout/main.xml");
             warning2.errorLine = "        android:text=\"Fooo\" />\n" +
                     "        ~~~~~~~~~~~~~~~~~~~\n";
-            warning2.path = "res/layout/main.xml";
+            warning2.path = "res/layout/main.xml".replace('/', File.separatorChar);
             warning2.location = Location.create(warning2.file,
                     new DefaultPosition(11, 8, 377), new DefaultPosition(11, 27, 396));
             secondary = Location.create(warning1.file,
@@ -92,13 +92,13 @@ public class TextReporterTest extends AbstractCheckTest {
                     + "    <uses-sdk android:minSdkVersion=\"8\" />\n"
                     + "    ^\n"
                     + "    AndroidManifest.xml:8: Secondary location\n"
-                    + "res/layout/main.xml:12: Warning: [I18N] Hardcoded string \"Fooo\", should use @string resource [HardcodedText]\n"
+                    + "res/layout/main.xml:12: Warning: Hardcoded string \"Fooo\", should use @string resource [HardcodedText]\n"
                     + "        android:text=\"Fooo\" />\n"
                     + "        ~~~~~~~~~~~~~~~~~~~\n"
                     + "    AndroidManifest.xml:8: Secondary location\n"
                     + "Also affects: res/layout/main.xml:6\n"
                     + "0 errors, 2 warnings\n",
-                    report);
+                    report.replace(File.separatorChar, '/'));
         } finally {
             //noinspection ResultOfMethodCallIgnored
             file.delete();
@@ -135,7 +135,7 @@ public class TextReporterTest extends AbstractCheckTest {
             warning1.location.setSecondary(secondary);
 
             Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
-                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    "Hardcoded string \"Fooo\", should use @string resource",
                     Severity.WARNING, project);
             warning2.line = 11;
             warning2.file = new File("/foo/bar/Foo/res/layout/main.xml");
@@ -192,7 +192,7 @@ public class TextReporterTest extends AbstractCheckTest {
                     + "\n"
                     + "   http://developer.android.com/guide/topics/manifest/uses-sdk-element.html\n"
                     + "\n"
-                    + "res/layout/main.xml:12: Warning: [I18N] Hardcoded string \"Fooo\", should use @string resource [HardcodedText]\n"
+                    + "res/layout/main.xml:12: Warning: Hardcoded string \"Fooo\", should use @string resource [HardcodedText]\n"
                     + "        android:text=\"Fooo\" />\n"
                     + "        ~~~~~~~~~~~~~~~~~~~\n"
                     + "    AndroidManifest.xml:8: Secondary location\n"
@@ -213,7 +213,7 @@ public class TextReporterTest extends AbstractCheckTest {
                     + "   resource lookup.\n"
                     + "\n"
                     + "0 errors, 3 warnings\n",
-                    report);
+                    report.replace(File.separatorChar, '/'));
         } finally {
             //noinspection ResultOfMethodCallIgnored
             file.delete();

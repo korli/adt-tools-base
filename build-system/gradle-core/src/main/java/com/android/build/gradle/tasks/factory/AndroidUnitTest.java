@@ -16,25 +16,28 @@
 
 package com.android.build.gradle.tasks.factory;
 
-import static com.android.SdkConstants.FN_FRAMEWORK_LIBRARY;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactScope.ALL;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactType;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactType.CLASSES;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.RUNTIME_CLASSPATH;
+import static com.android.build.gradle.internal.scope.TaskOutputHolder.AnchorOutputType.ALL_CLASSES;
 import static com.android.builder.core.VariantType.UNIT_TEST;
 
 import com.android.annotations.NonNull;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
+import com.android.build.gradle.internal.scope.TaskOutputHolder.TaskOutputType;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.TestVariantData;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
 import java.io.File;
-import java.util.List;
-import java.util.function.Predicate;
-import org.gradle.api.file.FileTree;
+import org.gradle.api.file.ConfigurableFileCollection;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.plugins.JavaBasePlugin;
 import org.gradle.api.reporting.ConfigurableReport;
-import org.gradle.api.tasks.TaskInputs;
-import org.gradle.api.tasks.compile.AbstractCompile;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.testing.Test;
 import org.gradle.api.tasks.testing.TestTaskReports;
 
@@ -43,32 +46,37 @@ import org.gradle.api.tasks.testing.TestTaskReports;
  */
 public class AndroidUnitTest extends Test {
 
-    /**
-     * Returns the test class files.
-     *
-     * <p>This is the special case we need to handle - if getCandidateClassFiles is called
-     * too early, i.e. before the task is fully configured, return an empty FileTree. The
-     * default is to create a FileTree using getTestClassesDir(), but that creates a
-     * FileTree with a null root, which fails later on.
-     *
-     * @see ConfigAction#configureSources(AndroidUnitTest)
-     */
-    @Override
-    public FileTree getCandidateClassFiles() {
-        if (getTestClassesDir() == null) {
-            return getProject().files().getAsFileTree();
-        } else {
-            return super.getCandidateClassFiles();
-        }
+    private String sdkPlatformDirPath;
+    private FileCollection mergedManifest;
+    private FileCollection resCollection;
+    private FileCollection assetsCollection;
+
+    @InputFiles
+    @Optional
+    public FileCollection getResCollection() {
+        return resCollection;
+    }
+
+    @InputFiles
+    @Optional
+    public FileCollection getAssetsCollection() {
+        return assetsCollection;
+    }
+
+    @Input
+    public String getSdkPlatformDirPath() {
+        return sdkPlatformDirPath;
+    }
+
+    @InputFiles
+    public FileCollection getMergedManifest() {
+        return mergedManifest;
     }
 
     /**
      * Configuration Action for a JavaCompile task.
      */
     public static class ConfigAction implements TaskConfigAction<AndroidUnitTest> {
-
-        private static final Predicate<File> PLATFORM_JAR =
-                file -> FN_FRAMEWORK_LIBRARY.equals(file.getName());
 
         private final VariantScope scope;
 
@@ -103,51 +111,28 @@ public class AndroidUnitTest extends Test {
                             + testedVariantData.getVariantConfiguration().getFullName()
                             + " build.");
 
-            runTestsTask.setTestClassesDir(scope.getJavaOutputDir());
+            runTestsTask.setTestClassesDirs(scope.getOutput(ALL_CLASSES));
 
-            configureSources(runTestsTask);
+            boolean includeAndroidResources =
+                    scope.getGlobalScope()
+                            .getExtension()
+                            .getTestOptions()
+                            .getUnitTests()
+                            .isIncludeAndroidResources();
 
-            ConventionMappingHelper.map(
-                    runTestsTask,
-                    "classpath",
-                    () -> {
-                        List<Object> classpaths = Lists.newArrayList();
+            runTestsTask.setClasspath(computeClasspath(includeAndroidResources));
+            runTestsTask.sdkPlatformDirPath =
+                    scope.getGlobalScope().getAndroidBuilder().getTarget().getLocation();
 
-                        // Get classpath values from tasks if the tasks are already created.
-                        final AbstractCompile testCompileTask = variantData.javacTask;
-                        if (testCompileTask != null) {
-                            // When Jack is used for building the APK, the platform jar for javac
-                            // may end up in the class path (as opposed to boot class path), so we
-                            // need to remove it.
-                            testCompileTask
-                                    .getClasspath()
-                                    .getFiles()
-                                    .stream()
-                                    .filter(PLATFORM_JAR.negate())
-                                    .forEach(classpaths::add);
-
-                            classpaths.add(testCompileTask.getOutputs().getFiles());
-                        } else {
-                            classpaths.add(testedVariantData.getScope().getJavaOutputs());
-                            classpaths.add(scope.getJavaOutputs());
-                        }
-
-                        classpaths.add(variantData.getJavaResourcesForUnitTesting());
-                        classpaths.add(testedVariantData.getJavaResourcesForUnitTesting());
-
-                        scope.getGlobalScope()
-                                .getAndroidBuilder()
-                                .getBootClasspath(false)
-                                .stream()
-                                .filter(PLATFORM_JAR.negate())
-                                .forEach(classpaths::add);
-
-                        // Mockable JAR is last, to make sure you can shadow the classes with
-                        // dependencies.
-                        classpaths.add(scope.getGlobalScope().getMockableAndroidJarFile());
-
-                        return scope.getGlobalScope().getProject().files(classpaths);
-                    });
+            // if android resources are meant to be accessible, then we need to make sure
+            // changes to them trigger a new run of the tasks
+            VariantScope testedScope = testedVariantData.getScope();
+            if (includeAndroidResources) {
+                runTestsTask.assetsCollection = testedScope.getOutput(TaskOutputType.MERGED_ASSETS);
+                runTestsTask.resCollection =
+                        testedScope.getOutput(TaskOutputType.MERGED_NOT_COMPILED_RES);
+            }
+            runTestsTask.mergedManifest = testedScope.getOutput(TaskOutputType.MERGED_MANIFESTS);
 
             // Put the variant name in the report path, so that different testing tasks don't
             // overwrite each other's reports. For component model plugin, the report tasks are not
@@ -173,18 +158,33 @@ public class AndroidUnitTest extends Test {
                     .applyConfiguration(runTestsTask);
         }
 
-        /**
-         * Sets task inputs. Normally this is done by JavaBasePlugin, but in our case this is too
-         * early and candidate class files are not known yet. So we call this here, once we know
-         * the class files.
-         *
-         * @see AndroidUnitTest#getCandidateClassFiles()
-         */
-        private static TaskInputs configureSources(@NonNull AndroidUnitTest runTestsTask) {
-            return runTestsTask
-                    .getInputs()
-                    .files(runTestsTask.getCandidateClassFiles())
-                    .skipWhenEmpty();
+        @NonNull
+        private ConfigurableFileCollection computeClasspath(boolean includeAndroidResources) {
+            ConfigurableFileCollection collection = scope.getGlobalScope().getProject().files();
+
+            // the test classpath is made up of:
+            // - the config file
+            if (includeAndroidResources) {
+                collection.from(scope.getOutput(TaskOutputType.UNIT_TEST_CONFIG_DIRECTORY));
+            }
+            // - the test component classes and java_res
+            collection.from(scope.getOutput(ALL_CLASSES));
+            // TODO is this the right thing? this doesn't include the res merging via transform AFAIK
+            collection.from(scope.getOutput(TaskOutputType.JAVA_RES));
+
+            // - the runtime dependencies for both CLASSES and JAVA_RES type
+            collection.from(
+                    scope.getArtifactFileCollection(RUNTIME_CLASSPATH, ALL, CLASSES));
+            collection.from(
+                    scope.getArtifactFileCollection(
+                            RUNTIME_CLASSPATH,
+                            ALL,
+                            ArtifactType.JAVA_RES));
+
+            // Mockable JAR is last, to make sure you can shadow the classes with
+            // dependencies.
+            collection.from(scope.getGlobalScope().getOutput(TaskOutputType.MOCKABLE_JAR));
+            return collection;
         }
     }
 }

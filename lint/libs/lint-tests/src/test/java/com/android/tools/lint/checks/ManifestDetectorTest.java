@@ -16,9 +16,11 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.tools.lint.checks.GradleDetectorTest.createSdkPaths;
+import static com.android.tools.lint.checks.GradleDetectorTest.createRelativePaths;
+import static com.android.tools.lint.checks.infrastructure.ProjectDescription.Type.LIBRARY;
 
 import com.android.testutils.TestUtils;
+import com.android.tools.lint.checks.infrastructure.ProjectDescription;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
 import java.io.File;
@@ -187,39 +189,48 @@ public class ManifestDetectorTest extends AbstractCheckTest {
     }
 
     public void testOldTargetSdk() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.TARGET_NEWER);
-        //noinspection all // Sample code
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:7: Warning: Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details. [OldTargetApi]\n"
                 + "    <uses-sdk android:minSdkVersion=\"10\" android:targetSdkVersion=\"14\" />\n"
                 + "                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
-            lintProject(
-                    xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"test.bytecode\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"10\" android:targetSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "        <activity\n"
-                            + "            android:name=\".BytecodeTestsActivity\"\n"
-                            + "            android:label=\"@string/app_name\" >\n"
-                            + "            <intent-filter>\n"
-                            + "                <action android:name=\"android.intent.action.MAIN\" />\n"
-                            + "\n"
-                            + "                <category android:name=\"android.intent.category.LAUNCHER\" />\n"
-                            + "            </intent-filter>\n"
-                            + "        </activity>\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"),
-                    mStrings));
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
+                        manifest(
+                                ""
+                                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                                        + "    package=\"test.bytecode\"\n"
+                                        + "    android:versionCode=\"1\"\n"
+                                        + "    android:versionName=\"1.0\" >\n"
+                                        + "\n"
+                                        + "    <uses-sdk android:minSdkVersion=\"10\" android:targetSdkVersion=\"14\" />\n"
+                                        + "\n"
+                                        + "    <application\n"
+                                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                                        + "        android:label=\"@string/app_name\" >\n"
+                                        + "        <activity\n"
+                                        + "            android:name=\".BytecodeTestsActivity\"\n"
+                                        + "            android:label=\"@string/app_name\" >\n"
+                                        + "            <intent-filter>\n"
+                                        + "                <action android:name=\"android.intent.action.MAIN\" />\n"
+                                        + "\n"
+                                        + "                <category android:name=\"android.intent.category.LAUNCHER\" />\n"
+                                        + "            </intent-filter>\n"
+                                        + "        </activity>\n"
+                                        + "    </application>\n"
+                                        + "\n"
+                                        + "</manifest>\n"),
+                        mStrings)
+                .issues(ManifestDetector.TARGET_NEWER)
+                .run()
+                .expect(expected)
+                .expectFixDiffs(
+                        ""
+                                + "Fix for AndroidManifest.xml line 6: Update targetSdkVersion to 26:\n"
+                                + "@@ -7 +7\n"
+                                + "-     <uses-sdk android:minSdkVersion=\"10\" android:targetSdkVersion=\"14\" />\n"
+                                + "+     <uses-sdk android:minSdkVersion=\"10\" android:targetSdkVersion=\"26\" />\n");
     }
 
     public void testMultipleSdk() throws Exception {
@@ -584,78 +595,154 @@ public class ManifestDetectorTest extends AbstractCheckTest {
                         mStrings));
     }
 
-    public void testDuplicatePermissionsMultiProject() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.UNIQUE_PERMISSION);
+    public void testDuplicatePermissionsMultiProject() {
 
-        File master = getProjectDir("MasterProject",
-                // Master project
-                xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"foo.bar2\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <permission android:name=\"foo.permission.SEND_SMS\"\n"
-                            + "        android:label=\"@string/foo\"\n"
-                            + "        android:description=\"@string/foo\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"),
-                projectProperties().property("android.library.reference.1", "../LibraryProject").property("manifestmerger.enabled", "true"),
-                mMainCode
-        );
-        File library = getProjectDir("LibraryProject",
-                // Library project
-                xml("AndroidManifest.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    package=\"foo.bar2\"\n"
-                            + "    android:versionCode=\"1\"\n"
-                            + "    android:versionName=\"1.0\" >\n"
-                            + "\n"
-                            + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
-                            + "\n"
-                            + "    <permission android:name=\"bar.permission.SEND_SMS\"\n"
-                            + "        android:label=\"@string/foo\"\n"
-                            + "        android:description=\"@string/foo\" />\n"
-                            + "\n"
-                            + "    <application\n"
-                            + "        android:icon=\"@drawable/ic_launcher\"\n"
-                            + "        android:label=\"@string/app_name\" >\n"
-                            + "    </application>\n"
-                            + "\n"
-                            + "</manifest>\n"),
-                projectProperties().library(true).compileSdk(14),
-                mLibraryCode,
-                mLibraryStrings
-        );
-        assertEquals(""
-                + "LibraryProject/AndroidManifest.xml:9: Error: Permission name SEND_SMS is not unique (appears in both foo.permission.SEND_SMS and bar.permission.SEND_SMS) [UniquePermission]\n"
-                + "    <permission android:name=\"bar.permission.SEND_SMS\"\n"
-                + "                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "1 errors, 0 warnings\n",
+        //noinspection all // Sample code
+        ProjectDescription library = project(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"foo.bar2\"\n"
+                        + "    android:versionCode=\"1\"\n"
+                        + "    android:versionName=\"1.0\" >\n"
+                        + "\n"
+                        + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+                        + "\n"
+                        + "    <permission android:name=\"bar.permission.SEND_SMS\"\n"
+                        + "        android:label=\"@string/foo\"\n"
+                        + "        android:description=\"@string/foo\" />\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                        + "        android:label=\"@string/app_name\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n")
+        ).type(LIBRARY).name("Library");
 
-           checkLint(Arrays.asList(master, library)));
+        //noinspection all // Sample code
+        ProjectDescription main = project(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"foo.bar2\"\n"
+                        + "    android:versionCode=\"1\"\n"
+                        + "    android:versionName=\"1.0\" >\n"
+                        + "\n"
+                        + "    <uses-sdk android:minSdkVersion=\"14\" />\n"
+                        + "\n"
+                        + "    <permission android:name=\"foo.permission.SEND_SMS\"\n"
+                        + "        android:label=\"@string/foo\"\n"
+                        + "        android:description=\"@string/foo\" />\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:icon=\"@drawable/ic_launcher\"\n"
+                        + "        android:label=\"@string/app_name\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n")
+        ).name("App").dependsOn(library);
+
+        lint()
+                .projects(main, library)
+                .incremental("App/AndroidManifest.xml").
+                issues(ManifestDetector.UNIQUE_PERMISSION)
+                .run()
+                .expect(""
+                        + "../Library/AndroidManifest.xml:9: Error: Permission name SEND_SMS is not unique (appears in both foo.permission.SEND_SMS and bar.permission.SEND_SMS) [UniquePermission]\n"
+                        + "    <permission android:name=\"bar.permission.SEND_SMS\"\n"
+                        + "                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "    AndroidManifest.xml:9: Previous permission here\n"
+                        + "1 errors, 0 warnings\n");
+    }
+
+    public void testUniquePermissionsPrunedViaManifestRemove() {
+        // Actually checks 4 separate things:
+        // (1) The unique permission check looks across multiple projects via the
+        //     manifest merge (in an incremental way)
+        // (2) It allows duplicate permission names if the whole package, not just
+        //     the base name is the same
+        // (3) It flags permissions that vary by package name, not base name, across
+        //     manifests
+        // (4) It ignores permissions that have been removed via manifest merger
+        //     directives. This is a regression test for
+        //     https://code.google.com/p/android/issues/detail?id=227683
+        // (5) Using manifest placeholders
+
+        //noinspection all // Sample code
+        ProjectDescription library = project(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"test.pkg.library\" >\n"
+                        + "    <permission\n"
+                        + "        android:name=\"a.b.c.SHARED_ACCESS\"\n"
+                        + "        android:label=\"Shared Access\"\n"
+                        + "        android:protectionLevel=\"signature\"/>\n"
+                        + "    <permission android:name=\"pkg1.PERMISSION_NAME_1\"/>\n"
+                        + "    <permission android:name=\"${applicationId}.permission.PERMISSION_NAME_2\"/>\n"
+                        + "    <permission android:name=\"${unknownPlaceHolder1}.permission.PERMISSION_NAME_3\"/>\n"
+                        + "</manifest>\n")
+        ).type(LIBRARY).name("Library");
+
+        //noinspection all // Sample code
+        ProjectDescription main = project(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    xmlns:tools=\"http://schemas.android.com/tools\"\n"
+                        + "    package=\"test.pkg.app\" >\n"
+                        + "    <permission\n"
+                        + "        android:name=\"a.b.c.SHARED_ACCESS\"\n"
+                        + "        tools:node=\"remove\"/>\n"
+                        + "    <permission android:name=\"pkg2.PERMISSION_NAME_1\"/>\n"
+                        + "    <permission android:name=\"test.pkg.app.permission.PERMISSION_NAME_2\"/>\n"
+                        + "    <permission android:name=\"${unknownPlaceHolder2}.permission.PERMISSION_NAME_3\"/>\n"
+                        + "</manifest>\n")
+        ).name("App").dependsOn(library);
+
+        lint()
+                .projects(main, library)
+                .incremental("App/AndroidManifest.xml").
+                issues(ManifestDetector.UNIQUE_PERMISSION)
+                .run()
+                .expect(""
+                        + "../Library/AndroidManifest.xml:8: Error: Permission name PERMISSION_NAME_1 is not unique (appears in both pkg2.PERMISSION_NAME_1 and pkg1.PERMISSION_NAME_1) [UniquePermission]\n"
+                        + "    <permission android:name=\"pkg1.PERMISSION_NAME_1\"/>\n"
+                        + "                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "    AndroidManifest.xml:5: Previous permission here\n"
+                        + "1 errors, 0 warnings\n");
     }
 
     public void testMissingVersion() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.SET_VERSION);
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:2: Warning: Should set android:versionCode to specify the application version [MissingVersion]\n"
                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
                 + "^\n"
                 + "AndroidManifest.xml:2: Warning: Should set android:versionName to specify the application version [MissingVersion]\n"
                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
                 + "^\n"
-                + "0 errors, 2 warnings\n",
-            lintProject(mNo_version));
+                + "0 errors, 2 warnings\n";
+        lint().files(
+                mNo_version)
+                .issues(ManifestDetector.SET_VERSION)
+                .run()
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for AndroidManifest.xml line 1: Set versionCode:\n"
+                + "@@ -3 +3\n"
+                + "  <manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "-     package=\"foo.bar2\" >\n"
+                + "+     package=\"foo.bar2\"\n"
+                + "+     android:versionCode=\"|\" >\n"
+                + "  \n"
+                + "Fix for AndroidManifest.xml line 1: Set versionName:\n"
+                + "@@ -3 +3\n"
+                + "  <manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "-     package=\"foo.bar2\" >\n"
+                + "+     package=\"foo.bar2\"\n"
+                + "+     android:versionName=\"|\" >\n"
+                + "  \n");
     }
 
     public void testVersionNotMissingInGradleProjects() throws Exception {
@@ -766,15 +853,26 @@ public class ManifestDetectorTest extends AbstractCheckTest {
     }
 
     public void testMissingApplicationIcon() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.APPLICATION_ICON);
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:9: Warning: Should explicitly set android:icon, there is no default [MissingApplicationIcon]\n"
                 + "    <application\n"
                 + "    ^\n"
-                + "0 errors, 1 warnings\n",
-            lintProject(
+                + "0 errors, 1 warnings\n";
+        lint().files(
                 mMissing_application_icon,
-                mStrings));
+                mStrings)
+                .issues(ManifestDetector.APPLICATION_ICON)
+                .run()
+                .expect(expected)
+                .verifyFixes().window(1).expectFixDiffs(""
+                + "Fix for AndroidManifest.xml line 8: Set icon:\n"
+                + "@@ -9 +9\n"
+                + "  \n"
+                + "-     <application android:label=\"@string/app_name\" >\n"
+                + "+     <application\n"
+                + "+         android:icon=\"@mipmap/|\"\n"
+                + "+         android:label=\"@string/app_name\" >\n"
+                + "          <activity\n");
     }
 
     public void testMissingApplicationIconInLibrary() throws Exception {
@@ -1119,290 +1217,386 @@ public class ManifestDetectorTest extends AbstractCheckTest {
     }
 
     public void testFullBackupContentBoolean() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
-
-                lintProjectIncrementally(
-                        "AndroidManifest.xml",
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:allowBackup=\"true\"\n"
-                                + "        android:fullBackupContent=\"true\"\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:allowBackup=\"true\"\n"
+                        + "        android:fullBackupContent=\"true\"\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .incremental()
+                .run()
+                .expectClean();
     }
 
     public void testFullBackupContentMissing() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:7: Warning: Missing <full-backup-content> resource [AllowBackup]\n"
                 + "        android:fullBackupContent=\"@xml/backup\"\n"
                 + "                                   ~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
-
-                lintProjectIncrementally(
-                        "AndroidManifest.xml",
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:allowBackup=\"true\"\n"
-                                + "        android:fullBackupContent=\"@xml/backup\"\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
                         + "\n"
-                        + "</manifest>\n")));
+                        + "    <application\n"
+                        + "        android:allowBackup=\"true\"\n"
+                        + "        android:fullBackupContent=\"@xml/backup\"\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .incremental()
+                .run()
+                .expect(expected);
     }
 
     public void testFullBackupContentMissingInLibrary() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
-
-                lintProjectIncrementally(
-                        "AndroidManifest.xml",
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:allowBackup=\"true\"\n"
-                                + "        android:fullBackupContent=\"@xml/backup\"\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n"),
-                        projectProperties().library(true).compileSdk(14)));
+        //noinspection all // Sample code
+        lint().files(
+                projectProperties().library(true).compileSdk(14),
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:allowBackup=\"true\"\n"
+                        + "        android:fullBackupContent=\"@xml/backup\"\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .incremental("AndroidManifest.xml")
+                .run()
+                .expectClean();
     }
 
     public void testFullBackupContentOk() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
-
-                lintProjectIncrementally(
-                        "AndroidManifest.xml",
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:allowBackup=\"true\"\n"
-                                + "        android:fullBackupContent=\"@xml/backup\"\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n"),
-                        xml("res/xml/backup.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<full-backup-content>\n"
-                                + "     <include domain=\"file\" path=\"dd\"/>\n"
-                                + "     <exclude domain=\"file\" path=\"dd/fo3o.txt\"/>\n"
-                                + "     <exclude domain=\"file\" path=\"dd/ss/foo.txt\"/>\n"
-                                + "</full-backup-content>")));
+        //noinspection all // Sample code
+        lint().files(
+                projectProperties().library(true).compileSdk(14),
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:allowBackup=\"true\"\n"
+                        + "        android:fullBackupContent=\"@xml/backup\"\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"),
+                xml("res/xml/backup.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<full-backup-content>\n"
+                        + "     <include domain=\"file\" path=\"dd\"/>\n"
+                        + "     <exclude domain=\"file\" path=\"dd/fo3o.txt\"/>\n"
+                        + "     <exclude domain=\"file\" path=\"dd/ss/foo.txt\"/>\n"
+                        + "</full-backup-content>"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .incremental("AndroidManifest.xml")
+                .run()
+                .expectClean();
     }
 
     public void testHasBackupSpecifiedInTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"23\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:fullBackupContent=\"no\"\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expectClean();
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"23\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:fullBackupContent=\"no\"\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
     }
 
     public void testMissingBackupInTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:5: Warning: On SDK version 23 and up, your app data will be automatically backed up and restored on app install. Consider adding the attribute android:fullBackupContent to specify an @xml resource which configures which files to backup. More info: https://developer.android.com/training/backup/autosyncapi.html [AllowBackup]\n"
                 + "    <application\n"
                 + "    ^\n"
-                + "0 errors, 1 warnings\n",
+                + "0 errors, 1 warnings\n";
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"23\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"23\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expect(expected);
+
     }
 
     public void testMissingBackupInPreTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"21\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expectClean();
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"21\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
     }
 
     public void testMissingBackupWithoutGcmPreTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"21\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expectClean();
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"21\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
     }
 
     public void testMissingBackupWithoutGcmPostTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:5: Warning: On SDK version 23 and up, your app data will be automatically backed up and restored on app install. Consider adding the attribute android:fullBackupContent to specify an @xml resource which configures which files to backup. More info: https://developer.android.com/training/backup/autosyncapi.html [AllowBackup]\n"
                 + "    <application\n"
                 + "    ^\n"
-                + "0 errors, 1 warnings\n",
+                + "0 errors, 1 warnings\n";
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"23\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"23\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expect(expected);
     }
 
     public void testMissingBackupWithGcmPreTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"21\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >"
+                        + "        <receiver\n"
+                        + "            android:name=\".GcmBroadcastReceiver\"\n"
+                        + "            android:permission=\"com.google.android.c2dm.permission.SEND\" >\n"
+                        + "            <intent-filter>\n"
+                        + "                <action android:name=\"com.google.android.c2dm.intent.RECEIVE\" />\n"
+                        + "                <category android:name=\"com.example.gcm\" />\n"
+                        + "            </intent-filter>\n"
+                        + "        </receiver>\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expectClean();
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"21\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >"
-                                + "        <receiver\n"
-                                + "            android:name=\".GcmBroadcastReceiver\"\n"
-                                + "            android:permission=\"com.google.android.c2dm.permission.SEND\" >\n"
-                                + "            <intent-filter>\n"
-                                + "                <action android:name=\"com.google.android.c2dm.intent.RECEIVE\" />\n"
-                                + "                <category android:name=\"com.example.gcm\" />\n"
-                                + "            </intent-filter>\n"
-                                + "        </receiver>\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
     }
 
     public void testMissingBackupWithGcmPostTarget23() throws Exception {
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals(""
+        String expected = ""
                 + "AndroidManifest.xml:5: Warning: On SDK version 23 and up, your app data will be automatically backed up, and restored on app install. Your GCM regid will not work across restores, so you must ensure that it is excluded from the back-up set. Use the attribute android:fullBackupContent to specify an @xml resource which configures which files to backup. More info: https://developer.android.com/training/backup/autosyncapi.html [AllowBackup]\n"
                 + "    <application\n"
                 + "    ^\n"
-                + "0 errors, 1 warnings\n",
-
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"23\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >"
-                                + "        <receiver\n"
-                                + "            android:name=\".GcmBroadcastReceiver\"\n"
-                                + "            android:permission=\"com.google.android.c2dm.permission.SEND\" >\n"
-                                + "            <intent-filter>\n"
-                                + "                <action android:name=\"com.google.android.c2dm.intent.RECEIVE\" />\n"
-                                + "                <category android:name=\"com.example.gcm\" />\n"
-                                + "            </intent-filter>\n"
-                                + "        </receiver>\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
+                + "0 errors, 1 warnings\n";
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"23\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >"
+                        + "        <receiver\n"
+                        + "            android:name=\".GcmBroadcastReceiver\"\n"
+                        + "            android:permission=\"com.google.android.c2dm.permission.SEND\" >\n"
+                        + "            <intent-filter>\n"
+                        + "                <action android:name=\"com.google.android.c2dm.intent.RECEIVE\" />\n"
+                        + "                <category android:name=\"com.example.gcm\" />\n"
+                        + "            </intent-filter>\n"
+                        + "        </receiver>\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expect(expected);
     }
 
     public void testNoMissingFullBackupWithDoNotAllowBackup() throws Exception {
         // Regression test for https://code.google.com/p/android/issues/detail?id=181805
-        mEnabled = Collections.singleton(ManifestDetector.ALLOW_BACKUP);
-        assertEquals("No warnings.",
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"21\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:allowBackup=\"false\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >"
+                        + "        <receiver\n"
+                        + "            android:name=\".GcmBroadcastReceiver\"\n"
+                        + "            android:permission=\"com.google.android.c2dm.permission.SEND\" >\n"
+                        + "            <intent-filter>\n"
+                        + "                <action android:name=\"com.google.android.c2dm.intent.RECEIVE\" />\n"
+                        + "                <category android:name=\"com.example.gcm\" />\n"
+                        + "            </intent-filter>\n"
+                        + "        </receiver>\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .run()
+                .expectClean();
+    }
 
-                lintProject(
-                        xml("AndroidManifest.xml", ""
-                                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                                + "    package=\"com.example.helloworld\" >\n"
-                                + "    <uses-sdk android:targetSdkVersion=\"21\" />"
-                                + "\n"
-                                + "    <application\n"
-                                + "        android:label=\"@string/app_name\"\n"
-                                + "        android:allowBackup=\"false\"\n"
-                                + "        android:theme=\"@style/AppTheme\" >"
-                                + "        <receiver\n"
-                                + "            android:name=\".GcmBroadcastReceiver\"\n"
-                                + "            android:permission=\"com.google.android.c2dm.permission.SEND\" >\n"
-                                + "            <intent-filter>\n"
-                                + "                <action android:name=\"com.google.android.c2dm.intent.RECEIVE\" />\n"
-                                + "                <category android:name=\"com.example.gcm\" />\n"
-                                + "            </intent-filter>\n"
-                                + "        </receiver>\n"
-                                + "    </application>\n"
-                                + "\n"
-                                + "</manifest>\n")));
+    public void testFullBackupContentMissingIgnored() throws Exception {
+        // Make sure now that we look at the merged manifest that we correctly handle tools:ignore
+        //noinspection all // Sample code
+        lint().files(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    xmlns:tools=\"http://schemas.android.com/tools\"\n"
+                        + "    package=\"com.example.helloworld\" >\n"
+                        + "\n"
+                        + "    <application\n"
+                        + "        tools:ignore=\"AllowBackup\"\n"
+                        + "        android:allowBackup=\"true\"\n"
+                        + "        android:fullBackupContent=\"@xml/backup\"\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"))
+                .issues(ManifestDetector.ALLOW_BACKUP)
+                .incremental()
+                .run()
+                .expectClean();
+    }
+
+    public void testBackupAttributeFromMergedManifest() throws Exception {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=236584
+        // Library project specifies backup descriptor, main project does not.
+
+        //noinspection all // Sample code
+        ProjectDescription library = project(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"test.pkg.library\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"23\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:allowBackup=\"true\"\n"
+                        + "        android:fullBackupContent=\"@xml/backup\">\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n"),
+                xml("res/xml/backup.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<full-backup-content>\n"
+                        + "     <include domain=\"file\" path=\"dd\"/>\n"
+                        + "     <exclude domain=\"file\" path=\"dd/fo3o.txt\"/>\n"
+                        + "     <exclude domain=\"file\" path=\"dd/ss/foo.txt\"/>\n"
+                        + "</full-backup-content>")
+        ).type(LIBRARY).name("LibraryProject");
+
+        //noinspection all // Sample code
+        ProjectDescription main = project(
+                manifest(""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"test.pkg.app\" >\n"
+                        + "    <uses-sdk android:targetSdkVersion=\"23\" />"
+                        + "\n"
+                        + "    <application\n"
+                        + "        android:label=\"@string/app_name\"\n"
+                        + "        android:theme=\"@style/AppTheme\" >\n"
+                        + "    </application>\n"
+                        + "\n"
+                        + "</manifest>\n")
+        ).dependsOn(library);
+
+        lint().projects(main, library).issues(ManifestDetector.ALLOW_BACKUP).
+                run().expectClean();
     }
 
     public void testWearableBindListener() throws Exception {
@@ -1524,7 +1718,7 @@ public class ManifestDetectorTest extends AbstractCheckTest {
                     "extras/google/m2repository/com/google/android/gms/play-services-wearable/8.4.0/play-services-wearable-8.4.0.aar",
             };
 
-            createSdkPaths(mSdkDir, paths);
+            createRelativePaths(mSdkDir, paths);
         }
 
         return mSdkDir;

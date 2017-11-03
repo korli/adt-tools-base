@@ -20,7 +20,6 @@ import com.android.annotations.NonNull;
 import com.android.build.gradle.managed.NdkConfig;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
 import java.util.List;
 import java.util.Set;
 
@@ -37,6 +36,8 @@ public class NdkConfigImpl implements NdkConfig {
     String toolchain;
 
     String toolchainVersion;
+
+    Boolean useUnifiedHeaders;
 
     Set<String> abiFilters = Sets.newHashSet();
 
@@ -94,6 +95,16 @@ public class NdkConfigImpl implements NdkConfig {
     @Override
     public void setToolchainVersion(@NonNull String toolchainVersion) {
         this.toolchainVersion = toolchainVersion;
+    }
+
+    @Override
+    public Boolean getUseUnifiedHeaders() {
+        return useUnifiedHeaders;
+    }
+
+    @Override
+    public void setUseUnifiedHeaders(@NonNull Boolean useUnifiedHeaders) {
+        this.useUnifiedHeaders = useUnifiedHeaders;
     }
 
     @Override

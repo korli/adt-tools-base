@@ -42,9 +42,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
-import org.gradle.api.logging.Logger;
-
 import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.File;
@@ -57,6 +54,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+import org.gradle.api.logging.Logger;
 
 /**
  * Transform that takes the hot (or warm) swap classes and dexes them.
@@ -81,16 +79,19 @@ public class InstantRunDex extends Transform {
 
     @NonNull
     private final InstantRunVariantScope variantScope;
+    private final int minSdkForDx;
 
     public InstantRunDex(
             @NonNull InstantRunVariantScope transformVariantScope,
             @NonNull Supplier<DexByteCodeConverter> dexByteCodeConverter,
             @NonNull DexOptions dexOptions,
-            @NonNull Logger logger) {
+            @NonNull Logger logger,
+            int minSdkForDx) {
         this.variantScope = transformVariantScope;
         this.dexByteCodeConverter = dexByteCodeConverter;
         this.dexOptions = dexOptions;
         this.logger = new LoggerWrapper(logger);
+        this.minSdkForDx = minSdkForDx;
     }
 
     @Override
@@ -156,17 +157,19 @@ public class InstantRunDex extends Transform {
         inputFiles.add(classesJar);
 
         try {
-            variantScope.getInstantRunBuildContext().startRecording(
-                    InstantRunBuildContext.TaskType.INSTANT_RUN_DEX);
+            variantScope
+                    .getInstantRunBuildContext()
+                    .startRecording(InstantRunBuildContext.TaskType.INSTANT_RUN_DEX);
             convertByteCode(inputFiles.build(), outputFolder);
-            variantScope.getInstantRunBuildContext().addChangedFile(
-                    FileType.RELOAD_DEX,
-                    new File(outputFolder, "classes.dex"));
+            variantScope
+                    .getInstantRunBuildContext()
+                    .addChangedFile(FileType.RELOAD_DEX, new File(outputFolder, "classes.dex"));
         } catch (ProcessException e) {
             throw new TransformException(e);
         } finally {
-            variantScope.getInstantRunBuildContext().stopRecording(
-                    InstantRunBuildContext.TaskType.INSTANT_RUN_DEX);
+            variantScope
+                    .getInstantRunBuildContext()
+                    .stopRecording(InstantRunBuildContext.TaskType.INSTANT_RUN_DEX);
         }
     }
 
@@ -204,12 +207,16 @@ public class InstantRunDex extends Transform {
     @VisibleForTesting
     protected void convertByteCode(List<File> inputFiles, File outputFolder)
             throws InterruptedException, ProcessException, IOException {
-        dexByteCodeConverter.get().convertByteCode(inputFiles,
-                outputFolder,
-                false /* multiDexEnabled */,
-                null /*getMainDexListFile */,
-                dexOptions,
-                new LoggedProcessOutputHandler(logger));
+        dexByteCodeConverter
+                .get()
+                .convertByteCode(
+                        inputFiles,
+                        outputFolder,
+                        false /* multiDexEnabled */,
+                        null /*getMainDexListFile */,
+                        dexOptions,
+                        new LoggedProcessOutputHandler(logger),
+                        minSdkForDx);
     }
 
     @VisibleForTesting
@@ -254,11 +261,15 @@ public class InstantRunDex extends Transform {
     @NonNull
     @Override
     public Map<String, Object> getParameterInputs() {
-        return ImmutableMap.of(
+        ImmutableMap.Builder<String, Object> params = ImmutableMap.builder();
+        params.put(
                 "changesAreCompatible",
-                variantScope.getInstantRunBuildContext().hasPassedVerification(),
+                variantScope.getInstantRunBuildContext().hasPassedVerification());
+        params.put(
                 "restartDexRequested",
                 variantScope.getGlobalScope().isActive(OptionalCompilationStep.RESTART_ONLY));
+        params.put("minSdkForDx", minSdkForDx);
+        return params.build();
     }
 
     @NonNull

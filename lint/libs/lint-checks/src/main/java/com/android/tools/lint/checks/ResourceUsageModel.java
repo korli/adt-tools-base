@@ -31,6 +31,7 @@ import static com.android.SdkConstants.PREFIX_BINDING_EXPR;
 import static com.android.SdkConstants.PREFIX_RESOURCE_REF;
 import static com.android.SdkConstants.PREFIX_THEME_REF;
 import static com.android.SdkConstants.PREFIX_TWOWAY_BINDING_EXPR;
+import static com.android.SdkConstants.REFERENCE_STYLE;
 import static com.android.SdkConstants.STYLE_RESOURCE_PREFIX;
 import static com.android.SdkConstants.TAG_ITEM;
 import static com.android.SdkConstants.TAG_LAYOUT;
@@ -45,10 +46,10 @@ import static com.google.common.base.Charsets.UTF_8;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.client.api.DefaultConfiguration;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
@@ -972,17 +973,19 @@ public class ResourceUsageModel {
                                 && !parent.startsWith(PREFIX_ANDROID)) {
                             String parentStyle = parent;
                             if (!parentStyle.startsWith(STYLE_RESOURCE_PREFIX)) {
-                                parentStyle = STYLE_RESOURCE_PREFIX + parentStyle;
+                                // Allow parent references to start with 'style/'
+                                // as well as the more strict '@style/'.
+                                if (parentStyle.startsWith(REFERENCE_STYLE)) {
+                                    parentStyle = PREFIX_RESOURCE_REF + parentStyle;
+                                } else {
+                                    parentStyle = STYLE_RESOURCE_PREFIX + parentStyle;
+                                }
                             }
                             Resource ps = getResourceFromUrl(
                                     LintUtils.getFieldName(parentStyle));
                             if (ps != null && definition != null) {
-                                ps.addReference(definition);
                                 definition.addReference(ps);
                             }
-                        } else if (definition != null) {
-                            // Extending a builtin theme: treat these as used
-                            markReachable(definition);
                         }
                     } else {
                         // Implicit parent styles by name
@@ -994,7 +997,6 @@ public class ResourceUsageModel {
                                 Resource ps = getResourceFromUrl(
                                         STYLE_RESOURCE_PREFIX + LintUtils.getFieldName(name));
                                 if (ps != null && definition != null) {
-                                    ps.addReference(definition);
                                     definition.addReference(ps);
                                 }
                             } else {

@@ -16,7 +16,6 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_ID;
 import static com.android.SdkConstants.ATTR_LAYOUT;
 import static com.android.SdkConstants.DOT_XML;
@@ -25,9 +24,11 @@ import static com.android.SdkConstants.NEW_ID_PREFIX;
 import static com.android.SdkConstants.VIEW_INCLUDE;
 import static com.android.ide.common.resources.configuration.FolderConfiguration.QUALIFIER_SPLITTER;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
+import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Implementation;
@@ -55,13 +56,12 @@ import java.util.Set;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
 
 /**
  * Checks for duplicate ids within a layout and within an included layout
  */
 public class DuplicateIdDetector extends LayoutDetector {
-    private Set<String> mIds;
+    private Map<String, Attr> mFileIds;
     private Map<File, Set<String>> mFileToIds;
     private Map<File, List<String>> mIncludes;
 
@@ -123,7 +123,7 @@ public class DuplicateIdDetector extends LayoutDetector {
     @Override
     public void beforeCheckFile(@NonNull Context context) {
         if (context.getPhase() == 1) {
-            mIds = new HashSet<>();
+            mFileIds = new HashMap<>();
         }
     }
 
@@ -131,9 +131,8 @@ public class DuplicateIdDetector extends LayoutDetector {
     public void afterCheckFile(@NonNull Context context) {
         if (context.getPhase() == 1) {
             // Store this layout's set of ids for full project analysis in afterCheckProject
-            mFileToIds.put(context.file, mIds);
-
-            mIds = null;
+            mFileToIds.put(context.file, mFileIds.keySet());
+            mFileIds = null;
         }
     }
 
@@ -248,11 +247,49 @@ public class DuplicateIdDetector extends LayoutDetector {
         assert attribute.getName().equals(ATTR_ID) || ATTR_ID.equals(attribute.getLocalName());
         String id = attribute.getValue();
         if (context.getPhase() == 1) {
-            if (mIds.contains(id)) {
+            if (attribute.getOwnerElement() != null) {
+                String ownerName = attribute.getOwnerElement().getTagName();
+                if (ownerName != null && ownerName.equals(SdkConstants.CLASS_CONSTRAINT_LAYOUT_REFERENCE)) {
+                    Node parentNode = attribute.getOwnerElement().getParentNode();
+                    if (parentNode != null) {
+                        String parentName = parentNode.getNodeName();
+                        if (parentName != null && parentName.equals(
+                          SdkConstants.CLASS_CONSTRAINT_LAYOUT_CONSTRAINTS)) {
+                            return;
+                        }
+                    }
+                }
+                if (ownerName != null && ownerName.equals(SdkConstants.TAG)) {
+                    Node parentNode = attribute.getOwnerElement().getParentNode();
+                    if (parentNode != null) {
+                        String parentName = parentNode.getNodeName();
+                        if (parentName != null
+                                && (parentName.equals(SdkConstants.CLASS_CONSTRAINT_LAYOUT_BARRIER)
+                                        || parentName.equals(
+                                                SdkConstants.CLASS_CONSTRAINT_LAYOUT_CHAIN)
+                                        || parentName.equals(
+                                                SdkConstants.CLASS_CONSTRAINT_LAYOUT_LAYER)
+                                        || parentName.equals(
+                                                SdkConstants.CLASS_CONSTRAINT_LAYOUT_GROUP)
+                                    )) {
+                            return;
+                        }
+                    }
+                }
+            }
+            if (mFileIds.containsKey(id)) {
                 Location location = context.getLocation(attribute);
 
-                Attr first = findIdAttribute(attribute.getOwnerDocument(), id);
+                Attr first = mFileIds.get(id);
                 if (first != null && first != attribute) {
+                    // Make sure they have the same parent if it's a navigation document
+                    if (context.getResourceFolderType() == ResourceFolderType.NAVIGATION
+                          && first.getOwnerElement().getParentNode() !=
+                          attribute.getOwnerElement().getParentNode()) {
+                        mFileIds.put(id, attribute);
+                        return;
+                    }
+
                     Location secondLocation = context.getLocation(first);
                     secondLocation.setMessage(String.format("Duplicate id `%1$s` originally defined here", id), true);
                     location.setSecondary(secondLocation);
@@ -267,7 +304,7 @@ public class DuplicateIdDetector extends LayoutDetector {
                     return;
                 }
 
-                mIds.add(id);
+                mFileIds.put(id, attribute);
             }
         } else {
             Collection<Multimap<String, Occurrence>> maps = mLocations.get(context.file);
@@ -294,27 +331,6 @@ public class DuplicateIdDetector extends LayoutDetector {
         }
     }
 
-    /** Find the first id attribute with the given value below the given node */
-    private static Attr findIdAttribute(Node node, String targetValue) {
-        if (node.getNodeType() == Node.ELEMENT_NODE) {
-            Attr attribute = ((Element) node).getAttributeNodeNS(ANDROID_URI, ATTR_ID);
-            if (attribute != null && attribute.getValue().equals(targetValue)) {
-                return attribute;
-            }
-        }
-
-        NodeList children = node.getChildNodes();
-        for (int i = 0, n = children.getLength(); i < n; i++) {
-            Node child = children.item(i);
-            Attr result = findIdAttribute(child, targetValue);
-            if (result != null) {
-                return result;
-            }
-        }
-
-        return null;
-    }
-
     /** Include Graph Node */
     private static class Layout {
         private final File mFile;
@@ -335,8 +351,8 @@ public class DuplicateIdDetector extends LayoutDetector {
             return LintUtils.getLayoutName(mFile);
         }
 
-        String getDisplayName() {
-            return mFile.getParentFile().getName() + File.separator + mFile.getName();
+        String getDisplayName(@NonNull LintClient client) {
+            return LintUtils.getFileNameWithParent(client, mFile);
         }
 
         void include(Layout target) {
@@ -361,11 +377,6 @@ public class DuplicateIdDetector extends LayoutDetector {
 
         List<Layout> getIncludes() {
             return mIncludes;
-        }
-
-        @Override
-        public String toString() {
-            return getDisplayName();
         }
     }
 
@@ -507,6 +518,7 @@ public class DuplicateIdDetector extends LayoutDetector {
                 Multimap<String, Set<String>> nameToIds =
                         ArrayListMultimap.create(includes.size(), 4);
 
+                LintClient client = mContext.getClient();
                 for (Layout included : includes) {
                     if (seen.contains(included)) {
                         continue;
@@ -550,7 +562,7 @@ public class DuplicateIdDetector extends LayoutDetector {
                                 String msg = String.format(
                                         "Duplicate id %1$s, defined or included multiple " +
                                         "times in %2$s: %3$s",
-                                        id, layout.getDisplayName(),
+                                        id, layout.getDisplayName(client),
                                         sorted.toString());
 
                                 // Store location request for the <include> tag
@@ -601,6 +613,7 @@ public class DuplicateIdDetector extends LayoutDetector {
                 Map<Layout, Occurrence> occurrences, Set<Layout> seen) {
             seen.add(layout);
 
+            LintClient client = mContext.getClient();
             Set<String> layoutIds = layout.getIds();
             if (layoutIds != null && layoutIds.contains(id)) {
                 StringBuilder path = new StringBuilder(80);
@@ -608,11 +621,11 @@ public class DuplicateIdDetector extends LayoutDetector {
                 if (!stack.isEmpty()) {
                     Iterator<Layout> iterator = stack.descendingIterator();
                     while (iterator.hasNext()) {
-                        path.append(iterator.next().getDisplayName());
+                        path.append(iterator.next().getDisplayName(client));
                         path.append(" => ");
                     }
                 }
-                path.append(layout.getDisplayName());
+                path.append(layout.getDisplayName(client));
                 path.append(" defines ");
                 path.append(id);
 

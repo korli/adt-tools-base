@@ -22,7 +22,6 @@ import static com.android.build.gradle.model.ModelConstants.NATIVE_BUILD_SYSTEMS
 import static com.android.build.gradle.model.ModelConstants.NATIVE_DEPENDENCIES;
 
 import com.android.annotations.NonNull;
-import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.internal.NativeDependencyLinkage;
 import com.android.build.gradle.internal.ProductFlavorCombo;
 import com.android.build.gradle.internal.core.Abi;
@@ -45,6 +44,9 @@ import com.android.build.gradle.ndk.internal.NdkConfiguration;
 import com.android.build.gradle.ndk.internal.NdkExtensionConvention;
 import com.android.build.gradle.ndk.internal.NdkNamingScheme;
 import com.android.build.gradle.ndk.internal.ToolchainConfiguration;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.StringOption;
 import com.android.build.gradle.tasks.NativeBuildSystem;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.core.VariantConfiguration;
@@ -61,7 +63,14 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-
+import java.io.File;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import javax.inject.Inject;
 import org.gradle.api.BuildableComponentSpec;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.Plugin;
@@ -85,8 +94,6 @@ import org.gradle.model.Path;
 import org.gradle.model.RuleSource;
 import org.gradle.model.Validate;
 import org.gradle.model.internal.core.ModelPath;
-import org.gradle.model.internal.core.ModelReference;
-import org.gradle.model.internal.core.ModelRegistrations;
 import org.gradle.model.internal.registry.ModelRegistry;
 import org.gradle.model.internal.type.ModelType;
 import org.gradle.model.internal.type.ModelTypes;
@@ -107,16 +114,6 @@ import org.gradle.platform.base.ComponentType;
 import org.gradle.platform.base.PlatformContainer;
 import org.gradle.platform.base.TypeBuilder;
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
-
-import java.io.File;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-import javax.inject.Inject;
 
 /**
  * Plugin for Android NDK applications.
@@ -141,11 +138,6 @@ public class NdkComponentModelPlugin implements Plugin<Project> {
         project.getPluginManager().apply(AndroidComponentModelPlugin.class);
         project.getPluginManager().apply(CPlugin.class);
         project.getPluginManager().apply(CppPlugin.class);
-
-        // Remove this when our models no longer depends on Project.
-        modelRegistry.register(ModelRegistrations
-                .bridgedInstance(ModelReference.of("projectModel", Project.class), project)
-                .descriptor("Model of project.").build());
 
         toolingRegistry.register(new NativeComponentModelBuilder(modelRegistry));
     }
@@ -229,11 +221,13 @@ public class NdkComponentModelPlugin implements Plugin<Project> {
                 projectId = projectId.getParentIdentifier();
             }
 
-            NdkHandler ndkHandler = new NdkHandler(
-                    projectId.getProjectDir(),
-                    ndkConfig.getPlatformVersion(),
-                    ndkConfig.getToolchain(),
-                    ndkConfig.getToolchainVersion());
+            NdkHandler ndkHandler =
+                    new NdkHandler(
+                            projectId.getProjectDir(),
+                            ndkConfig.getPlatformVersion(),
+                            ndkConfig.getToolchain(),
+                            ndkConfig.getToolchainVersion(),
+                            ndkConfig.getUseUnifiedHeaders());
             ndkHandler.setCompileSdkVersion(compileSdkVersion);
             return ndkHandler;
         }
@@ -402,20 +396,42 @@ public class NdkComponentModelPlugin implements Plugin<Project> {
             final NativeLibrarySpec library = specs.get(ndkConfig.getModuleName());
 
             final ImmutableSet.Builder<String> builder = ImmutableSet.builder();
-            for(Abi abi : NdkHandler.getAbiList()) {
+            Iterable<Abi> defaultAbiList =
+                    ndkHandler.isConfigured()
+                            ? ndkHandler.getDefaultAbis()
+                            : NdkHandler.getAbiList();
+            for (Abi abi : defaultAbiList) {
                 builder.add(abi.getName());
             }
-            final ImmutableSet<String> supportedAbis = builder.build();
+            final ImmutableSet<String> defaultAbis = builder.build();
 
             binaries.withType(
                     AndroidBinaryInternal.class,
                     binary -> {
                         binary.computeMergedNdk(
-                                ndkConfig,
-                                binary.getProductFlavors(),
-                                binary.getBuildType());
+                                ndkConfig, binary.getProductFlavors(), binary.getBuildType());
                         if (binary.getMergedNdkConfig().getAbiFilters().isEmpty()) {
-                            binary.getMergedNdkConfig().getAbiFilters().addAll(supportedAbis);
+                            binary.getMergedNdkConfig().getAbiFilters().addAll(defaultAbis);
+                        } else {
+                            for (String filter : binary.getMergedNdkConfig().getAbiFilters()) {
+                                Abi abiFilter = Abi.getByName(filter);
+                                if (abiFilter == null) {
+                                    throw new InvalidUserDataException(
+                                            "ABI filter '"
+                                                    + filter
+                                                    + "' is not a valid ABI.  "
+                                                    + "Supported ABI are:\n"
+                                                    + ndkHandler.getSupportedAbis());
+                                } else if (!ndkHandler.getSupportedAbis().contains(abiFilter)) {
+                                    throw new InvalidUserDataException(
+                                            "ABI filter '"
+                                                    + filter
+                                                    + "' is no longer supported in "
+                                                    + "NDK version r"
+                                                    + ndkHandler.getRevision()
+                                                    + ".");
+                                }
+                            }
                         }
 
                         if (library != null) {
@@ -425,12 +441,11 @@ public class NdkComponentModelPlugin implements Plugin<Project> {
                                             binary.getBuildType(),
                                             binary.getProductFlavors());
                             for (NativeLibraryBinarySpec nativeBin : nativeBinaries) {
-                                if (binary.getMergedNdkConfig().getAbiFilters().contains(
-                                        nativeBin.getTargetPlatform().getName())) {
+                                if (binary.getMergedNdkConfig()
+                                        .getAbiFilters()
+                                        .contains(nativeBin.getTargetPlatform().getName())) {
                                     NdkConfiguration.configureBinary(
-                                            nativeBin,
-                                            binary.getMergedNdkConfig(),
-                                            ndkHandler);
+                                            nativeBin, binary.getMergedNdkConfig(), ndkHandler);
                                     binary.getNativeBinaries().add(nativeBin);
                                 }
                             }
@@ -522,9 +537,9 @@ public class NdkComponentModelPlugin implements Plugin<Project> {
 
             NdkAbiOptions abiConfig = abiConfigs.get(abi.getName());
 
-            String sysroot = (abiConfig == null || abiConfig.getPlatformVersion() == null)
-                    ? ndkHandler.getSysroot(abi)
-                    : ndkHandler.getSysroot(abi, abiConfig.getPlatformVersion());
+            String sysroot =
+                    ndkHandler.getCompilerSysroot(
+                            abi, abiConfig == null ? null : abiConfig.getPlatformVersion());
             cFlags.add("--sysroot=" + sysroot);
             cppFlags.add("--sysroot=" + sysroot);
 
@@ -571,9 +586,9 @@ public class NdkComponentModelPlugin implements Plugin<Project> {
         }
 
         @Model("androidInjectedBuildAbi")
-        public static String getBuildAbi(Project project) {
-            return AndroidGradleOptions.isBuildOnlyTargetAbiEnabled(project)
-                    ? Strings.nullToEmpty(AndroidGradleOptions.getBuildTargetAbi(project))
+        public static String getBuildAbi(Project project, ProjectOptions projectOptions) {
+            return projectOptions.get(BooleanOption.BUILD_ONLY_TARGET_ABI)
+                    ? Strings.nullToEmpty(projectOptions.get(StringOption.IDE_BUILD_TARGET_ABI))
                     : "";
         }
 

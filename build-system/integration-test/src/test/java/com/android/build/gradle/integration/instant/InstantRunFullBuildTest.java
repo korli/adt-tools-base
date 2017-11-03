@@ -17,20 +17,18 @@
 package com.android.build.gradle.integration.instant;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static org.mockito.Matchers.contains;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.android.utils.Pair;
 import com.google.common.truth.Expect;
 import java.io.File;
@@ -52,9 +50,7 @@ public class InstantRunFullBuildTest {
     private InstantRun instantRunModel;
 
     @Before
-    public void getModel() {
-        // IR currently does not work with Jack - http://b.android.com/224374
-        AssumeUtil.assumeNotUsingJack();
+    public void getModel() throws Exception {
         mProject.execute("clean");
         AndroidProject model = mProject.model().getSingle().getOnlyModel();
         instantRunModel = InstantRunTestUtils.getInstantRunModel(model);
@@ -77,12 +73,13 @@ public class InstantRunFullBuildTest {
 
     @Test
     public void testVersionCode() throws Exception {
-        TestFileUtils.appendToFile(mProject.getBuildFile(),
-                "android.applicationVariants.all { v ->\n"
-                        + "    v.outputs.each { o ->\n"
-                        + "        o.versionCodeOverride = 42\n"
-                        + "    }\n"
-                        + "}\n");
+        TestFileUtils.appendToFile(
+                mProject.getBuildFile(),
+                "android.applicationVariants.all { variant ->\n"
+                        + " variant.outputs.all { output ->\n"
+                        + "    output.versionCodeOverride = 42\n"
+                        + "  }\n"
+                        + "}");
         doTest(24);
         assertThat(mProject.file("build/intermediates/instant-run-support/debug/slice_0/AndroidManifest.xml"))
                 .contains("android:versionCode=\"42\"");
@@ -91,17 +88,13 @@ public class InstantRunFullBuildTest {
     private void doTest(int featureLevel) throws Exception {
         mProject.executor()
                 .withInstantRun(
-                        featureLevel,
-                        ColdswapMode.AUTO,
-                        OptionalCompilationStep.FULL_APK)
+                        new AndroidVersion(featureLevel, null), OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
         InstantRunBuildInfo initialContext = InstantRunTestUtils.loadContext(instantRunModel);
 
         mProject.executor()
                 .withInstantRun(
-                        featureLevel,
-                        ColdswapMode.AUTO,
-                        OptionalCompilationStep.FULL_APK)
+                        new AndroidVersion(featureLevel, null), OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
         InstantRunBuildInfo secondContext = InstantRunTestUtils.loadContext(instantRunModel);
         assertThat(secondContext.getTimeStamp()).isNotEqualTo(initialContext.getTimeStamp());

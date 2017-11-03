@@ -68,24 +68,27 @@ int64_t TimeUnitInMilliseconds() {
 // |system_cpu_time_in_millisec| and |elapsed_time_in_millisec|. Returns true
 // on success.
 //
-// |elapsed_time_in_millisec| is the combination of every
-// state; while |system_cpu_time_in_millisec| is anything but 'idle'.
-//
 // Only the first line of /proc/stat is used.
 // See more details at http://man7.org/linux/man-pages/man5/proc.5.html.
+//
+// |elapsed_time_in_millisec| is the combination of every state, except
+// 'guest' (since Linux 2.6.24), as it is included in 'user', and 'guest_nice'
+// (since Linux 2.6.33), as it is included by 'guest'.
+//
+// |system_cpu_time_in_millisec| is the combination of every state of
+// |elapsed_time_in_millisec| except 'idle' and 'iowait' (which we also consider
+// as idle time).
+//
 bool ParseProcStatForUsageData(const string& content, CpuUsageData* data) {
-  int64_t user, nice, system, idle, iowait, irq, softirq, steal, guest,
-      guest_nice;
+  int64_t user, nice, system, idle, iowait, irq, softirq, steal;
   // TODO: figure out why sscanf_s cannot compile.
-  if (sscanf(content.c_str(),
-             "cpu  %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64
-             " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64,
-             &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal,
-             &guest, &guest_nice) == 10) {
-    int64_t load = user + nice + system + iowait + irq + softirq + steal +
-                   guest + guest_nice;
+  if (sscanf(
+          content.c_str(), "cpu  %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64
+                           " %" PRId64 " %" PRId64 " %" PRId64 " %" PRId64,
+          &user, &nice, &system, &idle, &iowait, &irq, &softirq, &steal) == 8) {
+    int64_t load = user + nice + system + irq + softirq + steal;
     data->set_system_cpu_time_in_millisec(load * TimeUnitInMilliseconds());
-    int64_t elapsed = load + idle;
+    int64_t elapsed = load + idle + iowait;
     data->set_elapsed_time_in_millisec(elapsed * TimeUnitInMilliseconds());
     return true;
   }
@@ -156,13 +159,6 @@ bool ParseProcPidStatForUsageData(int32_t pid, const string& content,
   return false;
 }
 
-// Parses a thread's stat file (proc/[pid]/task/[tid]/stat) to collect info.
-// Returns true on success.
-// For a thread, the following fields are read (the first field is numbered as
-// 1).
-//    (1) id  %d                      => For sanity checking.
-//    (2) comm  %s (in parentheses)   => Output |name|.
-//    (3) state  %c                   => Output |state|.
 bool CollectProcessUsageData(int32_t pid, const string& usage_file,
                              CpuUsageData* data) {
   string buffer;
@@ -215,7 +211,7 @@ bool CpuUsageSampler::SampleAProcess(int32_t pid) {
                              data.mutable_cpu_usage()) &&
       CollectProcessUsageData(pid, usage_files_->GetProcessStatFilePath(pid),
                               data.mutable_cpu_usage())) {
-    data.mutable_basic_info()->set_app_id(pid);
+    data.mutable_basic_info()->set_process_id(pid);
     data.mutable_basic_info()->set_end_timestamp(clock_.GetCurrentTime());
     cache_.Add(data);
     return true;

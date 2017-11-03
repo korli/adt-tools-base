@@ -44,6 +44,7 @@ import static com.android.sdklib.BuildToolInfo.PathId.AIDL;
 import static com.android.sdklib.BuildToolInfo.PathId.ANDROID_RS;
 import static com.android.sdklib.BuildToolInfo.PathId.ANDROID_RS_CLANG;
 import static com.android.sdklib.BuildToolInfo.PathId.BCC_COMPAT;
+import static com.android.sdklib.BuildToolInfo.PathId.DAEMON_AAPT2;
 import static com.android.sdklib.BuildToolInfo.PathId.DEXDUMP;
 import static com.android.sdklib.BuildToolInfo.PathId.DX;
 import static com.android.sdklib.BuildToolInfo.PathId.DX_JAR;
@@ -73,7 +74,6 @@ import com.android.utils.ILogger;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Range;
-
 import java.io.File;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -147,7 +147,11 @@ public class BuildToolInfo {
         LD_X86_64("24.0.0"),
 
         /** OS Path to aapt2. */
-        AAPT2("24.0.0 rc2");
+        AAPT2("24.0.0 rc2"),
+
+        /** OS Path to aapt2 that supports daemon mode. */
+        // TODO(imorlowska): figure out which build tools will include the daemon mode.
+        DAEMON_AAPT2("26.0.2");
 
         /**
          * min revision this element was introduced.
@@ -173,6 +177,11 @@ public class BuildToolInfo {
          */
         public boolean isPresentIn(@NonNull Revision revision) {
             return revision.compareTo(mMinRevision) >= 0;
+        }
+
+        @VisibleForTesting
+        public Revision getMinRevision() {
+            return mMinRevision;
         }
     }
 
@@ -313,6 +322,7 @@ public class BuildToolInfo {
 
         if (aapt2 != null) {
             result.add(AAPT2, aapt2);
+            result.add(DAEMON_AAPT2, aapt2);
         } else if (AAPT2.isPresentIn(revision)) {
             throw new IllegalArgumentException("AAPT2 required in " + revision.toString());
         }
@@ -353,6 +363,7 @@ public class BuildToolInfo {
 
         add(AAPT, FN_AAPT);
         add(AAPT2, FN_AAPT2);
+        add(DAEMON_AAPT2, FN_AAPT2);
         add(AIDL, FN_AIDL);
         add(DX, FN_DX);
         add(DX_JAR, FD_LIB + File.separator + FN_DX_JAR);

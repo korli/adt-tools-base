@@ -1,0 +1,15 @@
+apply plugin: 'com.android.feature'
+
+android {
+    compileSdkVersion rootProject.latestCompileSdk
+    buildToolsVersion = rootProject.buildToolsVersion
+
+    baseFeature true
+}
+
+dependencies {
+    feature project(':feature')
+    application project(':app')
+
+    implementation project(':library')
+}

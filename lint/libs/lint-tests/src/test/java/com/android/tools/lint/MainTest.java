@@ -16,12 +16,18 @@
 
 package com.android.tools.lint;
 
+import static com.android.tools.lint.LintCliFlags.ERRNO_CREATED_BASELINE;
 import static com.android.tools.lint.LintCliFlags.ERRNO_EXISTS;
 import static com.android.tools.lint.LintCliFlags.ERRNO_INVALID_ARGS;
 import static com.android.tools.lint.LintCliFlags.ERRNO_SUCCESS;
 
+import com.android.SdkConstants;
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.checks.AccessibilityDetector;
+import com.android.tools.lint.client.api.LintDriver;
+import com.android.tools.lint.client.api.LintListener;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
 import java.io.ByteArrayOutputStream;
@@ -31,10 +37,29 @@ import org.intellij.lang.annotations.Language;
 
 @SuppressWarnings("javadoc")
 public class MainTest extends AbstractCheckTest {
+    public interface Cleanup {
+        String cleanup(String s);
+    }
+
+    @Override
+    public String cleanup(String result) {
+        return super.cleanup(result);
+    }
 
     private void checkDriver(String expectedOutput, String expectedError, int expectedExitCode,
-            String[] args)
-            throws Exception {
+            String[] args) {
+        checkDriver(expectedOutput, expectedError, expectedExitCode, args, MainTest.this::cleanup,
+                null);
+    }
+
+    public static void checkDriver(
+            String expectedOutput,
+            String expectedError,
+            int expectedExitCode,
+            String[] args,
+            @Nullable Cleanup cleanup,
+            @Nullable LintListener listener) {
+
         PrintStream previousOut = System.out;
         PrintStream previousErr = System.err;
         try {
@@ -45,13 +70,36 @@ public class MainTest extends AbstractCheckTest {
 
             int exitCode = 0;
             try {
-                new Main().run(args);
+                Main main = new Main() {
+                    @Override
+                    protected void initializeDriver(@NonNull LintDriver driver) {
+                        super.initializeDriver(driver);
+                        if (listener != null) {
+                            driver.addLintListener(listener);
+                        }
+                    }
+                };
+                main.run(args);
             } catch (Main.ExitException e) {
                 exitCode = e.getStatus();
             }
 
-            assertEquals(expectedError, cleanup(error.toString()));
-            assertEquals(expectedOutput, cleanup(output.toString()));
+            String stderr = error.toString();
+            if (cleanup != null) {
+                stderr = cleanup.cleanup(stderr);
+            }
+            if (!expectedError.trim().equals(stderr.trim())) {
+                assertEquals(expectedError, stderr); // instead of fail: get difference in output
+            }
+            if (expectedOutput != null) {
+                String stdout = output.toString();
+                if (cleanup != null) {
+                    stdout = cleanup.cleanup(stdout);
+                }
+                if (!expectedOutput.trim().equals(stdout.trim())) {
+                    assertEquals(expectedOutput, stdout);
+                }
+            }
             assertEquals(expectedExitCode, exitCode);
         } finally {
             System.setOut(previousOut);
@@ -64,10 +112,10 @@ public class MainTest extends AbstractCheckTest {
         // Expected output
         "\n" +
         "Scanning MainTest_testArguments: .\n" +
-        "res/layout/accessibility.xml:4: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n" +
+        "res/layout/accessibility.xml:4: Warning: Missing contentDescription attribute on image [ContentDescription]\n" +
         "    <ImageView android:id=\"@+id/android_logo\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n" +
         "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
-        "res/layout/accessibility.xml:5: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n" +
+        "res/layout/accessibility.xml:5: Warning: Missing contentDescription attribute on image [ContentDescription]\n" +
         "    <ImageButton android:importantForAccessibility=\"yes\" android:id=\"@+id/android_logo2\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n" +
         "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
         "0 errors, 2 warnings\n",
@@ -220,16 +268,16 @@ public class MainTest extends AbstractCheckTest {
         checkDriver(
                 "\n"
                 + "Scanning MainTest_testCustomResourceDirs: ..\n"
-                + "myres1/layout/accessibility1.xml:4: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres1/layout/accessibility1.xml:4: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageView android:id=\"@+id/android_logo\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "myres2/layout/accessibility1.xml:4: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres2/layout/accessibility1.xml:4: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageView android:id=\"@+id/android_logo\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "myres1/layout/accessibility1.xml:5: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres1/layout/accessibility1.xml:5: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageButton android:importantForAccessibility=\"yes\" android:id=\"@+id/android_logo2\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "myres2/layout/accessibility1.xml:5: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres2/layout/accessibility1.xml:5: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageButton android:importantForAccessibility=\"yes\" android:id=\"@+id/android_logo2\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "0 errors, 4 warnings\n", // Expected output
@@ -248,6 +296,8 @@ public class MainTest extends AbstractCheckTest {
                         new File(project, "myres1").getPath(),
                         "--resources",
                         new File(project, "myres2").getPath(),
+                        "--compile-sdk-version",
+                        "15",
                         project.getPath(),
                 });
     }
@@ -261,16 +311,16 @@ public class MainTest extends AbstractCheckTest {
         checkDriver(
                 "\n"
                 + "Scanning MainTest_testPathList: ..\n"
-                + "myres1/layout/accessibility1.xml:4: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres1/layout/accessibility1.xml:4: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageView android:id=\"@+id/android_logo\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "myres2/layout/accessibility1.xml:4: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres2/layout/accessibility1.xml:4: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageView android:id=\"@+id/android_logo\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "myres1/layout/accessibility1.xml:5: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres1/layout/accessibility1.xml:5: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageButton android:importantForAccessibility=\"yes\" android:id=\"@+id/android_logo2\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "myres2/layout/accessibility1.xml:5: Warning: [Accessibility] Missing contentDescription attribute on image [ContentDescription]\n"
+                + "myres2/layout/accessibility1.xml:5: Warning: Missing contentDescription attribute on image [ContentDescription]\n"
                 + "    <ImageButton android:importantForAccessibility=\"yes\" android:id=\"@+id/android_logo2\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "0 errors, 4 warnings\n", // Expected output
@@ -362,6 +412,49 @@ public class MainTest extends AbstractCheckTest {
         });
     }
 
+    public void testCreateBaseline() throws Exception {
+        File baseline = File.createTempFile("baseline", "xml");
+        //noinspection ResultOfMethodCallIgnored
+        baseline.delete(); // shouldn't exist
+        assertFalse(baseline.exists());
+        //noinspection ConcatenationWithEmptyString
+        checkDriver(
+                // Expected output
+                null,
+
+                // Expected error
+                ""
+                        + "Created baseline file " + cleanup(baseline.getPath()) + "\n"
+                        + "\n"
+                        + "Also breaking the build in case this was not intentional. If you\n"
+                        + "deliberately created the baseline file, re-run the build and this\n"
+                        + "time it should succeed without warnings.\n"
+                        + "\n"
+                        + "If not, investigate the baseline path in the lintOptions config\n"
+                        + "or verify that the baseline file has been checked into version\n"
+                        + "control.\n"
+                        + "\n",
+
+                // Expected exit code
+                ERRNO_CREATED_BASELINE,
+
+                // Args
+                new String[]{
+                        "--check",
+                        "ContentDescription",
+                        "--baseline",
+                        baseline.getPath(),
+                        "--disable",
+                        "LintError",
+                        getProjectDir(null, mAccessibility).getPath()
+
+                });
+        assertTrue(baseline.exists());
+        //noinspection ResultOfMethodCallIgnored
+        baseline.delete();
+    }
+
+
     @Override
     protected Detector getDetector() {
         // Sample issue to check by the main driver
@@ -397,10 +490,13 @@ public class MainTest extends AbstractCheckTest {
                 LintCliClient.getCleanPath(new File(sep + "foo" + sep + "..")));
         assertEquals(sep + "foo",
                 LintCliClient.getCleanPath(new File(sep + "foo" + sep + "bar " + sep + "..")));
-        assertEquals(sep + "c:",
-                LintCliClient.getCleanPath(new File(sep + "c:")));
-        assertEquals(sep + "c:" + sep + "foo",
-                LintCliClient.getCleanPath(new File(sep + "c:" + sep + "foo")));
+
+        if (SdkConstants.CURRENT_PLATFORM != SdkConstants.PLATFORM_WINDOWS) {
+            assertEquals(sep + "c:",
+                    LintCliClient.getCleanPath(new File(sep + "c:")));
+            assertEquals(sep + "c:" + sep + "foo",
+                    LintCliClient.getCleanPath(new File(sep + "c:" + sep + "foo")));
+        }
     }
 
     public void testGradle() throws Exception {
@@ -429,6 +525,14 @@ public class MainTest extends AbstractCheckTest {
     }
 
     public void testValidateOutput() throws Exception {
+        if (SdkConstants.CURRENT_PLATFORM == SdkConstants.PLATFORM_WINDOWS) {
+            // This test relies on making directories not writable, then
+            // running lint pointing the output to that directory
+            // and checking that error messages make sense. This isn't
+            // supported on Windows; calling file.setWritable(false) returns
+            // false; so skip this entire test on Windows.
+            return;
+        }
         File project = getProjectDir(null,
                 mAccessibility2
         );
@@ -521,11 +625,11 @@ public class MainTest extends AbstractCheckTest {
             + "    <ImageButton android:importantForAccessibility=\"no\" android:layout_width=\"wrap_content\" android:layout_height=\"wrap_content\" android:src=\"@drawable/android_button\" android:focusable=\"false\" android:clickable=\"false\" android:layout_weight=\"1.0\" />\n"
             + "</LinearLayout>\n";
 
-    private TestFile mAccessibility = xml("res/layout/accessibility.xml", ACCESSIBILITY_XML);
+    private final TestFile mAccessibility = xml("res/layout/accessibility.xml", ACCESSIBILITY_XML);
 
-    private TestFile mAccessibility2 = xml("myres1/layout/accessibility1.xml", ACCESSIBILITY_XML);
+    private final TestFile mAccessibility2 = xml("myres1/layout/accessibility1.xml", ACCESSIBILITY_XML);
 
-    private TestFile mAccessibility3 = xml("myres2/layout/accessibility1.xml", ACCESSIBILITY_XML);
+    private final TestFile mAccessibility3 = xml("myres2/layout/accessibility1.xml", ACCESSIBILITY_XML);
 
     @SuppressWarnings("all") // Sample code
     private TestFile mGetterTest = java(""

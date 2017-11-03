@@ -29,11 +29,10 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import org.xml.sax.SAXParseException;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
+import org.xml.sax.SAXParseException;
 
 /**
  * Exception for errors during merging.
@@ -107,8 +106,10 @@ public class MergingException extends Exception {
         public MergingException build() {
             if (mCause != null) {
                 if (mMessageText == null) {
-                    mMessageText = MoreObjects.firstNonNull(
-                            mCause.getLocalizedMessage(), mCause.getClass().getCanonicalName());
+                    mMessageText =
+                            MoreObjects.firstNonNull(
+                                    mCause.getLocalizedMessage(),
+                                    mCause.getClass().getCanonicalName());
                 }
                 if (mPosition == SourcePosition.UNKNOWN && mCause instanceof SAXParseException) {
                     SAXParseException exception = (SAXParseException) mCause;

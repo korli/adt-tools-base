@@ -19,7 +19,18 @@ package com.android.builder.testing;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteStreams;
-
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.reflect.Constructor;
+import java.util.Collections;
+import java.util.List;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.JarOutputStream;
+import java.util.zip.ZipEntry;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -34,19 +45,6 @@ import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
-
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Constructor;
-import java.util.Collections;
-import java.util.List;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.jar.JarOutputStream;
-import java.util.zip.ZipEntry;
 
 /**
  * Given a "standard" android.jar, creates a "mockable" version, where all classes and methods
@@ -82,11 +80,10 @@ public class MockableJarGenerator {
                 "Output file [%s] already exists.",
                 output.getAbsolutePath());
 
-        JarFile androidJar = null;
-        JarOutputStream outputStream = null;
-        try {
-            androidJar = new JarFile(input);
-            outputStream = new JarOutputStream(new BufferedOutputStream(new FileOutputStream(output)));
+        try (JarFile androidJar = new JarFile(input);
+                JarOutputStream outputStream =
+                        new JarOutputStream(
+                                new BufferedOutputStream(new FileOutputStream(output)))) {
 
             for (JarEntry entry : Collections.list(androidJar.entries())) {
                 InputStream inputStream = androidJar.getInputStream(entry);
@@ -95,21 +92,23 @@ public class MockableJarGenerator {
                     if (!skipClass(entry.getName().replace("/", "."))) {
                         rewriteClass(entry, inputStream, outputStream);
                     }
-                } else {
+                } else if (!skipEntry(entry)) {
                     outputStream.putNextEntry(entry);
                     ByteStreams.copy(inputStream, outputStream);
                 }
 
                 inputStream.close();
             }
-        } finally {
-            if (androidJar != null) {
-                androidJar.close();
-            }
-            if (outputStream != null) {
-                outputStream.close();
-            }
         }
+    }
+
+    private static boolean skipEntry(JarEntry entry) {
+        String name = entry.getName();
+        return name.endsWith("/")
+                || name.startsWith("res/")
+                || name.startsWith("assets/")
+                || name.equals("AndroidManifest.xml")
+                || name.equals("resources.arsc");
     }
 
     private boolean skipClass(String className) {
@@ -152,7 +151,7 @@ public class MockableJarGenerator {
 
         List<MethodNode> methodNodes = classNode.methods;
         for (MethodNode methodNode : methodNodes) {
-            methodNode.access &= ~Opcodes.ACC_FINAL;
+            methodNode.access &= ~(Opcodes.ACC_FINAL | Opcodes.ACC_NATIVE);
             fixMethodBody(methodNode, classNode);
         }
 
@@ -175,9 +174,8 @@ public class MockableJarGenerator {
      * Rewrites the method bytecode to remove the "Stub!" exception.
      */
     private void fixMethodBody(MethodNode methodNode, ClassNode classNode) {
-        if ((methodNode.access & Opcodes.ACC_NATIVE) != 0
-                || (methodNode.access & Opcodes.ACC_ABSTRACT) != 0) {
-            // Abstract and native method don't have bodies to rewrite.
+        if ((methodNode.access & Opcodes.ACC_ABSTRACT) != 0) {
+            // Abstract methods don't have bodies to rewrite.
             return;
         }
 
@@ -188,6 +186,11 @@ public class MockableJarGenerator {
 
         Type returnType = Type.getReturnType(methodNode.desc);
         InsnList instructions = methodNode.instructions;
+        if (instructions == null) {
+            // Create a body if the method didn't have it, e.g. if it was native.
+            instructions = new InsnList();
+            methodNode.instructions = instructions;
+        }
 
         if (methodNode.name.equals(CONSTRUCTOR)) {
             // Keep the call to parent constructor, delete the exception after that.
@@ -216,7 +219,7 @@ public class MockableJarGenerator {
                     instructions.add(new InsnNode(Opcodes.FCONST_0));
                 } else if (returnType.equals(Type.DOUBLE_TYPE)) {
                     instructions.add(new InsnNode(Opcodes.DCONST_0));
-                } else {
+                } else if (!returnType.equals(Type.VOID_TYPE)) {
                     instructions.add(new InsnNode(Opcodes.ACONST_NULL));
                 }
 

@@ -101,4 +101,44 @@ public interface ProgressIndicator {
     default void logVerbose(@NonNull String s) {
         logInfo(s);
     }
+
+    /**
+     * Creates a new progress indicator that just delegates to {@code this}, except that its
+     * {@code [0, 1]} progress interval maps to {@code this}'s {@code [getFraction()-max]}.
+     * So for example if {@code this} is currently at 10% and a sub progress is created with
+     * {@code max = 0.5}, when the sub progress is at 50% the parent progress will be at 30%, and
+     * when the sub progress is at 100% the parent will be at 50%.
+     */
+    default ProgressIndicator createSubProgress(double max) {
+        double start = getFraction();
+        // Unfortunately some dummy indicators always report their fraction as 1. In that case just
+        // return the indicator itself.
+        if (start == 1) {
+            return this;
+        }
+
+        double subRange = max - start;
+        // Check that we're at least close to being a valid value. If we're equal to or less than 0
+        // we'll treat it as 0 (that is, sets do nothing and gets just return the 0).
+        if (subRange < -0.0001 || subRange > 1.0001) {
+            logError("Progress subrange out of bounds: " + subRange);
+        }
+
+        return new DelegatingProgressIndicator(ProgressIndicator.this) {
+            @Override
+            public void setFraction(double subFraction) {
+                if (subRange > 0) {
+                    subFraction = Math.min(1, Math.max(0, subFraction));
+                    super.setFraction(start + subFraction * subRange);
+                }
+            }
+
+            @Override
+            public double getFraction() {
+                return Math.min(
+                        1,
+                        Math.max(0, subRange > 0 ? (super.getFraction() - start) / subRange : 0));
+            }
+        };
+    }
 }

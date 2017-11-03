@@ -19,9 +19,6 @@ package com.android.builder.internal.aapt;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.core.VariantType;
-import com.android.builder.dependency.level2.AndroidDependency;
-import com.android.builder.model.AaptOptions;
-import com.android.builder.model.AndroidLibrary;
 import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
 import com.android.utils.ILogger;
@@ -29,11 +26,9 @@ import com.google.common.base.Verify;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -70,11 +65,7 @@ public class AaptPackageConfig implements Cloneable {
     @Nullable
     private File mResourceOutputApk;
 
-    /**
-     * All libraries added (see {@link Builder#setLibraries(List)}).
-     */
-    @NonNull
-    private ImmutableList<AndroidDependency> mLibraries;
+    @NonNull private ImmutableSet<File> librarySymbolTableFiles;
 
     /**
      * Symbol output directory (see {@link Builder#setSymbolOutputDir(File)}).
@@ -162,26 +153,25 @@ public class AaptPackageConfig implements Cloneable {
     @Nullable
     private VariantType mVariantType;
 
-    /**
-     * Base feature APK file.
-     */
-    @Nullable
-    private File mBaseFeature;
+    /** List of imported resource files */
+    @NonNull private ImmutableList<File> mImports;
 
-    /**
-     * Previously compiled feature APK files.
-     */
-    @NonNull
-    private ImmutableSet<File> mPreviousFeatures;
+    /** Package ID for the feature split. */
+    @Nullable private Integer mPackageId;
 
-    /**
-     * Creates a new instance of the the package configuration with default values.
-     */
+    /** Dependent feature APK files, including the base feature. */
+    @NonNull private ImmutableSet<File> mDependentFeatures;
+
+    /** Whether we should list resource files into one file. */
+    private boolean mListResourceFiles;
+
+    /** Creates a new instance of the the package configuration with default values. */
     private AaptPackageConfig() {
-        mLibraries = ImmutableList.of();
+        librarySymbolTableFiles = ImmutableSet.of();
         mVerbose = false;
         mResourceConfigs = ImmutableSet.of();
-        mPreviousFeatures = ImmutableSet.of();
+        mDependentFeatures = ImmutableSet.of();
+        mImports = ImmutableList.of();
     }
 
     @Override
@@ -196,6 +186,11 @@ public class AaptPackageConfig implements Cloneable {
             Verify.verify(false);
             return new AaptPackageConfig();
         }
+    }
+
+    @NonNull
+    public ImmutableList<File> getImports() {
+        return mImports;
     }
 
     /**
@@ -239,13 +234,14 @@ public class AaptPackageConfig implements Cloneable {
     }
 
     /**
-     * Obtains all libraries added.
+     * The library symbol table files.
      *
-     * @return all libraries; returns an empty list if no libraries were added
+     * <p>These are R.txt files but with the package name as the first line. They can be parsed
+     * using {@link com.android.builder.symbols.SymbolIo#readTableWithPackage(File)}
      */
     @NonNull
-    public List<AndroidDependency> getLibraries() {
-        return Collections.unmodifiableList(mLibraries);
+    public Set<File> getLibrarySymbolTableFiles() {
+        return librarySymbolTableFiles;
     }
 
     /**
@@ -400,28 +396,30 @@ public class AaptPackageConfig implements Cloneable {
     }
 
     /**
-     * Obtains the base feature APK file.
+     * Obtains the package ID for the feature split.
      *
-     * @return the base feature APK file, {@code null} if not set
+     * @return the package ID for the feature split
      */
     @Nullable
-    public File getBaseFeature() {
-        return mBaseFeature;
+    public Integer getPackageId() {
+        return mPackageId;
     }
 
     /**
-     * Obtains the previously compiled feature APK files.
+     * Obtains the dependent feature APK files.
      *
-     * @return the previously compiled feature APK files
+     * @return the dependent feature APK files
      */
     @NonNull
-    public Set<File> getPreviousFeatures() {
-        return mPreviousFeatures;
+    public Set<File> getDependentFeatures() {
+        return mDependentFeatures;
     }
 
-    /**
-     * Builder used to create a {@link AaptPackageConfig}.
-     */
+    public boolean isListResourceFiles() {
+        return mListResourceFiles;
+    }
+
+    /** Builder used to create a {@link AaptPackageConfig}. */
     public static class Builder {
 
         /**
@@ -507,18 +505,17 @@ public class AaptPackageConfig implements Cloneable {
         }
 
         /**
-         * Sets the libraries in the package configuration. See
-         * {@link AbstractAapt#validatePackageConfig(AaptPackageConfig)} for details on field rules.
+         * Sets the library symbol table files in the package configuration. See {@link
+         * AbstractAapt#validatePackageConfig(AaptPackageConfig)} for details on field rules.
          *
          * @param libraries the list of libraries to add, {@code null} is treated as an empty set
-         * @return {@code this}
          */
         @NonNull
-        public Builder setLibraries(@Nullable List<AndroidDependency> libraries) {
+        public Builder setLibrarySymbolTableFiles(@Nullable Set<File> libraries) {
             if (libraries == null) {
-                mConfig.mLibraries = ImmutableList.of();
+                mConfig.librarySymbolTableFiles = ImmutableSet.of();
             } else {
-                mConfig.mLibraries = ImmutableList.copyOf(libraries);
+                mConfig.librarySymbolTableFiles = ImmutableSet.copyOf(libraries);
             }
 
             return this;
@@ -732,26 +729,52 @@ public class AaptPackageConfig implements Cloneable {
         }
 
         /**
-         * Sets the base feature APK file.
+         * Adds a list of files that will be used as imports to resolve external symbols when
+         * running the aapt2 command.
          *
-         * @param baseFeature the base feature APK file.
-         * @return {@code this}
+         * @param imports list of imports files.
+         * @return
          */
         @NonNull
-        public Builder setBaseFeature(@Nullable File baseFeature) {
-            mConfig.mBaseFeature = baseFeature;
+        public Builder setImports(@NonNull ImmutableList<File> imports) {
+            mConfig.mImports = imports;
             return this;
         }
 
         /**
-         * Sets the previously compiled feature APK files.
+         * Sets the package ID for the feature split.
          *
-         * @param previousFeatures the previously compiled feature APK files.
+         * @param packageId the package ID for the feature split.
          * @return {@code this}
          */
         @NonNull
-        public Builder setPreviousFeatures(@NonNull Collection<File> previousFeatures) {
-            mConfig.mPreviousFeatures = ImmutableSet.copyOf(previousFeatures);
+        public Builder setPackageId(@Nullable Integer packageId) {
+            mConfig.mPackageId = packageId;
+            return this;
+        }
+
+        /**
+         * Sets the dependent feature APK files.
+         *
+         * @param dependentFeatures the dependent feature APK files.
+         * @return {@code this}
+         */
+        @NonNull
+        public Builder setDependentFeatures(@NonNull Collection<File> dependentFeatures) {
+            mConfig.mDependentFeatures = ImmutableSet.copyOf(dependentFeatures);
+            return this;
+        }
+
+
+        /**
+         * Sets whether we should list the resource files into one file.
+         *
+         * @param listResourceFiles whether we should list the resource files into one file.
+         * @return {@code this}
+         */
+        @NonNull
+        public Builder setListResourceFiles(boolean listResourceFiles) {
+            mConfig.mListResourceFiles = listResourceFiles;
             return this;
         }
     }

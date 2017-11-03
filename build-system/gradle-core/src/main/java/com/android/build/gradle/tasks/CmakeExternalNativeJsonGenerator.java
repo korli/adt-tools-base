@@ -16,46 +16,44 @@
 
 package com.android.build.gradle.tasks;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.builder.core.AndroidBuilder;
-import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessInfoBuilder;
-import com.android.repository.api.ConsoleProgressIndicator;
-import com.android.repository.api.LocalPackage;
-import com.android.repository.api.ProgressIndicator;
-import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.utils.FileUtils;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
-import org.gradle.api.GradleException;
-import org.gradle.api.InvalidUserDataException;
-
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.gradle.api.GradleException;
 
 /**
- * CMake JSON generation logic. This is separated from the corresponding CMake task so that
- * JSON can be generated during configuration.
+ * CMake JSON generation logic. This is separated from the corresponding CMake task so that JSON can
+ * be generated during configuration.
  */
-class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
+abstract class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
+    private static final Pattern cmakeFileFinder =
+            Pattern.compile("^(.*CMake (Error|Warning).* at\\s+)([^:]+)(:.*)$", Pattern.DOTALL);
+
+    @NonNull final File cmakeInstallFolder;
 
     CmakeExternalNativeJsonGenerator(
-            @Nullable File sdkDirectory,
             @NonNull NdkHandler ndkHandler,
             int minSdkVersion,
             @NonNull String variantName,
-            @NonNull List<Abi> abis,
+            @NonNull Collection<Abi> abis,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull File sdkFolder,
             @NonNull File ndkFolder,
@@ -63,6 +61,7 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
             @NonNull File objFolder,
             @NonNull File jsonFolder,
             @NonNull File makeFile,
+            @NonNull File cmakeInstallFolder,
             boolean debuggable,
             @Nullable List<String> buildArguments,
             @Nullable List<String> cFlags,
@@ -71,18 +70,18 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         super(ndkHandler, minSdkVersion, variantName, abis, androidBuilder, sdkFolder, ndkFolder,
                 soFolder, objFolder, jsonFolder, makeFile, debuggable,
                 buildArguments, cFlags, cppFlags, nativeBuildConfigurationsJsons);
-        checkNotNull(sdkDirectory);
-        File cmakeExecutable = getCmakeExecutable();
-        if (!cmakeExecutable.exists()) {
-            // throw InvalidUserDataException directly for "Failed to find CMake" error. Android
-            // Studio doesn't doesn't currently produce Quick Fix UI for SyncIssues.
-            throw new InvalidUserDataException(
-                    String.format("Failed to find CMake.\n"
-                            + "Install from Android Studio under File/Settings/"
-                            + "Appearance & Behavior/System Settings/Android SDK/SDK Tools/CMake.\n"
-                            + "Expected CMake executable at %s.", cmakeExecutable));
-        }
+        this.cmakeInstallFolder = cmakeInstallFolder;
     }
+
+    /**
+     * Returns the cache arguments for implemented strategy.
+     *
+     * @param abi - ABI for which cache arguments needs to be created
+     * @param abiPlatformVersion - ABI's platform version
+     * @return Returns the cache arguments
+     */
+    @NonNull
+    abstract List<String> getCacheArguments(@NonNull String abi, int abiPlatformVersion);
 
     @Override
     void processBuildOutput(@NonNull String buildOutput, @NonNull String abi,
@@ -97,52 +96,65 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
             @NonNull File outputJson) {
         checkConfiguration();
         ProcessInfoBuilder builder = new ProcessInfoBuilder();
-        // CMake requires a folder. Trim the filename off.
-        File cmakeListsFolder = getMakefile().getParentFile();
 
-        builder.setExecutable(getCmakeExecutable());
-        builder.addArgs(String.format("-H%s", cmakeListsFolder));
-        builder.addArgs(String.format("-B%s", outputJson.getParentFile()));
-        // TODO: possibly remove the Android Gradle part.
-        // Depends on how upstream CMake accepts our JSON patch.
-        builder.addArgs("-GAndroid Gradle - Ninja");
-        builder.addArgs(String.format("-DANDROID_ABI=%s", abi));
-        builder.addArgs(String.format("-DANDROID_NDK=%s", getNdkFolder()));
-        builder.addArgs(
-                String.format("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=%s",
-                        new File(getObjFolder(), abi)));
-        builder.addArgs(
-                String.format("-DCMAKE_BUILD_TYPE=%s", isDebuggable() ? "Debug" : "Release"));
-        builder.addArgs(String.format("-DCMAKE_MAKE_PROGRAM=%s",
-                getNinjaExecutable().getAbsolutePath()));
-        builder.addArgs(String.format("-DCMAKE_TOOLCHAIN_FILE=%s",
-                getToolChainFile().getAbsolutePath()));
-
-        builder.addArgs(String.format("-DANDROID_PLATFORM=android-%s", abiPlatformVersion));
-
-        if (!getcFlags().isEmpty()) {
-            builder.addArgs(String.format("-DCMAKE_C_FLAGS=%s", Joiner.on(" ").join(getcFlags())));
-        }
-
-        if (!getCppFlags().isEmpty()) {
-            builder.addArgs(String.format("-DCMAKE_CXX_FLAGS=%s",
-                    Joiner.on(" ").join(getCppFlags())));
-        }
-
-        for (String argument : getBuildArguments()) {
-            builder.addArgs(argument);
-        }
+        builder.setExecutable(getSdkCmakeExecutable());
+        builder.addArgs(getProcessBuilderArgs(abi, abiPlatformVersion, outputJson));
 
         return builder;
     }
 
-    @Override
-    String executeProcess(ProcessInfoBuilder processBuilder) throws ProcessException, IOException {
-        return ExternalNativeBuildTaskUtils
-                .executeBuildProcessAndLogError(
-                        androidBuilder,
-                        processBuilder,
-                        true /* logStdioToInfo */);
+    /** Returns the list of arguments to be passed to process builder. */
+    @VisibleForTesting
+    @NonNull
+    List<String> getProcessBuilderArgs(
+            @NonNull String abi, int abiPlatformVersion, @NonNull File outputJson) {
+        List<String> processBuilderArgs = Lists.newArrayList();
+        // CMake requires a folder. Trim the filename off.
+        File cmakeListsFolder = getMakefile().getParentFile();
+
+        processBuilderArgs.add(String.format("-H%s", cmakeListsFolder));
+        processBuilderArgs.add(String.format("-B%s", outputJson.getParentFile()));
+        processBuilderArgs.addAll(getCacheArguments(abi, abiPlatformVersion));
+
+        // Add user provided build arguments
+        processBuilderArgs.addAll(getBuildArguments());
+        return processBuilderArgs;
+    }
+
+    /**
+     * Returns a list of default cache arguments that the implementations may use.
+     *
+     * @param abi - ABI for which cache arguments needs to be created
+     * @param abiPlatformVersion - ABI's platform version
+     * @return list of default cache arguments
+     */
+    protected List<String> getCommonCacheArguments(@NonNull String abi, int abiPlatformVersion) {
+        List<String> cacheArguments = Lists.newArrayList();
+        cacheArguments.add(String.format("-DANDROID_ABI=%s", abi));
+        cacheArguments.add(String.format("-DANDROID_PLATFORM=android-%s", abiPlatformVersion));
+        cacheArguments.add(
+                String.format(
+                        "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=%s", new File(getObjFolder(), abi)));
+        cacheArguments.add(
+                String.format("-DCMAKE_BUILD_TYPE=%s", isDebuggable() ? "Debug" : "Release"));
+        cacheArguments.add(String.format("-DANDROID_NDK=%s", getNdkFolder()));
+        if (!getcFlags().isEmpty()) {
+            cacheArguments.add(
+                    String.format("-DCMAKE_C_FLAGS=%s", Joiner.on(" ").join(getcFlags())));
+        }
+
+        if (!getCppFlags().isEmpty()) {
+            cacheArguments.add(
+                    String.format("-DCMAKE_CXX_FLAGS=%s", Joiner.on(" ").join(getCppFlags())));
+        }
+
+        return cacheArguments;
+    }
+
+    /** Returns the compile commands json file for the given abi. */
+    @NonNull
+    public File getCompileCommandsJson(@NonNull String abi) {
+        return ExternalNativeBuildTaskUtils.getCompileCommandsJson(getJsonFolder(), abi);
     }
 
     @NonNull
@@ -185,7 +197,49 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
     }
 
     @NonNull
-    private File getToolChainFile() {
+    @VisibleForTesting
+    static String correctMakefilePaths(@NonNull String input, @NonNull File makeFileDirectory) {
+        Matcher cmakeFinderMatcher = cmakeFileFinder.matcher(input);
+        if (cmakeFinderMatcher.matches()) {
+            // The whole multi-line output could contain multiple warnings/errors
+            // so we split it into lines, fix the filenames, then recombine it.
+            List<String> corrected = new ArrayList<>();
+            for (String entry : input.split("\n")) {
+                cmakeFinderMatcher = cmakeFileFinder.matcher(entry);
+                if (cmakeFinderMatcher.matches()) {
+                    String fileName = cmakeFinderMatcher.group(3);
+                    File makeFile = new File(fileName);
+                    // No need to update absolute paths.
+                    if (makeFile.isAbsolute()) {
+                        corrected.add(entry);
+                        continue;
+                    }
+
+                    // Don't point to a file that doesn't exist.
+                    makeFile = new File(makeFileDirectory, fileName);
+                    if (!makeFile.exists()) {
+                        corrected.add(entry);
+                        continue;
+                    }
+
+                    // We were able to update the makefile path.
+                    corrected.add(
+                            cmakeFinderMatcher.group(1)
+                                    + makeFile.getAbsolutePath()
+                                    + cmakeFinderMatcher.group(4));
+                } else {
+                    corrected.add(entry);
+                }
+            }
+
+            return Joiner.on('\n').join(corrected);
+        }
+
+        return input;
+    }
+
+    @NonNull
+    protected File getToolChainFile() {
         String toolchainFileName = "android.toolchain.cmake";
         File ndkCmakeFolder = new File(new File(getNdkFolder(), "build"), "cmake");
         // Toolchain file should be located at ndk/build/cmake/ for NDK r13+.
@@ -193,42 +247,27 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         if (!toolchainFile.exists()) {
             // Toolchain file for NDK r12 is in the SDK.
             // TODO: remove this when we stop caring about r12.
-            toolchainFile = new File(getCmakeFolder(), toolchainFileName);
+            toolchainFile = new File(getCmakeInstallFolder(), toolchainFileName);
         }
         return toolchainFile;
     }
 
     @NonNull
-    private File getCmakeFolder() {
-        ProgressIndicator progress = new ConsoleProgressIndicator();
-        AndroidSdkHandler sdk = AndroidSdkHandler.getInstance(getSdkFolder());
-        LocalPackage cmakePackage = sdk.getLatestLocalPackageForPrefix(SdkConstants.FD_CMAKE, true,
-                progress);
-        if (cmakePackage != null) {
-            return cmakePackage.getLocation();
-        }
-        return new File(getSdkFolder(), SdkConstants.FD_CMAKE);
+    protected File getSdkCmakeFolder() {
+        return getCmakeFolderFromSdkFolder(getSdkFolder());
     }
 
     @NonNull
-    private File getCmakeBinFolder() {
-        return new File(getCmakeFolder(), "bin");
+    protected File getCmakeBinFolder() {
+        return new File(getCmakeInstallFolder(), "bin");
     }
 
     @NonNull
-    private File getCmakeExecutable() {
+    protected File getCmakeExecutable() {
         if (isWindows()) {
             return new File(getCmakeBinFolder(), "cmake.exe");
         }
         return new File(getCmakeBinFolder(), "cmake");
-    }
-
-    @NonNull
-    private File getNinjaExecutable() {
-        if (isWindows()) {
-            return new File(getCmakeBinFolder(), "ninja.exe");
-        }
-        return new File(getCmakeBinFolder(), "ninja");
     }
 
     /**
@@ -274,4 +313,18 @@ class CmakeExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         return messages;
     }
 
+    @NonNull
+    private File getCmakeInstallFolder() {
+        return cmakeInstallFolder;
+    }
+
+    @NonNull
+    protected File getSdkCmakeExecutable() {
+        return getSdkCmakeExecutable(getSdkFolder());
+    }
+
+    @NonNull
+    protected File getSdkCmakeBinFolder() {
+        return getSdkCmakeBinFolder(getSdkFolder());
+    }
 }

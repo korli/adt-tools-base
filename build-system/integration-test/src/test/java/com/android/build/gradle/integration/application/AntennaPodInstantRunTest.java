@@ -21,25 +21,38 @@ import static com.android.testutils.truth.MoreTruth.assertThatDex;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.RunGradleTasks;
+import com.android.build.gradle.integration.common.runner.FilterableParameterized;
+import com.android.build.gradle.integration.common.utils.PerformanceTestProjects;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.build.gradle.integration.instant.InstantRunTestUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.options.BooleanOption;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.utils.FileUtils;
+import com.android.sdklib.AndroidVersion;
+import com.android.tools.ir.client.InstantRunArtifact;
 import com.google.common.collect.ImmutableList;
 import com.google.common.truth.Expect;
 import java.io.File;
-import java.io.IOException;
 import java.util.List;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
+@RunWith(FilterableParameterized.class)
 public class AntennaPodInstantRunTest {
 
     @Rule public Expect expect = Expect.createAndEnableStackTrace();
+
+    @Parameterized.Parameter public VariantScope.Java8LangSupport java8LangSupport;
+
+    @Parameterized.Parameters
+    public static List<VariantScope.Java8LangSupport> getJava8LangSupport() {
+        return ImmutableList.of(
+                VariantScope.Java8LangSupport.RETROLAMBDA, VariantScope.Java8LangSupport.DESUGAR);
+    }
 
     @Rule
     public GradleTestProject mainProject =
@@ -48,56 +61,12 @@ public class AntennaPodInstantRunTest {
     private GradleTestProject project;
 
     @Before
-    public void updateToLatestVersionsAndSetOptions() throws IOException {
+    public void setUp() throws Exception {
         project = mainProject.getSubproject("AntennaPod");
-        TestFileUtils.searchAndReplace(
-                project.getBuildFile(),
-                "classpath \"com.android.tools.build:gradle:\\d+.\\d+.\\d+\"",
-                "classpath \"com.android.tools.build:gradle:"
-                        + GradleTestProject.ANDROID_GRADLE_PLUGIN_VERSION
-                        + '"');
-        TestFileUtils.searchAndReplace(
-                project.getBuildFile(),
-                "jcenter\\(\\)",
-                "maven { url '"
-                        + FileUtils.toSystemIndependentPath(System.getenv("CUSTOM_REPO"))
-                        + "'} \n"
-                        + "        jcenter()");
-        TestFileUtils.searchAndReplace(
-                project.getBuildFile(),
-                "buildToolsVersion = \".*\"",
-                "buildToolsVersion = \"" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION
-                        + "\" // Updated by test");
-
-        List<String> subprojects =
-                ImmutableList.of("AudioPlayer/library", "afollestad/commons", "afollestad/core");
-
-        for (String subproject: subprojects) {
-            TestFileUtils.searchAndReplace(
-                    mainProject.getSubproject(subproject).getBuildFile(),
-                    "buildToolsVersion \".*\"",
-                    "buildToolsVersion \"" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION
-                            + "\" // Updated by test");
+        PerformanceTestProjects.initializeAntennaPod(mainProject);
+        if (java8LangSupport == VariantScope.Java8LangSupport.RETROLAMBDA) {
+            PerformanceTestProjects.antennaPodSetRetrolambdaEnabled(mainProject, true);
         }
-
-        // Update the support lib and fix resulting issue:
-        List<File> filesWithSupportLibVersion =
-                ImmutableList.of(
-                        project.getBuildFile(),
-                        mainProject.file("afollestad/core/build.gradle"),
-                        mainProject.file("afollestad/commons/build.gradle"));
-
-        for (File buildFile : filesWithSupportLibVersion) {
-            TestFileUtils.searchAndReplace(
-                    buildFile,
-                    "23.1.1",
-                    GradleTestProject.SUPPORT_LIB_VERSION);
-        }
-
-        TestFileUtils.searchAndReplace(
-                mainProject.file("afollestad/core/src/main/res/values-v11/styles.xml"),
-                "abc_ic_ab_back_mtrl_am_alpha",
-                "abc_ic_ab_back_material");
     }
 
     @Test
@@ -105,21 +74,21 @@ public class AntennaPodInstantRunTest {
         getExecutor().run("clean");
         InstantRun instantRunModel =
                 InstantRunTestUtils.getInstantRunModel(
-                        project.model().withoutOfflineFlag().getMulti().getModelMap().get(":app"));
+                        project.model().ignoreSyncIssues().getMulti().getModelMap().get(":app"));
 
         getExecutor()
-                .withInstantRun(23, ColdswapMode.MULTIDEX, OptionalCompilationStep.RESTART_ONLY)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.RESTART_ONLY)
                 .run(":app:assembleDebug");
 
         // Test the incremental build
         makeHotSwapChange(1);
         getExecutor()
-                .withInstantRun(23, ColdswapMode.MULTIDEX, OptionalCompilationStep.RESTART_ONLY)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.RESTART_ONLY)
                 .run(":app:assembleDebug");
 
         makeHotSwapChange(100);
 
-        getExecutor().withInstantRun(23, ColdswapMode.MULTIDEX).run("assembleDebug");
+        getExecutor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         InstantRunArtifact artifact = InstantRunTestUtils.getReloadDexArtifact(instantRunModel);
 
@@ -131,24 +100,28 @@ public class AntennaPodInstantRunTest {
         // Test cold swap
         makeColdSwapChange(100);
 
-        getExecutor().withInstantRun(23, ColdswapMode.MULTIDEX).run(":app:assembleDebug");
+        getExecutor().withInstantRun(new AndroidVersion(23, null)).run(":app:assembleDebug");
 
-        InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel, ColdswapMode.MULTIDEX);
+        InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel);
     }
 
     @NonNull
     private RunGradleTasks getExecutor() {
-        return project.executor().withoutOfflineFlag();
+        if (java8LangSupport == VariantScope.Java8LangSupport.RETROLAMBDA) {
+            return project.executor().with(BooleanOption.ENABLE_EXTRACT_ANNOTATIONS, false);
+        } else {
+            return project.executor();
+        }
     }
 
-    private void makeHotSwapChange(int i) throws IOException {
+    private void makeHotSwapChange(int i) throws Exception {
         TestFileUtils.searchAndReplace(
                 project.file("app/src/main/java/de/danoeh/antennapod/activity/MainActivity.java"),
                 "public void onStart\\(\\) \\{",
                 "public void onStart() {\n" + "        Log.d(TAG, \"onStart called " + i + "\");");
     }
 
-    private void makeColdSwapChange(int i) throws IOException {
+    private void makeColdSwapChange(int i) throws Exception {
         String newMethodName = "newMethod" + i;
         File mainActivity =
                 project.file("app/src/main/java/de/danoeh/antennapod/activity/MainActivity.java");

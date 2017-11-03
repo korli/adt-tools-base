@@ -1,4 +1,5 @@
 apply plugin: 'java'
+apply plugin: 'kotlin'
 apply plugin: 'jacoco-tools-base'
 apply plugin: 'clone-artifacts'
 apply plugin: 'antlr'
@@ -34,19 +35,31 @@ sourceSets {
 }
 
 dependencies {
+    compileOnly libs.auto_value
+
     compile project(':base:builder')
     compile project(':base:lint')
-    // TODO: Switch to remote dependency once the empty deprecated transform-api is published
-    compile project(':base:transform-api')
+    compile project(':base:uast')
     compile project(':base:gradle-api')
     compile project(':dataBinding:compilerCommon')
+
+    compile libs.kotlin_stdlib
+    compile libs.transform_api_deprecated
     compile libs.asm
+    compile libs.asm_analysis
     compile libs.asm_commons
-    compile libs.proguard
-    compile libs.jacoco_core
-    compile libs.jacoco_report
+    compile libs.asm_util
+    compile libs.jacoco_core, {
+      exclude group: 'org.ow2.asm', module: 'asm-debug-all'
+    }
+    compile libs.jacoco_report, {
+      exclude group: 'org.ow2.asm', module: 'asm-debug-all'
+    }
     compile libs.jopt
+    compile libs.kotlin_stdlib
+    compile libs.proguard
     compile libs.protobuf
+
     testCompile project(':base:instant-run:instant-run-annotations')
     testCompile project(':base:instant-run:instant-run-runtime')
 
@@ -55,15 +68,12 @@ dependencies {
     // not exposed as a runtime dependency.
     provided gradleApi()
 
-    // Exclude plugins/core-* to avoiding adding Gradle's ecj implementation to the classpath
-    testCompile fileTree(
-            dir:file("$rootProject.ext.androidHostOut/gradle-dist-link/lib"),
-            includes: ["*", "plugins/gradle*"])
-
-    includeInJar project(':base:instant-run:instant-run-server')
+    // Package the instant-run-server.jar, nothing else.
+    includeInJar project(path: ':base:instant-run:instant-run-server', configuration: 'archives')
 
     antlr libs.antlr3
 
+    testCompile gradleApi()
     testCompile libs.junit
     testCompile libs.truth
     testCompile libs.mockito_core
@@ -91,13 +101,18 @@ apply from: "$rootDir/buildSrc/base/publish.gradle"
 apply from: "$rootDir/buildSrc/base/bintray.gradle"
 
 test {
-    environment("CUSTOM_REPO", rootProject.file("../out/repo"))
+    environment("CUSTOM_REPO",
+            rootProject.file("../out/repo").toString()
+                    + File.pathSeparator
+                    + rootProject.file("../prebuilts/tools/common/m2/repository/").toString())
 
     testLogging {
         events "failed"
     }
 
     maxParallelForks = Runtime.runtime.availableProcessors() / 2
+
+    exclude "**/GradleCoreBazelSuite*"
 }
 
 javadoc {
@@ -158,4 +173,14 @@ javadoc {
 // Incremental update test support
 javadoc {
     classpath += configurations.provided
+}
+
+// setup annotation processor output directory
+File generatedSources = new File(project.buildDir, 'generated/generated')
+tasks.compileJava {
+    doFirst {
+        generatedSources.mkdirs()
+    }
+    options.compilerArgs += ['-s', generatedSources]
+    outputs.dir(generatedSources)
 }

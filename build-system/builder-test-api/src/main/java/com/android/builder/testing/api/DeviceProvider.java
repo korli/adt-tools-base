@@ -18,7 +18,6 @@ package com.android.builder.testing.api;
 
 import com.android.annotations.NonNull;
 import com.google.common.annotations.Beta;
-
 import java.util.List;
 
 /**
@@ -63,8 +62,4 @@ public abstract class DeviceProvider {
      * @return if the provider is configured.
      */
     public abstract boolean isConfigured();
-
-    public int getMaxThreads() {
-        return 0;
-    }
 }

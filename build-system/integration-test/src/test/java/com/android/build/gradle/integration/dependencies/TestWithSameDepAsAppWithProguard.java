@@ -17,12 +17,10 @@
 package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.utils.TestFileUtils.appendToFile;
-import static com.google.common.truth.TruthJUnit.assume;
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -41,8 +39,7 @@ public class TestWithSameDepAsAppWithProguard {
             .create();
 
     @BeforeClass
-    public static void setUp() throws IOException {
-        assume().that(GradleTestProject.USE_JACK).isFalse();
+    public static void setUp() throws Exception {
         appendToFile(project.getBuildFile(),
                 "\n" +
                 "apply plugin: \"com.android.application\"\n" +
@@ -75,7 +72,7 @@ public class TestWithSameDepAsAppWithProguard {
     }
 
     @Test
-    public void testProguardOnTestVariantSucceeds() {
+    public void testProguardOnTestVariantSucceeds() throws Exception {
         project.execute("clean", "assembleDebugAndroidTest");
     }
 }

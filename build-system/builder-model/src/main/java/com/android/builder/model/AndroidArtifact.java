@@ -18,7 +18,6 @@ package com.android.builder.model;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.Map;
@@ -129,4 +128,25 @@ public interface AndroidArtifact extends BaseArtifact {
      */
     @NonNull
     InstantRun getInstantRun();
+
+    /**
+     * Returns a list of additional APKs that need to installed on the device for this artifact to
+     * work correctly.
+     *
+     * <p>For test artifacts, these will be "buddy APKs" from the {@code androidTestUtil}
+     * configuration.
+     *
+     * @since 3.0
+     */
+    @NonNull
+    Collection<File> getAdditionalRuntimeApks();
+
+
+    /**
+     * Returns the test options only if the variant type is testing.
+     *
+     * @since 3.0
+     */
+    @Nullable
+    TestOptions getTestOptions();
 }

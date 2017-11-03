@@ -40,7 +40,7 @@ import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.FilterData;
-import com.android.build.OutputFile;
+import com.android.build.VariantOutput;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidArtifactOutput;
 import com.android.builder.model.AndroidLibrary;
@@ -52,6 +52,7 @@ import com.android.ide.common.repository.GradleVersion;
 import com.android.ide.common.repository.ResourceVisibilityLookup;
 import com.android.resources.Density;
 import com.android.resources.ResourceFolderType;
+import com.android.sdklib.AndroidTargetHash;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
@@ -101,6 +102,7 @@ public class Project {
     protected Configuration configuration;
     protected String pkg;
     protected int buildSdk = -1;
+    protected String buildTargetHash;
     protected IAndroidTarget target;
 
     protected AndroidVersion manifestMinSdk = AndroidVersion.DEFAULT;
@@ -109,7 +111,7 @@ public class Project {
     protected boolean library;
     protected String name;
     protected String proguardPath;
-    protected boolean mergeManifests;
+    protected boolean mergeManifests = true;
 
     /** The SDK info, if any */
     protected SdkInfo sdkInfo;
@@ -123,6 +125,7 @@ public class Project {
     protected List<File> gradleFiles;
     protected List<File> manifestFiles;
     protected List<File> javaSourceFolders;
+    protected List<File> generatedSourceFolders;
     protected List<File> javaClassFolders;
     protected List<File> nonProvidedJavaLibraries;
     protected List<File> javaLibraries;
@@ -140,6 +143,7 @@ public class Project {
     private Map<String, String> superClassMap;
     private ResourceVisibilityLookup resourceVisibility;
     private BuildToolInfo buildTools;
+    private Document mergedManifest;
 
     /**
      * Creates a new {@link Project} for the given directory.
@@ -236,6 +240,23 @@ public class Project {
         return null;
     }
 
+    /**
+     * Returns the merged manifest of this project. This may return null
+     * if not called on the main project. Note that the file reference
+     * in the merged manifest isn't accurate; the merged manifest accumulates
+     * information from a wide variety of locations.
+     *
+     * @return The merged manifest, if available.
+     */
+    @Nullable
+    public Document getMergedManifest() {
+        if (mergedManifest == null) {
+            mergedManifest = client.getMergedManifest(this);
+        }
+
+        return mergedManifest;
+    }
+
     /** Creates a new Project. Use one of the factory methods to create. */
     protected Project(
             @NonNull LintClient client,
@@ -267,19 +288,7 @@ public class Project {
                             "manifestmerger.enabled"));
                     String target = properties.getProperty("target");
                     if (target != null) {
-                        int index = target.lastIndexOf('-');
-                        if (index == -1) {
-                            index = target.lastIndexOf(':');
-                        }
-                        if (index != -1) {
-                            String versionString = target.substring(index + 1);
-                            try {
-                                buildSdk = Integer.parseInt(versionString);
-                            } catch (NumberFormatException nufe) {
-                                client.log(Severity.WARNING, null,
-                                        "Unexpected build target format: %1$s", target);
-                            }
-                        }
+                        setBuildTargetHash(target);
                     }
 
                     for (int i = 1; i < 1000; i++) {
@@ -355,6 +364,8 @@ public class Project {
                 // only set BuildSdk for projects other than frameworks and
                 // the ones that don't have one set in project.properties.
                 buildSdk = getClient().getHighestKnownApiLevel();
+                buildTargetHash = AndroidTargetHash.getPlatformHashString(new AndroidVersion(
+                        HIGHEST_KNOWN_API, null));
             }
 
         }
@@ -429,6 +440,15 @@ public class Project {
         }
 
         return javaSourceFolders;
+    }
+
+    @NonNull
+    public List<File> getGeneratedSourceFolders() {
+        if (generatedSourceFolders == null) {
+            generatedSourceFolders = client.getGeneratedSourceFolders(this);
+        }
+
+        return generatedSourceFolders;
     }
 
     /**
@@ -594,10 +614,10 @@ public class Project {
                length++;
            }
 
-           return path.substring(length);
+           return client.getDisplayPath(new File(path.substring(length)));
        }
 
-       return path;
+       return client.getDisplayPath(file);
     }
 
     /**
@@ -716,12 +736,48 @@ public class Project {
     }
 
     /**
-     * Returns the target API used to build the project, or -1 if not known
+     * Returns the compile SDK version used to build the project, or null if not known.
+     * This is the string name of the compileSdkVersion. If you want the numeric
+     * API level, use {@link #getBuildTargetHash()} instead, or to get the
+     * actual
      *
-     * @return the build target API or -1 if unknown
+     * @return the compileSdkVersion or -1 if unknown
      */
     public int getBuildSdk() {
         return buildSdk;
+    }
+
+    /**
+     * Returns the target API used to build the project, or null if not known.
+     * Note that this is returning a String rather than a {@link AndroidVersion}
+     * since it may refer to either a {@link AndroidTargetHash} for a platform
+     * or for an add-on, and {@link AndroidVersion} can only express platform
+     * versions.
+     *
+     * @return the build target API or -1 if unknown
+     */
+    @Nullable
+    public String getBuildTargetHash() {
+        return buildTargetHash;
+    }
+
+
+    /**
+     * Sets the build target hash to be used for this project. This is only
+     * intended for lint internal usage.
+     *
+     * @param buildTargetHash the target hash
+     */
+    public void setBuildTargetHash(String buildTargetHash) {
+        this.buildTargetHash = buildTargetHash;
+
+        AndroidVersion version = AndroidTargetHash.getPlatformVersion(buildTargetHash);
+        if (version != null) {
+            buildSdk = version.getFeatureLevel();
+        } else {
+            client.log(Severity.WARNING, null,
+                    "Unexpected build target format: %1$s", target);
+        }
     }
 
     /**
@@ -1375,13 +1431,11 @@ public class Project {
                     AndroidArtifact mainArtifact = variant.getMainArtifact();
                     Collection<AndroidArtifactOutput> outputs = mainArtifact.getOutputs();
                     for (AndroidArtifactOutput output : outputs) {
-                        for (OutputFile file : output.getOutputs()) {
-                            final String DENSITY_NAME = OutputFile.FilterType.DENSITY.name();
-                            if (file.getFilterTypes().contains(DENSITY_NAME)) {
-                                for (FilterData data : file.getFilters()) {
-                                    if (DENSITY_NAME.equals(data.getFilterType())) {
-                                        relevantDensities.add(data.getIdentifier());
-                                    }
+                        final String DENSITY_NAME = VariantOutput.FilterType.DENSITY.name();
+                        if (output.getFilterTypes().contains(DENSITY_NAME)) {
+                            for (FilterData data : output.getFilters()) {
+                                if (DENSITY_NAME.equals(data.getFilterType())) {
+                                    relevantDensities.add(data.getIdentifier());
                                 }
                             }
                         }

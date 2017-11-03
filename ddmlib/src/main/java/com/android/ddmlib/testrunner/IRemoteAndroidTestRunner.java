@@ -20,7 +20,6 @@ import com.android.ddmlib.AdbCommandRejectedException;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.ShellCommandUnresponsiveException;
 import com.android.ddmlib.TimeoutException;
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.TimeUnit;
@@ -174,6 +173,12 @@ public interface IRemoteAndroidTestRunner {
     void setCoverage(boolean coverage);
 
     /**
+     * Sets this test to enforce expecting a final time stamp from the instrumentation otherwise the
+     * run will be considered failed.
+     */
+    void setEnforceTimeStamp(boolean enforceTimestamp);
+
+    /**
      * Sets this test run to test collection mode. If true, will skip test execution and will set
      * all appropriate runner arguments required for a successful test collection.
      */
@@ -186,23 +191,41 @@ public interface IRemoteAndroidTestRunner {
     void setMaxtimeToOutputResponse(int maxTimeToOutputResponse);
 
     /**
-     * Sets the maximum time allowed between output of the shell command running the tests on
-     * the devices.
-     * <p>
-     * This allows setting a timeout in case the tests can become stuck and never finish. This is
+     * Sets the maximum time allowed between output of the shell command running the tests on the
+     * devices.
+     *
+     * <p>This allows setting a timeout in case the tests can become stuck and never finish. This is
      * different from the normal timeout on the connection.
-     * <p>
-     * By default no timeout will be specified.
+     *
+     * <p>By default no timeout will be specified.
      *
      * @param maxTimeToOutputResponse the maximum amount of time during which the command is allowed
-     *            to not output any response. A value of 0 means the method will wait forever
-     *            (until the <var>receiver</var> cancels the execution) for command output and
-     *            never throw.
-     * @param maxTimeUnits Units for non-zero {@code maxTimeToOutputResponse} values.
-     *
-     * @see IDevice#executeShellCommand(String, com.android.ddmlib.IShellOutputReceiver, int)
+     *     to not output any response. A value of 0 means the method will wait forever (until the
+     *     <var>receiver</var> cancels the execution) for command output and never throw.
+     * @param maxTimeUnits Units for non-zero {@code maxTimeToOutputResponse} and {@code maxTimeout}
+     *     values.
+     * @see IDevice#executeShellCommand(String, com.android.ddmlib.IShellOutputReceiver, long, long,
+     *     TimeUnit)
      */
     void setMaxTimeToOutputResponse(long maxTimeToOutputResponse, TimeUnit maxTimeUnits);
+
+    /**
+     * Sets the maximum time allowed for the instrumentation to finish.
+     *
+     * <p>This allows setting a timeout in case the tests can become stuck and never finish. This is
+     * different from the normal timeout on the connection.
+     *
+     * <p>By default no timeout will be specified.
+     *
+     * @param maxTimeout the maximum amount of time during which the command is allowed to not
+     *     output any response. A value of 0 means the method will wait forever (until the
+     *     <var>receiver</var> cancels the execution) for command output and never throw.
+     * @param maxTimeUnits Units for non-zero {@code maxTimeToOutputResponse} and {@code maxTimeout}
+     *     values.
+     * @see IDevice#executeShellCommand(String, com.android.ddmlib.IShellOutputReceiver, long, long,
+     *     TimeUnit)
+     */
+    void setMaxTimeout(long maxTimeout, TimeUnit maxTimeUnits);
 
     /**
      * Set a custom run name to be reported to the {@link ITestRunListener} on {@link #run}

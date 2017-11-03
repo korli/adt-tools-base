@@ -42,11 +42,11 @@ public class ObjectAnimatorDetectorTest extends AbstractCheckTest {
                 + "                                      ~~~~~~~~\n"
                 + "src/main/java/test/pkg/AnimatorTest.java:55: Warning: This method is accessed from an ObjectAnimator so it should be annotated with @Keep to ensure that it is not discarded or renamed in release builds [AnimatorKeep]\n"
                 + "        public void setProp1(int x) {\n"
-                + "                    ~~~~~~~~~~~~~~\n"
+                + "                    ~~~~~~~~~~~~~~~\n"
                 + "    src/main/java/test/pkg/AnimatorTest.java:15: ObjectAnimator usage here\n"
                 + "src/main/java/test/pkg/AnimatorTest.java:58: Warning: This method is accessed from an ObjectAnimator so it should be annotated with @Keep to ensure that it is not discarded or renamed in release builds [AnimatorKeep]\n"
                 + "        private void setProp2(float x) {\n"
-                + "                     ~~~~~~~~~~~~~~~~\n"
+                + "                     ~~~~~~~~~~~~~~~~~\n"
                 + "    src/main/java/test/pkg/AnimatorTest.java:47: ObjectAnimator usage here\n"
                 + "4 errors, 2 warnings\n";
 
@@ -404,6 +404,87 @@ public class ObjectAnimatorDetectorTest extends AbstractCheckTest {
                         + "    }\n"
                         + "}\n"))
                 .issues(ObjectAnimatorDetector.BROKEN_PROPERTY)
+                .run()
+                .expectClean();
+    }
+
+    public void testSuppress() throws Exception {
+        // Regression test for https://code.google.com/p/android/issues/detail?id=232405
+        // Ensure that we can suppress both types of issues by annotating either the
+        // property binding site *or* the property declaration site
+
+        //noinspection all // Sample code
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "import android.animation.ObjectAnimator;\n"
+                        + "import android.annotation.SuppressLint;\n"
+                        + "import android.widget.Button;\n"
+                        + "\n"
+                        + "@SuppressWarnings(\"unused\")\n"
+                        + "public class AnimatorTest {\n"
+                        + "\n"
+                        + "    // Suppress at the binding site\n"
+                        + "    @SuppressLint({\"ObjectAnimatorBinding\", \"AnimatorKeep\"})\n"
+                        + "    public void testObjectAnimator02(Button button) {\n"
+                        + "        Object myObject = new MyObject();\n"
+                        + "\n"
+                        + "        ObjectAnimator.ofInt(myObject, \"prop0\", 0, 1, 2, 5);\n"
+                        + "        ObjectAnimator.ofInt(myObject, \"prop2\", 0, 1, 2, 5).start();\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    // Suppressed at the property site\n"
+                        + "    public void testObjectAnimator13(Button button) {\n"
+                        + "        Object myObject = new MyObject();\n"
+                        + "\n"
+                        + "        ObjectAnimator.ofInt(myObject, \"prop1\", 0, 1, 2, 5);\n"
+                        + "        ObjectAnimator.ofInt(myObject, \"prop3\", 0, 1, 2, 5).start();\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    private static class MyObject {\n"
+                        + "        public void setProp0(int x) {\n"
+                        + "        }\n"
+                        + "\n"
+                        + "        @SuppressLint(\"AnimatorKeep\")\n"
+                        + "        public void setProp1(int x) {\n"
+                        + "        }\n"
+                        + "\n"
+                        + "        private void setProp2(float x) {\n"
+                        + "        }\n"
+                        + "\n"
+                        + "        @SuppressLint(\"ObjectAnimatorBinding\")\n"
+                        + "        private void setProp3(float x) {\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}"))
+                .issues(ObjectAnimatorDetector.BROKEN_PROPERTY,
+                        ObjectAnimatorDetector.MISSING_KEEP)
+                .run()
+                .expectClean();
+    }
+
+    public void test37136742() {
+        // Regression test for 37136742
+        lint().files(
+                java(""
+                        + "package test.pkg;\n"
+                        + "import android.animation.Keyframe;\n"
+                        + "import android.animation.ObjectAnimator;\n"
+                        + "import android.animation.PropertyValuesHolder;\n"
+                        + "import android.app.Activity;\n"
+                        + "import android.view.View;\n"
+                        + "\n"
+                        + "public class TestObjAnimator extends Activity {\n"
+                        + "    public void animate(View target) {\n"
+                        + "        Keyframe kf0 = Keyframe.ofFloat(0f, 0f);\n"
+                        + "        Keyframe kf1 = Keyframe.ofFloat(.5f, 360f);\n"
+                        + "        Keyframe kf2 = Keyframe.ofFloat(1f, 0f);\n"
+                        + "        PropertyValuesHolder pvhRotation = PropertyValuesHolder.ofKeyframe(\"rotation\", kf0, kf1, kf2);\n"
+                        + "        ObjectAnimator rotationAnim = ObjectAnimator.ofPropertyValuesHolder(target, pvhRotation);\n"
+                        + "        rotationAnim.setDuration(5000);\n"
+                        + "    }\n"
+                        + "}\n"))
                 .run()
                 .expectClean();
     }

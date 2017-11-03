@@ -16,14 +16,11 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.tools.lint.detector.api.TextFormat.TEXT;
+import static com.android.tools.lint.checks.infrastructure.ProjectDescription.Type.LIBRARY;
 
-import com.android.annotations.NonNull;
-import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.checks.infrastructure.ProjectDescription;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.Location;
-import com.android.tools.lint.detector.api.Severity;
 import java.io.File;
 import java.util.Arrays;
 import org.intellij.lang.annotations.Language;
@@ -280,26 +277,22 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
     }
 
     public void testMultiProject() throws Exception {
-        File master = getProjectDir("MasterProject",
-                // Master project
-                manifest().pkg("foo.master").minSdk(14),
-                projectProperties().property("android.library.reference.1", "../LibraryProject"),
-                mMainCode
-        );
-        File library = getProjectDir("LibraryProject",
+        //noinspection all // Sample code
+        ProjectDescription library = project(
                 // Library project
                 mLibraryManifest,
-                projectProperties().library(true).compileSdk(14),
                 mLibraryCode,
                 mLibraryStrings
-        );
-        assertEquals(""
-                + "LibraryProject/res/values/strings.xml:7: Warning: The resource R.string.string3 appears to be unused [UnusedResources]\n"
-                + "    <string name=\"string3\">String 3</string>\n"
-                + "            ~~~~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
+        ).type(LIBRARY).name("LibraryProject");
 
-           checkLint(Arrays.asList(master, library)).replace("/TESTROOT/", ""));
+        //noinspection all // Sample code
+        ProjectDescription main = project(
+                mMainCode
+        ).name("App").dependsOn(library);
+
+        lint().projects(main, library)
+                .run()
+                .expectClean();
     }
 
     public void testFqcnReference() throws Exception {
@@ -363,31 +356,6 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
                         + "    }"
                         + "}")
             ));
-    }
-
-    public void testNoMerging() throws Exception {
-        // http://code.google.com/p/android/issues/detail?id=36952
-
-        File master = getProjectDir("MasterProject",
-                // Master project
-                manifest().pkg("foo.master").minSdk(14),
-                projectProperties().property("android.library.reference.1", "../LibraryProject"),
-                mMainCode
-        );
-        File library = getProjectDir("LibraryProject",
-                // Library project
-                mLibraryManifest,
-                projectProperties().library(true).compileSdk(14),
-                mLibraryCode,
-                mLibraryStrings
-        );
-        assertEquals(""
-                + "LibraryProject/res/values/strings.xml:7: Warning: The resource R.string.string3 appears to be unused [UnusedResources]\n"
-                + "    <string name=\"string3\">String 3</string>\n"
-                + "            ~~~~~~~~~~~~~~\n"
-                + "0 errors, 1 warnings\n",
-
-           checkLint(Arrays.asList(master, library)).replace("/TESTROOT/", ""));
     }
 
     public void testLibraryMerging() throws Exception {
@@ -718,8 +686,10 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
     }
 
     public void testStyles() throws Exception {
-        mEnableIds = false;
-        assertEquals(""
+        String expected = ""
+                + "res/values/styles.xml:4: Warning: The resource R.style.UnusedStyleExtendingFramework appears to be unused [UnusedResources]\n"
+                + "   <style name=\"UnusedStyleExtendingFramework\" parent=\"android:Theme\"/>\n"
+                + "          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "res/values/styles.xml:5: Warning: The resource R.style.UnusedStyle appears to be unused [UnusedResources]\n"
                 + "    <style name=\"UnusedStyle\"/>\n"
                 + "           ~~~~~~~~~~~~~~~~~~\n"
@@ -729,24 +699,47 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
                 + "res/values/styles.xml:7: Warning: The resource R.style.UnusedStyle_Something_Sub appears to be unused [UnusedResources]\n"
                 + "    <style name=\"UnusedStyle.Something.Sub\" parent=\"UnusedStyle\"/>\n"
                 + "           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 3 warnings\n",
+                + "res/values/styles.xml:8: Warning: The resource R.style.ImplicitUsed appears to be unused [UnusedResources]\n"
+                + "    <style name=\"ImplicitUsed\" parent=\"android:Widget.ActionBar\"/>\n"
+                + "           ~~~~~~~~~~~~~~~~~~~\n"
+                + "res/values/styles.xml:9: Warning: The resource R.style.EmptyParent appears to be unused [UnusedResources]\n"
+                + "    <style name=\"EmptyParent\" parent=\"\"/>\n"
+                + "           ~~~~~~~~~~~~~~~~~~\n"
+                + "0 errors, 6 warnings\n";
+        lint().files(
+                xml("res/values/styles.xml", ""
+                        + "<resources>\n\n\n"
+                        +  "   <style name=\"UnusedStyleExtendingFramework\" parent=\"android:Theme\"/>\n"
+                        + "    <style name=\"UnusedStyle\"/>\n"
+                        + "    <style name=\"UnusedStyle.Sub\"/>\n"
+                        + "    <style name=\"UnusedStyle.Something.Sub\" parent=\"UnusedStyle\"/>\n"
 
-                lintProject(
-                        xml("res/values/styles.xml", ""
-                                + "<resources>\n"
-                                + "    <style name=\"UsedStyle\" parent=\"android:Theme\"/>\n"
-                                + "    <style name=\"UsedStyle.Sub\"/>\n"
-                                + "    <style name=\"UsedStyle.Something.Sub\" parent=\"UsedStyle\"/>\n"
-
-                                + "    <style name=\"UnusedStyle\"/>\n"
-                                + "    <style name=\"UnusedStyle.Sub\"/>\n"
-                                + "    <style name=\"UnusedStyle.Something.Sub\" parent=\"UnusedStyle\"/>\n"
-
-                                + "    <style name=\"ImplicitUsed\" parent=\"android:Widget.ActionBar\"/>\n"
-                                + "</resources>")
-                ));
+                        + "    <style name=\"ImplicitUsed\" parent=\"android:Widget.ActionBar\"/>\n"
+                        + "    <style name=\"EmptyParent\" parent=\"\"/>\n"
+                        + "</resources>"))
+                .run()
+                .expect(expected);
     }
 
+    public void testStylePrefix() throws Exception {
+        // AAPT accepts parent style references that simply start with "style/" (not @style);
+        // similarly, it also allows android:style/ rather than @android:style/
+        lint().files(
+                xml("res/values/styles.xml", ""
+                        + "<resources \n"
+                        + "        xmlns:tools=\"http://schemas.android.com/tools\"\n"
+                        + "        tools:keep=\"@style/MyInheritingStyle\" >\n"
+                        +  "    <style name=\"MyStyle\">\n"
+                        + "        <item name=\"android:textColor\">#ffff00ff</item>\n"
+                        + "    </style>\n"
+                        + "\n"
+                        + "    <style name=\"MyInheritingStyle\" parent=\"style/MyStyle\">\n"
+                        + "        <item name=\"android:textSize\">24pt</item>\n"
+                        + "    </style>\n"
+                        + "</resources>"))
+                .run()
+                .expectClean();
+    }
 
     public void testThemeFromLayout() throws Exception {
         mEnableIds = false;
@@ -779,6 +772,37 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
                                 + "    }\n"
                                 + "}\n")
                 ));
+    }
+
+    public void testReferenceFromObjectLiteralArguments() throws Exception {
+        lint().files(
+                xml("res/layout/main.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    android:orientation=\"vertical\" android:layout_width=\"match_parent\"\n"
+                        + "    android:layout_height=\"match_parent\" />\n"),
+                java("test/my/pkg/MyTest.java", ""
+                        + "package test.pkg;\n"
+                        + "\n"
+                        + "public class MyTest {\n"
+                        + "    public Object test() {\n"
+                        + "        return new Inner<String>(R.layout.main) {\n"
+                        + "            @Override\n"
+                        + "            public void foo() {\n"
+                        + "                super.foo();\n"
+                        + "            }\n"
+                        + "        };\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    private static class Inner<T> {\n"
+                        + "        public Inner(int id) {\n"
+                        + "        }\n"
+                        + "        public void foo() {\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}\n"))
+                .run()
+                .expectClean();
     }
 
     public void testKeepAndDiscard() throws Exception {
@@ -863,10 +887,156 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
                 ));
     }
 
-    @Override
-    protected void checkReportedError(@NonNull Context context, @NonNull Issue issue,
-            @NonNull Severity severity, @NonNull Location location, @NonNull String message) {
-        assertNotNull(message, UnusedResourceDetector.getUnusedResource(message, TEXT));
+    public void testReferenceFromDataBinding() throws Exception {
+        // Regression test for https://issuetracker.google.com/38213600
+        //noinspection all // Sample code
+        lint().files(
+                // Data binding layout
+                xml("res/layout/added_view.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<layout xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <TextView\n"
+                        + "        android:layout_width=\"match_parent\"\n"
+                        + "        android:layout_height=\"match_parent\"\n"
+                        + "        android:orientation=\"vertical\"\n"
+                        + "        android:text=\"Hello World\"/>\n"
+                        + "</layout>"),
+                xml("res/layout/added_view2.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<layout xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <data class=\".IndependentLibraryBinding\">\n"
+                        + "    </data>\n"
+                        + "    <TextView\n"
+                        + "        android:layout_width=\"match_parent\"\n"
+                        + "        android:layout_height=\"match_parent\"\n"
+                        + "        android:orientation=\"vertical\"\n"
+                        + "        android:text=\"Hello World\"/>\n"
+                        + "</layout>"),
+                xml("res/layout/third_added_view.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<layout xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <data>\n"
+                        + "    </data>\n"
+                        + "    <TextView\n"
+                        + "        android:layout_width=\"match_parent\"\n"
+                        + "        android:layout_height=\"match_parent\"\n"
+                        + "        android:orientation=\"vertical\"\n"
+                        + "        android:text=\"Hello World\"/>\n"
+                        + "</layout>"),
+                // Only usage: data binding class
+                java(""
+                        + "package my.pkg;\n"
+                        + "\n"
+                        + "import android.view.LayoutInflater;\n"
+                        + "\n"
+                        + "public class Ref {\n"
+                        + "    public void test(LayoutInflater inflater){\n"
+                        + "        final AddedViewBinding addedView = AddedViewBinding.inflate(inflater, null, true);\n"
+                        + "        final ThirdAddedViewBinding addedView2 = ThirdAddedViewBinding.inflate(inflater, null, true);\n"
+                        + "        final AddedViewBinding addedView3 = IndependentLibraryBinding.inflate(inflater, null, true);\n"
+                        + "    }\n"
+                        + "}\n"),
+                // Stubs to make type resolution work in test without actual data binding
+                // code-gen and data binding runtime libraries
+                java(""
+                        + "package my.pkg;\n"
+                        + "\n"
+                        + "abstract class AddedViewBinding extends android.databinding.ViewDataBinding {\n"
+                        + "    public AddedViewBinding(android.databinding.DataBindingComponent bindingComponent,\n"
+                        + "                             android.view.View root, int localFieldCount) {\n"
+                        + "        super(bindingComponent, root, localFieldCount);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public static AddedViewBinding inflate(android.view.LayoutInflater inflater, \n"
+                        + "                                           android.view.ViewGroup root, \n"
+                        + "                                           boolean attachToRoot) {\n"
+                        + "        return null;\n"
+                        + "    }\n"
+                        + "}\n"),
+                java(""
+                        + "package my.pkg;\n"
+                        + "\n"
+                        + "abstract class IndependentLibraryBinding extends android.databinding.ViewDataBinding {\n"
+                        + "    public IndependentLibraryBinding(android.databinding.DataBindingComponent bindingComponent,\n"
+                        + "                             android.view.View root, int localFieldCount) {\n"
+                        + "        super(bindingComponent, root, localFieldCount);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public static IndependentLibraryBinding inflate(android.view.LayoutInflater inflater, \n"
+                        + "                                           android.view.ViewGroup root, \n"
+                        + "                                           boolean attachToRoot) {\n"
+                        + "        return null;\n"
+                        + "    }\n"
+                        + "}\n"),
+                java(""
+                        + "package my.pkg;\n"
+                        + "\n"
+                        + "abstract class ThirdAddedViewBinding extends android.databinding.ViewDataBinding {\n"
+                        + "    public ThirdAddedViewBinding(android.databinding.DataBindingComponent bindingComponent,\n"
+                        + "                             android.view.View root, int localFieldCount) {\n"
+                        + "        super(bindingComponent, root, localFieldCount);\n"
+                        + "    }\n"
+                        + "\n"
+                        + "    public static ThirdAddedViewBinding inflate(android.view.LayoutInflater inflater, \n"
+                        + "                                           android.view.ViewGroup root, \n"
+                        + "                                           boolean attachToRoot) {\n"
+                        + "        return null;\n"
+                        + "    }\n"
+                        + "}\n"),
+                java(""
+                        + "package android.databinding;\n"
+                        + "public abstract class ViewDataBinding {\n"
+                        + "}"))
+                .run()
+                .expectClean();
+    }
+
+    @SuppressWarnings("SpellCheckingInspection")
+    public void testButterknife() throws Exception {
+        // Regression test for https://issuetracker.google.com/62640956
+        //noinspection all // Sample code
+        lint().files(
+                // Data binding layout
+                xml("res/values/colors.xml", "" +
+                        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                        "<resources>\n" +
+                        "    <color name=\"bgColor\">#FF4444</color>\n" +
+                        "</resources>\n"),
+                java("" +
+                        "package my.pkg;\n" +
+                        "import butterknife.BindColor;\n" +
+                        "\n" +
+                        "public class Reference {\n" +
+                        "    @BindColor(R2.color.bgColor)\n" +
+                        "    int bgColor;\n" +
+                        "}\n"),
+                java("" +
+                        "package butterknife;\n" +
+                        "import java.lang.annotation.*;\n" +
+                        "import static java.lang.annotation.ElementType.FIELD;\n" +
+                        "import static java.lang.annotation.RetentionPolicy.CLASS;\n" +
+                        "@Retention(CLASS) @Target(FIELD)\n" +
+                        "public @interface BindColor {\n" +
+                        "  int value();\n" +
+                        "}\n"),
+                java("" +
+                        "package my.pkg;\n" +
+                        "\n" +
+                        "public final class R {\n" +
+                        "    public static final class color {\n" +
+                        "        public static final int bgColor=0x7f05001f;" +
+                        "    }\n" +
+                        "}\n"),
+                java("" +
+                        "package my.pkg;\n" +
+                        "\n" +
+                        "public final class R2 {\n" +
+                        "    public static final class color {\n" +
+                        "        public static final int bgColor=0x7f05001f;" +
+                        "    }\n" +
+                        "}\n"))
+                .run()
+                .expectClean();
     }
 
     @SuppressWarnings("all") // Sample code
@@ -931,8 +1101,9 @@ public class UnusedResourceDetectorTest extends AbstractCheckTest {
             + "        public static final int linearLayout2=0x7f050002;\n"
             + "    }\n"
             + "    public static final class layout {\n"
-            + "        public static final int main=0x7f030000;\n"
-            + "        public static final int other=0x7f030001;\n"
+            // Not final: happens in libraries. Make sure we handle it correctly.
+            + "        public static int main=0x7f030000;\n"
+            + "        public static int other=0x7f030001;\n"
             + "    }\n"
             + "    public static final class string {\n"
             + "        public static final int app_name=0x7f040001;\n"

@@ -16,7 +16,6 @@
 
 package com.android.build.gradle.integration.instant;
 
-import static com.android.build.gradle.integration.common.truth.AbstractAndroidSubject.ClassFileScope.INSTANT_RUN;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.instant.InstantRunTestUtils.PORTS;
@@ -29,23 +28,21 @@ import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.runner.FilterableParameterized;
-import com.android.build.gradle.integration.common.utils.AndroidVersionMatcher;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunBuildMode;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
 import com.android.ddmlib.IDevice;
-import com.android.tools.fd.client.InstantRunArtifact;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.testutils.apk.SplitApks;
+import com.android.tools.ir.client.InstantRunArtifact;
 import com.google.common.collect.Iterables;
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
-import org.gradle.api.JavaVersion;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -57,7 +54,6 @@ import org.junit.runners.Parameterized;
 @RunWith(FilterableParameterized.class)
 public class DaggerTest {
 
-    private static final ColdswapMode COLDSWAP_MODE = ColdswapMode.MULTIDEX;
     private static final String ORIGINAL_MESSAGE = "from module";
     private static final String APP_MODULE_DESC = "Lcom/android/tests/AppModule;";
     private static final String GET_MESSAGE = "getMessage";
@@ -66,10 +62,10 @@ public class DaggerTest {
 
     @Rule public final Adb adb = new Adb();
 
-    @Parameterized.Parameters(name = "{0},useAndroidApt={1}")
+    @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> data() {
         return Arrays.asList(
-                new Object[][] {{"daggerOne", true}, {"daggerTwo", true}, {"daggerTwo", false}});
+                new Object[][] {{"daggerOne"}, {"daggerTwo"}});
     }
 
     @Rule public GradleTestProject project;
@@ -77,27 +73,18 @@ public class DaggerTest {
     private File mAppModule;
 
     private final String testProject;
-    private final boolean useAndroidApt;
 
-    public DaggerTest(String testProject, boolean useAndroidApt) {
+    public DaggerTest(String testProject) {
         this.testProject = testProject;
-        this.useAndroidApt = useAndroidApt;
 
-        project = GradleTestProject.builder().fromTestProject(testProject).create();
+        project = GradleTestProject.builder()
+                .fromTestProject(testProject)
+                .create();
     }
 
     @Before
-    public void setUp() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
-        if (this.testProject.equals("daggerTwo")) {
-            Assume.assumeTrue(
-                    "Dagger 2 only works on java 7+", JavaVersion.current().isJava7Compatible());
-        }
+    public void setUp() throws Exception {
         mAppModule = project.file("src/main/java/com/android/tests/AppModule.java");
-
-        if (testProject.equals("daggerTwo") && !useAndroidApt) {
-            project.setBuildFile("build.no-apt.gradle");
-        }
     }
 
     @Test
@@ -108,11 +95,11 @@ public class DaggerTest {
     @Test
     public void coldSwap() throws Exception {
         new ColdSwapTester(project)
-                .testMultiDex(
+                .testMultiApk(
                         new ColdSwapTester.Steps() {
                             @Override
-                            public void checkApk(@NonNull File apk) throws Exception {
-                                assertThatApk(apk).hasClass(APP_MODULE_DESC, INSTANT_RUN);
+                            public void checkApks(@NonNull SplitApks apks) throws Exception {
+                                assertThat(apks).hasClass(APP_MODULE_DESC);
                             }
 
                             @Override
@@ -143,8 +130,8 @@ public class DaggerTest {
                                     throws Exception {
                                 InstantRunBuildContext.Artifact artifact =
                                         Iterables.getOnlyElement(artifacts);
-                                assertThatDex(artifact.getLocation())
-                                        .containsClass(APP_MODULE_DESC)
+                                assertThatApk(new Apk(artifact.getLocation()))
+                                        .hasClass(APP_MODULE_DESC)
                                         .that()
                                         .hasMethod(GET_MESSAGE);
                             }
@@ -154,11 +141,11 @@ public class DaggerTest {
     @Test
     public void hotSwap() throws Exception {
         InstantRun instantRunModel =
-                InstantRunTestUtils.doInitialBuild(project, 23, COLDSWAP_MODE);
+                InstantRunTestUtils.doInitialBuild(project, new AndroidVersion(23, null));
 
         TestFileUtils.searchAndReplace(mAppModule, "from module", "CHANGE");
 
-        project.executor().withInstantRun(23, COLDSWAP_MODE).run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         InstantRunArtifact artifact = InstantRunTestUtils.getReloadDexArtifact(instantRunModel);
 
@@ -167,14 +154,14 @@ public class DaggerTest {
 
     @Test
     @Category(DeviceTests.class)
-    public void hotSwap_device_art() throws Exception {
-        doTestHotSwap(adb.getDevice(AndroidVersionMatcher.thatUsesArt()));
+    public void hotSwap24() throws Exception {
+        doTestHotSwap(adb.getDevice(24));
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void hotSwap_device_dalvik() throws Exception {
-        doTestHotSwap(adb.getDevice(AndroidVersionMatcher.thatUsesDalvik()));
+    public void hotSwap23() throws Exception {
+        doTestHotSwap(adb.getDevice(23));
     }
 
     private void doTestHotSwap(IDevice iDevice) throws Exception {

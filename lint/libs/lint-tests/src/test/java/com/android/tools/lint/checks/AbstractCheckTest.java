@@ -20,12 +20,13 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.testutils.TestUtils;
 import com.android.tools.lint.checks.infrastructure.LintDetectorTest;
+import com.android.tools.lint.checks.infrastructure.TestIssueRegistry;
 import com.android.tools.lint.checks.infrastructure.TestLintTask;
-import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.client.api.IssueRegistry;
+import com.android.tools.lint.client.api.LintDriver;
+import com.android.tools.lint.client.api.LintRequest;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.Location;
-import com.android.tools.lint.detector.api.Severity;
 import com.google.common.collect.Sets;
 import java.io.File;
 import java.io.InputStream;
@@ -50,7 +51,7 @@ public abstract class AbstractCheckTest extends LintDetectorTest {
         Class<? extends Detector> detectorClass = getDetectorInstance().getClass();
         // Get the list of issues from the registry and filter out others, to make sure
         // issues are properly registered
-        List<Issue> candidates = new BuiltinIssueRegistry().getIssues();
+        List<Issue> candidates = new TestIssueRegistry().getIssues();
         for (Issue issue : candidates) {
             if (issue.getImplementation().getDetectorClass() == detectorClass) {
                 issues.add(issue);
@@ -76,16 +77,22 @@ public abstract class AbstractCheckTest extends LintDetectorTest {
         sdk = TestUtils.getSdk();
     }
 
+    @NonNull
+    public static File getSdk() {
+        return sdk;
+    }
+
     @Override
     @NonNull
     protected TestLintTask lint() {
         // instead of super.lint: don't set issues such that we can compute and compare
         // detector results below
         TestLintTask task = TestLintTask.lint();
+        task.runCompatChecks(false);
 
-        task.checkMessage((context, issue, severity, location, message)
+        task.checkMessage((context, issue, severity, location, message, fix)
                 -> AbstractCheckTest.super.checkReportedError(context, issue, severity, location,
-                message));
+                message, fix));
 
         // We call getIssues() instead of setting task.detector() because the above
         // getIssues call will ensure that we only check issues registered in the class
@@ -93,6 +100,9 @@ public abstract class AbstractCheckTest extends LintDetectorTest {
 
         // Now check check the discrepancy to look for unregistered issues and
         // highlight these
+// TODO: Handle problems from getRegisteredIssuesFromDetector and if no fields are found
+// don't assert the below. Basically, let the ISSUE field live outside the detector class
+// (such as in a companion.)
         List<Issue> computedIssues = getRegisteredIssuesFromDetector();
         if (getIssues().equals(computedIssues)) {
             Set<Issue> checkedIssues = Sets.newHashSet(task.getCheckedIssues());
@@ -100,8 +110,8 @@ public abstract class AbstractCheckTest extends LintDetectorTest {
             if (!checkedIssues.equals(detectorIssues)) {
                 Set<Issue> difference = Sets.symmetricDifference(checkedIssues, detectorIssues);
                 fail("Discrepancy in issues listed in detector class "
-                        + getDetectorInstance().getClass().getSimpleName() + " and issues "
-                        + "found in the issue registry: " + difference);
+                        +getDetectorInstance().getClass().getSimpleName()+" and issues "
+                        +"found in the issue registry: "+difference);
             }
         }
 
@@ -120,6 +130,19 @@ public abstract class AbstractCheckTest extends LintDetectorTest {
         @Override
         public File getSdkHome() {
             return TestUtils.getSdk();
+        }
+
+        @NonNull
+        @Override
+        protected LintDriver createDriver(@NonNull IssueRegistry registry,
+                @NonNull LintRequest request) {
+            LintDriver driver = super.createDriver(registry, request);
+            // All the builtin tests have been migrated; make tests faster
+            // by not computing PSI/Lombok trees when not necessary, and better yet,
+            // make sure that no new tests are accidentally integrated that are using
+            // the old mechanism (with this the tests won't work)
+            driver.setRunCompatChecks(false, false);
+            return driver;
         }
     }
 }

@@ -26,15 +26,11 @@ import com.android.ide.common.blame.SourcePosition;
 import com.android.utils.ILogger;
 import com.google.common.base.CaseFormat;
 import com.google.common.collect.ImmutableList;
-
-import org.w3c.dom.Document;
-import org.xml.sax.SAXException;
-
 import java.io.IOException;
 import java.util.EnumMap;
 import java.util.Map;
-
 import javax.xml.parsers.ParserConfigurationException;
+import org.xml.sax.SAXException;
 
 /**
  * Contains the result of 2 files merging.
@@ -60,45 +56,47 @@ public class MergingReport {
          */
         AAPT_SAFE,
 
-        /**
-         * Blame file for merged manifest file.
-         */
-        BLAME
+        /** Blame file for merged manifest file. */
+        BLAME,
     }
 
     @NonNull
-    private final Map<MergedManifestKind, String> mMergedDocuments;
+    private final Map<MergedManifestKind, String> mergedDocuments;
     @NonNull
-    private final Map<MergedManifestKind, XmlDocument> mMergedXmlDocuments;
+    private final Map<MergedManifestKind, XmlDocument> mergedXmlDocuments;
     @NonNull
-    private final Result mResult;
+    private final Result result;
     // list of logging events, ordered by their recording time.
     @NonNull
-    private final ImmutableList<Record> mRecords;
+    private final ImmutableList<Record> records;
     @NonNull
-    private final ImmutableList<String> mIntermediaryStages;
+    private final ImmutableList<String> intermediaryStages;
     @NonNull
-    private final Actions mActions;
+    private final Actions actions;
+    @NonNull
+    private final String packageName;
 
     private MergingReport(@NonNull Map<MergedManifestKind, String> mergedDocuments,
             @NonNull Map<MergedManifestKind, XmlDocument> mergedXmlDocuments,
             @NonNull Result result,
             @NonNull ImmutableList<Record> records,
             @NonNull ImmutableList<String> intermediaryStages,
-            @NonNull Actions actions) {
-        mMergedDocuments = mergedDocuments;
-        mMergedXmlDocuments = mergedXmlDocuments;
-        mResult = result;
-        mRecords = records;
-        mIntermediaryStages = intermediaryStages;
-        mActions = actions;
+            @NonNull Actions actions,
+            @NonNull String packageName) {
+        this.mergedDocuments = mergedDocuments;
+        this.mergedXmlDocuments = mergedXmlDocuments;
+        this.result = result;
+        this.records = records;
+        this.intermediaryStages = intermediaryStages;
+        this.actions = actions;
+        this.packageName = packageName;
     }
 
     /**
      * dumps all logging records to a logger.
      */
     public void log(@NonNull ILogger logger) {
-        for (Record record : mRecords) {
+        for (Record record : records) {
             switch(record.mSeverity) {
                 case WARNING:
                     logger.warning(record.toString());
@@ -113,9 +111,9 @@ public class MergingReport {
                     logger.error(null /* throwable */, "Unhandled record type " + record.mSeverity);
             }
         }
-        mActions.log(logger);
+        actions.log(logger);
 
-        if (!mResult.isSuccess()) {
+        if (!result.isSuccess()) {
             logger.warning("\nSee http://g.co/androidstudio/manifest-merger for more information"
                     + " about the manifest merger.\n");
         }
@@ -123,12 +121,12 @@ public class MergingReport {
 
     @Nullable
     public String getMergedDocument(@NonNull MergedManifestKind state) {
-        return mMergedDocuments.get(state);
+        return mergedDocuments.get(state);
     }
 
     @Nullable
     public XmlDocument getMergedXmlDocument(@NonNull MergedManifestKind state) {
-        return mMergedXmlDocuments.get(state);
+        return mergedXmlDocuments.get(state);
     }
 
     /**
@@ -138,7 +136,7 @@ public class MergingReport {
      */
     @NonNull
     public ImmutableList<String> getIntermediaryStages() {
-        return mIntermediaryStages;
+        return intermediaryStages;
     }
 
     /**
@@ -166,35 +164,40 @@ public class MergingReport {
 
     @NonNull
     public Result getResult() {
-        return mResult;
+        return result;
     }
 
     @NonNull
     public ImmutableList<Record> getLoggingRecords() {
-        return mRecords;
+        return records;
     }
 
     @NonNull
     public Actions getActions() {
-        return mActions;
+        return actions;
     }
 
     @NonNull
     public String getReportString() {
-        switch (mResult) {
+        switch (result) {
             case SUCCESS:
                 return "Manifest merger executed successfully";
             case WARNING:
-                return mRecords.size() > 1
+                return records.size() > 1
                         ? "Manifest merger exited with warnings, see logs"
-                        : "Manifest merger warning : " + mRecords.get(0).mLog;
+                        : "Manifest merger warning : " + records.get(0).mLog;
             case ERROR:
-                return mRecords.size() > 1
+                return records.size() > 1
                         ? "Manifest merger failed with multiple errors, see logs"
-                        : "Manifest merger failed : " + mRecords.get(0).mLog;
+                        : "Manifest merger failed : " + records.get(0).mLog;
             default:
-                return "Manifest merger returned an invalid result " + mResult;
+                return "Manifest merger returned an invalid result " + result;
         }
+    }
+
+    @NonNull
+    public String getPackageName() {
+        return packageName;
     }
 
     /**
@@ -272,10 +275,18 @@ public class MergingReport {
         private boolean mHasErrors = false;
         @NonNull
         private ActionRecorder mActionRecorder = new ActionRecorder();
-        private final ILogger mLogger;
+        @NonNull private final ILogger mLogger;
+        @Nullable private final ManifestMerger2 mManifestMerger;
+        private String packageName;
 
-        Builder(ILogger logger) {
+        @VisibleForTesting
+        Builder(@NonNull ILogger logger) {
+            this(logger, null);
+        }
+
+        Builder(@NonNull ILogger logger, @Nullable ManifestMerger2 manifestMerger) {
             mLogger = logger;
+            mManifestMerger = manifestMerger;
         }
 
         Builder setMergedDocument(@NonNull MergedManifestKind mergedManifestKind, @NonNull String mergedDocument) {
@@ -360,9 +371,16 @@ public class MergingReport {
                     result,
                     mRecordBuilder.build(),
                     mIntermediaryStages.build(),
-                    mActionRecorder.build());
+                    mActionRecorder.build(),
+                    packageName);
         }
 
+        @Nullable
+        public ManifestMerger2 getManifestMerger() {
+            return mManifestMerger;
+        }
+
+        @NonNull
         public ILogger getLogger() {
             return mLogger;
         }
@@ -370,6 +388,10 @@ public class MergingReport {
         public String blame(XmlDocument document)
                 throws ParserConfigurationException, SAXException, IOException {
             return mActionRecorder.build().blame(document);
+        }
+
+        public void setFinalPackageName(String finalPackageName) {
+            this.packageName = finalPackageName;
         }
     }
 }

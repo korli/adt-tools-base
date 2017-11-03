@@ -19,19 +19,16 @@ package com.android.build.gradle.internal.dsl;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-/**
- * DSL object for configuring APT options.
- */
+/** DSL object for configuring APT options. */
 @SuppressWarnings("UnnecessaryInheritDoc")
-public class AnnotationProcessorOptions implements CoreAnnotationProcessorOptions {
+public class AnnotationProcessorOptions
+        implements com.android.build.gradle.api.AnnotationProcessorOptions {
 
     private final List<String> classNames = Lists.newArrayList();
     private final Map<String, String> arguments = Maps.newHashMap();
@@ -98,29 +95,10 @@ public class AnnotationProcessorOptions implements CoreAnnotationProcessorOption
         this.includeCompileClasspath = includeCompileClasspath;
     }
 
-    public void _initWith(CoreAnnotationProcessorOptions aptOptions) {
+    public void _initWith(com.android.build.gradle.api.AnnotationProcessorOptions aptOptions) {
         setClassNames(aptOptions.getClassNames());
         setArguments(aptOptions.getArguments());
         setIncludeCompileClasspath(aptOptions.getIncludeCompileClasspath());
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        AnnotationProcessorOptions that = (AnnotationProcessorOptions) o;
-        return Objects.equal(classNames, that.classNames) &&
-                Objects.equal(arguments, that.arguments) &&
-                Objects.equal(includeCompileClasspath, that.includeCompileClasspath);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(classNames, arguments);
     }
 
     @Override

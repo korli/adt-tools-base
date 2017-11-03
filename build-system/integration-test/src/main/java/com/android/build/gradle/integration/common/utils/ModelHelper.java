@@ -16,9 +16,11 @@
 
 package com.android.build.gradle.integration.common.utils;
 
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.builder.core.BuilderConstants.DEBUG;
 import static com.android.builder.core.VariantType.ANDROID_TEST;
 import static com.android.builder.model.AndroidProject.ARTIFACT_ANDROID_TEST;
+import static com.android.builder.model.AndroidProject.ARTIFACT_UNIT_TEST;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -27,7 +29,7 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.build.FilterData;
-import com.android.build.OutputFile;
+import com.android.build.VariantOutput;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidArtifactOutput;
 import com.android.builder.model.AndroidProject;
@@ -44,6 +46,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -108,24 +111,10 @@ public class ModelHelper {
                 "variantName '" + variantName + "' single output null-check",
                 output);
 
-        // we only support single outputFile in this helper method.
-        // we're not going to use this, this is a state check only.
-        Collection<? extends OutputFile> outputFiles = output.getOutputs();
-        assertNotNull(
-                "variantName '" + variantName + "' outputFiles null-check",
-                outputFiles);
-        assertEquals(
-                "variantName '" + variantName + "' outputFiles size check",
-                1,
-                outputFiles.size());
+        File outputFile = output.getOutputFile();
+        assertNotNull("variantName '" + variantName + "' mainOutputFile null-check", outputFile);
 
-        // get the main output file
-        OutputFile mainOutputFile = output.getMainOutputFile();
-        assertNotNull(
-                "variantName '" + variantName + "' mainOutputFile null-check",
-                mainOutputFile);
-
-        return mainOutputFile.getOutputFile();
+        return outputFile;
     }
 
     public static void testDefaultSourceSets(
@@ -138,17 +127,23 @@ public class ModelHelper {
                 "main", defaultConfig.getSourceProvider())
                 .test();
 
-        // test the main instrumentTest source provider
-        SourceProviderContainer testSourceProviders = getSourceProviderContainer(
-                defaultConfig.getExtraSourceProviders(), ARTIFACT_ANDROID_TEST);
+        // test the main androidTest source provider
+        SourceProviderContainer androidTestSourceProviders =
+                getSourceProviderContainer(
+                        defaultConfig.getExtraSourceProviders(), ARTIFACT_ANDROID_TEST);
 
-        new SourceProviderHelper(model.getName(), projectDir,
-                ANDROID_TEST.getPrefix(), testSourceProviders.getSourceProvider())
+        new SourceProviderHelper(
+                        model.getName(),
+                        projectDir,
+                        ANDROID_TEST.getPrefix(),
+                        androidTestSourceProviders.getSourceProvider())
                 .test();
 
         // test the source provider for the build types
         Collection<BuildTypeContainer> buildTypes = model.getBuildTypes();
-        assertEquals("Build Type Count", 2, buildTypes.size());
+        assertThat(buildTypes).named("build types").hasSize(2);
+
+        String testedBuildType = findTestedBuildType(model);
 
         for (BuildTypeContainer btContainer : model.getBuildTypes()) {
             new SourceProviderHelper(
@@ -158,8 +153,21 @@ public class ModelHelper {
                     btContainer.getSourceProvider())
                     .test();
 
-            // For every build type there's the unit test source provider.
-            assertEquals(1, btContainer.getExtraSourceProviders().size());
+            // For every build type there's the unit test source provider and the android test
+            // one (optional).
+            final Set<String> extraSourceProviderNames =
+                    btContainer
+                            .getExtraSourceProviders()
+                            .stream()
+                            .map(SourceProviderContainer::getArtifactName)
+                            .collect(Collectors.toSet());
+
+            if (btContainer.getBuildType().getName().equals(testedBuildType)) {
+                assertThat(extraSourceProviderNames)
+                        .containsExactly(ARTIFACT_ANDROID_TEST, ARTIFACT_UNIT_TEST);
+            } else {
+                assertThat(extraSourceProviderNames).containsExactly(ARTIFACT_UNIT_TEST);
+            }
         }
     }
 
@@ -186,8 +194,8 @@ public class ModelHelper {
         Collection<AndroidArtifactOutput> relMainOutputs = relMainInfo.getOutputs();
         assertNotNull("Rel Main output null-check", relMainOutputs);
 
-        File debugFile = debugMainOutputs.iterator().next().getMainOutputFile().getOutputFile();
-        File releaseFile = relMainOutputs.iterator().next().getMainOutputFile().getOutputFile();
+        File debugFile = debugMainOutputs.iterator().next().getOutputFile();
+        File releaseFile = relMainOutputs.iterator().next().getOutputFile();
 
         assertFalse("debug: " + debugFile + " / release: " + releaseFile,
                 debugFile.equals(releaseFile));
@@ -211,6 +219,38 @@ public class ModelHelper {
         return getDebugVariant(project).getMainArtifact();
     }
 
+    public static AndroidArtifact getAndroidTestArtifact(
+            @NonNull AndroidProject project, @NonNull String variantName) {
+        return getAndroidArtifact(
+                getVariant(project.getVariants(), variantName).getExtraAndroidArtifacts(),
+                ARTIFACT_ANDROID_TEST);
+    }
+
+    public static JavaArtifact getUnitTestArtifact(
+            @NonNull AndroidProject project, @NonNull String variantName) {
+        return getJavaArtifact(
+                getVariant(project.getVariants(), variantName).getExtraJavaArtifacts(),
+                ARTIFACT_UNIT_TEST);
+    }
+
+    /** deprecated Use {@link #getAndroidTestArtifact(AndroidProject, String)} */
+    @Deprecated
+    @NonNull
+    public static Collection<JavaArtifact> getExtraJavaArtifacts(@NonNull AndroidProject project) {
+        return getDebugVariant(project).getExtraJavaArtifacts();
+    }
+
+    public static AndroidArtifact getAndroidTestArtifact(@NonNull AndroidProject project) {
+        return getAndroidTestArtifact(project, "debug");
+    }
+
+    /** @deprecated Use {@link #getUnitTestArtifact(AndroidProject, String)} */
+    @Deprecated
+    @NonNull
+    public static JavaArtifact getUnitTestArtifact(@NonNull AndroidProject project) {
+        return getUnitTestArtifact(project, "debug");
+    }
+
     /**
      * return the only item with the given name, or throw an exception if 0 or 2+ items match
      */
@@ -219,6 +259,20 @@ public class ModelHelper {
             @NonNull Collection<AndroidArtifact> items,
             @NonNull String name) {
         return searchForExistingItem(items, name, AndroidArtifact::getName, "AndroidArtifact");
+    }
+
+    /**
+     * Gets the java artifact with the given name.
+     *
+     * @param items the java artifacts to search
+     * @param name the name to match, e.g. {@link AndroidProject#ARTIFACT_UNIT_TEST}
+     * @return the only item with the given name
+     * @throws AssertionError if no items match or if multiple items match
+     */
+    @NonNull
+    public static JavaArtifact getJavaArtifact(
+            @NonNull Collection<JavaArtifact> items, @NonNull String name) {
+        return searchForExistingItem(items, name, JavaArtifact::getName, "JavaArtifact");
     }
 
     /**
@@ -248,8 +302,9 @@ public class ModelHelper {
     }
 
     @Nullable
-    public static String getFilter(@NonNull OutputFile outputFile, @NonNull String filterType) {
-        for (FilterData filterData : outputFile.getFilters()) {
+    public static String getFilter(
+            @NonNull VariantOutput variantOutput, @NonNull String filterType) {
+        for (FilterData filterData : variantOutput.getFilters()) {
             if (filterData.getFilterType().equals(filterType)) {
                 return filterData.getIdentifier();
             }
@@ -269,10 +324,27 @@ public class ModelHelper {
     public static ProductFlavorContainer getProductFlavor(
             @NonNull Collection<ProductFlavorContainer> items,
             @NonNull String name) {
-        return searchForExistingItem(items, name, flavor -> flavor.getProductFlavor().getName(),
-                "ArtifactMetaData");
+        return searchForExistingItem(
+                items,
+                name,
+                flavor -> flavor.getProductFlavor().getName(),
+                "ProductFlavorContainer");
     }
 
+    @Nullable
+    public static String findTestedBuildType(@NonNull AndroidProject project) {
+        return project.getVariants()
+                .stream()
+                .filter(
+                        variant ->
+                                getOptionalAndroidArtifact(
+                                                variant.getExtraAndroidArtifacts(),
+                                                ARTIFACT_ANDROID_TEST)
+                                        != null)
+                .map(Variant::getBuildType)
+                .findAny()
+                .orElse(null);
+    }
 
     /**
      * Returns the generates sources commands for all projects for the debug variant.

@@ -25,7 +25,6 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -95,24 +94,37 @@ public class ActionRecorder {
             new LinkedHashMap<NodeKey, Actions.DecisionTreeRecord>();
 
     /**
-     * When the first xml file is loaded, there is nothing to merge with, however, each xml element
-     * and attribute added to the initial merged file need to be recorded.
+     * Record an {@link com.android.manifmerger.Actions.ActionType.ADDED} action for an unrecorded
+     * XmlElement and its unrecorded descendants. If exhaustiveSearch is true, we check all the
+     * XmlElement's descendants; if it's false, we stop searching through an XmlElement's
+     * descendants if that XmlElement has already been recorded.
      *
-     * @param xmlElement xml element added to the initial merged document.
+     * <p>When the first xml file is loaded, there is nothing to merge with, however, each xml
+     * element and attribute added to the initial merged file need to be recorded.
+     *
+     * @param xmlElement XmlElement added to the merged document.
+     * @param exhaustiveSearch whether to check an already recorded XmlElement's descendants
      */
-    synchronized void recordDefaultNodeAction(@NonNull XmlElement xmlElement) {
-        if (!mRecords.containsKey(xmlElement.getOriginalId())) {
+    synchronized void recordAddedNodeAction(
+            @NonNull XmlElement xmlElement, boolean exhaustiveSearch) {
+        boolean nodeRecorded = !getDecisionTreeRecord(xmlElement).getNodeRecords().isEmpty();
+        if (!nodeRecorded) {
             recordNodeAction(xmlElement, Actions.ActionType.ADDED);
-            for (XmlAttribute xmlAttribute : xmlElement.getAttributes()) {
-                AttributeOperationType attributeOperation = xmlElement
-                        .getAttributeOperationType(xmlAttribute.getName());
+        } else if (!exhaustiveSearch) {
+            return;
+        }
+        for (XmlAttribute xmlAttribute : xmlElement.getAttributes()) {
+            // check !nodeRecorded first because if it's true, we don't have
+            // to call getAttributeCreationRecord(xmlAttribute)
+            if (!nodeRecorded || getAttributeCreationRecord(xmlAttribute) == null) {
                 recordAttributeAction(
-                        xmlAttribute, Actions.ActionType.ADDED,
-                        attributeOperation);
+                        xmlAttribute,
+                        Actions.ActionType.ADDED,
+                        xmlElement.getAttributeOperationType(xmlAttribute.getName()));
             }
-            for (XmlElement childNode : xmlElement.getMergeableElements()) {
-                recordDefaultNodeAction(childNode);
-            }
+        }
+        for (XmlElement childNode : xmlElement.getMergeableElements()) {
+            recordAddedNodeAction(childNode, exhaustiveSearch);
         }
     }
 
@@ -123,12 +135,7 @@ public class ActionRecorder {
      * @param reason optional contextual information whey the implied element was added.
      */
     synchronized void recordImpliedNodeAction(@NonNull XmlElement xmlElement, @Nullable String reason) {
-        NodeKey storageKey = xmlElement.getOriginalId();
-        Actions.DecisionTreeRecord nodeDecisionTree = mRecords.get(storageKey);
-        if (nodeDecisionTree == null) {
-            nodeDecisionTree = new Actions.DecisionTreeRecord();
-            mRecords.put(storageKey, nodeDecisionTree);
-        }
+        Actions.DecisionTreeRecord nodeDecisionTree = getDecisionTreeRecord(xmlElement);
         Actions.NodeRecord record = new Actions.NodeRecord(Actions.ActionType.IMPLIED,
                 new SourceFilePosition(
                         xmlElement.getDocument().getSourceFile(),
@@ -184,23 +191,25 @@ public class ActionRecorder {
     synchronized void recordNodeAction(
             @NonNull XmlElement mergedElement,
             @NonNull Actions.NodeRecord nodeRecord) {
-
-        NodeKey storageKey = mergedElement.getOriginalId();
-        Actions.DecisionTreeRecord nodeDecisionTree = mRecords.get(storageKey);
-        if (nodeDecisionTree == null) {
-            nodeDecisionTree = new Actions.DecisionTreeRecord();
-            mRecords.put(storageKey, nodeDecisionTree);
-        }
+        Actions.DecisionTreeRecord nodeDecisionTree = getDecisionTreeRecord(mergedElement);
         nodeDecisionTree.addNodeRecord(nodeRecord);
+        updateRecordsIfNodeKeyChanged(mergedElement);
+    }
+
+    @NonNull
+    private synchronized Actions.DecisionTreeRecord getDecisionTreeRecord(
+            @NonNull XmlElement xmlElement) {
+        return mRecords.computeIfAbsent(
+                xmlElement.getOriginalId(), k -> new Actions.DecisionTreeRecord());
     }
 
     /**
      * Records an attribute action taken by the merging tool
      *
-     * @param attribute              the attribute in question.
-     * @param actionType             the action's type
+     * @param attribute the attribute in question.
+     * @param actionType the action's type
      * @param attributeOperationType the original tool annotation leading to the merging tool
-     *                               decision.
+     *     decision.
      */
     synchronized void recordAttributeAction(
             @NonNull XmlAttribute attribute,
@@ -278,6 +287,21 @@ public class ActionRecorder {
     }
 
     /**
+     * Adds the xmlElement's current node key to the map of NodeKeys to DecisionTreeRecords, if the
+     * node key has changed.
+     *
+     * @param xmlElement the xmlElement whose calculated node key may have changed from its original
+     *     node key.
+     */
+    private synchronized void updateRecordsIfNodeKeyChanged(@NonNull XmlElement xmlElement) {
+        NodeKey originalNodeKey = xmlElement.getOriginalId();
+        // by now the original NodeKey should have been added for this element.
+        Preconditions.checkState(
+                mRecords.containsKey(originalNodeKey), "No record for key [%s]", originalNodeKey);
+        mRecords.putIfAbsent(xmlElement.getId(), mRecords.get(originalNodeKey));
+    }
+
+    /**
      * Returns the record for an attribute creation event. The attribute is "created" when it is
      * added for the first time into the resulting merged xml document.
      */
@@ -300,11 +324,8 @@ public class ActionRecorder {
         // by now the node should have been added for this element.
         Preconditions.checkNotNull(nodeDecisionTree, "No record for key [%s]", storageKey);
         List<Actions.AttributeRecord> attributeRecords =
-                nodeDecisionTree.mAttributeRecords.get(attribute.getName());
-        if (attributeRecords == null) {
-            attributeRecords = new ArrayList<Actions.AttributeRecord>();
-            nodeDecisionTree.mAttributeRecords.put(attribute.getName(), attributeRecords);
-        }
+                nodeDecisionTree.mAttributeRecords.computeIfAbsent(
+                        attribute.getName(), k -> new ArrayList<>());
         return attributeRecords;
     }
 

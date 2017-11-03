@@ -19,6 +19,7 @@ package com.android.build.gradle.internal.pipeline;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.api.transform.Context;
+import com.android.build.api.transform.QualifiedContent;
 import com.android.build.api.transform.SecondaryFile;
 import com.android.build.api.transform.SecondaryInput;
 import com.android.build.api.transform.Status;
@@ -31,7 +32,7 @@ import com.android.builder.profile.Recorder;
 import com.android.ide.common.util.ReferenceHolder;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -46,47 +47,83 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import javax.inject.Inject;
+import org.gradle.api.Project;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.logging.Logger;
+import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectories;
 import org.gradle.api.tasks.OutputFiles;
-import org.gradle.api.tasks.ParallelizableTask;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
+import org.gradle.internal.impldep.org.jetbrains.annotations.NotNull;
+import org.gradle.workers.WorkerExecutor;
 
-/**
- * A task running a transform.
- */
-@ParallelizableTask
+/** A task running a transform. */
+@CacheableTask
 public class TransformTask extends StreamBasedTask implements Context {
 
     private Transform transform;
     private Recorder recorder;
     Collection<SecondaryFile> secondaryFiles = null;
+    List<FileCollection> secondaryInputFiles = null;
+    @NotNull private final WorkerExecutor workerExecutor;
 
     public Transform getTransform() {
         return transform;
     }
 
+    @Inject
+    public TransformTask(@NotNull WorkerExecutor workerExecutor) {
+        this.workerExecutor = workerExecutor;
+    }
+
     @InputFiles
-    public Collection<File> getOtherFileInputs() {
+    @Optional
+    public Collection<File> getOldSecondaryInputs() {
         //noinspection deprecation: Needed for backward compatibility.
-        return Stream.concat(
-                        transform.getSecondaryFiles().stream().map(SecondaryFile::getFile),
-                        transform.getSecondaryFileInputs().stream())
-                .collect(Collectors.toList());
+        return transform.getSecondaryFileInputs();
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public List<FileCollection> getSecondaryFileInputs() {
+        if (secondaryInputFiles == null) {
+            secondaryInputFiles = transform.getSecondaryFiles().stream()
+                    .map(secondaryFile -> secondaryFile.getFileCollection(getProject()))
+                    .collect(Collectors.toList());
+        }
+
+        return secondaryInputFiles;
     }
 
     @OutputFiles
-    public Collection<File> getOtherFileOutputs() {
-        return transform.getSecondaryFileOutputs();
+    public Map<String, File> getOtherFileOutputs() {
+
+        ImmutableMap.Builder<String, File> builder = new ImmutableMap.Builder<>();
+        int index = 0;
+        for (File outputFolder : transform.getSecondaryFileOutputs()) {
+            builder.put("otherFileOutput" + Integer.toString(++index), outputFolder);
+        }
+
+        return builder.build();
     }
 
     @OutputDirectories
-    public Collection<File> getOtherFolderOutputs() {
-        return transform.getSecondaryDirectoryOutputs();
+    public Map<String, File> getOtherFolderOutputs() {
+        ImmutableMap.Builder<String, File> builder = new ImmutableMap.Builder<>();
+        int index = 0;
+        for (File outputFolder : transform.getSecondaryDirectoryOutputs()) {
+            builder.put("otherFolderOutput" + Integer.toString(++index), outputFolder);
+        }
+
+        return builder.build();
     }
 
     @Input
@@ -108,7 +145,7 @@ public class TransformTask extends StreamBasedTask implements Context {
 
         GradleTransformExecution preExecutionInfo =
                 GradleTransformExecution.newBuilder()
-                        .setType(AnalyticsUtil.getTransformType(transform.getClass()))
+                        .setType(AnalyticsUtil.getTransformType(transform.getClass()).getNumber())
                         .setIsIncremental(isIncremental.getValue())
                         .build();
 
@@ -193,6 +230,10 @@ public class TransformTask extends StreamBasedTask implements Context {
                                                         : null)
                                         .setIncrementalMode(isIncremental.getValue())
                                         .build());
+
+                        if (outputStream != null) {
+                            outputStream.save();
+                        }
                         return null;
                     }
                 });
@@ -201,26 +242,28 @@ public class TransformTask extends StreamBasedTask implements Context {
     private Collection<SecondaryInput> gatherSecondaryInputChanges(
             Map<File, Status> changedMap, Set<File> removedFiles) {
 
+        final Project project = getProject();
         ImmutableList.Builder<SecondaryInput> builder = ImmutableList.builder();
         for (final SecondaryFile secondaryFile : getAllSecondaryInputs()) {
-            final File file = secondaryFile.getFile();
-            final Status status = changedMap.containsKey(file)
-                    ? changedMap.get(file)
-                    : removedFiles.contains(file)
-                            ? Status.REMOVED
-                            : Status.NOTCHANGED;
+            for (File file : secondaryFile.getFileCollection(project).getFiles()) {
+                final Status status = changedMap.containsKey(file)
+                        ? changedMap.get(file)
+                        : removedFiles.contains(file)
+                                ? Status.REMOVED
+                                : Status.NOTCHANGED;
 
-            builder.add(new SecondaryInput() {
-                @Override
-                public SecondaryFile getSecondaryInput() {
-                    return secondaryFile;
-                }
+                builder.add(new SecondaryInput() {
+                    @Override
+                    public SecondaryFile getSecondaryInput() {
+                        return secondaryFile;
+                    }
 
-                @Override
-                public Status getStatus() {
-                    return status;
-                }
-            });
+                    @Override
+                    public Status getStatus() {
+                        return status;
+                    }
+                });
+            }
         }
         return builder.build();
     }
@@ -249,13 +292,18 @@ public class TransformTask extends StreamBasedTask implements Context {
                 .collect(Collectors.toList());
     }
 
+    @Internal
     private synchronized Collection<SecondaryFile> getAllSecondaryInputs() {
         if (secondaryFiles == null) {
             ImmutableList.Builder<SecondaryFile> builder = ImmutableList.builder();
             builder.addAll(transform.getSecondaryFiles());
+            //noinspection deprecation
             builder.addAll(
-                    Iterables.transform(
-                            transform.getSecondaryFileInputs(), SecondaryFile::nonIncremental));
+                    transform
+                            .getSecondaryFileInputs()
+                            .stream()
+                            .map(SecondaryFile::nonIncremental)
+                            .iterator());
             secondaryFiles = builder.build();
         }
         return secondaryFiles;
@@ -288,9 +336,12 @@ public class TransformTask extends StreamBasedTask implements Context {
             @NonNull Map<File, Status> changedMap,
             @NonNull Set<File> removedFiles) {
 
+        final Project project = getProject();
         for (SecondaryFile secondaryFile : getAllSecondaryInputs()) {
-            File file = secondaryFile.getFile();
-            if ((changedMap.containsKey(file) || removedFiles.contains(file))
+            Set<File> files = secondaryFile.getFileCollection(project).getFiles();
+
+            if ((!Sets.intersection(files, changedMap.keySet()).isEmpty()
+                    || !Sets.intersection(files, removedFiles).isEmpty())
                     && !secondaryFile.supportsIncrementalBuild()) {
                 return false;
             }
@@ -299,8 +350,9 @@ public class TransformTask extends StreamBasedTask implements Context {
     }
 
     private boolean isSecondaryFile(File file) {
+        final Project project = getProject();
         for (SecondaryFile secondaryFile : getAllSecondaryInputs()) {
-            if (secondaryFile.getFile().equals(file)) {
+            if (secondaryFile.getFileCollection(project).contains(file)) {
                 return true;
             }
         }
@@ -319,6 +371,10 @@ public class TransformTask extends StreamBasedTask implements Context {
 
         Splitter splitter = Splitter.on(File.separatorChar);
 
+        final Sets.SetView<? super QualifiedContent.Scope> scopes =
+                Sets.union(transform.getScopes(), transform.getReferencedScopes());
+        final Set<QualifiedContent.ContentType> inputTypes = transform.getInputTypes();
+
         // start with the removed files as they carry the risk of removing incremental mode.
         // If we detect such a case, we stop immediately.
         for (File removedFile : removedFiles) {
@@ -331,16 +387,9 @@ public class TransformTask extends StreamBasedTask implements Context {
             boolean found = false;
             while (iterator.hasNext()) {
                 IncrementalTransformInput next = iterator.next();
-                if (next.checkRemovedJarFile(
-                        Sets.union(transform.getScopes(), transform.getReferencedScopes()),
-                        transform.getInputTypes(),
-                        removedFile,
-                        removedFileSegments)
+                if (next.checkRemovedJarFile(scopes, inputTypes, removedFile, removedFileSegments)
                         || next.checkRemovedFolderFile(
-                                Sets.union(transform.getScopes(), transform.getReferencedScopes()),
-                                transform.getInputTypes(),
-                                removedFile,
-                                removedFileSegments)) {
+                                scopes, inputTypes, removedFile, removedFileSegments)) {
                     found = true;
                     break;
                 }
@@ -415,6 +464,12 @@ public class TransformTask extends StreamBasedTask implements Context {
         void callback(@NonNull T transform, @NonNull TransformTask task);
     }
 
+    @NonNull
+    @Override
+    public WorkerExecutor getWorkerExecutor() {
+        return workerExecutor;
+    }
+
     public static class ConfigAction<T extends Transform> implements TaskConfigAction<TransformTask> {
 
         @NonNull
@@ -475,6 +530,8 @@ public class TransformTask extends StreamBasedTask implements Context {
             if (configActionCallback != null) {
                 configActionCallback.callback(transform, task);
             }
+            task.getOutputs().cacheIf(t -> transform.isCacheable());
+            task.registerConsumedAndReferencedStreamInputs();
         }
     }
 }

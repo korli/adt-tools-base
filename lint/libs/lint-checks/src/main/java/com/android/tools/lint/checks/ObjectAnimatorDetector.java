@@ -26,34 +26,28 @@ import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.TextFormat;
 import com.android.tools.lint.detector.api.TypeEvaluator;
+import com.android.tools.lint.detector.api.UastLintUtils;
 import com.google.common.collect.Sets;
-import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiAnnotation;
-import com.intellij.psi.PsiAssignmentExpression;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
 import com.intellij.psi.PsiCompiledElement;
-import com.intellij.psi.PsiDeclarationStatement;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiExpressionStatement;
-import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLocalVariable;
 import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
 import com.intellij.psi.PsiModifierList;
 import com.intellij.psi.PsiModifierListOwner;
-import com.intellij.psi.PsiReferenceExpression;
-import com.intellij.psi.PsiStatement;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiVariable;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -61,11 +55,20 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UDeclaration;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UFile;
+import org.jetbrains.uast.UQualifiedReferenceExpression;
+import org.jetbrains.uast.UReferenceExpression;
+import org.jetbrains.uast.USimpleNameReferenceExpression;
+import org.jetbrains.uast.UastUtils;
 
 /**
  * Looks for issues around ObjectAnimator usages
  */
-public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
+public class ObjectAnimatorDetector extends Detector implements UastScanner {
     public static final String KEEP_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "Keep";
 
     private static final Implementation IMPLEMENTATION = new Implementation(
@@ -109,7 +112,7 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
      * Multiple properties might all point back to the same setter; we don't want to
      * highlight these more than once (duplicate warnings etc) so keep track of them here
      */
-    private Set<PsiElement> mAlreadyWarned;
+    private Set<Object> mAlreadyWarned;
 
     /** Constructs a new {@link ObjectAnimatorDetector} */
     public ObjectAnimatorDetector() {
@@ -129,8 +132,8 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
     }
 
     @Override
-    public void visitMethod(@NonNull JavaContext context, @Nullable JavaElementVisitor visitor,
-            @NonNull PsiMethodCallExpression call, @NonNull PsiMethod method) {
+    public void visitMethod(@NonNull JavaContext context, @NonNull UCallExpression call,
+            @NonNull PsiMethod method) {
         JavaEvaluator evaluator = context.getEvaluator();
         if (!evaluator.isMemberInClass(method, "android.animation.ObjectAnimator") &&
                 !(method.getName().equals("ofPropertyValuesHolder")
@@ -138,12 +141,12 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
             return;
         }
 
-        PsiExpression[] expressions = call.getArgumentList().getExpressions();
-        if (expressions.length < 2) {
+        List<UExpression> expressions = call.getValueArguments();
+        if (expressions.size() < 2) {
             return;
         }
 
-        PsiType type = TypeEvaluator.evaluate(context, expressions[0]);
+        PsiType type = TypeEvaluator.evaluate(expressions.get(0));
         if (!(type instanceof PsiClassType)) {
             return;
         }
@@ -166,19 +169,18 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
         } else {
             // If "ObjectAnimator#ofObject", look for the type evaluator type in
             // argument at index 2 (third argument)
-            String expectedType = getExpectedType(context, call, 2);
+            String expectedType = getExpectedType(call, 2);
             if (expectedType != null) {
-                checkProperty(context, expressions[1], targetClass, expectedType);
+                checkProperty(context, expressions.get(1), targetClass, expectedType);
             }
         }
     }
 
     @Nullable
     private static String getExpectedType(
-            @NonNull JavaContext context,
-            @NonNull PsiMethodCallExpression method,
+            @NonNull UCallExpression method,
             int evaluatorIndex) {
-        String methodName = method.getMethodExpression().getReferenceName();
+        String methodName = method.getMethodName();
 
         if (methodName == null) {
             return null;
@@ -192,9 +194,9 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
             case "ofMultiFloat" : return "float[]";
             case "ofKeyframe" : return "android.animation.Keyframe";
             case "ofObject" : {
-                PsiExpression[] args = method.getArgumentList().getExpressions();
-                if (args.length > evaluatorIndex) {
-                    PsiType evaluatorType = TypeEvaluator.evaluate(context, args[evaluatorIndex]);
+                List<UExpression> args = method.getValueArguments();
+                if (args.size() > evaluatorIndex) {
+                    PsiType evaluatorType = TypeEvaluator.evaluate(args.get(evaluatorIndex));
                     if (evaluatorType != null) {
                         String typeName = evaluatorType.getCanonicalText();
                         if ("android.animation.FloatEvaluator".equals(typeName)) {
@@ -220,20 +222,20 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
     private void checkPropertyValueHolders(
             @NonNull JavaContext context,
             @NonNull PsiClass targetClass,
-            @NonNull PsiExpression[] expressions) {
-        for (int i = 1; i < expressions.length; i++) { // expressions[0] is the target class
-            PsiExpression arg = expressions[i];
+            @NonNull List<UExpression> expressions) {
+        for (int i = 1; i < expressions.size(); i++) { // expressions[0] is the target class
+            UExpression arg = expressions.get(i);
             // Find last assignment for each argument; this should be generic
             // infrastructure.
-            PsiMethodCallExpression holder = findHolderConstruction(context, arg);
+            UCallExpression holder = findHolderConstruction(context, arg);
             if (holder != null) {
-                PsiExpression[] args = holder.getArgumentList().getExpressions();
-                if (args.length >= 2) {
+                List<UExpression> args = holder.getValueArguments();
+                if (args.size() >= 2) {
                     // If "PropertyValueHolder#ofObject", look for the type evaluator type in
                     // argument at index 1 (second argument)
-                    String expectedType = getExpectedType(context, holder, 1);
+                    String expectedType = getExpectedType(holder, 1);
                     if (expectedType != null) {
-                        checkProperty(context, args[0], targetClass, expectedType);
+                        checkProperty(context, args.get(0), targetClass, expectedType);
                     }
                 }
             }
@@ -241,70 +243,59 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
     }
 
     @Nullable
-    private static PsiMethodCallExpression findHolderConstruction(@NonNull JavaContext context,
-            @Nullable PsiExpression arg) {
+    private static UCallExpression findHolderConstruction(@NonNull JavaContext context,
+            @Nullable UExpression arg) {
         if (arg == null) {
             return null;
         }
-        if (arg instanceof PsiMethodCallExpression) {
-            PsiMethodCallExpression callExpression = (PsiMethodCallExpression) arg;
+        if (arg instanceof UCallExpression) {
+            UCallExpression callExpression = (UCallExpression) arg;
             if (isHolderConstructionMethod(context, callExpression)) {
                 return callExpression;
             }
             // else: look inside the method and see if it's a method which trivially returns
             // an instance?
-        } else if (arg instanceof PsiReferenceExpression) {
+        } else if (arg instanceof UReferenceExpression) {
+            if (arg instanceof UQualifiedReferenceExpression) {
+                UQualifiedReferenceExpression qualified = (UQualifiedReferenceExpression) arg;
+                if (qualified.getSelector() instanceof UCallExpression) {
+                    UCallExpression selector = (UCallExpression) qualified.getSelector();
+                    if (isHolderConstructionMethod(context, selector)) {
+                        return selector;
+                    }
+                }
+            }
+
             // Variable reference? Field reference? etc.
-            PsiElement resolved = ((PsiReferenceExpression) arg).resolve();
+            PsiElement resolved = ((UReferenceExpression) arg).resolve();
             if (resolved instanceof PsiVariable) {
                 PsiVariable variable = (PsiVariable) resolved;
-                PsiExpression initializer = variable.getInitializer();
-                if (initializer != null) {
-                    PsiMethodCallExpression holder = findHolderConstruction(context, initializer);
-                    if (holder != null) {
-                        return holder;
+
+                UExpression lastAssignment = UastLintUtils.findLastAssignment(
+                        variable, arg);
+                // Resolve variable reassignments
+                while (lastAssignment instanceof USimpleNameReferenceExpression) {
+                    PsiElement el = ((USimpleNameReferenceExpression)lastAssignment).resolve();
+                    if (el instanceof PsiLocalVariable) {
+                        lastAssignment = UastLintUtils.findLastAssignment(
+                                (PsiLocalVariable)el, lastAssignment);
+                    } else {
+                        break;
                     }
                 }
 
-                if (!(variable instanceof PsiField)) {
-                    PsiStatement statement = PsiTreeUtil.getParentOfType(arg, PsiStatement.class,
-                            false);
-                    if (statement != null) {
-                        PsiStatement prev = PsiTreeUtil.getPrevSiblingOfType(statement,
-                                PsiStatement.class);
-                        String targetName = variable.getName();
-                        if (targetName == null) {
-                            return null;
-                        }
-                        while (prev != null) {
-                            if (prev instanceof PsiDeclarationStatement) {
-                                for (PsiElement element : ((PsiDeclarationStatement) prev)
-                                        .getDeclaredElements()) {
-                                    if (variable.equals(element)) {
-                                        return findHolderConstruction(context,
-                                                variable.getInitializer());
-                                    }
-                                }
-                            } else if (prev instanceof PsiExpressionStatement) {
-                                PsiExpression expression = ((PsiExpressionStatement) prev)
-                                        .getExpression();
-                                if (expression instanceof PsiAssignmentExpression) {
-                                    PsiAssignmentExpression assign
-                                            = (PsiAssignmentExpression) expression;
-                                    PsiExpression lhs = assign.getLExpression();
-                                    if (lhs instanceof PsiReferenceExpression) {
-                                        PsiReferenceExpression reference =
-                                                (PsiReferenceExpression) lhs;
-                                        if (targetName.equals(reference.getReferenceName()) &&
-                                                reference.getQualifier() == null) {
-                                            return findHolderConstruction(context,
-                                                    assign.getRExpression());
-                                        }
-                                    }
-                                }
-                            }
-                            prev = PsiTreeUtil.getPrevSiblingOfType(prev,
-                                    PsiStatement.class);
+                if (lastAssignment instanceof UCallExpression) {
+                    UCallExpression callExpression = (UCallExpression) lastAssignment;
+                    if (isHolderConstructionMethod(context, callExpression)) {
+                        return callExpression;
+                    }
+                } else if (lastAssignment instanceof UQualifiedReferenceExpression) {
+                    UQualifiedReferenceExpression expression
+                            = (UQualifiedReferenceExpression) lastAssignment;
+                    if (expression.getSelector() instanceof UCallExpression) {
+                        UCallExpression callExpression = (UCallExpression) expression.getSelector();
+                        if (isHolderConstructionMethod(context, callExpression)) {
+                            return callExpression;
                         }
                     }
                 }
@@ -314,10 +305,12 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
     }
 
     private static boolean isHolderConstructionMethod(@NonNull JavaContext context,
-            @NonNull PsiMethodCallExpression callExpression) {
-        String referenceName = callExpression.getMethodExpression().getReferenceName();
-        if (referenceName != null && referenceName.startsWith("of")) {
-            PsiMethod resolved = callExpression.resolveMethod();
+            @NonNull UCallExpression callExpression) {
+        String referenceName = callExpression.getMethodName();
+        if (referenceName != null && referenceName.startsWith("of")
+                // This will require more indirection; see unit test
+                && !referenceName.equals("ofKeyframe")) {
+            PsiMethod resolved = callExpression.resolve();
             if (resolved != null && context.getEvaluator().isMemberInClass(resolved,
                     "android.animation.PropertyValuesHolder")) {
                 return true;
@@ -329,7 +322,7 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
 
     private void checkProperty(
             @NonNull JavaContext context,
-            @NonNull PsiExpression propertyNameExpression,
+            @NonNull UExpression propertyNameExpression,
             @NonNull PsiClass targetClass,
             @NonNull String expectedType) {
         Object property = ConstantEvaluator.evaluate(context, propertyNameExpression);
@@ -367,7 +360,7 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
         if (bestMethod == null) {
             report(context, BROKEN_PROPERTY, propertyNameExpression, null,
                     String.format("Could not find property setter method `%1$s` on `%2$s`",
-                            methodName, qualifiedName));
+                            methodName, qualifiedName), null);
             return;
         }
 
@@ -375,11 +368,11 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
             report(context, BROKEN_PROPERTY, propertyNameExpression, bestMethod,
                     String.format("The setter for this property does not match the "
                                     + "expected signature (`public void %1$s(%2$s arg`)",
-                            methodName, expectedType));
+                            methodName, expectedType), null);
         } else if (context.getEvaluator().isStatic(bestMethod)) {
             report(context, BROKEN_PROPERTY, propertyNameExpression, bestMethod,
                     String.format("The setter for this property (%1$s.%2$s) should not be static",
-                            qualifiedName, methodName));
+                            qualifiedName, methodName), null);
         } else {
             PsiModifierListOwner owner = bestMethod;
             while (owner != null) {
@@ -401,19 +394,19 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
             }
 
             report(context, MISSING_KEEP, propertyNameExpression, bestMethod, ""
-                  // Keep in sync with isAddKeepErrorMessage below
                   + "This method is accessed from an ObjectAnimator so it should be "
                   + "annotated with `@Keep` to ensure that it is not discarded or "
-                  + "renamed in release builds");
+                  + "renamed in release builds", fix().data(bestMethod));
         }
     }
 
     private void report(
             @NonNull JavaContext context,
             @NonNull Issue issue,
-            @NonNull PsiExpression propertyNameExpression,
+            @NonNull UExpression propertyNameExpression,
             @Nullable PsiMethod method,
-            @NonNull String message) {
+            @NonNull String message,
+            @Nullable LintFix fix) {
         boolean reportOnMethod = issue == MISSING_KEEP && method != null;
 
         // No need to report @Keep issues in third party libraries
@@ -421,7 +414,7 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
             return;
         }
 
-        PsiElement locationNode = reportOnMethod ? method : propertyNameExpression;
+        Object locationNode = reportOnMethod ? method : propertyNameExpression;
 
         if (mAlreadyWarned != null && mAlreadyWarned.contains(locationNode)) {
             return;
@@ -431,22 +424,22 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
         mAlreadyWarned.add(locationNode);
 
         Location methodLocation = null;
-        if (method != null) {
+        if (method != null && !(method instanceof PsiCompiledElement)) {
             methodLocation = method.getNameIdentifier() != null
                     ? context.getRangeLocation(method.getNameIdentifier(), 0, method.getParameterList(), 0)
                     : context.getNameLocation(method);
         }
 
-        Location location = reportOnMethod ? methodLocation : context.getNameLocation(locationNode);
+        Location location;
         if (reportOnMethod) {
+            location = methodLocation;
             Location secondary = context.getLocation(propertyNameExpression);
             location.setSecondary(secondary);
             secondary.setMessage("ObjectAnimator usage here");
 
             // In the same compilation unit, don't show the error on the reference,
             // but in other files (where you may not spot the problem), highlight it.
-            if (Objects.equals(propertyNameExpression.getContainingFile(),
-                    method.getContainingFile())) {
+            if (isInSameCompilationUnit(propertyNameExpression, method)) {
                 // Same compilation unit: we don't need to show (in the IDE) the secondary
                 // location since we're drawing attention to the keep issue)
                 secondary.setVisible(false);
@@ -470,32 +463,35 @@ public class ObjectAnimatorDetector extends Detector implements JavaPsiScanner {
                     secondary.setMessage(secondaryMessage);
                 }
             }
-        } else if (methodLocation != null) {
-            location = location.withSecondary(methodLocation, "Property setter here");
+        } else {
+            location = context.getNameLocation(propertyNameExpression);
+            if (methodLocation != null) {
+                location = location.withSecondary(methodLocation, "Property setter here");
+            }
         }
-        context.report(issue, method, location, message);
+
+        // Allow suppressing at either the property binding site *or* the property site
+        // (we report errors on both)
+        UElement owner = UastUtils.getParentOfType(propertyNameExpression, UDeclaration.class,
+                false);
+        if (owner != null && context.getDriver().isSuppressed(context, issue, owner)) {
+            return;
+        }
+
+        context.report(issue, method, location, message, fix);
     }
 
-    /**
-     * Returns true if the error message (which should have been produced by this detector)
-     * corresponds to the method listed <b>on</b> a property method that it's missing a
-     * Keep annotation. Used by IDE quickfixes to only add keep annotations on the actual
-     * keep method, not on the error message (with the same inspection id) shown on the
-     * object animator.
-     *
-     * @param message    the original message produced by lint
-     * @param textFormat the format it's been provided in
-     * @return true if this is a message on a property method missing {@code @Keep}
-     */
-    @SuppressWarnings("unused") // Referenced from IDE
-    public static boolean isAddKeepErrorMessage(@NonNull String message,
-        @NonNull TextFormat textFormat) {
-        message = textFormat.convertTo(message, TextFormat.RAW);
-        return message.contains("This method is accessed from an ObjectAnimator so");
+    private static boolean isInSameCompilationUnit(
+            @NonNull UElement element1,
+            @NonNull PsiElement element2) {
+        UFile containingFile = UastUtils.getContainingFile(element1);
+        PsiFile file = containingFile != null ? containingFile.getPsi() : null;
+        return Objects.equals(file, element2.getContainingFile());
     }
 
     // Copy of PropertyValuesHolder#getMethodName - copy to ensure lint & platform agree
-    private static String getMethodName(String prefix, String propertyName) {
+    private static String getMethodName(
+            @SuppressWarnings("SameParameterValue") String prefix, String propertyName) {
         //noinspection SizeReplaceableByIsEmpty
         if (propertyName == null || propertyName.length() == 0) {
             // shouldn't get here

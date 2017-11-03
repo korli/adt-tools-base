@@ -35,6 +35,7 @@ import com.android.builder.core.ErrorReporter;
 import com.android.builder.model.SyncIssue;
 import com.android.builder.profile.Recorder;
 import com.android.ide.common.blame.Message;
+import com.android.utils.FileUtils;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -53,9 +54,14 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.gradle.api.Project;
+import org.gradle.api.Task;
+import org.gradle.api.file.FileCollection;
 import org.gradle.testfixtures.ProjectBuilder;
 import org.junit.Before;
+import org.junit.Rule;
+import org.junit.rules.TemporaryFolder;
 import org.mockito.Mockito;
 
 /**
@@ -65,6 +71,10 @@ import org.mockito.Mockito;
  * to allow for other tasks using the AndroidTaskRegistry directly.
  */
 public class TaskTestUtils {
+
+    @Rule
+    public TemporaryFolder temporaryFolder = new TemporaryFolder();
+
     private static final String FOLDER_TEST_PROJECTS = "test-projects";
 
     protected static final String TASK_NAME = "task name";
@@ -75,6 +85,7 @@ public class TaskTestUtils {
     protected FakeErrorReporter errorReporter;
 
     protected Supplier<RuntimeException> mTransformTaskFailed;
+    protected Project project;
 
     static class FakeErrorReporter extends ErrorReporter {
 
@@ -102,6 +113,12 @@ public class TaskTestUtils {
         public void receiveMessage(@NonNull Message message) {
             // do nothing
         }
+
+        @Override
+        public boolean hasSyncIssue(int type) {
+            return syncIssue != null && syncIssue.getType() == type;
+        }
+
     }
 
     public static final class FakeRecorder implements Recorder {
@@ -146,16 +163,18 @@ public class TaskTestUtils {
     }
 
     @Before
-    public void setUp() {
-        Project project = ProjectBuilder.builder().withProjectDir(
-                new File(getRootDir(), FOLDER_TEST_PROJECTS + "/basic")).build();
-
+    public void setUp() throws IOException {
+        File projectDirectory = temporaryFolder.newFolder();
+        FileUtils.mkdirs(projectDirectory);
+        project = ProjectBuilder.builder().withProjectDir(projectDirectory).build();
         scope = getScope();
         errorReporter = new FakeErrorReporter(ErrorReporter.EvaluationMode.IDE);
-        transformManager =
-                new TransformManager(new AndroidTaskRegistry(), errorReporter, new FakeRecorder());
+        transformManager = new TransformManager(
+                project, new AndroidTaskRegistry(), errorReporter, new FakeRecorder());
         taskFactory = new TaskContainerAdaptor(project.getTasks());
-        mTransformTaskFailed = () -> new RuntimeException("Transform task creation failed.");
+        mTransformTaskFailed = () -> new RuntimeException(
+                String.format("Transform task creation failed.  Sync issue:\n %s",
+                        errorReporter.getSyncIssue().toString()));
     }
 
     protected StreamTester streamTester() {
@@ -164,6 +183,11 @@ public class TaskTestUtils {
 
     protected StreamTester streamTester(@NonNull final Collection<TransformStream> streams) {
         return new StreamTester(new FilterableStreamCollection() {
+            @Override
+            Project getProject() {
+                return project;
+            }
+
             @NonNull
             @Override
             Collection<TransformStream> getStreams() {
@@ -191,6 +215,7 @@ public class TaskTestUtils {
 
         private List<File> jars = Lists.newArrayList();
         private List<File> folders = Lists.newArrayList();
+        private List<FileCollection> fileCollections = Lists.newArrayList();
         private File rootLocation = null;
 
         private StreamTester(@Nullable FilterableStreamCollection streamCollection) {
@@ -223,6 +248,11 @@ public class TaskTestUtils {
 
         StreamTester withFolder(@NonNull File file) {
             folders.add(file);
+            return this;
+        }
+
+        StreamTester withFileCollection(@NonNull FileCollection fileCollection) {
+            fileCollections.add(fileCollection);
             return this;
         }
 
@@ -270,8 +300,15 @@ public class TaskTestUtils {
 
             assertThat(stream.getContentTypes()).containsExactlyElementsIn(contentTypes);
 
-            if (!dependencies.isEmpty()) {
-                assertThat(stream.getDependencies()).containsExactlyElementsIn(dependencies);
+            if (!fileCollections.isEmpty()) {
+                for (FileCollection fileCollection : fileCollections) {
+                    List<String> taskNames = fileCollection.getBuildDependencies()
+                            .getDependencies(null /* task */)
+                            .stream()
+                            .map(Task::getName)
+                            .collect(Collectors.toList());
+                    assertThat(taskNames).containsExactlyElementsIn(dependencies);
+                }
             }
 
             if (!jars.isEmpty()) {
@@ -280,7 +317,12 @@ public class TaskTestUtils {
                 }
 
                 OriginalStream originalStream = (OriginalStream) stream;
-                assertThat(originalStream.getJarFiles().get()).containsExactlyElementsIn(jars);
+                Set<String> expectedFileNames = jars.stream().map(File::getName).collect(Collectors.toSet());
+                for (File file : originalStream.getFileCollection().getFiles()) {
+                    assertThat(expectedFileNames.contains(file.getName())).isTrue();
+                    expectedFileNames.remove(file.getName());
+                }
+                assertThat(expectedFileNames).isEmpty();
             }
 
             if (!folders.isEmpty()) {
@@ -289,7 +331,8 @@ public class TaskTestUtils {
                 }
 
                 OriginalStream originalStream = (OriginalStream) stream;
-                assertThat(originalStream.getFolders().get()).containsExactlyElementsIn(folders);
+                assertThat(originalStream.getFileCollection().getFiles())
+                        .containsExactlyElementsIn(folders);
             }
 
             if (rootLocation != null) {
@@ -298,7 +341,7 @@ public class TaskTestUtils {
                 }
 
                 IntermediateStream originalStream = (IntermediateStream) stream;
-                assertThat(originalStream.getRootLocation().get()).isEqualTo(rootLocation);
+                assertThat(originalStream.getRootLocation()).isEqualTo(rootLocation);
             }
 
             return stream;

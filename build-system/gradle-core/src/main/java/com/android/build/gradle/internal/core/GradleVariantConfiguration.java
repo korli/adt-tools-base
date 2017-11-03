@@ -20,40 +20,32 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.annotations.concurrency.Immutable;
+import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.AndroidConfig;
-import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.TestAndroidConfig;
+import com.android.build.gradle.api.JavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreBuildType;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeBuildOptions;
-import com.android.build.gradle.internal.dsl.CoreJackOptions;
-import com.android.build.gradle.internal.dsl.CoreJavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreNdkOptions;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
-import com.android.builder.core.DefaultApiVersion;
+import com.android.build.gradle.internal.scope.GlobalScope;
+import com.android.build.gradle.options.DeploymentDevice;
+import com.android.build.gradle.options.IntegerOption;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.StringOption;
+import com.android.builder.core.ManifestAttributeSupplier;
 import com.android.builder.core.VariantConfiguration;
 import com.android.builder.core.VariantType;
-import com.android.builder.dependency.level2.AndroidDependency;
-import com.android.builder.model.AndroidLibrary;
-import com.android.builder.model.AndroidProject;
-import com.android.builder.model.ApiVersion;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
 import com.android.builder.model.SourceProvider;
+import com.android.sdklib.AndroidVersion;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
-import org.gradle.api.Project;
-
-import android.databinding.tool.DataBindingBuilder;
-
-import java.io.File;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -71,14 +63,11 @@ import java.util.function.Function;
 public class GradleVariantConfiguration
         extends VariantConfiguration<CoreBuildType, CoreProductFlavor, CoreProductFlavor> {
 
-    @NonNull
-    private final Project project;
+    @NonNull private final ProjectOptions projectOptions;
     @NonNull
     private OptionalInt instantRunSupportStatusOverride = OptionalInt.empty();
     @NonNull
     private final MergedNdkConfig mergedNdkConfig = new MergedNdkConfig();
-    @NonNull
-    private final MergedJackOptions mergedJackOptions = new MergedJackOptions();
     @NonNull
     private final MergedExternalNativeBuildOptions mergedExternalNativeBuildOptions =
             new MergedExternalNativeBuildOptions();
@@ -86,19 +75,30 @@ public class GradleVariantConfiguration
     private final MergedJavaCompileOptions mergedJavaCompileOptions =
             new MergedJavaCompileOptions();
 
-    private GradleVariantConfiguration(
-            @NonNull Project project,
-            @Nullable VariantConfiguration<CoreBuildType, CoreProductFlavor, CoreProductFlavor> testedConfig,
+    @VisibleForTesting
+    GradleVariantConfiguration(
+            @NonNull ProjectOptions projectOptions,
+            @Nullable
+                    VariantConfiguration<CoreBuildType, CoreProductFlavor, CoreProductFlavor>
+                            testedConfig,
             @NonNull CoreProductFlavor defaultConfig,
             @NonNull SourceProvider defaultSourceProvider,
+            @Nullable ManifestAttributeSupplier mainManifestAttributeSupplier,
             @NonNull CoreBuildType buildType,
             @Nullable SourceProvider buildTypeSourceProvider,
             @NonNull VariantType type,
             @Nullable CoreSigningConfig signingConfigOverride) {
-        super(defaultConfig, defaultSourceProvider, buildType, buildTypeSourceProvider, type,
-                testedConfig, signingConfigOverride);
+        super(
+                defaultConfig,
+                defaultSourceProvider,
+                mainManifestAttributeSupplier,
+                buildType,
+                buildTypeSourceProvider,
+                type,
+                testedConfig,
+                signingConfigOverride);
         mergeOptions();
-        this.project = project;
+        this.projectOptions = projectOptions;
     }
 
     /**
@@ -106,13 +106,15 @@ public class GradleVariantConfiguration
      */
     public GradleVariantConfiguration getMyTestConfig(
             @NonNull SourceProvider defaultSourceProvider,
+            @Nullable ManifestAttributeSupplier mainManifestAttributeSupplier,
             @Nullable SourceProvider buildTypeSourceProvider,
             @NonNull VariantType type) {
         return new GradleVariantConfiguration(
-                this.project,
+                this.projectOptions,
                 this,
                 getDefaultConfig(),
                 defaultSourceProvider,
+                mainManifestAttributeSupplier,
                 getBuildType(),
                 buildTypeSourceProvider,
                 type,
@@ -126,28 +128,19 @@ public class GradleVariantConfiguration
      * @see VariantConfiguration#getMinSdkVersion()
      */
     @NonNull
-    @Override
-    public ApiVersion getMinSdkVersion() {
-        // The changed behavior comes from overriding getApiVersionsNonTestVariant().
-        return super.getMinSdkVersion();
-    }
+    public AndroidVersion getMinSdkVersionWithTargetDeviceApi() {
+        Integer targetApiLevel = projectOptions.get(IntegerOption.IDE_TARGET_DEVICE_API);
+        if (targetApiLevel != null && isMultiDexEnabled() && getBuildType().isDebuggable()) {
+            // Consider runtime API passed from the IDE only if multi-dex is enabled and the app is
+            // debuggable.
+            int minVersion =
+                    getTargetSdkVersion().getApiLevel() > 1
+                            ? Integer.min(getTargetSdkVersion().getApiLevel(), targetApiLevel)
+                            : targetApiLevel;
 
-    /**
-     * Return the minSdkVersion for filtering out resources.
-     *
-     * <p>This is always the minimum SDK version read from the manifest and/or DSL, ignoring the
-     * property passed from the IDE. This way R.java contents don't change depending on the device
-     * selected in the IDE.
-     */
-    @NonNull
-    public ApiVersion getResourcesMinSdkVersion() {
-        VariantConfiguration testedConfig = getTestedConfig();
-        if (testedConfig == null) {
-            return super.getApiVersionsNonTestVariant().minSdkVersion;
-        } else if (testedConfig instanceof GradleVariantConfiguration) {
-            return ((GradleVariantConfiguration) testedConfig).getResourcesMinSdkVersion();
+            return new AndroidVersion(minVersion);
         } else {
-            return testedConfig.getMinSdkVersion();
+            return super.getMinSdkVersion();
         }
     }
 
@@ -156,9 +149,10 @@ public class GradleVariantConfiguration
         /** Creates a variant configuration */
         @NonNull
         GradleVariantConfiguration create(
-                @NonNull Project project,
+                @NonNull ProjectOptions projectOptions,
                 @NonNull CoreProductFlavor defaultConfig,
                 @NonNull SourceProvider defaultSourceProvider,
+                @Nullable ManifestAttributeSupplier mainManifestAttributeSupplier,
                 @NonNull CoreBuildType buildType,
                 @Nullable SourceProvider buildTypeSourceProvider,
                 @NonNull VariantType type,
@@ -170,18 +164,20 @@ public class GradleVariantConfiguration
         @Override
         @NonNull
         public GradleVariantConfiguration create(
-                @NonNull Project project,
+                @NonNull ProjectOptions projectOptions,
                 @NonNull CoreProductFlavor defaultConfig,
                 @NonNull SourceProvider defaultSourceProvider,
+                @Nullable ManifestAttributeSupplier mainManifestAttributeSupplier,
                 @NonNull CoreBuildType buildType,
                 @Nullable SourceProvider buildTypeSourceProvider,
                 @NonNull VariantType type,
                 @Nullable CoreSigningConfig signingConfigOverride) {
             return new GradleVariantConfiguration(
-                    project,
+                    projectOptions,
                     null /*testedConfig*/,
                     defaultConfig,
                     defaultSourceProvider,
+                    mainManifestAttributeSupplier,
                     buildType,
                     buildTypeSourceProvider,
                     type,
@@ -202,18 +198,20 @@ public class GradleVariantConfiguration
         @NonNull
         @Override
         public GradleVariantConfiguration create(
-                @NonNull Project project,
+                @NonNull ProjectOptions projectOptions,
                 @NonNull CoreProductFlavor defaultConfig,
                 @NonNull SourceProvider defaultSourceProvider,
+                @Nullable ManifestAttributeSupplier mainManifestAttributeSupplier,
                 @NonNull CoreBuildType buildType,
                 @Nullable SourceProvider buildTypeSourceProvider,
                 @NonNull VariantType type,
                 @Nullable CoreSigningConfig signingConfigOverride) {
             return new GradleVariantConfiguration(
-                    project,
+                    projectOptions,
                     null /*testedConfig*/,
                     defaultConfig,
                     defaultSourceProvider,
+                    mainManifestAttributeSupplier,
                     buildType,
                     buildTypeSourceProvider,
                     type,
@@ -245,6 +243,7 @@ public class GradleVariantConfiguration
                 @Override
                 public GradleVariantConfiguration getMyTestConfig(
                         @NonNull SourceProvider defaultSourceProvider,
+                        @Nullable ManifestAttributeSupplier mainManifestAttributeSupplier,
                         @Nullable SourceProvider buildTypeSourceProvider,
                         @NonNull VariantType type) {
                     throw new UnsupportedOperationException("Test modules have no test variants.");
@@ -268,12 +267,6 @@ public class GradleVariantConfiguration
      * Merge Gradle specific options from build types, product flavors and default config.
      */
     private void mergeOptions() {
-        computeMergedOptions(
-                mergedJackOptions,
-                CoreProductFlavor::getJackOptions,
-                CoreBuildType::getJackOptions,
-                MergedJackOptions::reset,
-                MergedJackOptions::append);
         computeMergedOptions(
                 mergedJavaCompileOptions,
                 CoreProductFlavor::getJavaCompileOptions,
@@ -309,34 +302,47 @@ public class GradleVariantConfiguration
         return this;
     }
 
+    protected enum IncrementalMode {
+        /* Not an instantRun mode */
+        NONE,
+        /* instantRun mode */
+        FULL,
+    }
+
+    public boolean isInstantRunBuild(@NonNull GlobalScope globalScope) {
+        return getIncrementalMode(globalScope) == IncrementalMode.FULL;
+    }
+
+    /**
+     * Returns the incremental mode for this variant.
+     *
+     * @param globalScope the project's global scope.
+     * @return the {@link IncrementalMode} for this variant.
+     */
+    protected IncrementalMode getIncrementalMode(@NonNull GlobalScope globalScope) {
+        if (isInstantRunSupported()
+                && targetDeviceSupportsInstantRun(this, globalScope.getProjectOptions())
+                && globalScope.isActive(OptionalCompilationStep.INSTANT_DEV)) {
+            return IncrementalMode.FULL;
+        }
+        return IncrementalMode.NONE;
+    }
+
+    private static boolean targetDeviceSupportsInstantRun(
+            @NonNull GradleVariantConfiguration config, @NonNull ProjectOptions projectOptions) {
+        if (config.isLegacyMultiDexMode()) {
+            // We don't support legacy multi-dex on Dalvik.
+            return DeploymentDevice.getDeploymentDeviceAndroidVersion(projectOptions)
+                            .getFeatureLevel()
+                    >= AndroidVersion.ART_RUNTIME.getFeatureLevel();
+        }
+
+        return true;
+    }
+
     @NonNull
     public CoreNdkOptions getNdkConfig() {
         return mergedNdkConfig;
-    }
-
-    @Override
-    public ApiVersions getApiVersionsNonTestVariant() {
-        ApiVersions apiVersions = super.getApiVersionsNonTestVariant();
-        if (!project.hasProperty(AndroidProject.PROPERTY_BUILD_API)
-                || !getBuildType().isDebuggable()) {
-            return apiVersions;
-        }
-
-        // Consider runtime API passed from the IDE only if the app is debuggable.
-        Integer targetAPILevel =
-                Integer.parseInt(project.property(AndroidProject.PROPERTY_BUILD_API).toString());
-
-        if (targetAPILevel < 23) {
-            // max 100 DEX files in native multidex for L - see http://b.android.com/233093
-            return apiVersions;
-        }
-
-        int minVersion =
-                apiVersions.targetSdkVersion.getApiLevel() > 0
-                        ? Integer.min(apiVersions.targetSdkVersion.getApiLevel(), targetAPILevel)
-                        : targetAPILevel;
-
-        return new ApiVersions(new DefaultApiVersion(minVersion), apiVersions.targetSdkVersion);
     }
 
     @NonNull
@@ -353,21 +359,6 @@ public class GradleVariantConfiguration
     @Nullable
     public Set<String> getSupportedAbis() {
         return mergedNdkConfig.getAbiFilters();
-    }
-
-    /**
-     * Returns whether the configuration has minification enabled.
-     */
-    public boolean isMinifyEnabled() {
-        VariantType type = getType();
-        // if type == test then getTestedConfig always returns non-null
-        //noinspection ConstantConditions
-        return getBuildType().isMinifyEnabled() &&
-                (!type.isForTesting() || (getTestedConfig().getType() != VariantType.LIBRARY));
-    }
-
-    public CoreJackOptions getJackOptions() {
-        return mergedJackOptions;
     }
 
     @Nullable
@@ -422,7 +413,7 @@ public class GradleVariantConfiguration
         }
     }
 
-    public CoreJavaCompileOptions getJavaCompileOptions() {
+    public JavaCompileOptions getJavaCompileOptions() {
         return mergedJavaCompileOptions;
     }
 
@@ -444,10 +435,6 @@ public class GradleVariantConfiguration
         if (getType().isForTesting()) {
             return InstantRun.STATUS_NOT_SUPPORTED_VARIANT_USED_FOR_TESTING;
         }
-        if (getJackOptions().isEnabled()) {
-            return InstantRun.STATUS_NOT_SUPPORTED_FOR_JACK;
-        }
-
         return InstantRun.STATUS_SUPPORTED;
     }
 
@@ -566,7 +553,7 @@ public class GradleVariantConfiguration
     @Nullable
     @Override
     public String getVersionName() {
-        String override = AndroidGradleOptions.getVersionNameOverride(project);
+        String override = projectOptions.get(StringOption.IDE_VERSION_NAME_OVERRIDE);
         if (override != null) {
             return override;
         } else {
@@ -576,24 +563,11 @@ public class GradleVariantConfiguration
 
     @Override
     public int getVersionCode() {
-        Integer override = AndroidGradleOptions.getVersionCodeOverride(project);
+        Integer override = projectOptions.get(IntegerOption.IDE_VERSION_CODE_OVERRIDE);
         if (override != null) {
             return override;
         } else {
             return super.getVersionCode();
         }
-    }
-
-    @NonNull
-    public ImmutableSet<File> getSubProjectDataBindingArtifactFolders() {
-        ImmutableSet.Builder<File> builder = ImmutableSet.builder();
-        for (AndroidDependency dependency : getFlatPackageAndroidLibraries()) {
-            File dataBindingDir = new File(dependency.getExtractedFolder(),
-                    DataBindingBuilder.DATA_BINDING_ROOT_FOLDER_IN_AAR);
-            if (dataBindingDir.exists()) {
-                builder.add(dataBindingDir);
-            }
-        }
-        return builder.build();
     }
 }

@@ -4,6 +4,8 @@ load("//tools/base/bazel:maven.bzl", "maven_java_library", "maven_pom")
 iml_module(
     name = "studio.ddmlib",
     srcs = ["src/main/java"],
+    iml_files = ["ddmlib.iml"],
+    javacopts = ["-Xep:MissingCasesInEnumSwitch:WARN"],
     tags = ["managed"],
     test_data = ["//prebuilts/studio/sdk:platform-tools"],
     test_resources = ["src/test/resources"],
@@ -22,12 +24,14 @@ iml_module(
         "//tools/idea/.idea/libraries:JUnit4[test]",
         "//tools/base/testutils:studio.testutils[module, test]",
         "//tools/idea/.idea/libraries:truth[test]",
+        "//tools/base/fakeadbserver:studio.fakeadbserver[module, test]",
     ],
 )
 
 maven_java_library(
     name = "tools.ddmlib",
     srcs = glob(["src/main/java/**"]),
+    javacopts = ["-Xep:MissingCasesInEnumSwitch:WARN"],
     pom = ":pom",
     visibility = ["//visibility:public"],
     deps = [
@@ -41,7 +45,7 @@ maven_java_library(
 maven_pom(
     name = "pom",
     artifact = "ddmlib",
-    group = "com.android.tools",
+    group = "com.android.tools.ddms",
     source = "//tools/buildSrc/base:base_version",
 )
 
@@ -50,10 +54,13 @@ java_test(
     srcs = glob(["src/test/java/**"]),
     data = ["//prebuilts/studio/sdk:platform-tools"],
     jvm_flags = ["-Dtest.suite.jar=tools.tests.jar"],
+    resources = glob(["src/test/resources/**"]),
     test_class = "com.android.testutils.JarTestSuite",
     deps = [
         ":tools.ddmlib",
         "//tools/base/annotations",
+        "//tools/base/common:tools.common",
+        "//tools/base/fakeadbserver:tools.fakeadbserver",
         "//tools/base/testutils:tools.testutils",
         "//tools/base/third_party:com.google.guava_guava",
         "//tools/base/third_party:com.google.truth_truth",

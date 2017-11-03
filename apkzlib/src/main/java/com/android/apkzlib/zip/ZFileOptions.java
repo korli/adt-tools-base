@@ -18,6 +18,7 @@ package com.android.apkzlib.zip;
 
 import com.android.apkzlib.zip.compress.DeflateExecutionCompressor;
 import com.android.apkzlib.zip.utils.ByteTracker;
+import java.util.function.Supplier;
 import java.util.zip.Deflater;
 import javax.annotation.Nonnull;
 
@@ -30,52 +31,53 @@ public class ZFileOptions {
      * The byte tracker.
      */
     @Nonnull
-    private ByteTracker mTracker;
+    private ByteTracker tracker;
 
     /**
      * The compressor to use.
      */
     @Nonnull
-    private Compressor mCompressor;
+    private Compressor compressor;
 
     /**
      * Should timestamps be zeroed?
      */
-    private boolean mNoTimestamps;
+    private boolean noTimestamps;
 
     /**
      * The alignment rule to use.
      */
     @Nonnull
-    private AlignmentRule mAlignmentRule;
+    private AlignmentRule alignmentRule;
 
     /**
      * Should the extra field be used to cover empty space?
      */
-    private boolean mCoverEmptySpaceUsingExtraField;
+    private boolean coverEmptySpaceUsingExtraField;
 
     /**
      * Should files be automatically sorted before update?
      */
-    private boolean mAutoSortFiles;
+    private boolean autoSortFiles;
 
     /**
-     * Should validation of the data descriptors of entries be skipped? See
-     * {@link #getSkipDataDescriptorValidation()}
+     * Factory creating verification logs to use.
      */
-    private boolean mSkipDataDescriptionValidation;
+    @Nonnull
+    private Supplier<VerifyLog> verifyLogFactory;
 
     /**
      * Creates a new options object. All options are set to their defaults.
      */
     public ZFileOptions() {
-        mTracker = new ByteTracker();
-        mCompressor =
+        tracker = new ByteTracker();
+        compressor =
                 new DeflateExecutionCompressor(
                         Runnable::run,
-                        mTracker,
+                        tracker,
                         Deflater.DEFAULT_COMPRESSION);
-        mAlignmentRule = AlignmentRules.compose();
+        alignmentRule = AlignmentRules.compose();
+        verifyLogFactory = VerifyLogs::devNull;
     }
 
     /**
@@ -85,7 +87,7 @@ public class ZFileOptions {
      */
     @Nonnull
     public ByteTracker getTracker() {
-        return mTracker;
+        return tracker;
     }
 
     /**
@@ -95,7 +97,7 @@ public class ZFileOptions {
      */
     @Nonnull
     public Compressor getCompressor() {
-        return mCompressor;
+        return compressor;
     }
 
     /**
@@ -103,8 +105,9 @@ public class ZFileOptions {
      *
      * @param compressor the compressor
      */
-    public void setCompressor(@Nonnull Compressor compressor) {
-        mCompressor = compressor;
+    public ZFileOptions setCompressor(@Nonnull Compressor compressor) {
+        this.compressor = compressor;
+        return this;
     }
 
     /**
@@ -113,7 +116,7 @@ public class ZFileOptions {
      * @return should timestamps be zeroed?
      */
     public boolean getNoTimestamps() {
-        return mNoTimestamps;
+        return noTimestamps;
     }
 
     /**
@@ -121,8 +124,9 @@ public class ZFileOptions {
      *
      * @param noTimestamps should timestamps be zeroed?
      */
-    public void setNoTimestamps(boolean noTimestamps) {
-        mNoTimestamps = noTimestamps;
+    public ZFileOptions setNoTimestamps(boolean noTimestamps) {
+        this.noTimestamps = noTimestamps;
+        return this;
     }
 
     /**
@@ -132,7 +136,7 @@ public class ZFileOptions {
      */
     @Nonnull
     public AlignmentRule getAlignmentRule() {
-        return mAlignmentRule;
+        return alignmentRule;
     }
 
     /**
@@ -140,8 +144,9 @@ public class ZFileOptions {
      *
      * @param alignmentRule the alignment rule
      */
-    public void setAlignmentRule(@Nonnull AlignmentRule alignmentRule) {
-        mAlignmentRule = alignmentRule;
+    public ZFileOptions setAlignmentRule(@Nonnull AlignmentRule alignmentRule) {
+        this.alignmentRule = alignmentRule;
+        return this;
     }
 
     /**
@@ -151,7 +156,7 @@ public class ZFileOptions {
      * @return should the extra field be used to cover empty spaces?
      */
     public boolean getCoverEmptySpaceUsingExtraField() {
-        return mCoverEmptySpaceUsingExtraField;
+        return coverEmptySpaceUsingExtraField;
     }
 
     /**
@@ -160,8 +165,9 @@ public class ZFileOptions {
      *
      * @param coverEmptySpaceUsingExtraField should the extra field be used to cover empty spaces?
      */
-    public void setCoverEmptySpaceUsingExtraField(boolean coverEmptySpaceUsingExtraField) {
-        mCoverEmptySpaceUsingExtraField = coverEmptySpaceUsingExtraField;
+    public ZFileOptions setCoverEmptySpaceUsingExtraField(boolean coverEmptySpaceUsingExtraField) {
+        this.coverEmptySpaceUsingExtraField = coverEmptySpaceUsingExtraField;
+        return this;
     }
 
     /**
@@ -171,38 +177,38 @@ public class ZFileOptions {
      * @return should the file be automatically sorted?
      */
     public boolean getAutoSortFiles() {
-        return mAutoSortFiles;
+        return autoSortFiles;
     }
 
     /**
-     * Sets whether files should be automatically sorted before updating the zip file. See
-     * {@link ZFile} for an explanation on automatic sorting.
+     * Sets whether files should be automatically sorted before updating the zip file. See {@link
+     * ZFile} for an explanation on automatic sorting.
      *
      * @param autoSortFiles should the file be automatically sorted?
      */
-    public void setAutoSortFiles(boolean autoSortFiles) {
-        mAutoSortFiles = autoSortFiles;
+    public ZFileOptions setAutoSortFiles(boolean autoSortFiles) {
+        this.autoSortFiles = autoSortFiles;
+        return this;
     }
 
     /**
-     * Should data descriptor validation be skipped? This should generally be
-     * set to false. However, some tools (proguard -- http://b.android.com/221057) generate zips
-     * with incorrect data descriptors and to open the zips we need to skip the validation of data
-     * descriptors.
+     * Sets the verification log factory.
      *
-     * @return should data descriptors be validated?
+     * @param verifyLogFactory verification log factory
      */
-    public boolean getSkipDataDescriptorValidation() {
-        return mSkipDataDescriptionValidation;
+    public ZFileOptions setVerifyLogFactory(@Nonnull Supplier<VerifyLog> verifyLogFactory) {
+        this.verifyLogFactory = verifyLogFactory;
+        return this;
     }
 
     /**
-     * Sets whether data descriptors validation should be skipped. See
-     * {@link #getSkipDataDescriptorValidation()}.
+     * Obtains the verification log factory. By default, the verification log doesn't store
+     * anything and will always return an empty log.
      *
-     * @param skip should validation be skipped?
+     * @return the verification log factory
      */
-    public void setSkipDataDescriptionValidation(boolean skip) {
-        mSkipDataDescriptionValidation = skip;
+    @Nonnull
+    public Supplier<VerifyLog> getVerifyLogFactory() {
+        return verifyLogFactory;
     }
 }

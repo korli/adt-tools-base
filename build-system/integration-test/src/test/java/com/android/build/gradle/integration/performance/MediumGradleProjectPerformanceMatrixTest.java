@@ -23,26 +23,20 @@ import com.android.build.gradle.integration.common.fixture.BuildModel;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.RunGradleTasks;
 import com.android.build.gradle.integration.common.runner.FilterableParameterized;
-import com.android.build.gradle.integration.common.utils.JackHelper;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
-import com.android.build.gradle.integration.common.utils.SdkHelper;
+import com.android.build.gradle.integration.common.utils.PerformanceTestProjects;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.builder.core.AndroidBuilder;
+import com.android.build.gradle.options.BooleanOption;
 import com.android.builder.model.AndroidProject;
 import com.android.utils.FileUtils;
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.wireless.android.sdk.gradlelogging.proto.Logging;
 import com.google.wireless.android.sdk.gradlelogging.proto.Logging.BenchmarkMode;
+import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -53,173 +47,165 @@ import org.junit.runners.Parameterized;
 public class MediumGradleProjectPerformanceMatrixTest {
 
     @Rule public final GradleTestProject project;
-    @NonNull private final Set<ProjectScenario> projectScenarios;
+    @NonNull private final ProjectScenario projectScenario;
 
-    public MediumGradleProjectPerformanceMatrixTest(@NonNull Set<ProjectScenario> projectScenarios) {
-        this.projectScenarios = projectScenarios;
+    public MediumGradleProjectPerformanceMatrixTest(@NonNull ProjectScenario projectScenario) {
+        this.projectScenario = projectScenario;
         project =
                 GradleTestProject.builder()
                         .fromExternalProject("gradle-perf-android-medium")
                         .forBenchmarkRecording(
                                 new BenchmarkRecorder(
-                                        Logging.Benchmark.PERF_ANDROID_MEDIUM, projectScenarios))
-                        .withHeap("20G")
+                                        Logging.Benchmark.PERF_ANDROID_MEDIUM, projectScenario))
+                        .withHeap("1536M")
                         .create();
     }
 
     @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> getParameters() {
-        return Arrays.asList(
-                new Object[][] {
-                    {EnumSet.of(ProjectScenario.LEGACY_MULTIDEX)},
-                    {EnumSet.of(ProjectScenario.LEGACY_MULTIDEX, ProjectScenario.JACK_ON)},
-                    {EnumSet.of(ProjectScenario.NATIVE_MULTIDEX)},
-                    {EnumSet.of(ProjectScenario.NATIVE_MULTIDEX, ProjectScenario.JACK_ON)},
-                });
+    public static ProjectScenario[] getParameters() {
+        return new ProjectScenario[] {
+            ProjectScenario.LEGACY_MULTIDEX,
+            ProjectScenario.DEX_ARCHIVE_LEGACY_MULTIDEX,
+            ProjectScenario.NATIVE_MULTIDEX,
+            ProjectScenario.DEX_ARCHIVE_NATIVE_MULTIDEX,
+            ProjectScenario.D8_NATIVE_MULTIDEX,
+            ProjectScenario.D8_LEGACY_MULTIDEX,
+        };
     }
 
     @Before
-    public void initializeProject() throws IOException {
-        for (ProjectScenario projectScenario : projectScenarios) {
-            switch (projectScenario) {
-                case NATIVE_MULTIDEX:
-                    TestFileUtils.searchAndReplace(
-                            project.file("WordPress/build.gradle"),
-                            "minSdkVersion( )* \\d+",
-                            "minSdkVersion 21");
-                    break;
-                case LEGACY_MULTIDEX:
-                    break;
-                case JACK_ON:
-                    JackHelper.enableJack(project.file("WordPress/build.gradle"));
-                    break;
-                default:
-                    throw new IllegalArgumentException(
-                            "Unknown project scenario" + projectScenario);
-            }
-        }
-        Files.copy(
-                project.file("WordPress/gradle.properties-example").toPath(),
-                project.file("WordPress/gradle.properties").toPath());
-
-        Files.write(
-                project.file("local.properties").toPath(),
-                ImmutableList.of("sdk.dir=" + SdkHelper.findSdkDir()));
-
-        TestFileUtils.appendToFile(
-                project.getBuildFile(),
-                "buildscript {\n"
-                        + "    repositories {\n"
-                        + "        maven { url '"
-                        + FileUtils.toSystemIndependentPath(System.getenv("CUSTOM_REPO"))
-                        + "'       }"
-                        + "    }\n"
-                        + "    dependencies {\n"
-                        + "        classpath 'com.android.tools.build:gradle:"
-                        + GradleTestProject.ANDROID_GRADLE_PLUGIN_VERSION
-                        + "'\n"
-                        + "    }\n"
-                        + "}");
-
-        List<Path> buildGradleFiles =
-                ImmutableList.of(
-                                "WordPress/build.gradle",
-                                "libs/utils/WordPressUtils/build.gradle",
-                                "libs/editor/example/build.gradle",
-                                "libs/editor/WordPressEditor/build.gradle",
-                                "libs/networking/WordPressNetworking/build.gradle",
-                                "libs/analytics/WordPressAnalytics/build.gradle")
-                        .stream()
-                        .map(name -> project.file(name).toPath())
-                        .collect(Collectors.toList());
-
-        for (Path file : buildGradleFiles) {
+    public void initializeProject() throws Exception {
+        PerformanceTestProjects.initializeWordpress(project);
+        if (projectScenario != ProjectScenario.DEX_OUT_OF_PROCESS) {
             TestFileUtils.searchAndReplace(
-                    file, "classpath 'com\\.android\\.tools\\.build:gradle:\\d+.\\d+.\\d+'", "");
-
-            TestFileUtils.searchAndReplace(
-                    file,
-                    "jcenter\\(\\)",
-                    "maven { url '"
-                            + FileUtils.toSystemIndependentPath(System.getenv("CUSTOM_REPO"))
-                            + "'}\njcenter()");
-
-            TestFileUtils.searchAndReplace(
-                    file,
-                    "buildToolsVersion \"[^\"]+\"",
-                    String.format("buildToolsVersion \"%s\"", AndroidBuilder.MIN_BUILD_TOOLS_REV));
+                    project.file("WordPress/build.gradle"), "javaMaxHeapSize = \"6g\"", "");
         }
 
-        //TODO: Upstream some of this?
-
-        TestFileUtils.searchAndReplace(
-                project.file("libs/utils/WordPressUtils/build.gradle"),
-                "classpath 'com\\.novoda:bintray-release:0\\.3\\.4'",
-                "");
-        TestFileUtils.searchAndReplace(
-                project.file("libs/utils/WordPressUtils/build.gradle"),
-                "apply plugin: 'com\\.novoda\\.bintray-release'",
-                "");
-        TestFileUtils.searchAndReplace(
-                project.file("libs/utils/WordPressUtils/build.gradle"),
-                "publish \\{[\\s\\S]*\\}",
-                "");
-
-        TestFileUtils.searchAndReplace(
-                project.file("libs/networking/WordPressNetworking/build.gradle"),
-                "maven \\{ url 'http://wordpress-mobile\\.github\\.io/WordPress-Android' \\}",
-                "");
-
-        TestFileUtils.searchAndReplace(
-                project.file("libs/networking/WordPressNetworking/build.gradle"),
-                "compile 'org\\.wordpress:utils:1\\.11\\.0'",
-                "releaseCompile "
-                        + "project(path:':libs:utils:WordPressUtils', configuration: 'release')\n"
-                        + "    debugCompile "
-                        + "project(path:':libs:utils:WordPressUtils', configuration: 'debug')\n");
-        TestFileUtils.searchAndReplace(
-                project.file("libs/analytics/WordPressAnalytics/build.gradle"),
-                "compile 'org\\.wordpress:utils:1\\.11\\.0'",
-                "releaseCompile "
-                        + "project(path:':libs:utils:WordPressUtils', configuration: 'release')\n"
-                        + "    debugCompile "
-                        + "project(path:':libs:utils:WordPressUtils', configuration: 'debug')\n");
+        switch (projectScenario) {
+            case NATIVE_MULTIDEX:
+            case DEX_ARCHIVE_NATIVE_MULTIDEX:
+            case D8_NATIVE_MULTIDEX:
+                TestFileUtils.searchAndReplace(
+                        project.file("WordPress/build.gradle"),
+                        "minSdkVersion( )* \\d+",
+                        "minSdkVersion 21");
+                break;
+            case LEGACY_MULTIDEX:
+            case DEX_ARCHIVE_LEGACY_MULTIDEX:
+            case D8_LEGACY_MULTIDEX:
+                break;
+            default:
+                throw new IllegalArgumentException(
+                        "Unknown project scenario" + projectScenario);
+        }
     }
 
     @Test
     public void runBenchmarks() throws Exception {
         // Warm up
-        model().getMulti();
-        executor().run("assemble");
+        Map<String, AndroidProject> models = model().getMulti().getModelMap();
         executor().run("clean");
+        executor().run("assembleVanillaDebug");
 
-        executor().recordBenchmark(BenchmarkMode.EVALUATION).run("tasks");
+        for (BenchmarkMode benchmarkMode : getBenchmarks()) {
+            switch (benchmarkMode) {
+                case EVALUATION:
+                    executor().recordBenchmark(benchmarkMode).run("tasks");
+                    break;
+                case SYNC:
+                    Map<String, AndroidProject> model =
+                            model().recordBenchmark(BenchmarkMode.SYNC).getMulti().getModelMap();
+                    assertThat(model.keySet()).contains(":WordPress");
+                    continue;
+                case BUILD__FROM_CLEAN:
+                    FileUtils.cleanOutputDir(executor().getBuildCacheDir());
+                    clean();
+                    executor().recordBenchmark(benchmarkMode).run("assembleVanillaDebug");
+                    break;
+                case BUILD_INC__MAIN_PROJECT__JAVA__IMPLEMENTATION_CHANGE:
+                    executor().run("assembleVanillaDebug");
+                    changeJavaImplementation();
+                    executor().recordBenchmark(benchmarkMode).run("assembleVanillaDebug");
+                    break;
+                case BUILD_INC__MAIN_PROJECT__JAVA__API_CHANGE:
+                    executor().run("assembleVanillaDebug");
+                    changeJavaApi("newMethod");
+                    executor().recordBenchmark(benchmarkMode).run("assembleVanillaDebug");
+                    break;
+                case BUILD_ANDROID_TESTS_FROM_CLEAN:
+                    clean();
+                    executor()
+                            .recordBenchmark(benchmarkMode)
+                            .run("assembleVanillaDebugAndroidTest");
+                    break;
+                case GENERATE_SOURCES:
+                    clean();
+                    List<String> generateSourcesCommands =
+                            ModelHelper.getGenerateSourcesCommands(
+                                    models,
+                                    project ->
+                                            project.equals(":WordPress")
+                                                    ? "vanillaDebug"
+                                                    : "debug");
+                    executor()
+                            .recordBenchmark(benchmarkMode)
+                            .with(BooleanOption.IDE_GENERATE_SOURCES_ONLY, true)
+                            .run(generateSourcesCommands);
+                    break;
+                case NO_OP:
+                    executor().run("assembleVanillaDebug");
+                    executor().recordBenchmark(benchmarkMode).run("assembleVanillaDebug");
+                    break;
+                default:
+                    throw new UnsupportedOperationException(benchmarkMode.toString());
+            }
+        }
+    }
 
-        Map<String, AndroidProject> model =
-                model().recordBenchmark(BenchmarkMode.SYNC).getMulti().getModelMap();
-        assertThat(model.keySet()).contains(":WordPress");
+    private void changeJavaImplementation() throws IOException {
+        TestFileUtils.searchAndReplace(
+                project.getSubproject("WordPress")
+                        .file("src/main/java/org/wordpress/android/ui/WebViewActivity.java"),
+                "protected void onPause\\(\\) \\{",
+                "protected void onPause() {\n"
+                        + "        android.util.Log.d(\"TAG\", \"onPause called "
+                        + "\");");
+    }
 
+    private void changeJavaApi(@NonNull String newMethodName) throws IOException {
+        File mainActivity =
+                project.getSubproject("WordPress")
+                        .file("src/main/java/org/wordpress/android/ui/WebViewActivity.java");
+        TestFileUtils.searchAndReplace(
+                mainActivity,
+                "protected void onPause\\(\\) \\{",
+                "protected void onPause() {\n" + "        " + newMethodName + "();");
+        TestFileUtils.addMethod(
+                mainActivity,
+                "protected void "
+                        + newMethodName
+                        + "() {\n"
+                        + "        android.util.Log.d(\"TAG\", \""
+                        + newMethodName
+                        + " called\");\n"
+                        + "    }\n");
+    }
 
-        executor()
-                .recordBenchmark(BenchmarkMode.GENERATE_SOURCES)
-                .withArgument("-Pandroid.injected.generateSourcesOnly=true")
-                .run(
-                        ModelHelper.getGenerateSourcesCommands(
-                                model,
-                                project ->
-                                        project.equals(":WordPress") ? "vanillaDebug" : "debug"));
+    @NonNull
+    private Set<BenchmarkMode> getBenchmarks() {
+        return ImmutableSet.of(
+                BenchmarkMode.EVALUATION,
+                BenchmarkMode.SYNC,
+                BenchmarkMode.GENERATE_SOURCES,
+                BenchmarkMode.BUILD__FROM_CLEAN,
+                BenchmarkMode.NO_OP,
+                BenchmarkMode.BUILD_ANDROID_TESTS_FROM_CLEAN,
+                BenchmarkMode.BUILD_INC__MAIN_PROJECT__JAVA__API_CHANGE,
+                BenchmarkMode.BUILD_INC__MAIN_PROJECT__JAVA__IMPLEMENTATION_CHANGE);
+    }
 
+    private void clean() throws IOException, InterruptedException {
         executor().run("clean");
-
-        executor().recordBenchmark(BenchmarkMode.BUILD__FROM_CLEAN).run("assembleVanillaDebug");
-
-        executor().recordBenchmark(BenchmarkMode.NO_OP).run("assembleVanillaDebug");
-
-        executor().run("clean");
-
-        executor()
-                .recordBenchmark(BenchmarkMode.BUILD_ANDROID_TESTS_FROM_CLEAN)
-                .run("assembleVanillaDebugAndroidTest");
     }
 
     @NonNull
@@ -229,6 +215,11 @@ public class MediumGradleProjectPerformanceMatrixTest {
 
     @NonNull
     private RunGradleTasks executor() {
-        return project.executor().withoutOfflineFlag();
+        return project.executor()
+                .withEnableInfoLogging(false)
+                .with(BooleanOption.ENABLE_INTERMEDIATE_ARTIFACTS_CACHE, false)
+                .with(BooleanOption.ENABLE_AAPT2, false)
+                .with(BooleanOption.ENABLE_D8, projectScenario.useD8())
+                .withUseDexArchive(projectScenario.useDexArchive());
     }
 }

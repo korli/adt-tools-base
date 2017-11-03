@@ -22,6 +22,8 @@ import static com.android.tools.lint.detector.api.TextFormat.HTML_WITH_UNICODE;
 import static com.android.tools.lint.detector.api.TextFormat.RAW;
 import static com.android.tools.lint.detector.api.TextFormat.TEXT;
 
+import com.android.tools.lint.checks.PrivateApiDetector;
+import com.android.tools.lint.checks.infrastructure.TestIssueRegistry;
 import junit.framework.TestCase;
 
 public class TextFormatTest extends TestCase {
@@ -71,7 +73,14 @@ public class TextFormatTest extends TestCase {
                 HTML));
         assertEquals("", convertMarkup("", HTML));
         assertEquals("", convertMarkup("", HTML));
-        assertEquals("This is <b>bold</b>", convertMarkup("This is *bold*", HTML));
+        assertEquals("This is <i>italic</i>", convertMarkup("This is *italic*", HTML));
+        assertEquals("This is <b>bold</b>", convertMarkup("This is **bold**", HTML));
+        assertEquals("This is <b><i>bold-italics</i></b>", convertMarkup("This is ***bold-italics***", HTML));
+        assertEquals("This is italics", convertMarkup("This is *italics*", TEXT));
+        assertEquals("This is bold", convertMarkup("This is **bold**", TEXT));
+        assertEquals("This is bold-italics", convertMarkup("This is ***bold-italics***", TEXT));
+        assertEquals("values-v<i>NN</i>", convertMarkup("values-v\u200b*NN*", HTML));
+        assertEquals("<code>values-v</code><i>NN</i>", convertMarkup("`values-v`*NN*", HTML));
         assertEquals("Visit <a href=\"http://google.com\">http://google.com</a>.",
                 convertMarkup("Visit http://google.com.", HTML));
         assertEquals("This is <code>monospace</code>!", convertMarkup("This is `monospace`!",
@@ -93,7 +102,9 @@ public class TextFormatTest extends TestCase {
                 TEXT));
 
         // Corners (match at the beginning and end)
-        assertEquals("<b>bold</b>", convertMarkup("*bold*", HTML));
+        assertEquals("<i>italic</i>", convertMarkup("*italic*", HTML));
+        assertEquals("<b>bold</b>", convertMarkup("**bold**", HTML));
+        assertEquals("<b><i>bold-italics</i></b>", convertMarkup("***bold-italics***", HTML));
         assertEquals("<code>monospace</code>!", convertMarkup("`monospace`!", HTML));
 
         // Not formatting
@@ -109,6 +120,15 @@ public class TextFormatTest extends TestCase {
         assertEquals("* List item 1<br/>\n* List Item 2",
                 convertMarkup("* List item 1\n* List Item 2", HTML));
         assertEquals("myhttp://foo.bar", convertMarkup("myhttp://foo.bar", HTML));
+
+        assertEquals("Incorrect line ending: found carriage return (<code>\\r</code>) without " +
+                "corresponding newline (<code>\\n</code>)", convertMarkup("Incorrect line ending: found carriage return (`\\r`) without " +
+                "corresponding newline (`\\n`)", HTML));
+        assertEquals("This is a backslash: \\.", convertMarkup("This is a backslash: \\\\.", HTML));
+
+        assertEquals("*literal asterisks*", convertMarkup("\\*literal asterisks\\*", TEXT));
+        assertEquals("*literal asterisks*", convertMarkup("\\*literal asterisks\\*", HTML));
+        assertEquals("&lt;ignore path=\"*/test/*\" />n\"", convertMarkup("<ignore path=\\\"\\*/test/\\*\\\" />\\n\"", HTML));
     }
 
     public void testConvertMarkup2() throws Exception {
@@ -184,7 +204,7 @@ public class TextFormatTest extends TestCase {
         // monospace and bold test
         // From ManifestDetector#MULTIPLE_USES_SDK
         String explanation =
-            "The `<uses-sdk>` element should appear just once; the tools will *not* merge the " +
+            "The `<uses-sdk>` element should appear just once; the tools will **not** merge the " +
             "contents of all the elements so if you split up the attributes across multiple " +
             "elements, only one of them will take effect. To fix this, just merge all the " +
             "attributes from the various elements into a single <uses-sdk> element.";
@@ -247,6 +267,12 @@ public class TextFormatTest extends TestCase {
                         + "Line 2 <div>\n",
                 HTML.convertTo("<html>Line 1<br>Line 2\n<!-- comment -->&lt;div&gt;</html>",
                         TEXT));
+    }
+
+    public void testEscapedNewlines() throws Exception {
+        assertEquals("Using reflection to access hidden/private Android APIs is not safe; it will often not work on devices from other vendors, and it may suddenly stop working (if the API is removed) or crash spectacularly (if the API behavior changes, since there are no guarantees for compatibility.)", PrivateApiDetector.ISSUE.getExplanation(TextFormat.HTML));
+        // Ignore newlines if they are escaped; used for line wrapping
+        assertEquals("abcd<br/>\nef", RAW.convertTo("ab\\\ncd\nef", HTML));
     }
 
     public void testConvertFromHtml2() throws Exception {
@@ -316,5 +342,35 @@ public class TextFormatTest extends TestCase {
         // Regression test for https://code.google.com/p/android/issues/detail?id=181820
         // Make sure we handle formatting characters at the end
         assertEquals("foo bar *", convertMarkup("foo bar *", HTML));
+    }
+
+    public void testHttps() throws Exception {
+        assertEquals("Visit <a href=\"https://google.com\">https://google.com</a>.",
+                convertMarkup("Visit https://google.com.", HTML));
+    }
+
+    public void testConvertAll() {
+        for (Issue issue : new TestIssueRegistry().getIssues()) {
+            // Make sure there are no exceptions during conversion for any of the builtin strings
+            issue.getExplanation(TextFormat.RAW);
+            issue.getBriefDescription(TextFormat.RAW);
+            issue.getExplanation(TextFormat.HTML);
+            issue.getBriefDescription(TextFormat.HTML);
+            issue.getExplanation(TextFormat.TEXT);
+            issue.getBriefDescription(TextFormat.TEXT);
+        }
+    }
+
+    public void testTextToRaw() {
+        assertEquals("foo\\\\bar\\*baz\\*", TextFormat.TEXT.convertTo("foo\\bar*baz*",
+                TextFormat.RAW));
+        assertEquals("\\*\\*\\*foo\\*\\*\\*", TextFormat.TEXT.convertTo("***foo***",
+                TextFormat.RAW));
+        assertEquals("\\`symbol\\`", TextFormat.TEXT.convertTo("`symbol`",
+                TextFormat.RAW));
+        assertEquals("foo\\bar*baz*", TextFormat.RAW.convertTo("foo\\\\bar\\*baz\\*",
+                TextFormat.TEXT));
+        assertEquals("`symbol`", TextFormat.RAW.convertTo("\\`symbol\\`",
+                TextFormat.TEXT));
     }
 }

@@ -20,7 +20,10 @@ import static com.android.builder.core.VariantType.ANDROID_TEST;
 import static com.android.builder.core.VariantType.UNIT_TEST;
 
 import com.android.SdkConstants;
+import com.android.annotations.NonNull;
+import com.android.build.gradle.api.AndroidBasePlugin;
 import com.android.build.gradle.internal.ProductFlavorCombo;
+import com.android.build.gradle.internal.tasks.TaskInputHelper;
 import com.android.build.gradle.managed.AndroidConfig;
 import com.android.build.gradle.managed.BuildType;
 import com.android.build.gradle.managed.ProductFlavor;
@@ -28,13 +31,17 @@ import com.android.build.gradle.model.internal.AndroidBinaryInternal;
 import com.android.build.gradle.model.internal.AndroidComponentSpecInternal;
 import com.android.build.gradle.model.internal.DefaultAndroidBinary;
 import com.android.build.gradle.model.internal.DefaultAndroidComponentSpec;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.Version;
 import com.android.builder.core.BuilderConstants;
 import com.android.repository.Revision;
 import com.android.utils.StringHelper;
-import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
-
+import java.io.File;
+import java.util.HashMap;
+import java.util.List;
+import java.util.stream.Collectors;
+import javax.inject.Inject;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.file.SourceDirectorySet;
@@ -48,17 +55,15 @@ import org.gradle.model.ModelMap;
 import org.gradle.model.Mutate;
 import org.gradle.model.Path;
 import org.gradle.model.RuleSource;
+import org.gradle.model.internal.core.ModelReference;
+import org.gradle.model.internal.core.ModelRegistrations;
+import org.gradle.model.internal.registry.ModelRegistry;
 import org.gradle.platform.base.BinarySpec;
 import org.gradle.platform.base.ComponentBinaries;
 import org.gradle.platform.base.ComponentType;
 import org.gradle.platform.base.TypeBuilder;
 import org.gradle.tooling.BuildException;
 import org.gradle.tooling.UnsupportedVersionException;
-
-import java.io.File;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Plugin to set up infrastructure for other android plugins.
@@ -70,16 +75,37 @@ public class AndroidComponentModelPlugin implements Plugin<Project> {
      */
     public static final String COMPONENT_NAME = "android";
 
-    public static final String GRADLE_ACCEPTABLE_VERSION = "3.3";
+    public static final String GRADLE_ACCEPTABLE_VERSION = SdkConstants.GRADLE_MINIMUM_VERSION;
 
     private static final String GRADLE_VERSION_CHECK_OVERRIDE_PROPERTY =
             "com.android.build.gradle.overrideVersionCheck";
 
+    @NonNull private final ModelRegistry modelRegistry;
+
+    @Inject
+    private AndroidComponentModelPlugin(@NonNull ModelRegistry modelRegistry) {
+        this.modelRegistry = modelRegistry;
+    }
+
     @Override
     public void apply(Project project) {
+        project.getPluginManager().apply(AndroidBasePlugin.class);
         checkPluginVersion();
         checkGradleVersion(project);
+        TaskInputHelper.enableBypass();
+
         project.getPlugins().apply(ComponentModelBasePlugin.class);
+
+        project.getGradle().getTaskGraph().addTaskExecutionGraphListener(
+                taskGraph -> TaskInputHelper.disableBypass());
+
+        // Remove this when our models no longer depends on Project.
+        modelRegistry.register(
+                ModelRegistrations.bridgedInstance(
+                                ModelReference.of("projectModel", Project.class), project)
+                        .descriptor("Model of project.")
+                        .build());
+
     }
 
     /**
@@ -133,6 +159,12 @@ public class AndroidComponentModelPlugin implements Plugin<Project> {
         public void android(AndroidConfig androidModel) {
         }
 
+        @Defaults
+        public static void defaultConfig(
+                @Path("android.defaultConfig") ProductFlavor defaultConfig) {
+            defaultConfig.setFlavorSelections(new HashMap<>());
+        }
+
         @Finalize
         public static void finalizeAndroidModel(AndroidConfig androidModel) {
             if (androidModel.getBuildToolsRevision() == null
@@ -154,14 +186,29 @@ public class AndroidComponentModelPlugin implements Plugin<Project> {
 
         }
 
+        @Model
+        public static ProjectOptions createProjectOptions(Project project) {
+            return new ProjectOptions(project);
+        }
+
         @Defaults
         public static void createDefaultBuildTypes(
                 @Path("android.buildTypes") ModelMap<BuildType> buildTypes) {
+
+            buildTypes.beforeEach(buildType -> buildType.setFlavorSelections(new HashMap<>()));
+
             buildTypes.create(BuilderConstants.DEBUG, buildType -> {
                 buildType.setDebuggable(true);
                 buildType.setEmbedMicroApp(false);
             });
             buildTypes.create(BuilderConstants.RELEASE);
+        }
+
+        @Defaults
+        public static void productFlavors(
+                @Path("android.productFlavors") ModelMap<ProductFlavor> productFlavors) {
+            productFlavors.beforeEach(
+                    productFlavor -> productFlavor.setFlavorSelections(new HashMap<>()));
         }
 
         @Model

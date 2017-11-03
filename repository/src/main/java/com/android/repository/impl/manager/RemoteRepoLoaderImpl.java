@@ -33,9 +33,6 @@ import com.android.repository.impl.meta.SchemaModuleUtil;
 import com.android.repository.util.InstallerUtil;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
-import org.w3c.dom.ls.LSResourceResolver;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
@@ -43,8 +40,8 @@ import java.net.URL;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-
 import javax.xml.bind.JAXBException;
+import org.w3c.dom.ls.LSResourceResolver;
 
 /**
  * Utility class that loads {@link Repository}s from {@link RepositorySource}s.
@@ -89,15 +86,25 @@ public class RemoteRepoLoaderImpl implements RemoteRepoLoader {
     public Map<String, RemotePackage> fetchPackages(@NonNull ProgressIndicator progress,
             @NonNull Downloader downloader, @Nullable SettingsController settings) {
         Map<String, RemotePackage> result = Maps.newHashMap();
+        double progressMax = 0;
         for (RepositorySourceProvider provider : mSourceProviders) {
-            for (RepositorySource source : provider
-                    .getSources(downloader, progress, false)) {
+            progressMax += 0.1 / mSourceProviders.size();
+            List<RepositorySource> sources =
+                    provider.getSources(downloader, progress.createSubProgress(progressMax), false);
+            double progressIncrement = 0.9 / (mSourceProviders.size() * sources.size() * 2.);
+            for (RepositorySource source : sources) {
                 if (!source.isEnabled()) {
+                    progressMax += 2 * progressIncrement;
+                    progress.setFraction(progressMax);
                     continue;
                 }
                 try {
-                    InputStream repoStream = downloader
-                            .downloadAndStream(new URL(source.getUrl()), progress);
+                    progressMax += progressIncrement;
+                    InputStream repoStream =
+                            downloader.downloadAndStream(
+                                    new URL(source.getUrl()),
+                                    progress.createSubProgress(progressMax));
+                    progress.setFraction(progressMax);
                     final List<String> errors = Lists.newArrayList();
 
                     // Don't show the errors, in case the fallback loader can read it. But keep
@@ -135,9 +142,18 @@ public class RemoteRepoLoaderImpl implements RemoteRepoLoader {
                         parsedPackages = repo.getRemotePackage();
                     } else if (mFallback != null) {
                         // TODO: don't require downloading again
-                        parsedPackages = mFallback.parseLegacyXml(source, settings, progress);
+                        parsedPackages =
+                                mFallback.parseLegacyXml(
+                                        source,
+                                        downloader,
+                                        settings,
+                                        progress.createSubProgress(
+                                                progressMax + progressIncrement));
                         legacy = true;
                     }
+                    progressMax += progressIncrement;
+                    progress.setFraction(progressMax);
+
                     if (parsedPackages != null && !parsedPackages.isEmpty()) {
                         for (RemotePackage pkg : parsedPackages) {
                             RemotePackage existing = result.get(pkg.getPath());

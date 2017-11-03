@@ -16,6 +16,7 @@
 
 package com.android.resources;
 
+import com.android.annotations.NonNull;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,10 +32,10 @@ import java.util.Map;
 public final class FolderTypeRelationship {
 
     private static final Map<ResourceType, List<ResourceFolderType>> mTypeToFolderMap =
-        new EnumMap<ResourceType, List<ResourceFolderType>>(ResourceType.class);
+            new EnumMap<>(ResourceType.class);
 
     private static final Map<ResourceFolderType, List<ResourceType>> mFolderToTypeMap =
-        new EnumMap<ResourceFolderType, List<ResourceType>>(ResourceFolderType.class);
+            new EnumMap<>(ResourceFolderType.class);
 
     static {
         // generate the relationships in a temporary map
@@ -49,6 +50,7 @@ public final class FolderTypeRelationship {
         add(ResourceType.DIMEN, ResourceFolderType.VALUES);
         add(ResourceType.DRAWABLE, ResourceFolderType.VALUES);
         add(ResourceType.DRAWABLE, ResourceFolderType.DRAWABLE);
+        add(ResourceType.FONT, ResourceFolderType.FONT);
         add(ResourceType.ID, ResourceFolderType.DRAWABLE);
         add(ResourceType.FRACTION, ResourceFolderType.VALUES);
         add(ResourceType.ID, ResourceFolderType.VALUES);
@@ -64,29 +66,40 @@ public final class FolderTypeRelationship {
         add(ResourceType.RAW, ResourceFolderType.RAW);
         add(ResourceType.STRING, ResourceFolderType.VALUES);
         add(ResourceType.STYLE, ResourceFolderType.VALUES);
+        add(ResourceType.STYLE_ITEM, ResourceFolderType.VALUES);
         add(ResourceType.STYLEABLE, ResourceFolderType.VALUES);
         add(ResourceType.TRANSITION, ResourceFolderType.TRANSITION);
         add(ResourceType.ID, ResourceFolderType.TRANSITION);
         add(ResourceType.XML, ResourceFolderType.XML);
         add(ResourceType.ID, ResourceFolderType.XML);
+        add(ResourceType.NAVIGATION, ResourceFolderType.NAVIGATION);
 
         makeSafe();
     }
 
-    // The ID-providing relationship is also encoded in the above maps by having a folder
-    // map to two ResourceTypes, with the second ResourceType being ID.
-    private static final EnumSet<ResourceFolderType> ID_PROVIDING_RESOURCE_TYPES = EnumSet.of(
-      ResourceFolderType.LAYOUT, ResourceFolderType.MENU, ResourceFolderType.DRAWABLE,
-      ResourceFolderType.XML, ResourceFolderType.TRANSITION
-    );
+    /**
+     * The ID-providing relationship is also encoded in the above maps by having a folder map to two
+     * ResourceTypes, with the second ResourceType being ID.
+     */
+    private static final EnumSet<ResourceFolderType> ID_PROVIDING_RESOURCE_TYPES =
+            EnumSet.of(
+                    ResourceFolderType.LAYOUT,
+                    ResourceFolderType.MENU,
+                    ResourceFolderType.DRAWABLE,
+                    ResourceFolderType.XML,
+                    ResourceFolderType.TRANSITION,
+                    ResourceFolderType.NAVIGATION);
 
     /**
-     * Returns a list of {@link ResourceType}s that can be generated from files inside a folder
-     * of the specified type.
+     * Returns a list of {@link ResourceType}s that can be generated from files inside a folder of
+     * the specified type.
+     *
      * @param folderType The folder type.
      * @return a list of {@link ResourceType}, possibly empty but never null.
      */
-    public static List<ResourceType> getRelatedResourceTypes(ResourceFolderType folderType) {
+    @NonNull
+    public static List<ResourceType> getRelatedResourceTypes(
+            @NonNull ResourceFolderType folderType) {
         List<ResourceType> list = mFolderToTypeMap.get(folderType);
         if (list != null) {
             return list;
@@ -96,8 +109,34 @@ public final class FolderTypeRelationship {
     }
 
     /**
-     * Returns a list of {@link ResourceFolderType} that can contain files generating resources
-     * of the specified type.
+     * Returns a single ResourceType that can be generated from files inside a folder of the
+     * specified type and which is not {@link ResourceType#ID}.
+     *
+     * @param folderType The folder type.
+     * @return a single non-ID {@link ResourceType}.
+     */
+    @NonNull
+    public static ResourceType getNonIdRelatedResourceType(@NonNull ResourceFolderType folderType) {
+        List<ResourceType> resourceTypes = getRelatedResourceTypes(folderType);
+        if (resourceTypes.isEmpty()) {
+            throw new IllegalArgumentException(
+                    // {@link FolderTypeRelationshipTest#testResourceFolderType} guarantees this
+                    // should never happen
+                    String.format(
+                            "No resource types defined for given folder type: %s",
+                            folderType.getName()));
+        }
+        ResourceType resourceType = resourceTypes.get(0);
+        if (resourceTypes.size() > 1 && resourceType == ResourceType.ID) {
+            resourceType = resourceTypes.get(1);
+        }
+        return resourceType;
+    }
+
+    /**
+     * Returns a list of {@link ResourceFolderType} that can contain files generating resources of
+     * the specified type.
+     *
      * @param resType the type of resource.
      * @return a list of {@link ResourceFolderType}, possibly empty but never null.
      */
@@ -150,7 +189,7 @@ public final class FolderTypeRelationship {
         // first we add the folder to the list associated with the type.
         List<ResourceFolderType> folderList = mTypeToFolderMap.get(type);
         if (folderList == null) {
-            folderList = new ArrayList<ResourceFolderType>();
+            folderList = new ArrayList<>();
             mTypeToFolderMap.put(type, folderList);
         }
         if (folderList.indexOf(folder) == -1) {
@@ -160,7 +199,7 @@ public final class FolderTypeRelationship {
         // now we add the type to the list associated with the folder.
         List<ResourceType> typeList = mFolderToTypeMap.get(folder);
         if (typeList == null) {
-            typeList = new ArrayList<ResourceType>();
+            typeList = new ArrayList<>();
             mFolderToTypeMap.put(folder, typeList);
         }
         if (typeList.indexOf(type) == -1) {

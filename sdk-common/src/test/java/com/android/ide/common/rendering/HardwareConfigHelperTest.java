@@ -14,19 +14,18 @@ import static com.android.ide.common.rendering.HardwareConfigHelper.sortNexusLis
 import com.android.repository.testframework.MockFileOp;
 import com.android.sdklib.devices.Device;
 import com.android.sdklib.devices.DeviceManager;
+import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.utils.StdLogger;
 import com.google.common.collect.Lists;
-
-import junit.framework.TestCase;
-
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import junit.framework.TestCase;
 
 public class HardwareConfigHelperTest extends TestCase {
     private static DeviceManager getDeviceManager() {
         return DeviceManager.createInstance(
-                null, null, new StdLogger(StdLogger.Level.INFO), new MockFileOp());
+                new AndroidSdkHandler(null, null, new MockFileOp()), new StdLogger(StdLogger.Level.INFO));
     }
 
     public void testNexus() {

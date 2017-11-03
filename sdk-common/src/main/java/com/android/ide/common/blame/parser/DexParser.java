@@ -31,6 +31,23 @@ import java.util.regex.Pattern;
 
 public class DexParser implements PatternAwareOutputParser {
 
+    public static final String DX_UNEXPECTED_EXCEPTION = "UNEXPECTED TOP-LEVEL EXCEPTION:";
+
+    public static final String ERROR_INVOKE_DYNAMIC =
+            "invalid opcode ba (invokedynamic requires --min-sdk-version >= 26)";
+
+    public static final String ENABLE_DESUGARING =
+            "The dependency contains Java 8 bytecode. Please enable desugaring by "
+                    + "adding the following to build.gradle\n"
+                    + "android {\n"
+                    + "    compileOptions {\n"
+                    + "        sourceCompatibility 1.8\n"
+                    + "        targetCompatibility 1.8\n"
+                    + "    }\n"
+                    + "}\n"
+                    + "See https://developer.android.com/studio/write/java8-support.html for "
+                    + "details. Alternatively, increase the minSdkVersion to 26 or above.\n";
+
     static final String DEX_TOOL_NAME = "Dex";
 
     static final String DEX_LIMIT_EXCEEDED_ERROR =
@@ -98,7 +115,8 @@ public class DexParser implements PatternAwareOutputParser {
             return true;
         }
 
-        if (line.startsWith("trouble writing output: Too many method references:")) {
+        if (line.startsWith("trouble writing output: Too many method references")
+                || line.startsWith("Cannot fit requested classes in a single dex file.")) {
             StringBuilder original1 = new StringBuilder(line).append('\n');
             String nextLine = reader.readLine();
             while (!Strings.isNullOrEmpty(nextLine)) {
@@ -142,7 +160,7 @@ public class DexParser implements PatternAwareOutputParser {
             return true;
         }
 
-        if (!line.equals("UNEXPECTED TOP-LEVEL EXCEPTION:")) {
+        if (!line.equals(DX_UNEXPECTED_EXCEPTION)) {
             return false;
         }
         StringBuilder original = new StringBuilder(line).append('\n');
@@ -163,6 +181,16 @@ public class DexParser implements PatternAwareOutputParser {
                     exceptionWithStacktrace,
                     Optional.of(DEX_TOOL_NAME),
                     ImmutableList.of(SourceFilePosition.UNKNOWN)));
+            return true;
+        } else if (exception.startsWith(
+                "com.android.dx.cf.code.SimException: " + ERROR_INVOKE_DYNAMIC)) {
+            messages.add(
+                    new Message(
+                            Message.Kind.ERROR,
+                            ENABLE_DESUGARING,
+                            exceptionWithStacktrace,
+                            Optional.of(DEX_TOOL_NAME),
+                            ImmutableList.of(SourceFilePosition.UNKNOWN)));
             return true;
         } else {
             String cause = exception;

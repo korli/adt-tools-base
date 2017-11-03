@@ -22,7 +22,6 @@ import com.android.utils.ILogger;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ListenableFuture;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -35,7 +34,7 @@ public abstract class AbstractAapt implements Aapt {
 
     @Override
     @NonNull
-    public ListenableFuture<Void> link(@NonNull AaptPackageConfig config)
+    public final ListenableFuture<Void> link(@NonNull AaptPackageConfig config)
             throws AaptException {
         validatePackageConfig(config);
         return makeValidatedPackage(config);
@@ -53,65 +52,65 @@ public abstract class AbstractAapt implements Aapt {
     protected abstract ListenableFuture<Void> makeValidatedPackage(
             @NonNull AaptPackageConfig config) throws AaptException;
 
-
     /**
-     * Checks whether a package config is valid. Subclasses may override this method to change
-     * the validation performed. The default validation is described below.
+     * Checks whether a package config is valid. Subclasses may override this method to change the
+     * validation performed. The default validation is described below.
      *
      * <p>Config defines multiple fields, not all mandatory. The following rules apply when defining
      * a package configuration (failure to comply will result in {@link AaptException} being thrown:
      *
      * <ul>
-     *     <li>The following fields must be defined:
-     *     <ul>
+     *   <li>The following fields must be defined:
+     *       <ul>
      *         <li>Android target (see {@link AaptPackageConfig#getAndroidTarget()});
-     *         <li>Build tools information (see
-     *         {@link AaptPackageConfig#getBuildToolInfo()}};
+     *         <li>Build tools information (see {@link AaptPackageConfig#getBuildToolInfo()}};
      *         <li>Logger (see {@link AaptPackageConfig#getLogger()});
      *         <li>Manifest file (see {@link AaptPackageConfig#getManifestFile()});
      *         <li>{@code aapt} options (see {@link AaptPackageConfig#getOptions()});
      *         <li>Variant type (see {@link AaptPackageConfig#getVariantType()}};
-     *     </ul>
-     *     <li>The following fields are optional and some have defaults (these fields do <i>not</i>
-     *     need to be defined):
-     *     <ul>
-     *         <li>Custom package for {@code R} (see
-     *         {@link AaptPackageConfig#getCustomPackageForR()});
-     *         <li>Libraries (see {@link AaptPackageConfig#getLibraries()}); if none is set, an
-     *         empty list is assumed;
+     *       </ul>
+     *   <li>The following fields are optional and some have defaults (these fields do <i>not</i>
+     *       need to be defined):
+     *       <ul>
+     *         <li>Custom package for {@code R} (see {@link
+     *             AaptPackageConfig#getCustomPackageForR()});
+     *         <li>Libraries (see {@link AaptPackageConfig#getLibrarySymbolTableFiles()}); if none
+     *             is set, an empty list is assumed;
      *         <li>Preferred density (see {@link AaptPackageConfig#getPreferredDensity()});
      *         <li>Proguard output file (see {@link AaptPackageConfig#getProguardOutputFile()});
-     *         <li>Resource configs (see {@link AaptPackageConfig#getResourceConfigs()});
-     *         if none is set, an empty collection is assumed;
+     *         <li>Resource configs (see {@link AaptPackageConfig#getResourceConfigs()}); if none is
+     *             set, an empty collection is assumed;
      *         <li>Resource dir (see {@link AaptPackageConfig#getResourceDir()});
      *         <li>Resource output APK (see {@link AaptPackageConfig#getResourceOutputApk()});
      *         <li>Source output directory (see {@link AaptPackageConfig#getSourceOutputDir()});
      *         <li>Splits (see {@link AaptPackageConfig#getSplits()});
      *         <li>Symbol output directory (see {@link AaptPackageConfig#getSymbolOutputDir()});
-     *         <li>Debuggable (see {@link AaptPackageConfig#isDebuggable()}), {@code false}
-     *         by default;
-     *         <li>Pseudo localize (see {@link AaptPackageConfig#isPseudoLocalize()}),
-     *         {@code false} by default;
-     *         <li>Verbose (see {@link AaptPackageConfig#isVerbose()}), {@code false} by
-     *         default;
-     *     </ul>
-     *     <li>Either the source output directory
-     *     ({@link AaptPackageConfig#getSourceOutputDir()}) or the resource output APK
-     *     ({@link AaptPackageConfig#getResourceOutputApk()}) must be defined;
-     *     <li>If there are no libraries defined (see {@link AaptPackageConfig#getLibraries()})
-     *     then the symbol output directory ({@link AaptPackageConfig#getSymbolOutputDir()})
-     *     and the source output directory ({@link AaptPackageConfig#getSourceOutputDir()})
-     *     must <i>not</i> be defined; (*)
-     *     <li>If the build tools' version is {@code < 21}, then pseudo-localization is not allowed
-     *     ({@link AaptPackageConfig#isPseudoLocalize()});
-     *     <li>If the build tools' version is {@code < 21}, then fail on missing config entry (
-     *     {@code getOptions().getFailOnMissingConfigEntry()} must be {@code false};
-     *     <li>If there are splits ({@link AaptPackageConfig#getSplits()}) configured
-     *     and resource configs ({@link AaptPackageConfig#getResourceConfigs()})
-     *     configured, then all splits must be preset
-     *     in the resource configs and all densities in resource configs must match splits;
-     *     <li>If the build tools' version is {@code < 21}, then preferred density should not be set
-     *     (breaking this rule will issue a warning, but won't throw {@link AaptException});
+     *         <li>Debuggable (see {@link AaptPackageConfig#isDebuggable()}), {@code false} by
+     *             default;
+     *         <li>Pseudo localize (see {@link AaptPackageConfig#isPseudoLocalize()}), {@code false}
+     *             by default;
+     *         <li>Verbose (see {@link AaptPackageConfig#isVerbose()}), {@code false} by default;
+     *       </ul>
+     *   <li>Either the source output directory ({@link AaptPackageConfig#getSourceOutputDir()}) or
+     *       the resource output APK ({@link AaptPackageConfig#getResourceOutputApk()}) must be
+     *       defined;
+     *   <li>If there are no libraries defined (see {@link
+     *       AaptPackageConfig#getLibrarySymbolTableFiles()}) then the symbol output directory
+     *       ({@link AaptPackageConfig#getSymbolOutputDir()}) and the source output directory
+     *       ({@link AaptPackageConfig#getSourceOutputDir()}) must <i>not</i> be defined; (*)
+     *   <li>If the build tools' version is {@code < 21}, then pseudo-localization is not allowed
+     *       ({@link AaptPackageConfig#isPseudoLocalize()});
+     *   <li>If the build tools' version is {@code < 21}, then fail on missing config entry ( {@code
+     *       getOptions().getFailOnMissingConfigEntry()} must be {@code false};
+     *   <li>If there are splits ({@link AaptPackageConfig#getSplits()}) configured and resource
+     *       configs ({@link AaptPackageConfig#getResourceConfigs()}) configured, then all splits
+     *       must be preset in the resource configs and all densities in resource configs must match
+     *       splits;
+     *   <li>If the build tools' version is {@code < 21}, then preferred density should not be set
+     *       (breaking this rule will issue a warning, but won't throw {@link AaptException});
+     *   <li>If at least one dependent feature ({@link AaptPackageConfig#getDependentFeatures()}) is
+     *       defined, a package ID ({@link AaptPackageConfig#getPackageId()}) value must also be
+     *       defined.
      * </ul>
      *
      * <p>(*) This rule is currently disabled as it is sometimes broken for unknown reasons.
@@ -147,15 +146,9 @@ public abstract class AbstractAapt implements Aapt {
             throw new AaptException("Variant type not set.");
         }
 
-        if (packageConfig.getSourceOutputDir() == null
-                && packageConfig.getResourceOutputApk() == null) {
-            throw new AaptException("Neither source output dir nor resource output dir were "
-                    + "set, but at least one must be.");
-        }
-
         if ((packageConfig.getSymbolOutputDir() != null
-                || packageConfig.getSourceOutputDir() != null)
-                && packageConfig.getLibraries().isEmpty()) {
+                        || packageConfig.getSourceOutputDir() != null)
+                && packageConfig.getLibrarySymbolTableFiles().isEmpty()) {
             /*
              * This rule seems to be broken some times. Not exactly why, but the original code
              * (from where this was refactored) allowed libraries to be set to empty and defining
@@ -216,12 +209,11 @@ public abstract class AbstractAapt implements Aapt {
             }
         }
 
-        /*
-         * A base feature needs to be set to add previous features.
-         */
-        if (!packageConfig.getPreviousFeatures().isEmpty()
-                && packageConfig.getBaseFeature() == null) {
-            throw new AaptException("Previous features set but no base feature set.");
+        if (!packageConfig.getDependentFeatures().isEmpty()
+                && packageConfig.getPackageId() == null) {
+            throw new AaptException(
+                    "A dependent feature was defined but no package ID was set. "
+                            + "You are probably missing a feature dependency in the base feature.");
         }
     }
 }

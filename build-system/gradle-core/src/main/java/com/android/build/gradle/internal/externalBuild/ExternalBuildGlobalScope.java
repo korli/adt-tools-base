@@ -17,14 +17,13 @@
 package com.android.build.gradle.internal.externalBuild;
 
 import com.android.annotations.NonNull;
-import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.internal.scope.TransformGlobalScope;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.model.OptionalCompilationStep;
-
-import org.gradle.api.Project;
-
+import com.android.builder.utils.FileCache;
 import java.io.File;
-import java.util.EnumSet;
+import java.util.Set;
+import org.gradle.api.Project;
 
 /**
  * Implementation of the {@link TransformGlobalScope} for external build system integration
@@ -33,12 +32,20 @@ public class ExternalBuildGlobalScope implements TransformGlobalScope {
 
     private final Project project;
 
-    @NonNull
-    private final EnumSet<OptionalCompilationStep> optionalCompilationSteps;
+    @NonNull private final Set<OptionalCompilationStep> optionalCompilationSteps;
 
-    public ExternalBuildGlobalScope(Project project) {
+    @NonNull private final ProjectOptions projectOptions;
+
+    @NonNull private final FileCache buildCache;
+
+    public ExternalBuildGlobalScope(
+            @NonNull Project project,
+            @NonNull ProjectOptions projectOptions,
+            @NonNull FileCache buildCache) {
         this.project = project;
-        optionalCompilationSteps = AndroidGradleOptions.getOptionalCompilationSteps(project);
+        this.projectOptions = projectOptions;
+        this.buildCache = buildCache;
+        this.optionalCompilationSteps = projectOptions.getOptionalCompilationSteps();
     }
 
     @Override
@@ -55,5 +62,18 @@ public class ExternalBuildGlobalScope implements TransformGlobalScope {
     @Override
     public boolean isActive(OptionalCompilationStep step) {
         return optionalCompilationSteps.contains(step);
+    }
+
+
+    @NonNull
+    @Override
+    public ProjectOptions getProjectOptions() {
+        return projectOptions;
+    }
+
+    @NonNull
+    @Override
+    public FileCache getBuildCache() {
+        return buildCache;
     }
 }

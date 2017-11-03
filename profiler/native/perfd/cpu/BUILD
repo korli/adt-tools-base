@@ -1,3 +1,5 @@
+load("//tools/base/bazel:android.bzl", "ANDROID_COPTS")
+
 cc_library(
     name = "profiler_cpu",
     srcs = [
@@ -18,8 +20,9 @@ cc_library(
         "procfs_files.h",
         "simpleperf_manager.h",
         "thread_monitor.h",
+        "threads_sample.h",
     ],
-    copts = [
+    copts = ANDROID_COPTS + [
         "-Itools/base/profiler/native",
         "-I$(GENDIR)/tools/base/profiler",
     ],
@@ -43,6 +46,7 @@ cc_test(
     data = [
         "//tools/base/profiler/native/testdata:perfd/cpu",
     ],
+    linkstatic = 1,
     deps = [
         ":profiler_cpu",
         "//external:gmock_main",

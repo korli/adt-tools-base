@@ -19,7 +19,6 @@ package com.android.prefs;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.utils.FileUtils;
-
 import java.io.File;
 
 /**
@@ -55,9 +54,10 @@ public final class AndroidLocation {
      * Enum describing which variables to check and whether they should
      * be checked via {@link System#getProperty(String)} or {@link System#getenv()} or both.
      */
-    public enum EnvVar {
+    private enum Global {
         ANDROID_AVD_HOME("ANDROID_AVD_HOME", true,  true),  // both sys prop and env var
         ANDROID_SDK_HOME("ANDROID_SDK_HOME", true,  true),  // both sys prop and env var
+        TEST_TMPDIR     ("TEST_TMPDIR",      false, true),  // Bazel kludge
         USER_HOME       ("user.home",        true,  false), // sys prop only
         HOME            ("HOME",             false, true);  // env var only
 
@@ -65,14 +65,10 @@ public final class AndroidLocation {
         final boolean mIsSysProp;
         final boolean mIsEnvVar;
 
-        EnvVar(String name, boolean isSysProp, boolean isEnvVar) {
+        Global(String name, boolean isSysProp, boolean isEnvVar) {
             mName = name;
             mIsSysProp = isSysProp;
             mIsEnvVar = isEnvVar;
-        }
-
-        public String getName() {
-            return mName;
         }
 
         @Nullable
@@ -114,7 +110,7 @@ public final class AndroidLocation {
                   "It should NOT be set to the same as the root of your SDK.\n" +
                   "Please set it to a different folder or do not set it at all.\n" +
                   "If this is not set we default to: %2$s",
-                  path, findValidPath(USER_HOME, HOME)));
+                  path, findValidPath(TEST_TMPDIR, USER_HOME, HOME)));
             }
             return null;
         }
@@ -188,7 +184,7 @@ public final class AndroidLocation {
      * @throws AndroidLocationException
      */
     public static void checkAndroidSdkHome() throws AndroidLocationException {
-        EnvVar.ANDROID_SDK_HOME.validatePath(false);
+        Global.ANDROID_SDK_HOME.validatePath(false);
     }
 
     /**
@@ -199,7 +195,7 @@ public final class AndroidLocation {
     @NonNull
     public static String getAvdFolder() throws AndroidLocationException {
         if (sAvdLocation == null) {
-            String home = findValidPath(EnvVar.ANDROID_AVD_HOME);
+            String home = findValidPath(Global.ANDROID_AVD_HOME);
             if (home == null) {
                 home = getFolder() + FOLDER_AVD;
             }
@@ -212,17 +208,15 @@ public final class AndroidLocation {
     }
 
     public static String getUserHomeFolder() throws AndroidLocationException {
-        return findValidPath(EnvVar.USER_HOME, EnvVar.HOME);
+        return findValidPath(Global.TEST_TMPDIR, Global.USER_HOME, Global.HOME);
     }
 
     private static String findHomeFolder() throws AndroidLocationException {
-        String home = findValidPath(EnvVar.ANDROID_SDK_HOME, EnvVar.USER_HOME, EnvVar.HOME);
+        String home = findValidPath(Global.ANDROID_SDK_HOME, Global.TEST_TMPDIR, Global.USER_HOME, Global.HOME);
 
         // if the above failed, we throw an exception.
         if (home == null) {
-            throw new AndroidLocationException(
-              "Unable to get the Android SDK home directory.\n" +
-              "Make sure the environment variable ANDROID_SDK_HOME is set up.");
+            throw new AndroidLocationException("prop: " + System.getProperty("ANDROID_SDK_HOME"));
         }
         if (!home.endsWith(File.separator)) {
             home += File.separator;
@@ -245,8 +239,8 @@ public final class AndroidLocation {
      * @return the content of the first property/variable that is a valid directory.
      */
     @Nullable
-    private static String findValidPath(EnvVar... vars) throws AndroidLocationException {
-        for (EnvVar var : vars) {
+    private static String findValidPath(Global... vars) throws AndroidLocationException {
+        for (Global var : vars) {
             String path = var.validatePath(true);
             if (path != null) {
                 return path;

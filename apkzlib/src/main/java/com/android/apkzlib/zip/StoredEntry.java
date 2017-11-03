@@ -18,11 +18,13 @@ package com.android.apkzlib.zip;
 
 import com.android.apkzlib.zip.utils.CloseableByteSource;
 import com.android.apkzlib.zip.utils.CloseableDelegateByteSource;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Verify;
 import com.google.common.io.ByteSource;
 import com.google.common.io.ByteStreams;
 import com.google.common.primitives.Ints;
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -84,7 +86,8 @@ public class StoredEntry {
     /**
      * Local header field: version to extract, should match the CDH's.
      */
-    private static final ZipField.F2 F_VERSION_EXTRACT = new ZipField.F2(
+    @VisibleForTesting
+    static final ZipField.F2 F_VERSION_EXTRACT = new ZipField.F2(
             F_LOCAL_SIGNATURE.endOffset(), "Version to extract",
             new ZipFieldInvariantNonNegative());
 
@@ -152,43 +155,49 @@ public class StoredEntry {
      * Type of entry.
      */
     @Nonnull
-    private StoredEntryType mType;
+    private StoredEntryType type;
 
     /**
      * The central directory header with information about the file.
      */
     @Nonnull
-    private CentralDirectoryHeader mCdh;
+    private CentralDirectoryHeader cdh;
 
     /**
      * The file this entry is associated with
      */
     @Nonnull
-    private ZFile mFile;
+    private ZFile file;
 
     /**
      * Has this entry been deleted?
      */
-    private boolean mDeleted;
+    private boolean deleted;
 
     /**
      * Extra field specified in the local directory.
      */
     @Nonnull
-    private ExtraField mLocalExtra;
+    private ExtraField localExtra;
 
     /**
      * Type of data descriptor associated with the entry.
      */
     @Nonnull
-    private DataDescriptorType mDataDescriptorType;
+    private DataDescriptorType dataDescriptorType;
 
     /**
      * Source for this entry's data. If this entry is a directory, this source has to have zero
      * size.
      */
     @Nonnull
-    private ProcessedAndRawByteSources mSource;
+    private ProcessedAndRawByteSources source;
+
+    /**
+     * Verify log for the entry.
+     */
+    @Nonnull
+    private final VerifyLog verifyLog;
 
     /**
      * Creates a new stored entry.
@@ -200,39 +209,45 @@ public class StoredEntry {
      * read from the zip file, that is, if {@code header.getOffset()} is non-negative
      * @throws IOException failed to create the entry
      */
-    StoredEntry(@Nonnull CentralDirectoryHeader header, @Nonnull ZFile file,
-            @Nullable ProcessedAndRawByteSources source) throws IOException {
-        mCdh = header;
-        mFile = file;
-        mDeleted = false;
+    StoredEntry(
+            @Nonnull CentralDirectoryHeader header,
+            @Nonnull ZFile file,
+            @Nullable ProcessedAndRawByteSources source)
+            throws IOException {
+        cdh = header;
+        this.file = file;
+        deleted = false;
+        verifyLog = file.makeVerifyLog();
 
         if (header.getOffset() >= 0) {
             /*
              * This will be overwritten during readLocalHeader. However, IJ complains if we don't
-             * assign a value to mLocalExtra because of the @Nonnull annotation.
+             * assign a value to localExtra because of the @Nonnull annotation.
              */
-            mLocalExtra = new ExtraField();
+            localExtra = new ExtraField();
 
             readLocalHeader();
 
-            Preconditions.checkArgument(source == null, "Source was defined but contents already "
-                    + "exist on file.");
+            Preconditions.checkArgument(
+                    source == null,
+                    "Source was defined but contents already exist on file.");
 
             /*
              * Since the file is already in the zip, dynamically create a source that will read
              * the file from the zip when needed. The assignment is not really needed, but we
              * would get a warning because of the @NotNull otherwise.
              */
-            mSource = createSourceFromZip(mCdh.getOffset());
+            this.source = createSourceFromZip(cdh.getOffset());
         } else {
             /*
              * There is no local extra data for new files.
              */
-            mLocalExtra = new ExtraField();
+            localExtra = new ExtraField();
 
-            Preconditions.checkNotNull(source, "Source was not defined, but contents are not "
-                    + "on file.");
-            mSource = source;
+            Preconditions.checkNotNull(
+                    source,
+                    "Source was not defined, but contents are not on file.");
+            this.source = source;
         }
 
         /*
@@ -240,31 +255,35 @@ public class StoredEntry {
          * This seems to be respected by all zip utilities although I could not find there anywhere
          * in the specification.
          */
-        if (mCdh.getName().endsWith(Character.toString(ZFile.SEPARATOR))) {
-            mType = StoredEntryType.DIRECTORY;
-            Verify.verify(mSource.getProcessedByteSource().isEmpty(),
+        if (cdh.getName().endsWith(Character.toString(ZFile.SEPARATOR))) {
+            type = StoredEntryType.DIRECTORY;
+            verifyLog.verify(
+                    this.source.getProcessedByteSource().isEmpty(),
                     "Directory source is not empty.");
-            Verify.verify(mCdh.getCrc32() == 0, "Directory has CRC32 = %s.", mCdh.getCrc32());
-            Verify.verify(mCdh.getUncompressedSize() == 0, "Directory has uncompressed size = %s.",
-                    mCdh.getUncompressedSize());
+            verifyLog.verify(cdh.getCrc32() == 0, "Directory has CRC32 = %s.", cdh.getCrc32());
+            verifyLog.verify(
+                    cdh.getUncompressedSize() == 0,
+                    "Directory has uncompressed size = %s.",
+                    cdh.getUncompressedSize());
 
             /*
              * Some clever (OMG!) tools, like jar will actually try to compress the directory
              * contents and generate a 2 byte compressed data. Of course, the uncompressed size is
              * zero and we're just wasting space.
              */
-            long compressedSize = mCdh.getCompressionInfoWithWait().getCompressedSize();
-            Verify.verify(compressedSize == 0 || compressedSize == 2,
+            long compressedSize = cdh.getCompressionInfoWithWait().getCompressedSize();
+            verifyLog.verify(
+                    compressedSize == 0 || compressedSize == 2,
                     "Directory has compressed size = %s.", compressedSize);
         } else {
-            mType = StoredEntryType.FILE;
+            type = StoredEntryType.FILE;
         }
 
         /*
          * By default we assume there is no data descriptor unless the CRC is marked as deferred
          * in the header's GP Bit.
          */
-        mDataDescriptorType = DataDescriptorType.NO_DATA_DESCRIPTOR;
+        dataDescriptorType = DataDescriptorType.NO_DATA_DESCRIPTOR;
         if (header.getGpBit().isDeferredCrc()) {
             /*
              * If the deferred CRC bit exists, then we have an extra descriptor field. This extra
@@ -287,8 +306,8 @@ public class StoredEntry {
      * @return the local header size in bytes
      */
     public int getLocalHeaderSize() {
-        Preconditions.checkState(!mDeleted, "mDeleted");
-        return FIXED_LOCAL_FILE_HEADER_SIZE + mCdh.getEncodedFileName().length + mLocalExtra.size();
+        Preconditions.checkState(!deleted, "deleted");
+        return FIXED_LOCAL_FILE_HEADER_SIZE + cdh.getEncodedFileName().length + localExtra.size();
     }
 
     /**
@@ -299,9 +318,9 @@ public class StoredEntry {
      * @throws IOException failed to get compression information
      */
     long getInFileSize() throws IOException {
-        Preconditions.checkState(!mDeleted, "mDeleted");
-        return mCdh.getCompressionInfoWithWait().getCompressedSize() + getLocalHeaderSize()
-                + mDataDescriptorType.size;
+        Preconditions.checkState(!deleted, "deleted");
+        return cdh.getCompressionInfoWithWait().getCompressedSize() + getLocalHeaderSize()
+                + dataDescriptorType.size;
     }
 
     /**
@@ -312,7 +331,7 @@ public class StoredEntry {
      */
     @Nonnull
     public InputStream open() throws IOException {
-        return mSource.getProcessedByteSource().openStream();
+        return source.getProcessedByteSource().openStream();
     }
 
     /**
@@ -329,14 +348,31 @@ public class StoredEntry {
     }
 
     /**
+     * Obtains the contents of the file in an existing buffer.
+     *
+     * @param bytes buffer to read the file contents in.
+     * @return the number of bytes read
+     * @throws IOException failed to read the file.
+     */
+    public int read(byte[] bytes) throws IOException {
+        if (bytes.length < getCentralDirectoryHeader().getUncompressedSize()) {
+            throw new RuntimeException(
+                    "Buffer to small while reading {}" + getCentralDirectoryHeader().getName());
+        }
+        try (InputStream is = new BufferedInputStream(open())) {
+            return ByteStreams.read(is, bytes, 0, bytes.length);
+        }
+    }
+
+    /**
      * Obtains the type of entry.
      *
      * @return the type of entry
      */
     @Nonnull
     public StoredEntryType getType() {
-        Preconditions.checkState(!mDeleted, "mDeleted");
-        return mType;
+        Preconditions.checkState(!deleted, "deleted");
+        return type;
     }
 
     /**
@@ -358,10 +394,17 @@ public class StoredEntry {
      * @throws IOException failed to delete the entry
      */
     void delete(boolean notify) throws IOException {
-        Preconditions.checkState(!mDeleted, "mDeleted");
-        mFile.delete(this, notify);
-        mDeleted = true;
-        mSource.close();
+        Preconditions.checkState(!deleted, "deleted");
+        file.delete(this, notify);
+        deleted = true;
+        source.close();
+    }
+
+    /**
+     * Returns {@code true} if this entry has been deleted/replaced.
+     */
+    public boolean isDeleted() {
+        return deleted;
     }
 
     /**
@@ -371,7 +414,7 @@ public class StoredEntry {
      */
     @Nonnull
     public CentralDirectoryHeader getCentralDirectoryHeader() {
-        return mCdh;
+        return cdh;
     }
 
     /**
@@ -379,29 +422,29 @@ public class StoredEntry {
      * Header provided in the constructor. This method should only be called if the entry already
      * exists on disk; new entries do not have local headers.
      * <p>
-     * This method will define the {@link #mLocalExtra} field that is only defined in the
+     * This method will define the {@link #localExtra} field that is only defined in the
      * local descriptor.
      *
      * @throws IOException failed to read the local header
      */
     private void readLocalHeader() throws IOException {
         byte[] localHeader = new byte[FIXED_LOCAL_FILE_HEADER_SIZE];
-        mFile.directFullyRead(mCdh.getOffset(), localHeader);
+        file.directFullyRead(cdh.getOffset(), localHeader);
 
-        CentralDirectoryHeaderCompressInfo compressInfo = mCdh.getCompressionInfoWithWait();
+        CentralDirectoryHeaderCompressInfo compressInfo = cdh.getCompressionInfoWithWait();
 
         ByteBuffer bytes = ByteBuffer.wrap(localHeader);
         F_LOCAL_SIGNATURE.verify(bytes);
-        F_VERSION_EXTRACT.verify(bytes, compressInfo.getVersionExtract());
-        F_GP_BIT.verify(bytes, mCdh.getGpBit().getValue());
-        F_METHOD.verify(bytes, compressInfo.getMethod().methodCode);
+        F_VERSION_EXTRACT.verify(bytes, compressInfo.getVersionExtract(), verifyLog);
+        F_GP_BIT.verify(bytes, cdh.getGpBit().getValue(), verifyLog);
+        F_METHOD.verify(bytes, compressInfo.getMethod().methodCode, verifyLog);
 
-        if (mFile.areTimestampsIgnored()) {
+        if (file.areTimestampsIgnored()) {
             F_LAST_MOD_TIME.skip(bytes);
             F_LAST_MOD_DATE.skip(bytes);
         } else {
-            F_LAST_MOD_TIME.verify(bytes, mCdh.getLastModTime());
-            F_LAST_MOD_DATE.verify(bytes, mCdh.getLastModDate());
+            F_LAST_MOD_TIME.verify(bytes, cdh.getLastModTime(), verifyLog);
+            F_LAST_MOD_DATE.verify(bytes, cdh.getLastModDate(), verifyLog);
         }
 
         /*
@@ -409,32 +452,36 @@ public class StoredEntry {
          * File Header must be ignored and their actual values must be read from the Data
          * Descriptor following the contents of this entry. See readDataDescriptorRecord().
          */
-        if (mCdh.getGpBit().isDeferredCrc()) {
+        if (cdh.getGpBit().isDeferredCrc()) {
             F_CRC32.skip(bytes);
             F_COMPRESSED_SIZE.skip(bytes);
             F_UNCOMPRESSED_SIZE.skip(bytes);
         } else {
-            F_CRC32.verify(bytes, mCdh.getCrc32());
-            F_COMPRESSED_SIZE.verify(bytes, compressInfo.getCompressedSize());
-            F_UNCOMPRESSED_SIZE.verify(bytes, mCdh.getUncompressedSize());
+            F_CRC32.verify(bytes, cdh.getCrc32(), verifyLog);
+            F_COMPRESSED_SIZE.verify(bytes, compressInfo.getCompressedSize(), verifyLog);
+            F_UNCOMPRESSED_SIZE.verify(bytes, cdh.getUncompressedSize(), verifyLog);
         }
 
-        F_FILE_NAME_LENGTH.verify(bytes, mCdh.getEncodedFileName().length);
+        F_FILE_NAME_LENGTH.verify(bytes, cdh.getEncodedFileName().length);
         long extraLength = F_EXTRA_LENGTH.read(bytes);
-        long fileNameStart = mCdh.getOffset() + F_EXTRA_LENGTH.endOffset();
-        byte[] fileNameData = new byte[mCdh.getEncodedFileName().length];
-        mFile.directFullyRead(fileNameStart, fileNameData);
+        long fileNameStart = cdh.getOffset() + F_EXTRA_LENGTH.endOffset();
+        byte[] fileNameData = new byte[cdh.getEncodedFileName().length];
+        file.directFullyRead(fileNameStart, fileNameData);
 
-        String fileName = EncodeUtils.decode(fileNameData, mCdh.getGpBit());
-        if (!fileName.equals(mCdh.getName())) {
-            throw new IOException("Central directory reports file as being named '" + mCdh.getName()
-                    + "' but local header reports file being named '" + fileName + "'.");
+        String fileName = EncodeUtils.decode(fileNameData, cdh.getGpBit());
+        if (!fileName.equals(cdh.getName())) {
+            verifyLog.log(
+                    String.format(
+                            "Central directory reports file as being named '%s' but local header"
+                                    + "reports file being named '%s'.",
+                    cdh.getName(),
+                    fileName));
         }
 
-        long localExtraStart = fileNameStart + mCdh.getEncodedFileName().length;
+        long localExtraStart = fileNameStart + cdh.getEncodedFileName().length;
         byte[] localExtraRaw = new byte[Ints.checkedCast(extraLength)];
-        mFile.directFullyRead(localExtraStart, localExtraRaw);
-        mLocalExtra = new ExtraField(localExtraRaw);
+        file.directFullyRead(localExtraStart, localExtraRaw);
+        localExtra = new ExtraField(localExtraRaw);
     }
 
     /**
@@ -442,18 +489,18 @@ public class StoredEntry {
      * that a data descriptor does exist. It will read the data descriptor and check that the data
      * described there matches the data provided in the Central Directory.
      * <p>
-     * This method will set the {@link #mDataDescriptorType} field to the appropriate type of
+     * This method will set the {@link #dataDescriptorType} field to the appropriate type of
      * data descriptor record.
      *
      * @throws IOException failed to read the data descriptor record
      */
     private void readDataDescriptorRecord() throws IOException {
-        CentralDirectoryHeaderCompressInfo compressInfo = mCdh.getCompressionInfoWithWait();
+        CentralDirectoryHeaderCompressInfo compressInfo = cdh.getCompressionInfoWithWait();
 
-        long ddStart = mCdh.getOffset() + FIXED_LOCAL_FILE_HEADER_SIZE
-                + mCdh.getName().length() + mLocalExtra.size() + compressInfo.getCompressedSize();
+        long ddStart = cdh.getOffset() + FIXED_LOCAL_FILE_HEADER_SIZE
+                + cdh.getName().length() + localExtra.size() + compressInfo.getCompressedSize();
         byte ddData[] = new byte[DataDescriptorType.DATA_DESCRIPTOR_WITH_SIGNATURE.size];
-        mFile.directFullyRead(ddStart, ddData);
+        file.directFullyRead(ddStart, ddData);
 
         ByteBuffer ddBytes = ByteBuffer.wrap(ddData);
 
@@ -461,9 +508,9 @@ public class StoredEntry {
         int cpos = ddBytes.position();
         long sig = signatureField.read(ddBytes);
         if (sig == DATA_DESC_SIGNATURE) {
-            mDataDescriptorType = DataDescriptorType.DATA_DESCRIPTOR_WITH_SIGNATURE;
+            dataDescriptorType = DataDescriptorType.DATA_DESCRIPTOR_WITH_SIGNATURE;
         } else {
-            mDataDescriptorType = DataDescriptorType.DATA_DESCRIPTOR_WITHOUT_SIGNATURE;
+            dataDescriptorType = DataDescriptorType.DATA_DESCRIPTOR_WITHOUT_SIGNATURE;
             ddBytes.position(cpos);
         }
 
@@ -472,11 +519,9 @@ public class StoredEntry {
         ZipField.F4 uncompressedField = new ZipField.F4(compressedField.endOffset(),
                 "Uncompressed size");
 
-        if (!mFile.getSkipDataDescriptorVerification()) {
-            crc32Field.verify(ddBytes, mCdh.getCrc32());
-            compressedField.verify(ddBytes, compressInfo.getCompressedSize());
-            uncompressedField.verify(ddBytes, mCdh.getUncompressedSize());
-        }
+        crc32Field.verify(ddBytes, cdh.getCrc32(), verifyLog);
+        compressedField.verify(ddBytes, compressInfo.getCompressedSize(), verifyLog);
+        uncompressedField.verify(ddBytes, cdh.getUncompressedSize(), verifyLog);
     }
 
     /**
@@ -493,7 +538,7 @@ public class StoredEntry {
 
         final CentralDirectoryHeaderCompressInfo compressInfo;
         try {
-            compressInfo = mCdh.getCompressionInfoWithWait();
+            compressInfo = cdh.getCompressionInfoWithWait();
         } catch (IOException e) {
             throw new RuntimeException("IOException should never occur here because compression "
                     + "information should be immediately available if reading from zip.", e);
@@ -511,13 +556,13 @@ public class StoredEntry {
             @Nonnull
             @Override
             public InputStream openStream() throws IOException {
-                Preconditions.checkState(!mDeleted, "mDeleted");
+                Preconditions.checkState(!deleted, "deleted");
 
                 long dataStart = zipOffset + getLocalHeaderSize();
                 long dataEnd = dataStart + compressInfo.getCompressedSize();
 
-                mFile.openReadOnly();
-                return mFile.directOpen(dataStart, dataEnd);
+                file.openReadOnly();
+                return file.directOpen(dataStart, dataEnd);
             }
 
             @Override
@@ -544,7 +589,7 @@ public class StoredEntry {
             @Nonnull CloseableByteSource rawContents) {
         CentralDirectoryHeaderCompressInfo compressInfo;
         try {
-            compressInfo = mCdh.getCompressionInfoWithWait();
+            compressInfo = cdh.getCompressionInfoWithWait();
         } catch (IOException e) {
             throw new RuntimeException("IOException should never occur here because compression "
                     + "information should be immediately available if creating from raw "
@@ -567,7 +612,7 @@ public class StoredEntry {
     }
 
     /**
-     * Replaces {@link #mSource} with one that reads file data from the zip file.
+     * Replaces {@link #source} with one that reads file data from the zip file.
      *
      * @param zipFileOffset the offset in the zip file where data is written; must be non-negative
      * @throws IOException failed to replace the source
@@ -575,14 +620,14 @@ public class StoredEntry {
     void replaceSourceFromZip(long zipFileOffset) throws IOException {
         Preconditions.checkArgument(zipFileOffset >= 0, "zipFileOffset < 0");
 
-        ProcessedAndRawByteSources oldSource = mSource;
-        mSource = createSourceFromZip(zipFileOffset);
-        mCdh.setOffset(zipFileOffset);
+        ProcessedAndRawByteSources oldSource = source;
+        source = createSourceFromZip(zipFileOffset);
+        cdh.setOffset(zipFileOffset);
         oldSource.close();
     }
 
     /**
-     * Loads all data in memory and replaces {@link #mSource} with one that contains all the data
+     * Loads all data in memory and replaces {@link #source} with one that contains all the data
      * in memory.
      *
      * <p>If the entry's contents are already in memory, this call does nothing.
@@ -590,7 +635,7 @@ public class StoredEntry {
      * @throws IOException failed to replace the source
      */
     void loadSourceIntoMemory() throws IOException {
-        if (mCdh.getOffset() == -1) {
+        if (cdh.getOffset() == -1) {
             /*
              * No offset in the CDR means data has not been written to disk which, in turn,
              * means data is already loaded into memory.
@@ -598,11 +643,11 @@ public class StoredEntry {
             return;
         }
 
-        ProcessedAndRawByteSources oldSource = mSource;
+        ProcessedAndRawByteSources oldSource = source;
         byte[] rawContents = oldSource.getRawByteSource().read();
-        mSource = createSourcesFromRawContents(new CloseableDelegateByteSource(
+        source = createSourcesFromRawContents(new CloseableDelegateByteSource(
                 ByteSource.wrap(rawContents), rawContents.length));
-        mCdh.setOffset(-1);
+        cdh.setOffset(-1);
         oldSource.close();
     }
 
@@ -614,7 +659,7 @@ public class StoredEntry {
      */
     @Nonnull
     ProcessedAndRawByteSources getSource() {
-        return mSource;
+        return source;
     }
 
     /**
@@ -624,7 +669,23 @@ public class StoredEntry {
      */
     @Nonnull
     public DataDescriptorType getDataDescriptorType() {
-        return mDataDescriptorType;
+        return dataDescriptorType;
+    }
+
+    /**
+     * Removes the data descriptor, if it has one and resets the data descriptor bit in the
+     * central directory header.
+     *
+     * @return was the data descriptor remove?
+     */
+    boolean removeDataDescriptor() {
+        if (dataDescriptorType == DataDescriptorType.NO_DATA_DESCRIPTOR) {
+            return false;
+        }
+
+        dataDescriptorType = DataDescriptorType.NO_DATA_DESCRIPTOR;
+        cdh.resetDeferredCrc();
+        return true;
     }
 
     /**
@@ -636,35 +697,35 @@ public class StoredEntry {
     @Nonnull
     byte[] toHeaderData() throws IOException {
 
-        byte[] encodedFileName = mCdh.getEncodedFileName();
+        byte[] encodedFileName = cdh.getEncodedFileName();
 
         ByteBuffer out =
                 ByteBuffer.allocate(
-                        F_EXTRA_LENGTH.endOffset() + encodedFileName.length + mLocalExtra.size());
+                        F_EXTRA_LENGTH.endOffset() + encodedFileName.length + localExtra.size());
 
-        CentralDirectoryHeaderCompressInfo compressInfo = mCdh.getCompressionInfoWithWait();
+        CentralDirectoryHeaderCompressInfo compressInfo = cdh.getCompressionInfoWithWait();
 
         F_LOCAL_SIGNATURE.write(out);
         F_VERSION_EXTRACT.write(out, compressInfo.getVersionExtract());
-        F_GP_BIT.write(out, mCdh.getGpBit().getValue());
+        F_GP_BIT.write(out, cdh.getGpBit().getValue());
         F_METHOD.write(out, compressInfo.getMethod().methodCode);
 
-        if (mFile.areTimestampsIgnored()) {
+        if (file.areTimestampsIgnored()) {
             F_LAST_MOD_TIME.write(out, 0);
             F_LAST_MOD_DATE.write(out, 0);
         } else {
-            F_LAST_MOD_TIME.write(out, mCdh.getLastModTime());
-            F_LAST_MOD_DATE.write(out, mCdh.getLastModDate());
+            F_LAST_MOD_TIME.write(out, cdh.getLastModTime());
+            F_LAST_MOD_DATE.write(out, cdh.getLastModDate());
         }
 
-        F_CRC32.write(out, mCdh.getCrc32());
+        F_CRC32.write(out, cdh.getCrc32());
         F_COMPRESSED_SIZE.write(out, compressInfo.getCompressedSize());
-        F_UNCOMPRESSED_SIZE.write(out, mCdh.getUncompressedSize());
-        F_FILE_NAME_LENGTH.write(out, mCdh.getEncodedFileName().length);
-        F_EXTRA_LENGTH.write(out, mLocalExtra.size());
+        F_UNCOMPRESSED_SIZE.write(out, cdh.getUncompressedSize());
+        F_FILE_NAME_LENGTH.write(out, cdh.getEncodedFileName().length);
+        F_EXTRA_LENGTH.write(out, localExtra.size());
 
-        out.put(mCdh.getEncodedFileName());
-        mLocalExtra.write(out);
+        out.put(cdh.getEncodedFileName());
+        localExtra.write(out);
 
         return out.array();
     }
@@ -682,9 +743,9 @@ public class StoredEntry {
      * file
      */
     public boolean realign() throws IOException {
-        Preconditions.checkState(!mDeleted, "Entry has been deleted.");
+        Preconditions.checkState(!deleted, "Entry has been deleted.");
 
-        return mFile.realign(this);
+        return file.realign(this);
     }
 
     /**
@@ -694,7 +755,7 @@ public class StoredEntry {
      */
     @Nonnull
     public ExtraField getLocalExtra() {
-        return mLocalExtra;
+        return localExtra;
     }
 
     /**
@@ -705,7 +766,7 @@ public class StoredEntry {
      */
     public void setLocalExtra(@Nonnull ExtraField localExtra) throws IOException {
         boolean resized = setLocalExtraNoNotify(localExtra);
-        mFile.localHeaderChanged(this, resized);
+        file.localHeaderChanged(this, resized);
     }
 
     /**
@@ -733,13 +794,23 @@ public class StoredEntry {
          */
         loadSourceIntoMemory();
 
-        if (mLocalExtra.size() != localExtra.size()) {
+        if (this.localExtra.size() != localExtra.size()) {
             sizeChanged = true;
         } else {
             sizeChanged = false;
         }
 
-        mLocalExtra = localExtra;
+        this.localExtra = localExtra;
         return sizeChanged;
+    }
+
+    /**
+     * Obtains the verify log for the entry.
+     *
+     * @return the verify log
+     */
+    @Nonnull
+    public VerifyLog getVerifyLog() {
+        return verifyLog;
     }
 }

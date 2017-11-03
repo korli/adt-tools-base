@@ -18,7 +18,6 @@ package com.android.build.gradle.ndk.internal;
 
 import com.android.build.gradle.internal.ndk.NativeToolSpecification;
 import com.google.common.collect.ImmutableList;
-
 import java.util.List;
 
 /**
@@ -28,11 +27,13 @@ public class DefaultNativeToolSpecification implements NativeToolSpecification {
 
     private static final List<String> CPP_FLAGS = ImmutableList.of("-fno-rtti", "-fno-exceptions");
 
-    private static final List<String> LD_FLAGS = ImmutableList.of(
-            "-Wl,--no-undefined",
-            "-Wl,-z,noexecstack",
-            "-Wl,-z,relro",
-            "-Wl,-z,now");
+    private static final List<String> LD_FLAGS =
+            ImmutableList.of(
+                    "-Wl,--no-undefined",
+                    "-Wl,-z,noexecstack",
+                    "-Wl,-z,relro",
+                    "-Wl,-z,now",
+                    "-Wl,--warn-shared-textrel");
 
     @Override
     public Iterable<String> getCFlags() {

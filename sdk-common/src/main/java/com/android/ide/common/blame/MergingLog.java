@@ -22,7 +22,6 @@ import com.android.utils.FileUtils;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Comparator;
@@ -57,19 +56,22 @@ public class MergingLog {
                 }
             });
 
-    /**
-     * Map from positions in a merged file to file positions in their source files.
-     */
+    private final CacheLoader<String, Map<SourceFile, Map<SourcePosition, SourceFilePosition>>>
+            cacheLoader =
+                    new CacheLoader<
+                            String, Map<SourceFile, Map<SourcePosition, SourceFilePosition>>>() {
+                        @Override
+                        public Map<SourceFile, Map<SourcePosition, SourceFilePosition>> load(
+                                String shard) throws Exception {
+                            return MergingLogPersistUtil.loadFromMultiFileVersion2(
+                                    mOutputFolder, shard);
+                        }
+                    };
+
+    /** Map from positions in a merged file to file positions in their source files. */
     @NonNull
     private final LoadingCache<String, Map<SourceFile, Map<SourcePosition, SourceFilePosition>>>
-            mMergedFileMaps = CacheBuilder.newBuilder().build(
-            new CacheLoader<String, Map<SourceFile, Map<SourcePosition, SourceFilePosition>>>() {
-                @Override
-                public Map<SourceFile, Map<SourcePosition, SourceFilePosition>> load(String shard)
-                        throws Exception {
-                    return MergingLogPersistUtil.loadFromMultiFile(mOutputFolder, shard);
-                }
-    });
+            mMergedFileMaps = CacheBuilder.newBuilder().build(cacheLoader);
 
     @NonNull
     private final File mOutputFolder;
@@ -178,22 +180,25 @@ public class MergingLog {
 
         /*
 
-        e.g. if we have
-        <pre>
-                  error1     error2
-                   /--/       /--/
-        <a> <b key="c"  value="d" /> </a>
-        \----------------a---------------\
-            \-----------b-----------\
-                   \--\
-                    c
-       </pre>
-       we want to find c for error 1 and b for error 2.
-         */
+         e.g. if we have
+         <pre>
+                   error1     error2
+                    /--/       /--/
+         <a> <b key="c"  value="d" /> </a>
+         \----------------a---------------\
+             \-----------b-----------\
+                    \--\
+                     c
+        </pre>
+        we want to find c for error 1 and b for error 2.
+          */
 
         // get the element just before this one.
         @Nullable
-        Map.Entry<SourcePosition, SourceFilePosition> candidate = sortedMap.floorEntry(position);
+        Map.Entry<SourcePosition, SourceFilePosition> candidate =
+                position.getStartColumn() == -1
+                        ? sortedMap.ceilingEntry(position)
+                        : sortedMap.floorEntry(position);
 
         // Don't traverse the whole file.
         // This is the product of the depth and breadth of nesting that can be handled.
@@ -234,8 +239,8 @@ public class MergingLog {
         // will be saved. Empty map will result in the deletion of the file.
         for (Map.Entry<String, Map<SourceFile, Map<SourcePosition, SourceFilePosition>>> entry :
                 mMergedFileMaps.asMap().entrySet()) {
-            MergingLogPersistUtil
-                    .saveToMultiFile(mOutputFolder, entry.getKey(), entry.getValue());
+            MergingLogPersistUtil.saveToMultiFileVersion2(
+                    mOutputFolder, entry.getKey(), entry.getValue());
         }
         for (Map.Entry<String, Map<SourceFile, SourceFile>> entry :
                 mWholeFileMaps.asMap().entrySet()) {

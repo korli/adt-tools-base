@@ -23,18 +23,18 @@ import com.android.io.IAbstractFile;
 import com.android.io.IAbstractFolder;
 import com.android.io.StreamException;
 import com.google.common.io.Closeables;
-
-import org.xml.sax.InputSource;
-
 import java.io.InputStream;
-
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathExpressionException;
+import org.xml.sax.InputSource;
 
 /**
  * Helper and Constants for the AndroidManifest.xml file.
  *
+ * @deprecated Don't use the static method to parse manifests, they use XPath which is not
+ *     efficient.
  */
+@Deprecated
 public final class AndroidManifest {
 
     public static final String NODE_MANIFEST = "manifest";
@@ -74,6 +74,7 @@ public final class AndroidManifest {
     public static final String ATTRIBUTE_GLESVERSION = "glEsVersion";
     public static final String ATTRIBUTE_PROCESS = "process";
     public static final String ATTRIBUTE_DEBUGGABLE = "debuggable";
+    public static final String ATTRIBUTE_HASCODE = "hasCode";
     public static final String ATTRIBUTE_LABEL = "label";
     public static final String ATTRIBUTE_ICON = "icon";
     public static final String ATTRIBUTE_MIN_SDK_VERSION = "minSdkVersion";

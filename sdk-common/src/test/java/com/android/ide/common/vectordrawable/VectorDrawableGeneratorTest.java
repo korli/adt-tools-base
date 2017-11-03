@@ -21,11 +21,11 @@ import com.android.ide.common.util.GeneratorTester;
 import com.android.testutils.TestResources;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-import junit.framework.TestCase;
-
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import javax.imageio.ImageIO;
+import junit.framework.TestCase;
+import org.junit.Assert;
 
 @SuppressWarnings("javadoc")
 public class VectorDrawableGeneratorTest extends TestCase {
@@ -38,8 +38,8 @@ public class VectorDrawableGeneratorTest extends TestCase {
 
     private enum FileType {
         SVG,
-        XML;
-    };
+        XML
+    }
 
     private void checkVectorConversion(String testFileName, FileType type,
                                        boolean dumpXml, String expectedError) throws IOException {
@@ -412,6 +412,258 @@ public class VectorDrawableGeneratorTest extends TestCase {
         checkSvgConversion("test_move_after_close_transform");
     }
 
+    public void testSvgFillRuleEvenOdd() throws Exception {
+        checkSvgConversion("test_fill_type_evenodd");
+    }
+
+    public void testSvgFillRuleNonzero() throws Exception {
+        checkSvgConversion("test_fill_type_nonzero");
+    }
+
+    public void testSvgFillRuleNoRule() throws Exception {
+        checkSvgConversion("test_fill_type_no_rule");
+    }
+
+    public void testSvgDefsUseTransform() throws Exception {
+        checkSvgConversion("test_defs_use_shape2");
+    }
+
+    public void testSvgDefsUseColors() throws Exception {
+        checkSvgConversion("test_defs_use_colors");
+    }
+
+    public void testSvgDefsUseNoGroup() throws Exception {
+        checkSvgConversion("test_defs_use_no_group");
+    }
+
+    public void testSvgDefsUseNestedGroups() throws Exception {
+        checkSvgConversion("test_defs_use_nested_groups");
+    }
+
+    public void testSvgDefsUseNestedGroups2() throws Exception {
+        checkSvgConversion("test_defs_use_nested_groups2");
+    }
+
+    public void testSvgUseWithoutDefs() throws Exception {
+        checkSvgConversion("test_use_no_defs");
+    }
+
+    public void testSvgDefsUseMultiAttrib() throws Exception {
+        checkSvgConversion("test_defs_use_multi_attr");
+    }
+
+    public void testSvgDefsUseTransformRotate() throws Exception {
+        checkSvgConversion("test_defs_use_transform");
+    }
+
+    public void testSvgDefsUseTransformInDefs() throws Exception {
+        checkSvgConversion("test_defs_use_transform2");
+    }
+
+    public void testSvgDefsUseOrderMatters() throws Exception {
+        checkSvgConversion("test_defs_use_use_first");
+    }
+
+    // Clip Path Tests
+    public void testSvgClipPathGroup() throws Exception {
+        checkSvgConversion("test_clip_path_group");
+    }
+
+    public void testSvgClipPathTranslateAffected() throws Exception {
+        checkSvgConversion("test_clip_path_group_translate");
+    }
+
+    public void testSvgClipPathGroup2() throws Exception {
+        checkSvgConversion("test_clip_path_is_group");
+    }
+
+    public void testSvgClipPathMultiShapeClip() throws Exception {
+        checkSvgConversion("test_clip_path_mult_clip");
+    }
+
+    public void testSvgClipPathOverGroup() throws Exception {
+        checkSvgConversion("test_clip_path_over_group");
+    }
+
+    public void testSvgClipPathRect() throws Exception {
+        checkSvgConversion("test_clip_path_rect");
+    }
+
+    public void testSvgClipPathRectOverClipPath() throws Exception {
+        checkSvgConversion("test_clip_path_rect_over_circle");
+    }
+
+    public void testSvgClipPathTwoRect() throws Exception {
+        checkSvgConversion("test_clip_path_two_rect");
+    }
+
+    public void testSvgClipPathSinglePath() throws Exception {
+        checkSvgConversion("test_clip_path_path_over_rect");
+    }
+
+    // Style tests start here
+    public void testSvgStyleBasicShapes() throws Exception {
+        checkSvgConversion("test_style_basic_shapes");
+    }
+
+    public void testSvgStyleBlobfish() throws Exception {
+        checkSvgConversion("test_style_blobfish");
+    }
+
+    public void testSvgStyleCircle() throws Exception {
+        checkSvgConversion("test_style_circle");
+    }
+
+    public void testSvgStyleGroup() throws Exception {
+        checkSvgConversion("test_style_group");
+    }
+
+    public void testSvgStyleGroupClipPath() throws Exception {
+        checkSvgConversion("test_style_group_clip_path");
+    }
+
+    public void testSvgStyleGroupDuplicateAttr() throws Exception {
+        checkSvgConversion("test_style_group_duplicate_attr");
+    }
+
+    public void testSvgStyleMultiClass() throws Exception {
+        checkSvgConversion("test_style_multi_class");
+    }
+
+    public void testSvgStyleTwoShapes() throws Exception {
+        checkSvgConversion("test_style_two_shapes");
+    }
+
+    public void testSvgStylePathClassNames() throws Exception {
+        checkSvgConversion("test_style_path_class_names");
+    }
+
+    // Gradient tests start here
+    // The following gradient test files currently fail and do not have corresponding test cases:
+    // test_gradient_linear_transform_matrix
+    // test_gradient_linear_transform_matrix_2
+    // test_gradient_linear_transform_scale_rotate
+    // test_gradient_linear_transform_scale_translate_rotate
+    public void testSvgGradientLinearCoordinatesNegativePercentage() throws Exception {
+        checkSvgConversion("test_gradient_linear_coordinates_negative_percentage");
+    }
+
+    public void testSvgGradientLinearNoCoordinates() throws Exception {
+        checkSvgConversion("test_gradient_linear_no_coordinates");
+    }
+
+    public void testSvgGradientLinearNoUnits() throws Exception {
+        checkSvgConversion("test_gradient_linear_no_units");
+    }
+
+    public void testSvgGradientLinearObjectBoundingBox() throws Exception {
+        checkSvgConversion("test_gradient_linear_object_bounding_box");
+    }
+
+    public void testSvgGradientLinearOffsetDecreasing() throws Exception {
+        checkSvgConversion("test_gradient_linear_offset_decreasing");
+    }
+
+    public void testSvgGradientLinearOffsetOutOfBounds() throws Exception {
+        checkSvgConversion("test_gradient_linear_offset_out_of_bounds");
+    }
+
+    public void testSvgGradientLinearOffsetUndefined() throws Exception {
+        checkSvgConversion("test_gradient_linear_offset_undefined");
+    }
+
+    public void testSvgGradientLinearOneStop() throws Exception {
+        checkSvgConversion("test_gradient_linear_one_stop");
+    }
+
+    public void testSvgGradientLinearOverlappingStops() throws Exception {
+        checkSvgConversion("test_gradient_linear_overlapping_stops");
+    }
+
+    public void testSvgGradientLinearSpreadPad() throws Exception {
+        checkSvgConversion("test_gradient_linear_spread_pad");
+    }
+
+    public void testSvgGradientLinearSpreadReflect() throws Exception {
+        checkSvgConversion("test_gradient_linear_spread_reflect");
+    }
+
+    public void testSvgGradientLinearSpreadRepeat() throws Exception {
+        checkSvgConversion("test_gradient_linear_spread_repeat");
+    }
+
+    public void testSvgGradientLinearStopOpacity() throws Exception {
+        checkSvgConversion("test_gradient_linear_stop_opacity");
+    }
+
+    public void testSvgGradientLinearStopOpacityHalf() throws Exception {
+        checkSvgConversion("test_gradient_linear_stop_opacity_half");
+    }
+
+    public void testSvgGradientLinearStroke() throws Exception {
+        checkSvgConversion("test_gradient_linear_stroke");
+    }
+
+    public void testSvgGradientLinearThreeStops() throws Exception {
+        checkSvgConversion("test_gradient_linear_three_stops");
+    }
+
+    public void testSvgGradientLinearTransformGroupScaleTranslate() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_group_scale_translate");
+    }
+
+    public void testSvgGradientLinearTransformMatrix3() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_matrix_3");
+    }
+
+    public void testSvgGradientLinearTransformMatrixScale() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_matrix_scale");
+    }
+
+    public void testSvgGradientLinearTransformRotate() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_rotate");
+    }
+
+    public void testSvgGradientLinearTransformRotateScale() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_rotate_scale");
+    }
+
+    public void testSvgGradientLinearTransformRotateTranslateScale() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_rotate_translate_scale");
+    }
+
+    public void testSvgGradientLinearTransformScale() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_scale");
+    }
+
+    public void testSvgGradientLinearTransformTranslate() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_translate");
+    }
+
+    public void testSvgGradientLinearTransformTranslateRotate() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_translate_rotate");
+    }
+
+    public void testSvgGradientLinearTransformTranslateRotateScale() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_translate_rotate_scale");
+    }
+
+    public void testSvgGradientLinearTransformTranslateScale() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_translate_scale");
+    }
+
+    public void testSvgGradientLinearTransformTranslateScaleShapeTransform() throws Exception {
+        checkSvgConversion("test_gradient_linear_transform_translate_scale_shape_transform");
+    }
+
+    public void testSvgGradientLinearUserSpaceOnUse() throws Exception {
+        checkSvgConversion("test_gradient_linear_user_space_on_use");
+    }
+
+    public void testSvgGradientLinearXYNumbers() throws Exception {
+        checkSvgConversion("test_gradient_linear_x_y_numbers");
+    }
+
     // XML files start here.
     public void testXmlIconSizeOpacity() throws Exception {
         checkXmlConversion("ic_size_opacity");
@@ -491,5 +743,24 @@ public class VectorDrawableGeneratorTest extends TestCase {
 
     public void testXmlStroke3() throws Exception {
         checkXmlConversion("test_xml_stroke_3");
+    }
+
+    public void testPathDataInStringResource() throws Exception {
+        try {
+            checkXmlConversion("test_pathData_in_string_resource");
+            fail("Expecting exception.");
+        } catch (ResourcesNotSupportedException e) {
+            Assert.assertEquals("@string/pathDataAsString", e.getValue());
+            Assert.assertEquals("android:pathData", e.getName());
+        }
+    }
+
+    /**
+     * We aren't really interested in the content of the image produced in this test, we're just
+     * testing that resource references aren't touched when they're in the tools: attribute
+     * namespace.
+     */
+    public void testPathDataInStringToolsResource() throws Exception {
+        checkXmlConversion("test_pathData_in_string_tools_resource");
     }
 }

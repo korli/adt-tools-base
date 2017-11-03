@@ -26,26 +26,23 @@ import com.android.utils.ILogger;
 import com.android.utils.SdkUtils;
 import com.android.utils.XmlUtils;
 import com.google.common.base.Joiner;
-import com.google.common.base.Objects;
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
-
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.w3c.dom.Text;
-
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Xml {@link org.w3c.dom.Element} which is mergeable.
@@ -288,6 +285,11 @@ public class XmlElement extends OrphanXmlElement {
                 && lowerPriorityNode.getDocument().getFileType() != XmlDocument.Type.LIBRARY) {
             mergeType = MergeType.MERGE;
         }
+
+        // record the fact the lower priority element is merged into this one.
+        mergingReport
+                .getActionRecorder()
+                .recordNodeAction(lowerPriorityNode, Actions.ActionType.MERGED);
 
         if (mergeType != MergeType.MERGE_CHILDREN_ONLY) {
             // make a copy of all the attributes metadata, it will eliminate elements from this
@@ -654,7 +656,7 @@ public class XmlElement extends OrphanXmlElement {
         List<Node> comments = getLeadingComments(elementToBeAdded.getXml());
         // record all the actions before the node is moved from the library document to the main
         // merged document.
-        mergingReport.getActionRecorder().recordDefaultNodeAction(elementToBeAdded);
+        mergingReport.getActionRecorder().recordAddedNodeAction(elementToBeAdded, false);
 
         // only in the new file, just import it.
         Node node = getXml().getOwnerDocument().adoptNode(elementToBeAdded.getXml());
@@ -735,33 +737,37 @@ public class XmlElement extends OrphanXmlElement {
         // compare children
         @NonNull List<Node> expectedChildren = filterUninterestingNodes(getXml().getChildNodes());
         @NonNull List<Node> actualChildren = filterUninterestingNodes(otherNode.getXml().getChildNodes());
-        if (expectedChildren.size() != actualChildren.size()) {
+        int actualChildrenSize = actualChildren.size();
+        int expectedChildrenSize = expectedChildren.size();
+        if (expectedChildrenSize != actualChildrenSize) {
 
-            if (expectedChildren.size() > actualChildren.size()) {
+            if (expectedChildrenSize > actualChildrenSize) {
                 // missing some.
                 @NonNull List<String> missingChildrenNames =
                         Lists.transform(expectedChildren, NODE_TO_NAME);
-                missingChildrenNames.removeAll(Lists.transform(actualChildren, NODE_TO_NAME));
-                return Optional.of(String.format(
-                        "%1$s: Number of children do not match up: "
-                                + "expected %2$d versus %3$d at %4$s, missing %5$s",
-                        getId(),
-                        expectedChildren.size(),
-                        actualChildren.size(),
-                        otherNode.printPosition(),
-                        Joiner.on(",").join(missingChildrenNames)));
+                Lists.transform(actualChildren, NODE_TO_NAME).forEach(missingChildrenNames::remove);
+                return Optional.of(
+                        String.format(
+                                "%1$s: Number of children do not match up: "
+                                        + "expected %2$d versus %3$d at %4$s, missing %5$s",
+                                getId(),
+                                expectedChildrenSize,
+                                actualChildrenSize,
+                                otherNode.printPosition(),
+                                Joiner.on(",").join(missingChildrenNames)));
             } else {
                 // extra ones.
                 @NonNull List<String> extraChildrenNames = Lists.transform(actualChildren, NODE_TO_NAME);
-                extraChildrenNames.removeAll(Lists.transform(expectedChildren, NODE_TO_NAME));
-                return Optional.of(String.format(
-                        "%1$s: Number of children do not match up: "
-                                + "expected %2$d versus %3$d at %4$s, extra elements found : %5$s",
-                        getId(),
-                        expectedChildren.size(),
-                        actualChildren.size(),
-                        otherNode.printPosition(),
-                        Joiner.on(",").join(expectedChildren)));
+                Lists.transform(expectedChildren, NODE_TO_NAME).forEach(extraChildrenNames::remove);
+                return Optional.of(
+                        String.format(
+                                "%1$s: Number of children do not match up: "
+                                        + "expected %2$d versus %3$d at %4$s, extra elements found : %5$s",
+                                getId(),
+                                expectedChildrenSize,
+                                actualChildrenSize,
+                                otherNode.printPosition(),
+                                Joiner.on(",").join(extraChildrenNames)));
             }
         }
         for (Node expectedChild : expectedChildren) {

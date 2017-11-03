@@ -67,12 +67,35 @@ public class TestFiles {
     }
 
     @NonNull
+    public static LintDetectorTest.TestFile kt(@NonNull @Language("kotlin") String source) {
+        return kotlin(source);
+    }
+
+    @NonNull
+    public static LintDetectorTest.TestFile kt(@NonNull String to,
+            @NonNull @Language("kotlin") String source) {
+        return kotlin(to, source);
+    }
+
+    @NonNull
+    public static LintDetectorTest.TestFile kotlin(@NonNull @Language("kotlin") String source) {
+        return TestFile.KotlinTestFile.create(source);
+    }
+
+    @NonNull
+    public static LintDetectorTest.TestFile kotlin(@NonNull String to,
+            @NonNull @Language("kotlin") String source) {
+        return TestFile.KotlinTestFile.create(source);
+    }
+
+    @NonNull
     public static LintDetectorTest.TestFile xml(@NonNull String to,
             @NonNull @Language("XML") String source) {
         if (!to.endsWith(DOT_XML)) {
             throw new IllegalArgumentException("Expected .xml suffix for XML test file");
         }
-        return file().to(to).withSource(source);
+
+        return TestFile.XmlTestFile.create(to, source);
     }
 
     @NonNull
@@ -143,8 +166,8 @@ public class TestFiles {
         }
 
         String base64 = Base64.getEncoder().encodeToString(bytes);
-        return "\"\"\n+ \""
-                + Joiner.on("\"\n+ \"").join(Splitter.fixedLength(60).split(base64)) + "\"";
+        return "\"\" +\n\""
+                + Joiner.on("\" +\n\"").join(Splitter.fixedLength(60).split(base64)) + "\"";
     }
 
     public static String toBase64(@NonNull File file) throws IOException {
