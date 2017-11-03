@@ -16,12 +16,6 @@
 
 package com.android.sdklib.tool.sdkmanager;
 
-import static com.android.repository.testframework.FakePackage.FakeRemotePackage;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
-
 import com.android.annotations.NonNull;
 import com.android.repository.Revision;
 import com.android.repository.api.License;
@@ -31,23 +25,15 @@ import com.android.repository.api.RepoManager;
 import com.android.repository.impl.manager.RemoteRepoLoader;
 import com.android.repository.impl.manager.RepoManagerImpl;
 import com.android.repository.impl.meta.CommonFactory;
-import com.android.repository.testframework.FakeDependency;
-import com.android.repository.testframework.FakeDownloader;
-import com.android.repository.testframework.FakeLoader;
-import com.android.repository.testframework.FakePackage;
-import com.android.repository.testframework.FakeProgressIndicator;
-import com.android.repository.testframework.FakeRepositorySourceProvider;
-import com.android.repository.testframework.FakeSettingsController;
-import com.android.repository.testframework.MockFileOp;
+import com.android.repository.testframework.*;
 import com.android.repository.util.InstallerUtil;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.PrintStream;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.io.*;
 import java.net.URL;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
@@ -57,8 +43,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-import org.junit.Before;
-import org.junit.Test;
+
+import static com.android.repository.testframework.FakePackage.FakeRemotePackage;
+import static org.junit.Assert.*;
 
 /**
  * Tests for {@link SdkManagerCli}
@@ -328,66 +315,6 @@ public class SdkManagerCliTest {
                                 + "    Available Version: 2\n",
                         File.separator);
         assertEquals(expected, out.toString().replaceAll("\\r\\n", "\n"));
-    }
-
-    /**
-     * Verbosely list the packages we have installed and available.
-     */
-    @Test
-    public void verboseList() throws Exception {
-        SdkManagerCli.Settings settings = SdkManagerCli.Settings
-                .createSettings(ImmutableList.of("--list", "--sdk_root=/sdk", "--verbose"),
-                        mFileOp.getFileSystem());
-        assertNotNull("Arguments should be valid", settings);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        SdkManagerCli downloader = new SdkManagerCli(settings,
-                new PrintStream(out),
-                null,
-                mDownloader,
-                mSdkHandler);
-        downloader.run();
-        String expected = "Installed packages:\n"
-                + "--------------------------------------\n"
-                + "test;p1\n"
-                + "    Description:        package 1\n"
-                + "    Version:            1\n"
-                + "    Installed Location: /sdk/test/p1\n"
-                + "\n"
-                + "upgrade\n"
-                + "    Description:        upgrade v1\n"
-                + "    Version:            1\n"
-                + "    Installed Location: /sdk/upgrade\n"
-                + "\n"
-                + "Available Packages:\n"
-                + "--------------------------------------\n"
-                + "depended_on\n"
-                + "    Description:        fake package\n"
-                + "    Version:            1\n"
-                + "\n"
-                + "depends_on\n"
-                + "    Description:        fake package\n"
-                + "    Version:            1\n"
-                + "    Dependencies:\n"
-                + "        depended_on\n"
-                + "\n"
-                + "test;remote1\n"
-                + "    Description:        fake package\n"
-                + "    Version:            1\n"
-                + "\n"
-                + "upgrade\n"
-                + "    Description:        upgrade v2\n"
-                + "    Version:            2\n"
-                + "\n"
-                + "Available Updates:\n"
-                + "--------------------------------------\n"
-                + "obsolete\n"
-                + "    Local Version:  1\n"
-                + "    Remote Version: 2\n"
-                + "    (Obsolete)\n"
-                + "upgrade\n"
-                + "    Local Version:  1\n"
-                + "    Remote Version: 2\n";
-        assertEquals(expected, out.toString());
     }
 
     /**

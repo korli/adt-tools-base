@@ -47,5 +47,6 @@
     <orderEntry type="library" scope="TEST" name="jimfs" level="project" />
     <orderEntry type="module" module-name="binary-resources" />
     <orderEntry type="module" module-name="sdk-common" />
+    <orderEntry type="library" name="archive-patcher" level="project" />
   </component>
 </module>

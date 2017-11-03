@@ -19,30 +19,18 @@ package com.android.utils;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.blame.SourcePosition;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.StringReader;
-import java.io.UnsupportedEncodingException;
+import org.w3c.dom.*;
+import org.xml.sax.*;
+import org.xml.sax.ext.DefaultHandler2;
+
+import javax.xml.parsers.*;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 import static com.android.SdkConstants.UTF_8;
-import org.w3c.dom.Attr;
-import org.w3c.dom.Comment;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.w3c.dom.Text;
-import org.xml.sax.Attributes;
-import org.xml.sax.InputSource;
-import org.xml.sax.Locator;
-import org.xml.sax.SAXException;
-import org.xml.sax.XMLReader;
-import org.xml.sax.ext.DefaultHandler2;
 
 /**
  * A simple DOM XML parser which can retrieve exact beginning and end offsets
@@ -71,7 +59,7 @@ public class PositionXmlParser {
      */
     @NonNull
     public static Document parse(@NonNull InputStream input, boolean namespaceAware)
-            throws ParserConfigurationException, SAXException, IOException {
+      throws ParserConfigurationException, SAXException, IOException {
         // Read in all the data
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[1024];

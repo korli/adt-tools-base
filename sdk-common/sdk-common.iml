@@ -17,7 +17,6 @@
     <orderEntry type="library" exported="" name="kxml2" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
     <orderEntry type="module" module-name="testutils" scope="TEST" />
-    <orderEntry type="library" scope="TEST" name="mockito" level="project" />
     <orderEntry type="library" exported="" name="gson" level="project" />
     <orderEntry type="module" module-name="builder-test-api" />
     <orderEntry type="module-library">
@@ -34,7 +33,7 @@
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
     <orderEntry type="library" scope="PROVIDED" name="auto-value-1.4.1" level="project" />
-    <orderEntry type="library" name="jimfs" level="project" scope="TEST" />
+    <orderEntry type="library" scope="TEST" name="jimfs" level="project" />
     <orderEntry type="module" module-name="android-annotations" />
     <orderEntry type="module" module-name="ddmlib" />
     <orderEntry type="library" name="Guava" level="project" />
@@ -47,5 +46,6 @@
         <SOURCES />
       </library>
     </orderEntry>
+    <orderEntry type="library" scope="TEST" name="mockito-2" level="project" />
   </component>
 </module>

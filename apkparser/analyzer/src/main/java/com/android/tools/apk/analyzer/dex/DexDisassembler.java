@@ -17,10 +17,6 @@ package com.android.tools.apk.analyzer.dex;
 
 import com.android.annotations.NonNull;
 import com.android.tools.apk.analyzer.internal.SigUtils;
-import java.io.IOException;
-import java.io.StringWriter;
-import java.util.Optional;
-import java.util.stream.StreamSupport;
 import org.jf.baksmali.Adaptors.ClassDefinition;
 import org.jf.baksmali.Adaptors.MethodDefinition;
 import org.jf.baksmali.BaksmaliOptions;
@@ -30,6 +26,11 @@ import org.jf.dexlib2.dexbacked.DexBackedMethod;
 import org.jf.dexlib2.iface.MethodImplementation;
 import org.jf.dexlib2.util.ReferenceUtil;
 import org.jf.util.IndentingWriter;
+
+import java.io.IOException;
+import java.io.StringWriter;
+import java.util.Optional;
+import java.util.stream.StreamSupport;
 
 public class DexDisassembler {
     private final DexBackedDexFile dexFile;
