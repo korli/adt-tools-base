@@ -57,11 +57,13 @@ please see themes_device_defaults.xml.
 
         <item name="colorPrimaryDark">@color/legacy_primary_dark</item>
         <item name="colorPrimary">@color/legacy_primary</item>
+        <item name="colorSecondary">?attr/colorPrimary</item>
         <item name="colorControlActivated">@color/legacy_control_activated</item>
         <item name="colorControlNormal">@color/legacy_control_normal</item>
         <item name="colorControlHighlight">@color/legacy_button_pressed</item>
         <item name="colorButtonNormal">@color/legacy_button_normal</item>
         <item name="colorEdgeEffect">?attr/colorPrimary</item>
+        <item name="colorError">@color/red</item>
 
         <item name="disabledAlpha">0.5</item>
         <item name="backgroundDimAmount">0.6</item>
@@ -396,6 +398,7 @@ please see themes_device_defaults.xml.
         <item name="floatingToolbarItemBackgroundDrawable">@drawable/item_background_material_dark</item>
         <item name="floatingToolbarOpenDrawable">@drawable/ic_menu_moreoverflow_material_dark</item>
         <item name="floatingToolbarPopupBackgroundDrawable">@drawable/floating_popup_background_dark</item>
+        <item name="floatingToolbarDividerColor">@color/floating_popup_divider_dark</item>
 
         <!-- SearchView attributes -->
         <item name="searchViewStyle">@style/Widget.Holo.SearchView</item>
@@ -438,6 +441,11 @@ please see themes_device_defaults.xml.
         <item name="lightRadius">@dimen/light_radius</item>
         <item name="ambientShadowAlpha">@dimen/ambient_shadow_alpha</item>
         <item name="spotShadowAlpha">@dimen/spot_shadow_alpha</item>
+
+        <!-- Tooltip popup properties -->
+        <item name="tooltipFrameBackground">@drawable/tooltip_frame</item>
+        <item name="tooltipForegroundColor">@color/bright_foreground_light</item>
+        <item name="tooltipBackgroundColor">@color/tooltip_background_light</item>
     </style>
 
     <!-- Variant of {@link #Theme} with no title bar -->
@@ -552,6 +560,11 @@ please see themes_device_defaults.xml.
         <item name="floatingToolbarItemBackgroundDrawable">@drawable/item_background_material_light</item>
         <item name="floatingToolbarOpenDrawable">@drawable/ic_menu_moreoverflow_material_light</item>
         <item name="floatingToolbarPopupBackgroundDrawable">@drawable/floating_popup_background_light</item>
+        <item name="floatingToolbarDividerColor">@color/floating_popup_divider_light</item>
+
+        <!-- Tooltip popup colors -->
+        <item name="tooltipForegroundColor">@color/bright_foreground_dark</item>
+        <item name="tooltipBackgroundColor">@color/tooltip_background_dark</item>
     </style>
 
     <!-- Variant of {@link #Theme_Light} with no title bar -->
