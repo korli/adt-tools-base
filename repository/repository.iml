@@ -14,7 +14,7 @@
     <orderEntry type="library" name="commons-compress" level="project" />
     <orderEntry type="library" name="jimfs" level="project" />
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
-    <orderEntry type="library" name="mockito" level="project" />
     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
+    <orderEntry type="library" scope="TEST" name="mockito-2" level="project" />
   </component>
 </module>
