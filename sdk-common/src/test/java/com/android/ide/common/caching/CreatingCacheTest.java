@@ -16,12 +16,13 @@
 
 package com.android.ide.common.caching;
 
-import static com.google.common.truth.Truth.assertThat;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import java.util.concurrent.CountDownLatch;
 import org.junit.Test;
+
+import java.util.concurrent.CountDownLatch;
+
+import static com.google.common.truth.Truth.assertThat;
 
 /**
  */
@@ -241,11 +242,13 @@ public class CreatingCacheTest {
         // the latch that will be released when the thread is pending its query.
         CountDownLatch latch = new CountDownLatch(1);
 
-        new Thread(new CacheRunnable(cache, latch)).start();
+        Thread thread = new Thread(new CacheRunnable(cache, latch));
+        thread.start();
 
         // wait on thread to be waiting, before trying to clear the cache.
         latch.await();
 
         cache.clear();
+        thread.join();
     }
 }
