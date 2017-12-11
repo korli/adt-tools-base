@@ -15,71 +15,41 @@
  */
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.FD_BUILD_TOOLS;
-import static com.android.SdkConstants.GRADLE_PLUGIN_MINIMUM_VERSION;
-import static com.android.SdkConstants.GRADLE_PLUGIN_RECOMMENDED_VERSION;
-import static com.android.SdkConstants.SUPPORT_LIB_GROUP_ID;
-import static com.android.ide.common.repository.GoogleMavenRepository.MAVEN_GOOGLE_CACHE_DIR_KEY;
-import static com.android.ide.common.repository.GradleCoordinate.COMPARE_PLUS_HIGHER;
-import static com.android.sdklib.SdkVersionInfo.LOWEST_ACTIVE_API;
-import static com.android.tools.lint.checks.ManifestDetector.TARGET_NEWER;
-import static com.android.tools.lint.detector.api.LintUtils.guessGradleLocation;
-import static com.google.common.base.Charsets.UTF_8;
-
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
-import com.android.builder.model.AndroidArtifact;
-import com.android.builder.model.AndroidLibrary;
-import com.android.builder.model.AndroidProject;
-import com.android.builder.model.Dependencies;
-import com.android.builder.model.JavaLibrary;
-import com.android.builder.model.Library;
-import com.android.builder.model.MavenCoordinates;
-import com.android.builder.model.Variant;
-import com.android.ide.common.repository.GoogleMavenRepository;
-import com.android.ide.common.repository.GradleCoordinate;
+import com.android.builder.model.*;
+import com.android.ide.common.repository.*;
 import com.android.ide.common.repository.GradleCoordinate.RevisionComponent;
-import com.android.ide.common.repository.GradleVersion;
-import com.android.ide.common.repository.MavenRepositories;
-import com.android.ide.common.repository.SdkMavenRepository;
 import com.android.repository.io.FileOpUtils;
 import com.android.sdklib.AndroidTargetHash;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.tools.lint.client.api.LintClient;
-import com.android.tools.lint.detector.api.Category;
-import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Implementation;
-import com.android.tools.lint.detector.api.Issue;
-import com.android.tools.lint.detector.api.LintFix;
-import com.android.tools.lint.detector.api.LintUtils;
-import com.android.tools.lint.detector.api.Location;
-import com.android.tools.lint.detector.api.Project;
-import com.android.tools.lint.detector.api.Scope;
-import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.*;
 import com.google.common.base.Joiner;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import org.jetbrains.annotations.TestOnly;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
+
+import static com.android.SdkConstants.*;
+import static com.android.ide.common.repository.GoogleMavenRepository.MAVEN_GOOGLE_CACHE_DIR_KEY;
+import static com.android.ide.common.repository.GradleCoordinate.COMPARE_PLUS_HIGHER;
+import static com.android.sdklib.SdkVersionInfo.LOWEST_ACTIVE_API;
+import static com.android.tools.lint.checks.ManifestDetector.TARGET_NEWER;
+import static com.android.tools.lint.detector.api.LintUtils.guessGradleLocation;
+import static com.google.common.base.Charsets.UTF_8;
 
 /**
  * Checks Gradle files for potential errors
@@ -1159,8 +1129,12 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
         return null;
     }
 
-    @VisibleForTesting
-    static GoogleMavenRepository googleMavenRepository;
+    @TestOnly
+    public static void cleanUp() {
+        googleMavenRepository = null;
+    }
+
+    private static GoogleMavenRepository googleMavenRepository;
 
     @Nullable
     private static GradleVersion getGoogleMavenRepoVersion(@NonNull Context context,
