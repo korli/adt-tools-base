@@ -17,10 +17,8 @@
 package com.android.tools.lint.psi;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
 import com.intellij.psi.PsiAnnotationMemberValue;
 import com.intellij.psi.PsiArrayInitializerMemberValue;
-import com.intellij.psi.PsiType;
 
 public class ExternalPsiArrayInitializerMemberValue extends ExternalPsiAnnotationMemberValue
         implements PsiArrayInitializerMemberValue {
@@ -37,9 +35,9 @@ public class ExternalPsiArrayInitializerMemberValue extends ExternalPsiAnnotatio
         return mInitializers;
     }
 
-    @Nullable
-    @Override
-    public PsiType getType() {
-        return null;
-    }
+    //@Nullable
+    //@Override
+    //public PsiType getType() {
+    //    return null;
+    //}
 }

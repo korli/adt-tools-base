@@ -23,17 +23,17 @@ import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.utils.UninstallOnClose;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
 import com.android.builder.packaging.PackagingUtils;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.logcat.LogCatMessage;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
-import com.android.tools.fd.client.InstantRunClient;
-import com.android.tools.fd.client.InstantRunClient.FileTransfer;
-import com.android.tools.fd.client.UpdateMode;
+import com.android.sdklib.AndroidVersion;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
+import com.android.tools.ir.client.InstantRunClient;
+import com.android.tools.ir.client.InstantRunClient.FileTransfer;
+import com.android.tools.ir.client.UpdateMode;
 import com.android.utils.ILogger;
 import com.google.common.collect.ImmutableList;
 import java.io.Closeable;
@@ -45,7 +45,6 @@ import org.mockito.Mockito;
  */
 public class HotSwapTester {
 
-    public static final ColdswapMode COLDSWAP_MODE = ColdswapMode.MULTIDEX;
     @NonNull
     private final GradleTestProject project;
     @NonNull
@@ -109,11 +108,11 @@ public class HotSwapTester {
 
             // Run first time on device
             InstantRunTestUtils.doInitialBuild(
-                    project, device.getVersion().getApiLevel(), COLDSWAP_MODE);
+                    project, new AndroidVersion(device.getVersion().getApiLevel(), null));
 
             // Deploy to device
             InstantRunBuildInfo info = InstantRunTestUtils.loadContext(instantRunModel);
-            InstantRunTestUtils.doInstall(device, info.getArtifacts());
+            InstantRunTestUtils.doInstall(device, info);
 
             logcat.clearFiltered();
 
@@ -130,7 +129,6 @@ public class HotSwapTester {
             InstantRunClient client =
                     new InstantRunClient(packageName, iLogger, token, port);
 
-            // Give the app a chance to start
             InstantRunTestUtils.waitForAppStart(client, device);
 
             verifyOriginalCode.run();
@@ -140,7 +138,7 @@ public class HotSwapTester {
 
                 // Now build the hot swap patch.
                 project.executor()
-                        .withInstantRun(device.getVersion().getApiLevel(), COLDSWAP_MODE)
+                        .withInstantRun(new AndroidVersion(device.getVersion().getApiLevel(), null))
                         .run("assembleDebug");
 
                 FileTransfer fileTransfer;
@@ -232,5 +230,5 @@ public class HotSwapTester {
                 }
             }
         }
-    };
+    }
 }

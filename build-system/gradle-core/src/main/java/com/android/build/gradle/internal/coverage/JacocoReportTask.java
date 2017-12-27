@@ -20,17 +20,25 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.internal.tasks.TaskInputHelper;
 import com.android.build.gradle.internal.variant.TestVariantData;
-import com.android.builder.internal.testing.SimpleTestCallable;
 import com.android.builder.model.Version;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.io.Closeables;
 import com.google.common.io.Files;
-
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
+import java.util.function.Supplier;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Project;
 import org.gradle.api.file.FileCollection;
@@ -56,34 +64,21 @@ import org.jacoco.report.MultiSourceFileLocator;
 import org.jacoco.report.html.HTMLFormatter;
 import org.jacoco.report.xml.XMLFormatter;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.Callable;
-import java.util.stream.Stream;
-
 /**
  * Simple Jacoco report task that calls the Ant version.
  */
 public class JacocoReportTask extends DefaultTask {
 
+    private FileCollection jacocoClasspath;
+
+    private Supplier<File> coverageDirectory;
+    private FileCollection classFileCollection;
+    private Supplier<Collection<File>> sourceFolders;
+
     private File coverageFile;
-
-    private File coverageDirectory;
-
     private File reportDir;
-
-    private File classDir;
-
-    private List<File> sourceDir;
-
     private String reportName;
 
-    private FileCollection jacocoClasspath;
 
     private int tabWidth = 4;
 
@@ -102,11 +97,7 @@ public class JacocoReportTask extends DefaultTask {
     @Optional
     @Nullable
     public File getCoverageDirectory() {
-        return coverageDirectory;
-    }
-
-    public void setCoverageDirectory(File coverageDirectory) {
-        this.coverageDirectory = coverageDirectory;
+        return coverageDirectory.get();
     }
 
     @OutputDirectory
@@ -118,22 +109,14 @@ public class JacocoReportTask extends DefaultTask {
         this.reportDir = reportDir;
     }
 
-    @InputDirectory
-    public File getClassDir() {
-        return classDir;
-    }
-
-    public void setClassDir(File classDir) {
-        this.classDir = classDir;
+    @InputFiles
+    public FileCollection getClassFileCollection() {
+        return classFileCollection;
     }
 
     @InputFiles
-    public List<File> getSourceDir() {
-        return sourceDir;
-    }
-
-    public void setSourceDir(List<File> sourceDir) {
-        this.sourceDir = sourceDir;
+    public Collection<File> getSourceFolders() {
+        return sourceFolders.get();
     }
 
     public String getReportName() {
@@ -166,32 +149,32 @@ public class JacocoReportTask extends DefaultTask {
     @TaskAction
     public void generateReport() throws IOException {
         File coverageFile = getCoverageFile();
-        File coverageDirectory = getCoverageDirectory();
+        File coverageDir = coverageDirectory.get();
 
 
         List<File> coverageFiles = Lists.newArrayList();
         if (coverageFile != null) {
             coverageFiles.add(coverageFile);
         }
-        if (coverageDirectory != null) {
-            Files.fileTreeTraverser().breadthFirstTraversal(coverageDirectory)
+        if (coverageDir != null) {
+            Files.fileTreeTraverser().breadthFirstTraversal(coverageDir)
                     .filter(File::isFile).copyInto(coverageFiles);
         }
 
         if (coverageFiles.isEmpty()) {
-            if (coverageDirectory == null) {
+            if (coverageDir == null) {
                 throw new IOException("No input file or directory specified.");
             } else {
                 throw new IOException(String.format(
-                        "No coverage data to process in directory '%1$s'", coverageDirectory));
+                        "No coverage data to process in directory '%1$s'", coverageDir));
             }
         }
 
         generateReport(
                 coverageFiles,
                 getReportDir(),
-                getClassDir(),
-                getSourceDir(),
+                getClassFileCollection().getFiles(),
+                getSourceFolders(),
                 getTabWidth(),
                 getReportName(),
                 getLogger());
@@ -201,11 +184,12 @@ public class JacocoReportTask extends DefaultTask {
     static void generateReport(
             @NonNull List<File> coverageFiles,
             @NonNull File reportDir,
-            @NonNull File classDir,
-            @NonNull List<File> sourceDir,
+            @NonNull Collection<File> classFolders,
+            @NonNull Collection<File> sourceFolders,
             int tabWidth,
             @NonNull String reportName,
-            @NonNull Logger logger) throws IOException {
+            @NonNull Logger logger)
+            throws IOException {
         // Load data
         final ExecFileLoader loader = new ExecFileLoader();
         for (File coverageFile: coverageFiles) {
@@ -240,11 +224,11 @@ public class JacocoReportTask extends DefaultTask {
             final CoverageBuilder builder = new CoverageBuilder();
             final Analyzer analyzer = new Analyzer(executionDataStore, builder);
 
-            analyzeAll(analyzer, classDir);
+            analyzeAll(analyzer, classFolders);
 
             MultiSourceFileLocator locator = new MultiSourceFileLocator(0);
-            for (File file : sourceDir) {
-                locator.add(new DirectorySourceFileLocator(file, "UTF-8", tabWidth));
+            for (File folder : sourceFolders) {
+                locator.add(new DirectorySourceFileLocator(folder, "UTF-8", tabWidth));
             }
 
             final IBundleCoverage bundle = builder.getBundle(reportName);
@@ -259,11 +243,38 @@ public class JacocoReportTask extends DefaultTask {
         }
     }
 
-    private static void analyzeAll(@NonNull Analyzer analyzer, @NonNull File file)
+    private static void analyzeAll(
+            @NonNull Analyzer analyzer, @NonNull Collection<File> classFolders) throws IOException {
+        for (final File folder : classFolders) {
+            analyze(analyzer, folder, classFolders);
+        }
+    }
+
+    /**
+     * Analyzes code coverage on file if it's a class file, or recursively analyzes descendants if
+     * file is a folder.
+     *
+     * @param analyzer Jacoco Analyzer
+     * @param file a file or folder
+     * @param originalClassFolders the original collection of class folders to be analyzed; e.g.,
+     *     this.classFileCollection.getFiles(). This parameter is included to avoid redundant
+     *     computation in the case when one of the original class folders is a descendant of
+     *     another.
+     */
+    private static void analyze(
+            @NonNull Analyzer analyzer,
+            @NonNull File file,
+            @NonNull Collection<File> originalClassFolders)
             throws IOException {
         if (file.isDirectory()) {
-            for (final File f : file.listFiles()) {
-                analyzeAll(analyzer, f);
+            final File[] files = file.listFiles();
+            if (files != null) {
+                for (final File f : files) {
+                    // check that f is not in originalClassFolders to avoid redundant computation
+                    if (!originalClassFolders.contains(f)) {
+                        analyze(analyzer, f, originalClassFolders);
+                    }
+                }
             }
         } else {
             String name = file.getName();
@@ -316,23 +327,19 @@ public class JacocoReportTask extends DefaultTask {
             checkNotNull(scope.getTestedVariantData());
             final VariantScope testedScope = scope.getTestedVariantData().getScope();
 
-            ConventionMappingHelper.map(
-                    task,
-                    "jacocoClasspath",
-                    () -> project.getConfigurations().getAt(JacocoPlugin.ANT_CONFIGURATION_NAME));
-            ConventionMappingHelper.map(
-                    task,
-                    "coverageDirectory",
+            task.jacocoClasspath =
+                    project.getConfigurations().getAt(JacocoPlugin.ANT_CONFIGURATION_NAME);
+
+            task.coverageDirectory = TaskInputHelper.memoize(
                     () -> ((TestVariantData) scope.getVariantData()).connectedTestTask
                                     .getCoverageDir());
-            ConventionMappingHelper.map(
-                    task,
-                    "classDir",
-                    () -> testedScope.getVariantData().javacTask.getDestinationDir());
-            ConventionMappingHelper.map(
-                    task,
-                    "sourceDir",
-                    () -> testedScope.getVariantData().getJavaSourceFoldersForCoverage());
+
+            task.classFileCollection =
+                    testedScope.getOutput(TaskOutputHolder.AnchorOutputType.ALL_CLASSES);
+
+            task.sourceFolders =
+                    TaskInputHelper.bypassFileSupplier(
+                            () -> testedScope.getVariantData().getJavaSourceFoldersForCoverage());
 
             task.setReportDir(testedScope.getCoverageReportDir());
         }

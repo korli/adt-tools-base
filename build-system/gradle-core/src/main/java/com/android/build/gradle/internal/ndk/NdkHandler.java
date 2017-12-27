@@ -19,6 +19,7 @@ package com.android.build.gradle.internal.ndk;
 import static com.android.SdkConstants.FN_LOCAL_PROPERTIES;
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
@@ -36,6 +37,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.Collection;
 import java.util.Properties;
+import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.logging.Logging;
 
 /**
@@ -50,19 +52,20 @@ public class NdkHandler {
     private final Toolchain toolchain;
     private final String toolchainVersion;
     private final File ndkDirectory;
+    private final boolean useUnifiedHeaders;
     @Nullable
     private final NdkInfo ndkInfo;
     @Nullable
     private final Revision revision;
 
-    private static final int LATEST_SUPPORTED_VERSION = 13;
-    public static final String NDK_BUNDLE_SUBPATH = "ndk-bundle";
+    private static final int LATEST_SUPPORTED_VERSION = 14;
 
     public NdkHandler(
             @NonNull File projectDir,
             @Nullable String platformVersion,
             @NonNull String toolchainName,
-            @NonNull String toolchainVersion) {
+            @NonNull String toolchainVersion,
+            @Nullable Boolean useUnifiedHeaders) {
         this.toolchain = Toolchain.getByName(toolchainName);
         this.toolchainVersion = toolchainVersion;
         this.platformVersion = platformVersion;
@@ -95,6 +98,16 @@ public class NdkHandler {
                         ndkInfo = new DefaultNdkInfo(ndkDirectory);
                 }
             }
+        }
+
+        // useUnifiedHeaders defaults to true for r15 and above.
+        this.useUnifiedHeaders =
+                useUnifiedHeaders != null
+                        ? useUnifiedHeaders
+                        : revision != null && revision.getMajor() > 14;
+
+        if (this.useUnifiedHeaders && (revision == null || revision.getMajor() < 14)) {
+            throw new InvalidUserDataException("Unified headers is not supported before NDK r14.");
         }
     }
 
@@ -140,7 +153,7 @@ public class NdkHandler {
     }
 
     @Nullable
-    private String getPlatformVersion() {
+    public String getPlatformVersion() {
         if (platformVersion == null && compileSdkVersion != null) {
             checkNotNull(ndkInfo);
             platformVersion = ndkInfo.findLatestPlatformVersion(compileSdkVersion);
@@ -225,7 +238,10 @@ public class NdkHandler {
         File sdkFolder = sdkLocation.getFirst();
         if (sdkFolder != null) {
             // Worth checking if the NDK came bundled with the SDK
-            return new File(sdkFolder, NDK_BUNDLE_SUBPATH);
+            File ndkBundle = new File(sdkFolder, SdkConstants.FD_NDK);
+            if (ndkBundle.isDirectory()) {
+                return ndkBundle;
+            }
         }
 
         return null;
@@ -263,27 +279,51 @@ public class NdkHandler {
         return ndkInfo.getToolchainPath(toolchain, toolchainVersion, abi);
     }
 
-    /**
-     * Returns the sysroot directory for the toolchain.
-     */
+    public boolean isUseUnifiedHeaders() {
+        return useUnifiedHeaders;
+    }
+
+    /** Returns the compiler sysroot for the toolchain. */
     @NonNull
-    public String getSysroot(@NonNull Abi abi) {
+    public String getCompilerSysroot(@NonNull Abi abi) {
         if (getPlatformVersion() == null) {
             return "";
         } else {
             checkNotNull(ndkInfo);
-            return ndkInfo.getSysrootPath(abi, getPlatformVersion());
+            return ndkInfo.getCompilerSysrootPath(abi, getPlatformVersion(), useUnifiedHeaders);
         }
     }
 
-    /**
-     * Returns the sysroot directory for the toolchain with an platform version override.
-     */
-    public String getSysroot(Abi abi, @NonNull String platformVersionOverride) {
-        return ndkDirectory + "/platforms/" + platformVersionOverride + "/arch-"
-                    + abi.getArchitecture();
+    /** Returns the compiler sysroot for the toolchain with an platform version override. */
+    @NonNull
+    public String getCompilerSysroot(Abi abi, @Nullable String platformVersionOverride) {
+        checkNotNull(ndkInfo);
+        if (platformVersionOverride == null) {
+            return getCompilerSysroot(abi);
+        }
+        return ndkInfo.getCompilerSysrootPath(abi, platformVersionOverride, useUnifiedHeaders);
     }
 
+    /** Returns the linker sysroot for the toolchain. */
+    @NonNull
+    public String getLinkerSysroot(@NonNull Abi abi) {
+        if (getPlatformVersion() == null) {
+            return "";
+        } else {
+            checkNotNull(ndkInfo);
+            return ndkInfo.getLinkerSysrootPath(abi, getPlatformVersion());
+        }
+    }
+
+    /** Returns the linker sysroot for the toolchain with an platform version override. */
+    @NonNull
+    public String getLinkerSysroot(Abi abi, @Nullable String platformVersionOverride) {
+        checkNotNull(ndkInfo);
+        if (platformVersionOverride == null) {
+            return getLinkerSysroot(abi);
+        }
+        return ndkInfo.getLinkerSysrootPath(abi, platformVersionOverride);
+    }
     /**
      * Return true if compiledSdkVersion supports 64 bits ABI.
      */
@@ -351,6 +391,18 @@ public class NdkHandler {
      */
     @NonNull
     public Collection<Abi> getSupportedAbis() {
+        if (ndkInfo != null) {
+            return supports64Bits() ? ndkInfo.getSupportedAbis() : ndkInfo.getSupported32BitsAbis();
+        }
+        return supports64Bits() ? getAbiList() : getAbiList32();
+    }
+
+    /** Returns a list of supported ABI. */
+    @NonNull
+    public Collection<Abi> getDefaultAbis() {
+        if (ndkInfo != null) {
+            return supports64Bits() ? ndkInfo.getDefaultAbis() : ndkInfo.getDefault32BitsAbis();
+        }
         return supports64Bits() ? getAbiList() : getAbiList32();
     }
 

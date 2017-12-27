@@ -20,7 +20,13 @@ import static com.android.SdkConstants.CONSTRUCTOR_NAME;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.builder.model.AndroidLibrary;
+import com.android.builder.model.Dependencies;
+import com.android.builder.model.JavaLibrary;
+import com.android.builder.model.Library;
+import com.android.builder.model.MavenCoordinates;
 import com.android.tools.lint.detector.api.ClassContext;
+import com.google.common.collect.Maps;
 import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiAnnotationOwner;
 import com.intellij.psi.PsiAnonymousClass;
@@ -43,6 +49,13 @@ import com.intellij.psi.PsiReference;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiTypeVisitor;
 import com.intellij.psi.PsiWildcardType;
+import java.io.File;
+import java.util.Collection;
+import java.util.Map;
+import org.jetbrains.uast.UAnnotated;
+import org.jetbrains.uast.UAnnotation;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UMethod;
 
 @SuppressWarnings("MethodMayBeStatic") // Some of these methods may be overridden by LintClients
 public abstract class JavaEvaluator {
@@ -468,6 +481,12 @@ public abstract class JavaEvaluator {
     public abstract String findJarPath(@NonNull PsiElement element);
 
     /**
+     * Try to determine the path to the .jar file containing the element, <b>if</b> applicable
+     */
+    @Nullable
+    public abstract String findJarPath(@NonNull UElement element);
+
+    /**
      * Returns true if the given annotation is inherited (instead of being defined directly
      * on the given modifier list holder
      *
@@ -481,6 +500,234 @@ public abstract class JavaEvaluator {
         return annotationOwner == null || !annotationOwner.equals(owner.getModifierList());
     }
 
+    public boolean isInherited(@NonNull UAnnotation annotation,
+            @NonNull PsiModifierListOwner owner) {
+        PsiElement psi = annotation.getPsi();
+        if (psi instanceof PsiAnnotation) {
+            PsiAnnotationOwner annotationOwner = ((PsiAnnotation)psi).getOwner();
+            return annotationOwner == null || !annotationOwner.equals(owner.getModifierList());
+        }
+
+        return true;
+    }
+
+    /**
+     * Returns true if the given annotation is inherited (instead of being defined directly
+     * on the given modifier list holder
+     *
+     * @param annotation the annotation to check
+     * @param owner      the owner potentially declaring the annotation
+     * @return true if the annotation is inherited rather than being declared directly on this owner
+     */
+    public boolean isInherited(@NonNull UAnnotation annotation, @NonNull UAnnotated owner) {
+        return owner.getAnnotations().contains(annotation);
+    }
+
     @Nullable
     public abstract PsiPackage getPackage(@NonNull PsiElement node);
+
+    @Nullable
+    public abstract PsiPackage getPackage(@NonNull UElement node);
+
+    // Just here to disambiguate getPackage(PsiElement) and getPackage(UElement) since
+    // a UMethod is both a PsiElement and a UElement
+    @Nullable
+    public PsiPackage getPackage(@NonNull UMethod node) {
+        return getPackage((PsiElement) node);
+    }
+
+    /**
+     * Return the Gradle group id for the given element, <b>if</b> applicable. For example, for
+     * a method in the appcompat library, this would return "com.android.support".
+     */
+    @Nullable
+    public MavenCoordinates getLibrary(@NonNull PsiElement element) {
+        return getLibrary(findJarPath(element));
+    }
+
+    /**
+     * Return the Gradle group id for the given element, <b>if</b> applicable. For example, for
+     * a method in the appcompat library, this would return "com.android.support".
+     */
+    @Nullable
+    public MavenCoordinates getLibrary(@NonNull UElement element) {
+        return getLibrary(findJarPath(element));
+    }
+
+    /** Disambiguate between UElement and PsiElement since a UMethod is both */
+    @Nullable
+    public MavenCoordinates getLibrary(@NonNull UMethod element) {
+        return getLibrary((PsiElement)element);
+    }
+
+    public abstract Dependencies getDependencies();
+
+    @Nullable
+    private MavenCoordinates getLibrary(@Nullable String jarFile) {
+        if (jarFile != null) {
+            if (jarToGroup == null) {
+                jarToGroup = Maps.newHashMap();
+            }
+            MavenCoordinates coordinates = jarToGroup.get(jarFile);
+            if (coordinates == null) {
+                Library library = findOwnerLibrary(jarFile.replace('/', File.separatorChar));
+                if (library != null) {
+                    coordinates = library.getResolvedCoordinates();
+                }
+                if (coordinates == null) {
+                    // Use string location to figure it out. Note however that
+                    // this doesn't work when the build cache is in effect.
+                    // Example:
+                    // $PROJECT_DIRECTORY/app/build/intermediates/exploded-aar/com.android.support/
+                    //          /appcompat-v7/25.0.0-SNAPSHOT/jars/classes.jar
+                    // and we want to pick out "com.android.support" and "appcompat-v7"
+                    int index = jarFile.indexOf("exploded-aar");
+                    if (index != -1) {
+                        index += 13; // "exploded-aar/".length()
+                        for (int i = index; i < jarFile.length(); i++) {
+                            char c = jarFile.charAt(i);
+                            if (c == '/' || c == File.separatorChar) {
+                                String groupId = jarFile.substring(index, i);
+                                i++;
+                                for (int j = i; j < jarFile.length(); j++) {
+                                    c = jarFile.charAt(j);
+                                    if (c == '/' || c == File.separatorChar) {
+                                        String artifactId = jarFile.substring(i, j);
+                                        coordinates = new MyMavenCoordinates(groupId, artifactId);
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (coordinates == null) {
+                    coordinates = MyMavenCoordinates.NONE;
+                }
+                jarToGroup.put(jarFile, coordinates);
+            }
+            return coordinates == MyMavenCoordinates.NONE ? null : coordinates;
+        }
+
+        return null;
+    }
+
+    @Nullable
+    public Library findOwnerLibrary(@NonNull String jarFile) {
+        Dependencies dependencies = getDependencies();
+        if (dependencies != null) {
+            Library match = findOwnerLibrary(dependencies.getLibraries(), jarFile);
+            if (match != null) {
+                return match;
+            }
+            match = findOwnerJavaLibrary(dependencies.getJavaLibraries(), jarFile);
+            if (match != null) {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private static Library findOwnerJavaLibrary(
+            @NonNull Collection<? extends JavaLibrary> dependencies,
+            @NonNull String jarFile) {
+        for (JavaLibrary library : dependencies) {
+            if (jarFile.equals(library.getJarFile().getPath())) {
+                return library;
+            }
+            Library match = findOwnerJavaLibrary(library.getDependencies(), jarFile);
+            if (match != null) {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    @Nullable
+    private static Library findOwnerLibrary(
+            @NonNull Collection<? extends AndroidLibrary> dependencies,
+            @NonNull String jarFile) {
+        for (AndroidLibrary library : dependencies) {
+            if (jarFile.equals(library.getJarFile().getPath())) {
+                return library;
+            }
+            for (File jar : library.getLocalJars()) {
+                if (jarFile.equals(jar.getPath())) {
+                    return library;
+                }
+            }
+            Library match = findOwnerLibrary(library.getLibraryDependencies(), jarFile);
+            if (match != null) {
+                return match;
+            }
+
+            match = findOwnerJavaLibrary(library.getJavaDependencies(), jarFile);
+            if (match != null) {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Cache for {@link #getLibrary(PsiElement)}
+     */
+    private Map<String, MavenCoordinates> jarToGroup;
+
+    /**
+     * Dummy implementation of {@link com.android.builder.model.MavenCoordinates} which
+     * only stores group and artifact id's for now
+     */
+    private static class MyMavenCoordinates implements MavenCoordinates {
+
+        private static final MyMavenCoordinates NONE = new MyMavenCoordinates("", "");
+
+        private final String groupId;
+        private final String artifactId;
+
+        public MyMavenCoordinates(@NonNull String groupId, @NonNull String artifactId) {
+            this.groupId = groupId;
+            this.artifactId = artifactId;
+        }
+
+        @NonNull
+        @Override
+        public String getGroupId() {
+            return groupId;
+        }
+
+        @NonNull
+        @Override
+        public String getArtifactId() {
+            return artifactId;
+        }
+
+        @NonNull
+        @Override
+        public String getVersion() {
+            return "";
+        }
+
+        @NonNull
+        @Override
+        public String getPackaging() {
+            return "";
+        }
+
+        @Nullable
+        @Override
+        public String getClassifier() {
+            return "";
+        }
+
+        @Override
+        public String getVersionlessId() {
+            return groupId + ':' + artifactId;
+        }
+    }
 }

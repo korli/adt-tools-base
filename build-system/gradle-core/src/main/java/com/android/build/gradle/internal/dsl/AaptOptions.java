@@ -19,19 +19,18 @@ package com.android.build.gradle.internal.dsl;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.LoggerWrapper;
-
-import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.Optional;
-
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Optional;
 
-/**
- * DSL object for configuring aapt options.
- */
-public class AaptOptions implements com.android.builder.model.AaptOptions {
+/** DSL object for configuring aapt options. */
+public class AaptOptions {
+
+    @Nullable private Boolean namespaced;
 
     @Nullable
     private String ignoreAssetsPattern;
@@ -39,7 +38,7 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
     @Nullable
     private List<String> noCompressList;
 
-    private boolean cruncherEnabled = true;
+    @Nullable private Boolean cruncherEnabled;
 
     private boolean failOnMissingConfigEntry = false;
 
@@ -61,7 +60,6 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
      *
      * <p>See <code>aapt --help</code>
      */
-    @Override
     @Optional
     @Input
     public String getIgnoreAssets() {
@@ -73,6 +71,7 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
      *
      * <p>See <code>aapt --help</code>
      */
+    @Internal
     public String getIgnoreAssetsPattern() {
         return ignoreAssetsPattern;
     }
@@ -100,7 +99,6 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
      *
      * <p>Equivalent of the -0 flag. See <code>aapt --help</code>
      */
-    @Override
     @Optional
     @Input
     public Collection<String> getNoCompress() {
@@ -119,21 +117,33 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
                 + "now always enabled.");
     }
 
-    /**
-     * Enables or disables PNG crunching.
-     */
     public void setCruncherEnabled(boolean value) {
         cruncherEnabled = value;
     }
 
     /**
-     * Returns true if the PNGs should be crunched, false otherwise.
+     * Whether to crunch PNGs.
+     *
+     * <p>This will reduce the size of the APK if PNGs resources are not already optimally
+     * compressed, at the cost of extra time to build.
+     *
+     * <p>PNG crunching is enabled by default in the release build type and disabled by default in
+     * the debug build type.
+     *
+     * <p>This is replaced by {@link BuildType#isCrunchPngs()}.
      */
-    @Input
+    @Deprecated
     public boolean getCruncherEnabled() {
+        // Simulate true if unset. This is not really correct, but changing it to be a tri-state
+        // nullable Boolean is potentially a breaking change if the getter was being used by build
+        // scripts or third party plugins.
+        return cruncherEnabled == null ? true : cruncherEnabled;
+    }
+
+    public Boolean getCruncherEnabledOverride() {
         return cruncherEnabled;
     }
-    
+
     /**
      * Whether to use the new cruncher.
      */
@@ -155,7 +165,6 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
      *
      * <p>See <code>aapt --help</code>
      */
-    @Override
     @Input
     public boolean getFailOnMissingConfigEntry() {
         return failOnMissingConfigEntry;
@@ -203,7 +212,6 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
      * Returns the list of additional parameters to pass to {@code appt}.
      */
     @Nullable
-    @Override
     @Optional
     @Input
     public List<String> getAdditionalParameters() {
@@ -220,7 +228,27 @@ public class AaptOptions implements com.android.builder.model.AaptOptions {
      *
      * @return the number of cruncher processes, {@code 0} to use the default
      */
+    @Internal
     public int getCruncherProcesses() {
         return cruncherProcesses;
+    }
+
+    /**
+     * Returns true if the resources in this sub-project are fully namespaced.
+     *
+     * <p>This property is incubating and may change in a future release.
+     */
+    @Internal
+    @Nullable
+    public Boolean getNamespaced() {
+        return namespaced;
+    }
+
+    public void setNamespaced(@Nullable Boolean namespaced) {
+        this.namespaced = namespaced;
+    }
+
+    public void namespaced(@Nullable Boolean namespaced) {
+        this.namespaced = namespaced;
     }
 }

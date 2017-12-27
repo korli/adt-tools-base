@@ -16,7 +16,7 @@
 
 package com.android.build.gradle.integration.ndk;
 
-import static com.android.testutils.truth.MoreTruth.assertThatZip;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
 import com.android.build.gradle.integration.common.category.DeviceTests;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
@@ -24,16 +24,17 @@ import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp;
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import java.io.File;
-import java.io.IOException;
+import com.android.testutils.apk.Apk;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
-/**
- * Test AndroidTest with NDK.
- */
+/** Test AndroidTest with NDK. */
+@Ignore(
+        "NDK Compile is being deprecated and external native build "
+                + "doesn't support assembleAndroidTest")
 public class NdkConnectedCheckTest {
 
     private static AndroidTestApp app = new HelloWorldJniApp();
@@ -83,7 +84,7 @@ public class NdkConnectedCheckTest {
 
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         TestFileUtils.appendToFile(project.getBuildFile(),
                 "apply plugin: 'com.android.application'\n"
                         + "\n"
@@ -100,14 +101,14 @@ public class NdkConnectedCheckTest {
     }
 
     @Test
-    public void checkTestLibIsPackaged() throws IOException {
-        File apk = project.getTestApk("debug");
-        assertThatZip(apk).contains("lib/x86/libhello-jni_test.so");
+    public void checkTestLibIsPackaged() throws Exception {
+        Apk apk = project.getTestApk();
+        assertThat(apk).contains("lib/x86/libhello-jni_test.so");
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

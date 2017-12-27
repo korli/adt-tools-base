@@ -16,6 +16,9 @@
 
 package com.android.build.gradle.integration.component;
 
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatNativeLib;
+
 import com.android.build.gradle.integration.common.fixture.GradleBuildResult;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
@@ -25,17 +28,13 @@ import com.android.build.gradle.integration.common.fixture.app.MultiModuleTestPr
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.build.gradle.integration.common.utils.ZipHelper;
+import com.android.testutils.apk.Apk;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableMap;
 import java.io.File;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.Rule;
 import org.junit.Test;
-
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAar;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatNativeLib;
 
 /**
  * Integration test library plugin with JNI sources.
@@ -109,26 +108,19 @@ public class NdkJniLib2Test {
     }
 
     @Test
-    public void checkSoAreIncludedInBothAppAndLibrary() throws IOException, InterruptedException {
+    public void checkSoAreIncludedInBothAppAndLibrary() throws Exception {
         project.execute("clean", ":app:assembleDebug");
 
-        File releaseAar = project.getSubproject("lib").getAar("release");
-        assertThatAar(releaseAar).contains("jni/x86/libhello-jni.so");
+        Apk app = project.getSubproject("app").getApk("debug");
+        assertThat(app).contains("lib/x86/libhello-jni.so");
 
-        File app = project.getSubproject("app").getApk("debug");
-        assertThatAar(app).contains("lib/x86/libhello-jni.so");
-
-        File lib = ZipHelper.extractFile(releaseAar, "jni/x86/libhello-jni.so");
-        assertThatNativeLib(lib).isStripped();
-        lib = ZipHelper.extractFile(app, "lib/x86/libhello-jni.so");
+        File lib = ZipHelper.extractFile(app, "lib/x86/libhello-jni.so");
         assertThatNativeLib(lib).isStripped();
     }
 
-    /**
-     * Ensure prepareDependency task is executed before compilation task.
-     */
+    /** Ensure prepareDependency task is executed before compilation task. */
     @Test
-    public void checkTaskOrder() throws IOException {
+    public void checkTaskOrder() throws Exception {
         File emptyFile = project.getSubproject("app").file("src/main/jni/empty.c");
         FileUtils.createFile(emptyFile, "");
         TestFileUtils.appendToFile(project.getSubproject("app").getBuildFile(),
@@ -142,11 +134,8 @@ public class NdkJniLib2Test {
                 + "}\n");
 
         GradleBuildResult result = project.executor()
-                .withArgument("--dry-run") // Just checking task order.  Don't need to actually run.
                 .run(":app:assembleDebug");
         assertThat(result.getTask(":app:linkEmptyArmeabiDebugSharedLibrary"))
                 .wasExecuted();
-        assertThat(result.getTask(":app:linkEmptyArmeabiDebugSharedLibrary"))
-                .ranAfter(":app:prepareDebugDependencies");
     }
 }

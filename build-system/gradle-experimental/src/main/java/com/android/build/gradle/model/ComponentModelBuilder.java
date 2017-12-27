@@ -27,18 +27,21 @@ import static com.android.build.gradle.model.ModelConstants.TASK_MANAGER;
 
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.internal.ExtraModelInfo;
-import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.VariantManager;
 import com.android.build.gradle.internal.dependency.NativeDependencyResolveResult;
 import com.android.build.gradle.internal.ide.ModelBuilder;
+import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.managed.NdkAbiOptions;
 import com.android.build.gradle.model.internal.AndroidBinaryInternal;
 import com.android.build.gradle.model.internal.AndroidComponentSpecInternal;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.model.AndroidProject;
+import com.android.builder.model.ProjectBuildOutput;
+import com.android.builder.model.level2.GlobalLibraryMap;
 import com.google.common.collect.Multimap;
-
 import org.gradle.api.Project;
 import org.gradle.model.ModelMap;
 import org.gradle.model.internal.core.ModelPath;
@@ -67,7 +70,9 @@ public class ComponentModelBuilder implements ToolingModelBuilder {
 
     @Override
     public boolean canBuild(String modelName) {
-        return modelName.equals(AndroidProject.class.getName());
+        return modelName.equals(AndroidProject.class.getName())
+                || modelName.equals(GlobalLibraryMap.class.getName())
+                || modelName.equals(ProjectBuildOutput.class.getName());
     }
 
     @Override
@@ -126,10 +131,13 @@ public class ComponentModelBuilder implements ToolingModelBuilder {
         Multimap<String, NativeDependencyResolveResult> jniLibsDependencies = registry.realize(
                 new ModelPath(ModelConstants.JNILIBS_DEPENDENCIES),
                 multimapModelType(String.class, NativeDependencyResolveResult.class));
+        GlobalScope globalScope = registry.realize(ModelConstants.GLOBAL_SCOPE, GlobalScope.class);
+        ProjectOptions projectOptions = new ProjectOptions(globalScope.getProject());
 
         int projectType = isApplication ? AndroidProject.PROJECT_TYPE_APP
                 : AndroidProject.PROJECT_TYPE_LIBRARY;
         return new ModelBuilder(
+                globalScope,
                 androidBuilder,
                 variantManager,
                 taskManager,

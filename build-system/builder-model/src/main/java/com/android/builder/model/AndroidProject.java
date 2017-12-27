@@ -18,13 +18,12 @@ package com.android.builder.model;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-
 import java.io.File;
 import java.util.Collection;
 
 /**
- * Entry point for the model of the Android Projects. This models a single module, whether
- * the module is an app project or a library project.
+ * Entry point for the model of the Android Projects. This models a single module, whether the
+ * module is an app project, a library project, a feature project or an instantApp project.
  */
 public interface AndroidProject {
     //  Injectable properties to use with -P
@@ -38,6 +37,9 @@ public interface AndroidProject {
     // Sent by Studio 2.4+. Additional model feature trigger on a case by case basis
     // Value is simply true to enable.
     String PROPERTY_BUILD_MODEL_FEATURE_FULL_DEPENDENCIES = "android.injected.build.model.feature.full.dependencies";
+    // property to disable source download during model sync. This is used for lint.
+    String PROPERTY_BUILD_MODEL_DISABLE_SRC_DOWNLOAD =
+            "android.injected.build.model.disable.src.download";
 
     // Sent by Studio 2.2+
     // This property will enable compatibility checks between Android Studio and the Android
@@ -57,17 +59,29 @@ public interface AndroidProject {
 
     // Sent by Studio 1.5+
 
-    // The "feature level" of the device that is targeted, as returned by
-    // AndroidVersion.getFeatureLevel().
+    // The version api level of the target device.
     String PROPERTY_BUILD_API = "android.injected.build.api";
+    // The version codename of the target device. Null for released versions,
+    String PROPERTY_BUILD_API_CODENAME = "android.injected.build.codename";
+
     String PROPERTY_BUILD_ABI = "android.injected.build.abi";
     String PROPERTY_BUILD_DENSITY = "android.injected.build.density";
 
+    // Has the effect of telling the Gradle plugin to
+    //   1) Generate machine-readable errors
+    //   2) Generate build metadata JSON files
     String PROPERTY_INVOKED_FROM_IDE = "android.injected.invoked.from.ide";
+
+    // deprecated. Kept here so that newew Studio can still inject it for older plugin
+    // but newer plugin don't do anything different based on this property.
+    @SuppressWarnings("unused")
     String PROPERTY_GENERATE_SOURCES_ONLY = "android.injected.generateSourcesOnly";
 
     String PROPERTY_RESTRICT_VARIANT_PROJECT = "android.injected.restrict.variant.project";
     String PROPERTY_RESTRICT_VARIANT_NAME = "android.injected.restrict.variant.name";
+
+    // workaround for JNI AAPT2 not able to build apks in parallel.
+    String PROPERTY_INVOKE_JNI_AAPT2_LINK_SERIALLY = "android.injected.aapt2.serial";
 
     String PROPERTY_SIGNING_STORE_FILE = "android.injected.signing.store.file";
     String PROPERTY_SIGNING_STORE_PASSWORD = "android.injected.signing.store.password";
@@ -116,14 +130,18 @@ public interface AndroidProject {
 
     int MODEL_LEVEL_0_ORIGINAL = 0 ; // studio 1.0, no support for SyncIssue
     int MODEL_LEVEL_1_SYNC_ISSUE = 1; // studio 1.1+, with SyncIssue
-    int MODEL_LEVEL_2_DONT_USE = 2; // Don't use this. Go level 1 to level 3 when ready.
-    int MODEL_LEVEL_LATEST = MODEL_LEVEL_2_DONT_USE;
+    //int MODEL_LEVEL_2_DONT_USE = 2; // Don't use this. Go level 1 to level 3 when ready.
+    int MODEL_LEVEL_3_VARIANT_OUTPUT_POST_BUILD =
+            3; // Model for 3.0 with no variant output in import sync model.
+    int MODEL_LEVEL_4_NEW_DEP_MODEL = 4;
+    int MODEL_LEVEL_LATEST = MODEL_LEVEL_4_NEW_DEP_MODEL;
 
     int PROJECT_TYPE_APP = 0;
     int PROJECT_TYPE_LIBRARY = 1;
     int PROJECT_TYPE_TEST = 2;
-    int PROJECT_TYPE_ATOM = 3;
+    @Deprecated int PROJECT_TYPE_ATOM = 3;
     int PROJECT_TYPE_INSTANTAPP = 4;
+    int PROJECT_TYPE_FEATURE = 5;
 
     /**
      * Returns the model version. This is a string in the format X.Y.Z
@@ -165,7 +183,7 @@ public interface AndroidProject {
     boolean isLibrary();
 
     /**
-     * Returns the type of project: Android application, library, Atom or IAPK.
+     * Returns the type of project: Android application, library, feature, instantApp.
      *
      * @return the type of project.
      * @since 2.3
@@ -335,4 +353,12 @@ public interface AndroidProject {
      * @return the generation value
      */
     int getPluginGeneration();
+
+    /**
+     * Returns true if this is the base feature split.
+     *
+     * @return true if this is the base feature split
+     * @since 2.4
+     */
+    boolean isBaseSplit();
 }

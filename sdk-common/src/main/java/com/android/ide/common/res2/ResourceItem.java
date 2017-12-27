@@ -35,7 +35,6 @@ import static com.android.ide.common.resources.ResourceResolver.ATTR_EXAMPLE;
 import static com.android.ide.common.resources.ResourceResolver.XLIFF_G_TAG;
 import static com.android.ide.common.resources.ResourceResolver.XLIFF_NAMESPACE_PREFIX;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.rendering.api.ArrayResourceValue;
@@ -52,9 +51,11 @@ import com.android.ide.common.resources.configuration.DensityQualifier;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.resources.Density;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.android.utils.XmlUtils;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
-
+import java.nio.file.Paths;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -62,40 +63,59 @@ import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
-import java.nio.file.Paths;
-
 /**
  * A resource.
  *
- * This includes the name, type, source file as a {@link ResourceFile} and an optional {@link Node}
- * in case of a resource coming from a value file.
+ * <p>This includes the name, type, source file as a {@link ResourceFile} and an optional {@link
+ * Node} in case of a resource coming from a value file.
  */
 public class ResourceItem extends DataItem<ResourceFile>
         implements Configurable, Comparable<ResourceItem> {
 
-    @NonNull
-    private final ResourceType mType;
+    @NonNull private final ResourceType mType;
 
-    @Nullable
-    private Node mValue;
+    /**
+     * Namespace of the library this item came from.
+     *
+     * <p>This plays no part in the merging process, because the whole point of merging is that we
+     * merge items from different namespaces. Unfortunately we use {@link ResourceItem} and {@link
+     * ResourceValue} almost interchangeably, so for now this needs to be here.
+     *
+     * <p>TODO: Make {@link ResourceValue} {@link Configurable} and switch the whole repository
+     * system to deal only with {@link ResourceValue} instances.
+     */
+    @Nullable private final String mNamespace;
 
-    @Nullable
-    private String mLibraryName;
+    @Nullable private Node mValue;
 
-    @Nullable
-    protected ResourceValue mResourceValue;
+    @Nullable private String mLibraryName;
+
+    @Nullable protected ResourceValue mResourceValue;
 
     /**
      * Constructs the object with a name, type and optional value.
      *
-     * Note that the object is not fully usable as-is. It must be added to a ResourceFile first.
+     * <p>Note that the object is not fully usable as-is. It must be added to a ResourceFile first.
      *
-     * @param name  the name of the resource
-     * @param type  the type of the resource
+     * @param name the name of the resource
+     * @param namespace the namespace of the resource
+     * @param type the type of the resource
      * @param value an optional Node that represents the resource value.
      */
-    public ResourceItem(@NonNull String name, @NonNull ResourceType type, @Nullable Node value, @Nullable String libraryName) {
+    public ResourceItem(
+            @NonNull String name,
+            @Nullable String namespace,
+            @NonNull ResourceType type,
+            @Nullable Node value,
+            @Nullable String libraryName) {
         super(name);
+
+        // The only exception is the empty "<public />" tag which means that all resources are
+        // private.
+        Preconditions.checkArgument(
+                type == ResourceType.PUBLIC || !name.isEmpty(), "Resource name cannot be empty.");
+
+        mNamespace = namespace;
         mType = type;
         mValue = value;
         mLibraryName = libraryName;
@@ -142,7 +162,19 @@ public class ResourceItem extends DataItem<ResourceFile>
     }
 
     /**
+     * Returns the namespace where the resource was defined. This will be null for application
+     * resources.
+     *
+     * @return the library name or null.
+     */
+    @Nullable
+    public String getNamespace() {
+        return mNamespace;
+    }
+
+    /**
      * Returns the resource item qualifiers.
+     *
      * @return the qualifiers
      */
     @NonNull
@@ -163,6 +195,22 @@ public class ResourceItem extends DataItem<ResourceFile>
         }
 
         return resourceFile.getType();
+    }
+
+    /**
+     * Builds a {@link ResourceUrl} that points to this {@link ResourceItem}.
+     *
+     * <p>For now we pass the "framework" flag like before, but soon we'll start relying only on the
+     * namespace. Framework resources are not handled by the res2 system, so this shouldn't matter,
+     * but let's take it one step at a time.
+     */
+    @NonNull
+    public ResourceUrl getResourceUrl(boolean forceFramework) {
+        if (forceFramework) {
+            return ResourceUrl.create(mType, getName(), true);
+        } else {
+            return ResourceUrl.create(mNamespace, mType, getName());
+        }
     }
 
     /**
@@ -188,7 +236,7 @@ public class ResourceItem extends DataItem<ResourceFile>
      * Returns a key for this resource. They key uniquely identifies this resource by combining
      * resource type, qualifiers, and name.
      *
-     * If the resource has not been added to a {@link ResourceFile}, this will throw an {@link
+     * <p>If the resource has not been added to a {@link ResourceFile}, this will throw an {@link
      * IllegalStateException}.
      *
      * @return the key for this resource.
@@ -228,14 +276,27 @@ public class ResourceItem extends DataItem<ResourceFile>
             //noinspection VariableNotUsedInsideIf
             if (mValue == null) {
                 // Density based resource value?
-                Density density = mType == ResourceType.DRAWABLE || mType == ResourceType.MIPMAP
-                        ? getFolderDensity() : null;
+                Density density =
+                        mType == ResourceType.DRAWABLE || mType == ResourceType.MIPMAP
+                                ? getFolderDensity()
+                                : null;
+
+                ResourceFile source = getSource();
+                assert source != null;
+
                 if (density != null) {
-                    mResourceValue = new DensityBasedResourceValue(mType, getName(),
-                            getSource().getFile().getAbsolutePath(), density, isFrameworks, mLibraryName);
+                    mResourceValue =
+                            new DensityBasedResourceValue(
+                                    getResourceUrl(isFrameworks),
+                                    source.getFile().getAbsolutePath(),
+                                    density,
+                                    mLibraryName);
                 } else {
-                    mResourceValue = new ResourceValue(mType, getName(),
-                            getSource().getFile().getAbsolutePath(), isFrameworks, mLibraryName);
+                    mResourceValue =
+                            new ResourceValue(
+                                    getResourceUrl(isFrameworks),
+                                    source.getFile().getAbsolutePath(),
+                                    mLibraryName);
                 }
             } else {
                 mResourceValue = parseXmlToResourceValue(isFrameworks);
@@ -278,8 +339,7 @@ public class ResourceItem extends DataItem<ResourceFile>
     }
 
     /**
-     * Compares the ResourceItem {@link #getValue()} together and returns true if they are the
-     * same.
+     * Compares the ResourceItem {@link #getValue()} together and returns true if they are the same.
      *
      * @param resource The ResourceItem object to compare to.
      * @return true if equal
@@ -294,11 +354,15 @@ public class ResourceItem extends DataItem<ResourceFile>
 
     @Override
     public String toString() {
-        return "ResourceItem{" +
-                "mName='" + getName() + '\'' +
-                ", mType=" + mType +
-                ", mStatus=" + getStatus() +
-                '}';
+        return "ResourceItem{"
+                + "mName='"
+                + getName()
+                + '\''
+                + ", mType="
+                + mType
+                + ", mStatus="
+                + getStatus()
+                + '}';
     }
 
     @Override
@@ -316,7 +380,6 @@ public class ResourceItem extends DataItem<ResourceFile>
         ResourceItem that = (ResourceItem) o;
 
         return mType == that.mType;
-
     }
 
     @Override
@@ -331,70 +394,77 @@ public class ResourceItem extends DataItem<ResourceFile>
         assert mValue != null;
 
         final NamedNodeMap attributes = mValue.getAttributes();
-        ResourceType type = getType(mValue.getLocalName(), attributes);
-        if (type == null) {
-            return null;
-        }
 
         ResourceValue value;
         String name = getName();
 
-        switch (type) {
+        switch (mType) {
             case STYLE:
                 String parent = getAttributeValue(attributes, ATTR_PARENT);
                 try {
-                    value = parseStyleValue(
-                            new StyleResourceValue(type, name, parent, isFrameworks, mLibraryName));
-                } catch (Throwable t) {
-                    //noinspection UseOfSystemOutOrSystemErr
-                    System.err.println("Problem parsing attribute " + name + " of type " + type
-                            + " for node " + mValue);
+                    value =
+                            parseStyleValue(
+                                    new StyleResourceValue(
+                                            getResourceUrl(isFrameworks), parent, mLibraryName));
+                } catch (Exception ignored) {
                     return null;
                 }
                 break;
             case DECLARE_STYLEABLE:
-                value = parseDeclareStyleable(new DeclareStyleableResourceValue(type, name,
-                        isFrameworks, mLibraryName));
+                value =
+                        parseDeclareStyleable(
+                                new DeclareStyleableResourceValue(
+                                        getResourceUrl(isFrameworks), null, mLibraryName));
                 break;
             case ARRAY:
-                value = parseArrayValue(new ArrayResourceValue(name, isFrameworks, mLibraryName) {
-                    @Override
-                    protected int getDefaultIndex() {
-                        // Allow the user to specify a specific element to use via tools:index
-                        String toolsDefaultIndex = getAttributeValueNS(attributes, TOOLS_URI, ATTR_INDEX);
-                        if (toolsDefaultIndex != null) {
-                            try {
-                                return Integer.parseInt(toolsDefaultIndex);
-                            }
-                            catch (NumberFormatException e) {
+                ArrayResourceValue arrayValue =
+                        new ArrayResourceValue(getResourceUrl(isFrameworks), mLibraryName) {
+                            @Override
+                            protected int getDefaultIndex() {
+                                // Allow the user to specify a specific element to use via tools:index
+                                String toolsDefaultIndex =
+                                        getAttributeValueNS(attributes, TOOLS_URI, ATTR_INDEX);
+                                if (toolsDefaultIndex != null) {
+                                    try {
+                                        return Integer.parseInt(toolsDefaultIndex);
+                                    } catch (NumberFormatException e) {
+                                        return super.getDefaultIndex();
+                                    }
+                                }
                                 return super.getDefaultIndex();
                             }
-                        }
-                        return super.getDefaultIndex();
-                    }
-                });
+                        };
+                value = parseArrayValue(arrayValue);
                 break;
             case PLURALS:
-                value = parsePluralsValue(new PluralsResourceValue(name, isFrameworks, mLibraryName) {
-                    @Override
-                    public String getValue() {
-                        // Allow the user to specify tools:quantity.
-                        String quantity = getAttributeValueNS(attributes, TOOLS_URI, ATTR_QUANTITY);
-                        if (quantity != null) {
-                            String value = getValue(quantity);
-                            if (value != null) {
-                                return value;
+                PluralsResourceValue pluralsResourceValue =
+                        new PluralsResourceValue(getResourceUrl(isFrameworks), null, mLibraryName) {
+                            @Override
+                            public String getValue() {
+                                // Allow the user to specify tools:quantity.
+                                String quantity =
+                                        getAttributeValueNS(attributes, TOOLS_URI, ATTR_QUANTITY);
+                                if (quantity != null) {
+                                    String value = getValue(quantity);
+                                    if (value != null) {
+                                        return value;
+                                    }
+                                }
+                                return super.getValue();
                             }
-                        }
-                        return super.getValue();
-                    }
-                });
+                        };
+                value = parsePluralsValue(pluralsResourceValue);
                 break;
             case ATTR:
-                value = parseAttrValue(new AttrResourceValue(type, name, isFrameworks, mLibraryName));
+                value =
+                        parseAttrValue(
+                                new AttrResourceValue(getResourceUrl(isFrameworks), mLibraryName));
                 break;
             case STRING:
-                value = parseTextValue(new TextResourceValue(type, name, isFrameworks, mLibraryName));
+                value =
+                        parseTextValue(
+                                new TextResourceValue(
+                                        getResourceUrl(isFrameworks), null, null, mLibraryName));
                 break;
             case ANIMATOR:
             case DRAWABLE:
@@ -403,29 +473,19 @@ public class ResourceItem extends DataItem<ResourceFile>
             case MENU:
             case MIPMAP:
             case TRANSITION:
-                value = parseFileName(new ResourceValue(type, name, isFrameworks, mLibraryName));
+                value =
+                        parseFileName(
+                                new ResourceValue(getResourceUrl(isFrameworks), mLibraryName));
                 break;
             default:
-                value = parseValue(new ResourceValue(type, name, isFrameworks, mLibraryName));
+                value =
+                        parseValue(
+                                new ResourceValue(
+                                        getResourceUrl(isFrameworks), null, mLibraryName));
                 break;
         }
 
         return value;
-    }
-
-    @Nullable
-    private ResourceType getType(String qName, NamedNodeMap attributes) {
-        String typeValue;
-
-        // if the node is <item>, we get the type from the attribute "type"
-        if (SdkConstants.TAG_ITEM.equals(qName)) {
-            typeValue = getAttributeValue(attributes, ATTR_TYPE);
-        } else {
-            // the type is the name of the node.
-            typeValue = qName;
-        }
-
-        return ResourceType.getEnum(typeValue);
     }
 
     @Nullable
@@ -439,8 +499,9 @@ public class ResourceItem extends DataItem<ResourceFile>
     }
 
     @Nullable
-    private static String getAttributeValueNS(NamedNodeMap attributes, String namespaceURI, String attributeName) {
-        Attr attribute = (Attr)attributes.getNamedItemNS(namespaceURI, attributeName);
+    private static String getAttributeValueNS(
+            NamedNodeMap attributes, String namespaceURI, String attributeName) {
+        Attr attribute = (Attr) attributes.getNamedItemNS(namespaceURI, attributeName);
         if (attribute != null) {
             return attribute.getValue();
         }
@@ -466,10 +527,16 @@ public class ResourceItem extends DataItem<ResourceFile>
                         isFrameworkAttr = true;
                     }
 
-                    ItemResourceValue resValue = new ItemResourceValue(name, isFrameworkAttr,
-                            styleValue.isFramework(), styleValue.getLibraryName());
-                    String text = getTextNode(child.getChildNodes());
-                    resValue.setValue(ValueXmlHelper.unescapeResourceString(text, false, true));
+                    String value =
+                            ValueXmlHelper.unescapeResourceString(
+                                    getTextNode(child.getChildNodes()), false, true);
+                    ItemResourceValue resValue =
+                            new ItemResourceValue(
+                                    name,
+                                    isFrameworkAttr,
+                                    value,
+                                    styleValue.isFramework(),
+                                    styleValue.getLibraryName());
                     styleValue.addItem(resValue);
                 }
             }
@@ -484,8 +551,8 @@ public class ResourceItem extends DataItem<ResourceFile>
     }
 
     @NonNull
-    private static AttrResourceValue parseAttrValue(@NonNull Node valueNode,
-            @NonNull AttrResourceValue attrValue) {
+    private static AttrResourceValue parseAttrValue(
+            @NonNull Node valueNode, @NonNull AttrResourceValue attrValue) {
         NodeList children = valueNode.getChildNodes();
         for (int i = 0, n = children.getLength(); i < n; i++) {
             Node child = children.item(i);
@@ -563,8 +630,13 @@ public class ResourceItem extends DataItem<ResourceFile>
                         isFrameworkAttr = true;
                     }
 
-                    AttrResourceValue attr = parseAttrValue(child,
-                            new AttrResourceValue(ResourceType.ATTR, name, isFrameworkAttr, mLibraryName));
+                    AttrResourceValue attr =
+                            parseAttrValue(
+                                    child,
+                                    new AttrResourceValue(
+                                            ResourceUrl.create(
+                                                    ResourceType.ATTR, name, isFrameworkAttr),
+                                            mLibraryName));
                     declareStyleable.addValue(attr);
                 }
             }
@@ -584,9 +656,9 @@ public class ResourceItem extends DataItem<ResourceFile>
     @NonNull
     private ResourceValue parseFileName(@NonNull ResourceValue value) {
         String text = getTextNode(mValue.getChildNodes()).trim();
-        if (!text.isEmpty() &&
-                !text.startsWith(PREFIX_RESOURCE_REF) &&
-                !text.startsWith(PREFIX_THEME_REF)) {
+        if (!text.isEmpty()
+                && !text.startsWith(PREFIX_RESOURCE_REF)
+                && !text.startsWith(PREFIX_THEME_REF)) {
             text = Paths.get(text).toString();
         }
 
@@ -604,32 +676,33 @@ public class ResourceItem extends DataItem<ResourceFile>
             short nodeType = child.getNodeType();
 
             switch (nodeType) {
-                case Node.ELEMENT_NODE: {
-                    Element element = (Element) child;
-                    if (XLIFF_G_TAG.equals(element.getLocalName()) &&
-                            element.getNamespaceURI() != null &&
-                            element.getNamespaceURI().startsWith( XLIFF_NAMESPACE_PREFIX)) {
-                        if (element.hasAttribute(ATTR_EXAMPLE)) {
-                            // <xliff:g id="number" example="7">%d</xliff:g> minutes
-                            // => "(7) minutes"
-                            String example = element.getAttribute(ATTR_EXAMPLE);
-                            sb.append('(').append(example).append(')');
-                            continue;
-                        } else if (element.hasAttribute(ATTR_ID)) {
-                            // Step <xliff:g id="step_number">%1$d</xliff:g>
-                            // => Step ${step_number}
-                            String id = element.getAttribute(ATTR_ID);
-                            sb.append('$').append('{').append(id).append('}');
-                            continue;
+                case Node.ELEMENT_NODE:
+                    {
+                        Element element = (Element) child;
+                        if (XLIFF_G_TAG.equals(element.getLocalName())
+                                && element.getNamespaceURI() != null
+                                && element.getNamespaceURI().startsWith(XLIFF_NAMESPACE_PREFIX)) {
+                            if (element.hasAttribute(ATTR_EXAMPLE)) {
+                                // <xliff:g id="number" example="7">%d</xliff:g> minutes
+                                // => "(7) minutes"
+                                String example = element.getAttribute(ATTR_EXAMPLE);
+                                sb.append('(').append(example).append(')');
+                                continue;
+                            } else if (element.hasAttribute(ATTR_ID)) {
+                                // Step <xliff:g id="step_number">%1$d</xliff:g>
+                                // => Step ${step_number}
+                                String id = element.getAttribute(ATTR_ID);
+                                sb.append('$').append('{').append(id).append('}');
+                                continue;
+                            }
                         }
-                    }
 
-                    NodeList childNodes = child.getChildNodes();
-                    if (childNodes.getLength() > 0) {
-                        sb.append(getTextNode(childNodes));
+                        NodeList childNodes = child.getChildNodes();
+                        if (childNodes.getLength() > 0) {
+                            sb.append(getTextNode(childNodes));
+                        }
+                        break;
                     }
-                    break;
-                }
                 case Node.TEXT_NODE:
                     sb.append(child.getNodeValue());
                     break;
@@ -649,16 +722,18 @@ public class ResourceItem extends DataItem<ResourceFile>
         value.setValue(ValueXmlHelper.unescapeResourceString(text, false, true));
 
         int length = children.getLength();
-        if (length > 1) {
-            boolean haveElementChildren = false;
+
+        if (length >= 1) {
+            boolean haveElementChildrenOrCdata = false;
             for (int i = 0; i < length; i++) {
-                if (children.item(i).getNodeType() == Node.ELEMENT_NODE) {
-                    haveElementChildren = true;
+                if (children.item(i).getNodeType() == Node.ELEMENT_NODE
+                        || children.item(i).getNodeType() == Node.CDATA_SECTION_NODE) {
+                    haveElementChildrenOrCdata = true;
                     break;
                 }
             }
 
-            if (haveElementChildren) {
+            if (haveElementChildrenOrCdata) {
                 String markupText = getMarkupText(children);
                 value.setRawXmlValue(markupText);
             }
@@ -677,43 +752,46 @@ public class ResourceItem extends DataItem<ResourceFile>
             short nodeType = child.getNodeType();
 
             switch (nodeType) {
-                case Node.ELEMENT_NODE: {
-                    Element element = (Element) child;
-                    String tagName = element.getTagName();
-                    sb.append('<');
-                    sb.append(tagName);
+                case Node.ELEMENT_NODE:
+                    {
+                        Element element = (Element) child;
+                        String tagName = element.getTagName();
+                        sb.append('<');
+                        sb.append(tagName);
 
-                    NamedNodeMap attributes = element.getAttributes();
-                    int attributeCount = attributes.getLength();
-                    if (attributeCount > 0) {
-                        for (int j = 0; j < attributeCount; j++) {
-                            Node attribute = attributes.item(j);
-                            sb.append(' ');
-                            sb.append(attribute.getNodeName());
-                            sb.append('=').append('"');
-                            XmlUtils.appendXmlAttributeValue(sb, attribute.getNodeValue());
-                            sb.append('"');
+                        NamedNodeMap attributes = element.getAttributes();
+                        int attributeCount = attributes.getLength();
+                        if (attributeCount > 0) {
+                            for (int j = 0; j < attributeCount; j++) {
+                                Node attribute = attributes.item(j);
+                                sb.append(' ');
+                                sb.append(attribute.getNodeName());
+                                sb.append('=').append('"');
+                                XmlUtils.appendXmlAttributeValue(sb, attribute.getNodeValue());
+                                sb.append('"');
+                            }
                         }
+                        sb.append('>');
+
+                        NodeList childNodes = child.getChildNodes();
+                        if (childNodes.getLength() > 0) {
+                            sb.append(getMarkupText(childNodes));
+                        }
+
+                        sb.append('<');
+                        sb.append('/');
+                        sb.append(tagName);
+                        sb.append('>');
+
+                        break;
                     }
-                    sb.append('>');
-
-                    NodeList childNodes = child.getChildNodes();
-                    if (childNodes.getLength() > 0) {
-                        sb.append(getMarkupText(childNodes));
-                    }
-
-                    sb.append('<');
-                    sb.append('/');
-                    sb.append(tagName);
-                    sb.append('>');
-
-                    break;
-                }
                 case Node.TEXT_NODE:
                     sb.append(child.getNodeValue());
                     break;
                 case Node.CDATA_SECTION_NODE:
+                    sb.append("<![CDATA[");
                     sb.append(child.getNodeValue());
+                    sb.append("]]>");
                     break;
             }
         }

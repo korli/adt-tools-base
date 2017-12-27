@@ -23,16 +23,12 @@ import static org.mockito.Mockito.when;
 
 import com.android.xml.AndroidManifest;
 import com.google.common.collect.ImmutableList;
-
+import java.io.IOException;
+import javax.xml.parsers.ParserConfigurationException;
 import junit.framework.TestCase;
-
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import org.xml.sax.SAXException;
-
-import java.io.IOException;
-
-import javax.xml.parsers.ParserConfigurationException;
 
 /**
  * Tests for the {@link com.android.manifmerger.ManifestModel} class.
@@ -206,5 +202,53 @@ public class ManifestModelTest extends TestCase {
         assertEquals("mdpi", screenDefinitions.get(1).getKey());
         assertEquals("normal", screenDefinitions.get(2).getKey());
         assertEquals("normal+mdpi", screenDefinitions.get(3).getKey());
+    }
+
+    public void testProtectionLevelValues()
+            throws ParserConfigurationException, SAXException, IOException {
+        for (String protectionLevel :
+                ImmutableList.of(
+                        "normal",
+                        "dangerous",
+                        "signature",
+                        "signatureOrSystem",
+                        "privileged",
+                        "system",
+                        "development",
+                        "appop",
+                        "pre23",
+                        "installer",
+                        "verifier",
+                        "preinstalled",
+                        "setup",
+                        "ephemeral")) {
+            String input = getPermissionWithProtectionLevel(protectionLevel);
+            XmlDocument xmlDocument =
+                    TestUtils.xmlDocumentFromString(
+                            TestUtils.sourceFile(getClass(), "testNoUseFeaturesDeclaration"),
+                            input);
+
+            XmlElement xmlElement = xmlDocument.getRootNode().getMergeableElements().get(0);
+            assertEquals(
+                    protectionLevel,
+                    xmlElement
+                            .getAttribute(XmlNode.fromXmlName("android:protectionLevel"))
+                            .get()
+                            .getValue());
+        }
+    }
+
+    private String getPermissionWithProtectionLevel(String protectionLevel) {
+        return ""
+                + "<manifest\n"
+                + "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    xmlns:tools=\"http://schemas.android.com/tools\"\n"
+                + "    package=\"com.example.lib3\">\n"
+                + "\n"
+                + "    <permission android:protectionLevel=\""
+                + protectionLevel
+                + "\"/>\n"
+                + "\n"
+                + "</manifest>";
     }
 }

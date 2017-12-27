@@ -141,7 +141,7 @@ public final class Issue implements Comparable<Issue> {
      */
     @NonNull
     public String getBriefDescription(@NonNull TextFormat format) {
-        return RAW.convertTo(briefDescription, format);
+        return RAW.convertTo(briefDescription.trim(), format);
     }
 
     /**
@@ -155,7 +155,7 @@ public final class Issue implements Comparable<Issue> {
      */
     @NonNull
     public String getExplanation(@NonNull TextFormat format) {
-        return RAW.convertTo(explanation, format);
+        return RAW.convertTo(explanation.trim(), format);
     }
 
     /**
@@ -302,5 +302,24 @@ public final class Issue implements Comparable<Issue> {
     @Override
     public String toString() {
         return id;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        Issue issue = (Issue) o;
+
+        return id.equals(issue.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return id.hashCode();
     }
 }

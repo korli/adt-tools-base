@@ -22,17 +22,17 @@ import com.android.tools.bazel.parser.ast.Build;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
-import com.intellij.openapi.util.io.FileUtil;
-import org.jetbrains.annotations.NotNull;
-
+import com.intellij.openapi.diagnostic.Logger;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import org.jetbrains.annotations.NotNull;
 
 public class Package {
+    private static final Logger LOG = Logger.getInstance(BuildParser.class);
 
     private final String name;
     private final Workspace workspace;
@@ -46,7 +46,7 @@ public class Package {
 
     public Build getBuildFile() throws IOException {
         if (buildFile == null) {
-            File file = new File(getPackageDir(), "BUILD");
+            File file = buildFile(getPackageDir());
             Tokenizer tokenizer = new Tokenizer(file);
             BuildParser parser = new BuildParser(tokenizer);
             buildFile = parser.parse();
@@ -55,7 +55,13 @@ public class Package {
         return buildFile;
     }
 
-    public void generate(PrintWriter progress) throws IOException {
+    @NotNull
+    private File buildFile(@NotNull File dir) {
+        File buildDotBazelFile = new File(dir, "BUILD.bazel");
+        return buildDotBazelFile.isFile() ? buildDotBazelFile : new File(dir, "BUILD");
+    }
+
+    public void generate(Workspace.GenerationListener listener) throws IOException {
         if (workspace == null) return;
 
         boolean hasRules = false;
@@ -68,7 +74,7 @@ public class Package {
         if (!hasRules) return;
 
         File dir = getPackageDir();
-        File build = new File(dir, "BUILD");
+        File build = buildFile(dir);
         for (BazelRule rule : rules.values()) {
             if (!rule.isEmpty() && rule.isExport() && rule.shouldUpdate()) {
                 rule.update();
@@ -84,9 +90,9 @@ public class Package {
             String before = Files.toString(build, StandardCharsets.UTF_8);
             String after = Files.toString(tmp, StandardCharsets.UTF_8);
             if (!before.equals(after)) {
-                progress.append("Updated " + name + "/BUILD\n");
-                System.err.println("Build file changed: " + name);
-                System.err.println("idea diff " + build.getAbsolutePath() + " " + tmp.getAbsolutePath());
+                listener.packageUpdated(name);
+                LOG.info("Build file changed: " + name);
+                LOG.info("idea diff " + build.getAbsolutePath() + " " + tmp.getAbsolutePath());
                 Files.copy(tmp, build);
             }
         }

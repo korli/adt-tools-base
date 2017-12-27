@@ -1,7 +1,9 @@
 <?xml version="1.0"?>
+<#import "root://activities/common/kotlin_macros.ftl" as kt>
 <recipe>
-    <dependency mavenUrl="com.android.support:support-v4:21.0.2"/>
-    <dependency mavenUrl="com.android.support:support-v13:21.0.2"/>
+    <@kt.addAllKotlinDependencies />
+    <dependency mavenUrl="com.android.support:support-v4:+"/>
+    <dependency mavenUrl="com.android.support:support-v13:+"/>
     <merge from="root/AndroidManifest.xml.ftl"
              to="${escapeXmlAttribute(manifestOut)}/AndroidManifest.xml" />
 

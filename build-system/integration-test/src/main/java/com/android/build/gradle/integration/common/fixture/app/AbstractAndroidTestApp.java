@@ -22,7 +22,6 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.io.Files;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -72,6 +71,15 @@ public abstract class AbstractAndroidTestApp implements AndroidTestApp {
     public boolean removeFile(TestSourceFile file) {
         return sourceFiles.remove(file.getName(), file);
     }
+
+    @Override
+    public void replaceFile(TestSourceFile file) {
+        if (!removeFile(getFile(file.getName(), file.getParent()))) {
+            throw new IllegalArgumentException("No file to replace");
+        }
+        addFile(file);
+    }
+
 
     @Override
     public Collection<TestSourceFile> getAllSourceFiles() {

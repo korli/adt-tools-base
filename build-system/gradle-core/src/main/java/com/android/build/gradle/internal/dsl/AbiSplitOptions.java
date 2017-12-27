@@ -19,17 +19,17 @@ package com.android.build.gradle.internal.dsl;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.OutputFile;
-import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.core.Abi;
+import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
-
 import java.util.Set;
 
 /**
  * DSL object for configuring per-abi splits options.
  *
- * <p>See <a href="https://developer.android.com/studio/build/configure-apk-splits.html">APK Splits</a>.
+ * <p>See <a href="https://developer.android.com/studio/build/configure-apk-splits.html">FULL_APK
+ * Splits</a>.
  */
 public class AbiSplitOptions extends SplitOptions {
 
@@ -53,9 +53,7 @@ public class AbiSplitOptions extends SplitOptions {
         return builder.build();
     }
 
-    /**
-     * Whether to create an APK with all available ABIs.
-     */
+    /** Whether to create an FULL_APK with all available ABIs. */
     public boolean isUniversalApk() {
         return universalApk;
     }

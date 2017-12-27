@@ -21,8 +21,8 @@ import static com.android.build.gradle.integration.common.utils.AndroidVersionMa
 import com.android.build.gradle.integration.common.category.DeviceTests;
 import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
+import com.android.build.gradle.options.StringOption;
 import com.android.ddmlib.IDevice;
-import com.google.common.collect.ImmutableList;
 import org.junit.ClassRule;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -41,16 +41,17 @@ public class InstantUnitTest {
             .create();
 
     @Test
-    public void checkInstantUnitTestsBuild() {
+    public void checkInstantUnitTestsBuild() throws Exception {
         sProject.execute("clean", "assembleDebugAndroidTest");
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void runTestsOnDevice() {
+    public void runTestsOnDevice() throws Exception {
         sProject.execute("clean");
         IDevice device = adb.getDevice(thatUsesArt());
-        sProject.executeConnectedCheck(
-                ImmutableList.of(Adb.getInjectToDeviceProviderProperty(device)));
+        sProject.executor()
+                .with(StringOption.DEVICE_POOL_SERIAL, device.getSerialNumber())
+                .executeConnectedCheck();
     }
 }

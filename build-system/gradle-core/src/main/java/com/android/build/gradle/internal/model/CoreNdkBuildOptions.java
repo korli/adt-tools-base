@@ -18,10 +18,8 @@ package com.android.build.gradle.internal.model;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-
-import org.gradle.model.Managed;
-
 import java.io.File;
+import org.gradle.model.Managed;
 
 /**
  * Options for managing ndk-build external native builds.
@@ -31,4 +29,9 @@ public interface CoreNdkBuildOptions {
     @Nullable
     File getPath();
     void setPath(@NonNull File path);
+
+    @Nullable
+    File getBuildStagingDirectory();
+
+    void setBuildStagingDirectory(@NonNull File buildStagingDirectory);
 }

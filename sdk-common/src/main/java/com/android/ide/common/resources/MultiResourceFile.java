@@ -21,17 +21,19 @@ import com.android.ide.common.resources.ValueResourceParser.IValueResourceReposi
 import com.android.io.IAbstractFile;
 import com.android.io.StreamException;
 import com.android.resources.ResourceType;
+
 import com.android.utils.XmlUtils;
 import org.xml.sax.SAXException;
 
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
+
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
 
 /**
  * Represents a resource file able to declare multiple resources, which could be of
@@ -200,12 +202,6 @@ public final class MultiResourceFile extends ResourceFile implements IValueResou
 
         // empty list or no match found? add the given resource
         list.put(value.getName(), value);
-    }
-
-    @Override
-    public boolean hasResourceValue(ResourceType type, String name) {
-        ResourceValueMap map = mResourceItems.get(type);
-        return map != null && map.containsKey(name);
     }
 
     @Override

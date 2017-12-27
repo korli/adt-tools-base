@@ -1,11 +1,15 @@
 <?xml version="1.0"?>
+<#import "root://activities/common/kotlin_macros.ftl" as kt>
 <recipe>
+    <@kt.addAllKotlinDependencies />
     <dependency mavenUrl="com.android.support:support-v4:${buildApi}.+" />
     <dependency mavenUrl="com.android.support:recyclerview-v7:${buildApi}.+" />
 
     <#if hasAppBar>
       <dependency mavenUrl="com.android.support:design:${buildApi}.+"/>
     </#if>
+
+    <#include "../common/recipe_theme.xml.ftl" />
 
     <merge from="root/AndroidManifest.xml.ftl"
              to="${escapeXmlAttribute(manifestOut)}/AndroidManifest.xml" />
@@ -16,6 +20,15 @@
     </#if>
     <merge from="root/res/values/strings.xml.ftl"
              to="${escapeXmlAttribute(resOut)}/values/strings.xml" />
+
+    <#if isInstantApp!false>
+      <merge from="root/res/values/strings_iapp.xml.ftl"
+               to="${escapeXmlAttribute(baseFeatureResOut)}/values/strings.xml" />
+    <#else>
+      <merge from="root/res/values/strings_iapp.xml.ftl"
+               to="${escapeXmlAttribute(resOut)}/values/strings.xml" />
+    </#if>
+
     <merge from="root/res/values/dimens.xml.ftl"
              to="${escapeXmlAttribute(resOut)}/values/dimens.xml" />
     <#if hasAppBar>
@@ -42,14 +55,16 @@
                      to="${escapeXmlAttribute(resOut)}/layout/activity_${item_list_layout}.xml" />
     </#if>
 
-    <instantiate from="root/src/app_package/ContentDetailActivity.java.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${DetailName}Activity.java" />
-    <instantiate from="root/src/app_package/ContentDetailFragment.java.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${DetailName}Fragment.java" />
-    <instantiate from="root/src/app_package/ContentListActivity.java.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${CollectionName}Activity.java" />
+    <#assign ext=generateKotlin?string('kt', 'java')>
+
+    <instantiate from="root/src/app_package/ContentDetailActivity.${ext}.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${DetailName}Activity.${ext}" />
+    <instantiate from="root/src/app_package/ContentDetailFragment.${ext}.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${DetailName}Fragment.${ext}" />
+    <instantiate from="root/src/app_package/ContentListActivity.${ext}.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${CollectionName}Activity.${ext}" />
     <#include "../common/recipe_dummy_content.xml.ftl" />
 
-    <open file="${escapeXmlAttribute(srcOut)}/${DetailName}Fragment.java" />
+    <open file="${escapeXmlAttribute(srcOut)}/${DetailName}Fragment.${ext}" />
     <open file="${escapeXmlAttribute(resOut)}/layout/fragment_${detail_name}.xml" />
 </recipe>

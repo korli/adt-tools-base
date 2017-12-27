@@ -21,11 +21,11 @@ import static com.android.build.gradle.integration.common.truth.TruthHelper.asse
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import org.junit.Rule;
@@ -52,20 +52,17 @@ public class InstantRunDependencyChange {
                 project.model().getSingle().getOnlyModel());
 
         project.executor()
-                .withInstantRun(23, ColdswapMode.AUTO, OptionalCompilationStep.FULL_APK)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
 
         // add a dependency on the project build.
-        Files.append("dependencies {\n"
-                        + "    compile 'com.google.guava:guava:17.0'\n"
-                        + "}",
+        Files.append(
+                "dependencies { compile 'com.google.guava:guava:18.0' }",
                 project.file("build.gradle"),
                 Charsets.UTF_8);
 
         // now perform an incremental build.
-        project.executor()
-                .withInstantRun(23, ColdswapMode.AUTO)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         // check that adding a new dependency triggered a coldswap build.
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
@@ -83,15 +80,17 @@ public class InstantRunDependencyChange {
                 Files.asCharSource(project.file("build.gradle"), Charsets.UTF_8).read();
 
         // add the dependency and do a clean build.
-        Files.write(originalBuildFile + "dependencies {\n"
-                        + "    compile 'com.google.guava:guava:17.0'\n"
+        Files.write(
+                originalBuildFile
+                        + "dependencies {\n"
+                        + "    compile 'com.google.guava:guava:19.0'\n"
                         + "}",
                 project.file("build.gradle"),
                 Charsets.UTF_8);
 
         project.execute("clean");
         project.executor()
-                .withInstantRun(23, ColdswapMode.AUTO, OptionalCompilationStep.FULL_APK)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
 
         // change the dependency version on the project build.
@@ -102,9 +101,7 @@ public class InstantRunDependencyChange {
                 Charsets.UTF_8);
 
         // now perform an incremental build.
-        project.executor()
-                .withInstantRun(23, ColdswapMode.AUTO)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         // check that changing a dependency triggered a coldswap build.
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);

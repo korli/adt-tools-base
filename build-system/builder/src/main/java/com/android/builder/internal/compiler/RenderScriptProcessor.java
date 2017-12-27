@@ -23,7 +23,6 @@ import static com.android.SdkConstants.FN_RENDERSCRIPT_V8_JAR;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.ide.common.internal.LoggedErrorException;
 import com.android.ide.common.internal.WaitableExecutor;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessExecutor;
@@ -32,11 +31,11 @@ import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.process.ProcessResult;
 import com.android.sdklib.BuildToolInfo;
 import com.android.utils.ILogger;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.Collections;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -85,11 +84,9 @@ public class RenderScriptProcessor {
 
     public static final String RS_DEPS = "rsDeps";
 
-    @NonNull
-    private final List<File> mSourceFolders;
+    @NonNull private final Collection<File> mSourceFolders;
 
-    @NonNull
-    private final List<File> mImportFolders;
+    @NonNull private final Collection<File> mImportFolders;
 
     @NonNull
     private final File mSourceOutputDir;
@@ -124,8 +121,8 @@ public class RenderScriptProcessor {
     private final Map<String, File> mLibClCore = Maps.newHashMap();
 
     public RenderScriptProcessor(
-            @NonNull List<File> sourceFolders,
-            @NonNull List<File> importFolders,
+            @NonNull Collection<File> sourceFolders,
+            @NonNull Collection<File> importFolders,
             @NonNull File sourceOutputDir,
             @NonNull File resOutputDir,
             @NonNull File objOutputDir,
@@ -192,15 +189,17 @@ public class RenderScriptProcessor {
     public void build(
             @NonNull ProcessExecutor processExecutor,
             @NonNull ProcessOutputHandler processOutputHandler)
-            throws InterruptedException, ProcessException, LoggedErrorException, IOException {
+            throws InterruptedException, ProcessException, IOException {
 
-        // gather the files to compile
-        FileGatherer fileGatherer = new FileGatherer();
-        SourceSearcher searcher = new SourceSearcher(mSourceFolders, "rs", "fs");
-        searcher.setUseExecutor(false);
-        searcher.search(fileGatherer);
-
-        List<File> renderscriptFiles = fileGatherer.getFiles();
+        List<File> renderscriptFiles = Lists.newArrayList();
+        for (File dir : mSourceFolders) {
+            DirectoryWalker.builder()
+                    .root(dir.toPath())
+                    .extensions("rs", "fs")
+                    .action((start, path) -> renderscriptFiles.add(path.toFile()))
+                    .build()
+                    .walk();
+        }
 
         if (renderscriptFiles.isEmpty()) {
             return;
@@ -301,7 +300,7 @@ public class RenderScriptProcessor {
             @NonNull final ProcessExecutor processExecutor,
             @NonNull final ProcessOutputHandler processOutputHandler,
             @NonNull final Map<String, String> env)
-            throws IOException, InterruptedException, LoggedErrorException, ProcessException {
+            throws IOException, InterruptedException, ProcessException {
         // get the generated BC files.
         int targetApi = mTargetApi < 11 ? 11 : mTargetApi;
         targetApi = (mSupportMode && targetApi < 18) ? 18 : targetApi;
@@ -325,15 +324,18 @@ public class RenderScriptProcessor {
             @NonNull final ProcessExecutor processExecutor,
             @NonNull final ProcessOutputHandler processOutputHandler,
             @NonNull final Map<String, String> env)
-            throws IOException, InterruptedException, LoggedErrorException, ProcessException {
-        SourceSearcher searcher = new SourceSearcher(
-                Collections.singletonList(rawFolder), EXT_BC);
-        FileGatherer fileGatherer = new FileGatherer();
-        searcher.search(fileGatherer);
+            throws IOException, InterruptedException, ProcessException {
+        WaitableExecutor mExecutor = WaitableExecutor.useGlobalSharedThreadPool();
 
-        WaitableExecutor<Void> mExecutor  = WaitableExecutor.useGlobalSharedThreadPool();
+        Collection<File> files = Lists.newLinkedList();
+        DirectoryWalker.builder()
+                .root(rawFolder.toPath())
+                .extensions(EXT_BC)
+                .action((start, path) -> files.add(path.toFile()))
+                .build()
+                .walk();
 
-        for (final File bcFile : fileGatherer.getFiles()) {
+        for (final File bcFile : files) {
             String name = bcFile.getName();
             final String objName = name.replaceAll("\\.bc", ".o");
             final String soName = "librs." + name.replaceAll("\\.bc", ".so");

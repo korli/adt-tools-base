@@ -25,8 +25,8 @@ import com.android.sdklib.ISystemImage;
 import com.android.sdklib.repository.IdDisplay;
 import com.android.sdklib.repository.meta.DetailsTypes;
 import com.google.common.base.Objects;
-
 import java.io.File;
+import java.util.Comparator;
 
 /**
  * {@link ISystemImage} based on a {@link RepoPackage} (either system image, platform, or addon).
@@ -54,10 +54,15 @@ public class SystemImage implements ISystemImage {
 
     /**
      * Tag to apply to system images that include Google APIs.
-     * Note that {@link #WEAR_TAG} and {@link #TV_TAG} implies the presence of Google APIs in addition
-     * there is one system image that uses {@link #GOOGLE_APIS_X86_TAG}.
+     * Note that {@link #PLAY_STORE_TAG}, {@link #WEAR_TAG}, and {@link #TV_TAG} each imply the presence of Google APIs.
+     * In addition, there is one system image that uses {@link #GOOGLE_APIS_X86_TAG}.
      */
     public static final IdDisplay GOOGLE_APIS_TAG = IdDisplay.create("google_apis", "Google APIs");
+
+    /**
+     * Tag to apply to system images that have Google Play Store.
+     */
+    public static final IdDisplay PLAY_STORE_TAG = IdDisplay.create("google_apis_playstore", "Google Play");
 
     /**
      * A separate tag to apply to system images that include Google APIs on x86 systems.
@@ -162,25 +167,31 @@ public class SystemImage implements ISystemImage {
     }
 
     @Override
-    public int compareTo(ISystemImage o) {
-        int res = getTag().compareTo(o.getTag());
-        if (res != 0) {
-            return res;
+    public boolean hasPlayStore() {
+        if (PLAY_STORE_TAG.equals(getTag())) {
+            return true;
         }
-        res = getAbiType().compareTo(o.getAbiType());
-        if (res != 0) {
-            return res;
+        // A Wear system image has Play Store if it is
+        // a recent API version and is NOT Wear-for-China.
+        if (WEAR_TAG.equals(getTag()) &&
+            mAndroidVersion.getApiLevel() >= AndroidVersion.MIN_RECOMMENDED_WEAR_API &&
+            !getLocation().getAbsolutePath().contains(WEAR_CN_DIRECTORY)) {
+            return true;
         }
-        if (getAddonVendor() == null ^ o.getAddonVendor() != null) {
-            return getAddonVendor() == null ? -1 : 1;
-        }
-        if (getAddonVendor() != null && o.getAddonVendor() != null) {
-            res = getAddonVendor().compareTo(o.getAddonVendor());
-            if (res != 0) {
-                return res;
-            }
-        }
-        res = getLocation().compareTo(o.getLocation());
+        return false;
+    }
+
+    @Override
+    public int compareTo(@NonNull ISystemImage o) {
+        int res =
+                Comparator.comparing(ISystemImage::getTag)
+                        .thenComparing(ISystemImage::getAbiType)
+                        .thenComparing(
+                                ISystemImage::getAddonVendor,
+                                Comparator.nullsFirst(IdDisplay::compareTo))
+                        .thenComparing(ISystemImage::getLocation)
+                        .compare(this, o);
+
         if (res != 0) {
             return res;
         }

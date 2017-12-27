@@ -1,4 +1,5 @@
 apply plugin: 'java'
+apply plugin: 'kotlin'
 apply plugin: 'jacoco-tools-base'
 
 group = 'com.android.tools.lint'
@@ -7,9 +8,10 @@ version = rootProject.ext.baseVersion
 
 dependencies {
     compile project(':base:lint')
+    compile project(':base:layoutlib-api')
     compile project(':base:testutils')
     compile libs.junit
-    compile libs.mockito_all
+    compile libs.mockito_core
 
     testCompile libs.groovy
     testCompile libs.truth

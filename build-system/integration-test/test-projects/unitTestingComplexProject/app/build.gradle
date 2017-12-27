@@ -15,6 +15,7 @@
  */
 
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 apply from: "../../commonLocalRepo.gradle"
 
@@ -31,9 +32,10 @@ android {
 
 dependencies {
     compile project(':lib')
+    compile "org.jetbrains.kotlin:kotlin-stdlib:$rootProject.kotlinVersion"
 
     testCompile 'junit:junit:4.12'
-    testCompile 'org.mockito:mockito-core:1.9.5'
+    testCompile 'org.mockito:mockito-core:2.7.1'
     testCompile 'org.jdeferred:jdeferred-android-aar:1.2.3'
     testCompile 'commons-logging:commons-logging:1.1.1'
 }

@@ -25,7 +25,6 @@ import static com.android.build.gradle.integration.common.utils.TestFileUtils.ap
 import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction.ModelContainer;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.utils.LibraryGraphHelper;
-import com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Items;
 import com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.builder.model.AndroidLibrary;
@@ -38,7 +37,6 @@ import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 import com.google.common.truth.Truth;
-import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
 import org.junit.AfterClass;
@@ -57,7 +55,7 @@ public class AppWithCompileIndirectJarTest {
             .create();
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         Files.write("include 'app', 'library'", project.getSettingsFile(), Charsets.UTF_8);
 
         appendToFile(project.getBuildFile(),
@@ -83,9 +81,12 @@ public class AppWithCompileIndirectJarTest {
     }
 
     @Test
-    public void checkLevel1Model() {
-        Map<String, AndroidProject> models = project.model()
-                .level(AndroidProject.MODEL_LEVEL_1_SYNC_ISSUE).getMulti().getModelMap();
+    public void checkLevel1Model() throws Exception {
+        Map<String, AndroidProject> models =
+                project.model()
+                        .level(AndroidProject.MODEL_LEVEL_3_VARIANT_OUTPUT_POST_BUILD)
+                        .getMulti()
+                        .getModelMap();
 
         Variant appDebug = ModelHelper.getVariant(models.get(":app").getVariants(), "debug");
 
@@ -100,7 +101,8 @@ public class AppWithCompileIndirectJarTest {
         assertThat(deps.getProjects()).named("app module dependency count").isEmpty();
 
         Collection<JavaLibrary> javaLibraries = deps.getJavaLibraries();
-        assertThat(javaLibraries).named("app java dependency count").isEmpty();
+        assertThat(javaLibraries).named("app java dependency count").hasSize(1);
+        //assertThat(javaLibraries).named("app java dependency count").isEmpty();
 
         // ---
 
@@ -120,7 +122,7 @@ public class AppWithCompileIndirectJarTest {
     }
 
     @Test
-    public void checkLevel2Model() {
+    public void checkLevel4Model() throws Exception {
         final ModelContainer<AndroidProject> modelContainer = project.model()
                 .level(AndroidProject.MODEL_LEVEL_LATEST).getMulti();
         LibraryGraphHelper helper = new LibraryGraphHelper(modelContainer);
@@ -130,25 +132,29 @@ public class AppWithCompileIndirectJarTest {
         Variant appDebug = ModelHelper.getVariant(models.get(":app").getVariants(), "debug");
 
         DependencyGraphs compileGraph = appDebug.getMainArtifact().getDependencyGraphs();
+        System.out.println(compileGraph.getCompileDependencies());
 
         // check direct dependencies
         assertThat(helper.on(compileGraph).withType(MODULE).mapTo(Property.GRADLE_PATH))
                 .named("app direct module dependencies")
                 .containsExactly(":library");
 
-        assertThat(helper.on(compileGraph).withType(JAVA).asList())
+        //assertThat(helper.on(compileGraph).withType(JAVA).asList())
+        //        .named("app direct java deps")
+        //        .isEmpty();
+        assertThat(helper.on(compileGraph).withType(JAVA).mapTo(Property.COORDINATES))
                 .named("app direct java deps")
-                .isEmpty();
+                .containsExactly("com.google.guava:guava:18.0@jar");
 
         assertThat(helper.on(compileGraph).withType(ANDROID).asList())
                 .named("app direct android deps")
                 .isEmpty();
 
-        Items libraryItems = helper.on(compileGraph).withType(MODULE).getTransitiveFromSingleItem();
-
-        assertThat(libraryItems.withType(JAVA).mapTo(Property.COORDINATES))
-                .named("sub-module java dependencies")
-                .containsExactly("com.google.guava:guava:18.0@jar");
+        //Items libraryItems = helper.on(compileGraph).withType(MODULE).getTransitiveFromSingleItem();
+        //
+        //assertThat(libraryItems.withType(JAVA).mapTo(Property.COORDINATES))
+        //        .named("sub-module java dependencies")
+        //        .containsExactly("com.google.guava:guava:18.0@jar");
 
         // ---
 

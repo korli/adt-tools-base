@@ -24,7 +24,6 @@ import static com.android.SdkConstants.CONSTRAINT_LAYOUT_LIB_ARTIFACT_ID;
 import static com.android.SdkConstants.CONSTRAINT_LAYOUT_LIB_GROUP_ID;
 import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.ide.common.repository.GradleCoordinate.COMPARE_PLUS_LOWER;
-import static com.android.tools.lint.detector.api.TextFormat.RAW;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
@@ -42,9 +41,9 @@ import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.LayoutDetector;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
-import com.android.tools.lint.detector.api.TextFormat;
 import com.android.tools.lint.detector.api.XmlContext;
 import java.util.Collection;
 import java.util.Collections;
@@ -63,7 +62,7 @@ public class ConstraintLayoutDetector extends LayoutDetector {
             "Missing Constraints in ConstraintLayout",
             "The layout editor allows you to place widgets anywhere on the canvas, and it " +
             "records the current position with designtime attributes (such as " +
-            "`layout_editor_absoluteX`.) These attributes are *not* applied at runtime, so if " +
+            "`layout_editor_absoluteX`.) These attributes are **not** applied at runtime, so if " +
             "you push your layout on a device, the widgets may appear in a different location " +
             "than shown in the editor. To fix this, make sure a widget has both horizontal and " +
             "vertical constraints by dragging from the edge connections.",
@@ -114,11 +113,11 @@ public class ConstraintLayoutDetector extends LayoutDetector {
                             CONSTRAINT_LAYOUT_LIB_ARTIFACT_ID,
                             rc.getVersion());
                     if (COMPARE_PLUS_LOWER.compare(latestAvailable, version) > 0) {
-                        // Keep in sync with #isUpgradeDependencyError below
                         String message = "Using version " + version.getRevision()
                                 + " of the constraint library, which is obsolete";
+                        LintFix fix = fix().data(ConstraintLayoutDetector.class);
                         context.report(GradleDetector.DEPENDENCY, layout,
-                                context.getLocation(layout), message);
+                                context.getLocation(layout), message, fix);
                     }
                 }
             }
@@ -212,7 +211,7 @@ public class ConstraintLayoutDetector extends LayoutDetector {
         if (sdkHandler != null) {
             ProgressIndicator progress = context.getClient().getRepositoryLogger();
             RepoPackage latestPackage = SdkMavenRepository
-                    .findLatestVersion(LATEST_KNOWN_VERSION, sdkHandler, progress);
+                    .findLatestVersion(LATEST_KNOWN_VERSION, sdkHandler, null, progress);
             if (latestPackage != null) {
                 GradleCoordinate fromPackage = SdkMavenRepository
                         .getCoordinateFromSdkPath(latestPackage.getPath());
@@ -223,23 +222,5 @@ public class ConstraintLayoutDetector extends LayoutDetector {
             }
         }
         return latestAvailable;
-    }
-
-    /**
-     * Given an error message produced by this lint detector for the given issue type,
-     * returns whether it represents a suggestion update the library version.
-     * <p>
-     * Intended for IDE quickfix implementations.
-     *
-     * @param errorMessage the error message associated with the error
-     * @param format the format of the error message
-     * @return true if this is a suggestion to update the version
-     */
-    @SuppressWarnings("unused")
-    public static boolean isUpgradeDependencyError(
-            @NonNull String errorMessage,
-            @NonNull TextFormat format) {
-        errorMessage = format.convertTo(errorMessage, RAW);
-        return errorMessage.contains(" of the constraint library, which is obsolete");
     }
 }

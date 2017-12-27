@@ -24,7 +24,6 @@ import static com.android.SdkConstants.VALUE_FALSE;
 import static com.android.SdkConstants.VALUE_TRUE;
 import static com.android.tools.lint.checks.SupportAnnotationDetector.CHECK_RESULT_ANNOTATION;
 import static com.android.tools.lint.checks.SupportAnnotationDetector.PERMISSION_ANNOTATION;
-import static com.android.tools.lint.psi.EcjPsiManager.getTypeName;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -41,7 +40,6 @@ import com.android.tools.lint.client.api.JavaParser.ResolvedMethod;
 import com.android.tools.lint.client.api.JavaParser.ResolvedPackage;
 import com.android.tools.lint.client.api.JavaParser.TypeDescriptor;
 import com.android.tools.lint.client.api.LintClient;
-import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.psi.ExternalPsiAnnotation;
 import com.android.tools.lint.psi.ExternalPsiAnnotationLiteralMemberValue;
@@ -99,12 +97,12 @@ import org.w3c.dom.NodeList;
  * including its parameters.
  */
 public class ExternalAnnotationRepository {
-    public static final String SDK_ANNOTATIONS_PATH = "platform-tools/api/annotations.zip";
+    public static final String SDK_ANNOTATIONS_PATH = "annotations.zip";
     public static final String FN_ANNOTATIONS_XML = "annotations.xml";
 
     private static final boolean DEBUG = false;
 
-    private static ExternalAnnotationRepository sSingleton;
+    private static ExternalAnnotationRepository singleton;
 
     private final List<AnnotationsDatabase> databases;
 
@@ -114,14 +112,14 @@ public class ExternalAnnotationRepository {
 
     @NonNull
     public static synchronized ExternalAnnotationRepository get(@NonNull LintClient client) {
-        if (sSingleton == null) {
+        if (singleton == null) {
             Collection<Project> projects = client.getKnownProjects();
             if (Project.isAospBuildEnvironment()) {
                 for (Project project : projects) {
                     // If we are dealing with the AOSP frameworks project, we explicitly
                     // set the ExternalAnnotationRepository to a no-op.
                     if (Project.isAospFrameworksProject(project.getDir())) {
-                        return sSingleton = new ExternalAnnotationRepository(
+                        return singleton = new ExternalAnnotationRepository(
                                 Collections.emptyList());
                     }
                 }
@@ -142,25 +140,14 @@ public class ExternalAnnotationRepository {
             }
 
             File sdkAnnotations = client.findResource(SDK_ANNOTATIONS_PATH);
-            if (sdkAnnotations == null) {
-                // Until the SDK annotations are bundled in platform tools, provide
-                // a fallback for Gradle builds to point to a locally installed version
-                String path = System.getenv("SDK_ANNOTATIONS");
-                if (path != null) {
-                    sdkAnnotations = new File(path);
-                    if (!sdkAnnotations.exists()) {
-                        sdkAnnotations = null;
-                    }
-                }
-            }
             if (sdkAnnotations != null) {
                 files.add(sdkAnnotations);
             }
 
-            sSingleton = create(client, files);
+            singleton = create(client, files);
         }
 
-        return sSingleton;
+        return singleton;
     }
 
     @VisibleForTesting
@@ -595,7 +582,7 @@ public class ExternalAnnotationRepository {
      * The SDK has an annotations database, and AAR libraries can also supply individual databases.
      * The {@linkplain ExternalAnnotationRepository} class manages all of these and performs lookup
      * into the various databases through a single entrypoint.
-     * */
+     */
     static class AnnotationsDatabase {
         AnnotationsDatabase(@NonNull File file) throws IOException {
             String path = file.getPath();
@@ -878,7 +865,7 @@ public class ExternalAnnotationRepository {
                 String rootTag = root.getTagName();
                 assert rootTag.equals("root") : rootTag;
 
-                for (Element item : LintUtils.getChildren(root)) {
+                for (Element item : XmlUtils.getSubTags(root)) {
                     String signature = item.getAttribute(ATTR_NAME);
                     if (signature == null || signature.equals("null")) {
                         continue; // malformed item
@@ -923,16 +910,12 @@ public class ExternalAnnotationRepository {
 
         @Nullable
         private ClassInfo findClass(@Nullable ReferenceBinding cls) {
-            if (cls == null || cls.compoundName == null) {
-                return null;
-            }
-            return mClassMap.get(getTypeName(cls.compoundName));
+            return null;
         }
 
         @Nullable
         private ClassInfo findPackage(@NonNull PackageBinding pkg) {
-            return pkg.compoundName != null
-                    ? mClassMap.get(getTypeName(pkg.compoundName) + ".package-info") : null;
+            return null;
         }
 
         @Nullable
@@ -1540,6 +1523,6 @@ public class ExternalAnnotationRepository {
     /** For test usage only */
     @VisibleForTesting
     static synchronized void set(ExternalAnnotationRepository singleton) {
-        sSingleton = singleton;
+        ExternalAnnotationRepository.singleton = singleton;
     }
 }

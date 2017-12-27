@@ -20,12 +20,10 @@ import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.TaskFactory;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-
-import org.gradle.api.Action;
-import org.gradle.api.Task;
-
 import java.util.ArrayList;
 import java.util.List;
+import org.gradle.api.Action;
+import org.gradle.api.Task;
 
 /**
  * Handle for a {@link Task} that may not yet been created.
@@ -38,16 +36,10 @@ public class AndroidTask<T extends Task> {
     private String name;
     @NonNull
     private final Class<T> taskType;
-    @NonNull
-    private final List<AndroidTask<? extends Task>> upstreamTasks;
-    @NonNull
-    private final List<AndroidTask<? extends Task>> downstreamTasks;
 
     public AndroidTask(@NonNull String name, @NonNull Class<T> taskType) {
         this.name = name;
         this.taskType = taskType;
-        upstreamTasks = new ArrayList<>();
-        downstreamTasks = new ArrayList<>();
     }
 
     /**
@@ -67,22 +59,6 @@ public class AndroidTask<T extends Task> {
     }
 
     /**
-     * Return all the AndroidTask this depends on.
-     */
-    @NonNull
-    public List<AndroidTask<? extends Task>> getUpstreamTasks() {
-        return upstreamTasks;
-    }
-
-    /**
-     * Return all the AndroidTask that depends on this.
-     */
-    @NonNull
-    public List<AndroidTask<? extends Task>> getDownstreamTasks() {
-        return downstreamTasks;
-    }
-
-    /**
      * Add dependency on another AndroidTask.
      * @param taskFactory TaskFactory used to configure the task for dependencies.
      * @param other The task that this depends on.
@@ -94,8 +70,6 @@ public class AndroidTask<T extends Task> {
                 task.dependsOn(other.name);
             }
         });
-        upstreamTasks.add(other);
-        other.addDependent(this);
     }
 
     /**
@@ -204,10 +178,6 @@ public class AndroidTask<T extends Task> {
                 dependsOn(taskFactory, dependency);
             }
         }
-    }
-
-    private void addDependent(AndroidTask<? extends Task> tAndroidTask) {
-        downstreamTasks.add(tAndroidTask);
     }
 
     /**

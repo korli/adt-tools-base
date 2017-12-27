@@ -32,13 +32,6 @@ import com.android.utils.XmlUtils;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
-
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -47,14 +40,22 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import javax.xml.parsers.ParserConfigurationException;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 /**
- * Parser for "values" files.
+ * This class is deprecated and it's usages will soon move to a new parser in the Symbols package
+ * {@link com.android.builder.symbols.ResourceValuesXmlParser}.
  *
- * This parses the file and returns a list of {@link ResourceItem} object.
+ * <p>Parser for "values" files.
+ *
+ * <p>This parses the file and returns a list of {@link ResourceItem} object.
  */
+@Deprecated
 class ValueResourceParser2 {
 
     @NonNull
@@ -63,14 +64,19 @@ class ValueResourceParser2 {
     @Nullable
     private final String mLibraryName;
 
+    @Nullable private final String mNamespace;
+
     private boolean mTrackSourcePositions = true;
 
     /**
      * Creates the parser for a given file.
+     *
      * @param file the file to parse.
      */
-    ValueResourceParser2(@NonNull File file, @Nullable String libraryName) {
+    ValueResourceParser2(
+            @NonNull File file, @Nullable String namespace, @Nullable String libraryName) {
         mFile = file;
+        mNamespace = namespace;
         mLibraryName = libraryName;
     }
 
@@ -111,7 +117,7 @@ class ValueResourceParser2 {
                 continue;
             }
 
-            ResourceItem resource = getResource(node, mFile, mLibraryName);
+            ResourceItem resource = getResource(node, mFile, mNamespace, mLibraryName);
             if (resource != null) {
                 // check this is not a dup
                 checkDuplicate(resource, map, mFile);
@@ -120,7 +126,7 @@ class ValueResourceParser2 {
 
                 if (resource.getType() == ResourceType.DECLARE_STYLEABLE) {
                     // Need to also create ATTR items for its children
-                    addStyleableItems(node, resources, map, mFile, mLibraryName);
+                    addStyleableItems(node, resources, map, mFile, mNamespace, mLibraryName);
                 }
             }
         }
@@ -130,10 +136,16 @@ class ValueResourceParser2 {
 
     /**
      * Returns a new ResourceItem object for a given node.
+     *
      * @param node the node representing the resource.
      * @return a ResourceItem object or null.
      */
-    static ResourceItem getResource(@NonNull Node node, @Nullable File from, @Nullable String libraryName)
+    @Nullable
+    static ResourceItem getResource(
+            @NonNull Node node,
+            @Nullable File from,
+            @Nullable String namespace,
+            @Nullable String libraryName)
             throws MergingException {
         ResourceType type = getType(node, from);
         String name = getName(node);
@@ -141,11 +153,11 @@ class ValueResourceParser2 {
         if (name != null) {
             if (type != null) {
                 ValueResourceNameValidator.validate(name, type, from);
-                return new ResourceItem(name, type, node, libraryName);
+                return new ResourceItem(name, namespace, type, node, libraryName);
             }
         } else if (type == ResourceType.PUBLIC) {
             // Allow a <public /> node with no name: this means all resources are private
-            return new ResourceItem("", type, node, libraryName);
+            return new ResourceItem("", namespace, type, node, libraryName);
         }
 
         return null;
@@ -225,18 +237,20 @@ class ValueResourceParser2 {
     }
 
     /**
-     * Adds any declare styleable attr items below the given declare styleable nodes
-     * into the given list
+     * Adds any declare styleable attr items below the given declare styleable nodes into the given
+     * list
      *
      * @param styleableNode the declare styleable node
      * @param list the list to add items into
      * @param map map of existing items to detect dups.
      */
-    static void addStyleableItems(@NonNull Node styleableNode,
-                                  @NonNull List<ResourceItem> list,
-                                  @Nullable Map<ResourceType, Set<String>> map,
-                                  @Nullable File from,
-                                  @Nullable String libraryName)
+    static void addStyleableItems(
+            @NonNull Node styleableNode,
+            @NonNull List<ResourceItem> list,
+            @Nullable Map<ResourceType, Set<String>> map,
+            @Nullable File from,
+            @Nullable String namespace,
+            @Nullable String libraryName)
             throws MergingException {
         assert styleableNode.getNodeName().equals(ResourceType.DECLARE_STYLEABLE.getName());
         NodeList nodes = styleableNode.getChildNodes();
@@ -248,7 +262,7 @@ class ValueResourceParser2 {
                 continue;
             }
 
-            ResourceItem resource = getResource(node, from, libraryName);
+            ResourceItem resource = getResource(node, from, namespace, libraryName);
             if (resource != null) {
                 assert resource.getType() == ResourceType.ATTR;
 

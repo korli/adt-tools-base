@@ -17,15 +17,11 @@
 package com.android.build.gradle.tasks;
 
 import com.android.builder.core.VariantConfiguration;
-
+import java.io.IOException;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
-import org.gradle.api.tasks.ParallelizableTask;
 import org.gradle.api.tasks.TaskAction;
-
-import java.io.IOException;
-
 import proguard.ParseException;
 import proguard.gradle.ProGuardTask;
 
@@ -33,7 +29,6 @@ import proguard.gradle.ProGuardTask;
  * Specialization of the {@link ProGuardTask} that can use {@link Configuration} objects to retrieve
  * input files like the tested application classes and the tested application mapping file.
  */
-@ParallelizableTask
 public class TestModuleProGuardTask extends ProGuardTask {
     private Logger logger;
     private Configuration mappingConfiguration;
@@ -70,13 +65,13 @@ public class TestModuleProGuardTask extends ProGuardTask {
     public void proguard() throws ParseException, IOException {
         if (logger.isEnabled(LogLevel.INFO)) {
             logger.info("test module mapping file " + mappingConfiguration.getSingleFile());
-            for (Object file : variantConfiguration.getAllPackagedJars()) {
-                logger.info("test module proguard input " + file);
-
-            }
-            for (Object file : variantConfiguration.getProvidedOnlyJars()) {
-                logger.info("test module proguard library " + file);
-            }
+            //for (Object file : variantConfiguration.getAllPackagedJars()) {
+            //    logger.info("test module proguard input " + file);
+            //
+            //}
+            //for (Object file : variantConfiguration.getProvidedOnlyJars()) {
+            //    logger.info("test module proguard library " + file);
+            //}
         }
 
         if (mappingConfiguration.getSingleFile().isFile()) {

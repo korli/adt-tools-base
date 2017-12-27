@@ -21,6 +21,7 @@ import com.android.annotations.Nullable;
 import com.android.dvlib.DeviceSchema;
 import com.android.resources.ScreenOrientation;
 import com.android.resources.ScreenRound;
+import com.android.sdklib.repository.targets.SystemImage;
 
 import java.awt.Dimension;
 import java.util.ArrayList;
@@ -52,6 +53,9 @@ public final class Device {
     /** Manufacturer of the device */
     @NonNull
     private final String mManufacturer;
+
+    /** True if the device supports Google Play Store */
+    private final boolean mHasPlayStore;
 
     /** A list of software capabilities, one for each API level range */
     @NonNull
@@ -111,6 +115,13 @@ public final class Device {
     @NonNull
     public String getId() {
         return mId;
+    }
+
+    /**
+     * Returns true if this type of emulated {@link Device} supports Google Play Store.
+     */
+    public boolean hasPlayStore() {
+        return mHasPlayStore;
     }
 
     /**
@@ -287,6 +298,7 @@ public final class Device {
         private String mName;
         private String mId;
         private String mManufacturer;
+        private boolean mHasPlayStore;
         private final List<Software> mSoftware = new ArrayList<Software>();
         private final List<State> mState = new ArrayList<State>();
         private Meta mMeta;
@@ -301,6 +313,7 @@ public final class Device {
             mName = d.getDisplayName();
             mId = d.getId();
             mManufacturer = d.getManufacturer();
+            mHasPlayStore = d.hasPlayStore();
             for (Software s : d.getAllSoftware()) {
                 mSoftware.add(s.deepCopy());
             }
@@ -320,6 +333,10 @@ public final class Device {
 
         public void setTagId(@Nullable String tagId) {
             mTagId = tagId;
+            if (SystemImage.WEAR_TAG.getId().equals(mTagId)) {
+                // All Wear devices are compatible with Play Store
+                mHasPlayStore = true;
+            }
         }
 
         public void addBootProp(@NonNull String propName, @NonNull String propValue) {
@@ -328,6 +345,14 @@ public final class Device {
 
         public void setManufacturer(@NonNull String manufacturer) {
             mManufacturer = manufacturer;
+        }
+
+        public void setPlayStore(boolean hasPlayStore) {
+            mHasPlayStore = hasPlayStore;
+            if (SystemImage.WEAR_TAG.getId().equals(mTagId)) {
+                // All Wear devices are compatible with Play Store
+                mHasPlayStore = true;
+            }
         }
 
         public void addSoftware(@NonNull Software sw) {
@@ -385,15 +410,7 @@ public final class Device {
             }
 
             if (mId == null) {
-                if ("android-wear".equals(mTagId)) {
-                    // b.android.com/200772
-                    // When api 21 wear images are removed (hopefully reasonably soon post-api-24),
-                    // this also should be, since it is obviously a horrible hack.
-                    mId = "wear_" + mName.substring(mName.lastIndexOf(' ') + 1).toLowerCase();
-                }
-                else {
-                    mId = mName;
-                }
+                mId = mName;
             }
 
             if (mMeta == null) {
@@ -430,6 +447,7 @@ public final class Device {
         mName = b.mName;
         mId = b.mId;
         mManufacturer = b.mManufacturer;
+        mHasPlayStore = b.mHasPlayStore;
         mSoftware = Collections.unmodifiableList(b.mSoftware);
         mState = Collections.unmodifiableList(b.mState);
         mMeta = b.mMeta;

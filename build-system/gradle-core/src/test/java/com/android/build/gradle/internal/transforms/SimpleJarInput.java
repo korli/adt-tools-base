@@ -22,16 +22,17 @@ import com.android.build.api.transform.QualifiedContent;
 import com.android.build.api.transform.Status;
 import com.android.build.gradle.internal.pipeline.TransformManager;
 import java.io.File;
+import java.io.Serializable;
 import java.util.Set;
 
 /** A simple jar input for the transforms pipeline. */
-public class SimpleJarInput implements JarInput {
+public class SimpleJarInput implements JarInput, Serializable {
 
     @NonNull private final File file;
     @NonNull private final Status status;
     @NonNull private final String name;
     @NonNull private final Set<ContentType> contentTypes;
-    @NonNull private final Set<Scope> scopes;
+    @NonNull private final Set<? super Scope> scopes;
 
     public static Builder builder(@NonNull File jarFile) {
         return new Builder(jarFile);
@@ -42,7 +43,7 @@ public class SimpleJarInput implements JarInput {
             @NonNull Status status,
             @NonNull String name,
             @NonNull Set<ContentType> contentTypes,
-            @NonNull Set<Scope> scopes) {
+            @NonNull Set<? super Scope> scopes) {
         this.file = file;
         this.status = status;
         this.name = name;
@@ -76,7 +77,7 @@ public class SimpleJarInput implements JarInput {
 
     @Override
     @NonNull
-    public Set<Scope> getScopes() {
+    public Set<? super Scope> getScopes() {
         return scopes;
     }
 
@@ -84,15 +85,15 @@ public class SimpleJarInput implements JarInput {
         private File file;
         private Status status;
         private String name;
-        private Set<QualifiedContent.ContentType> contentTypes;
-        private Set<QualifiedContent.Scope> scopes;
+        private Set<ContentType> contentTypes;
+        private Set<? super Scope> scopes;
 
         public Builder(File file) {
             this.file = file;
             this.name = file.getName();
             this.status = Status.ADDED;
             this.contentTypes = TransformManager.CONTENT_CLASS;
-            this.scopes = TransformManager.SCOPE_FULL_LIBRARY;
+            this.scopes = TransformManager.SCOPE_FULL_LIBRARY_WITH_LOCAL_JARS;
         }
 
         public Builder setStatus(Status status) {

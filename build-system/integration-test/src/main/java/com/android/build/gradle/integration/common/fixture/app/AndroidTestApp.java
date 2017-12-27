@@ -17,7 +17,6 @@
 package com.android.build.gradle.integration.common.fixture.app;
 
 import com.android.build.gradle.integration.common.fixture.TestProject;
-
 import java.util.Collection;
 
 /**
@@ -50,4 +49,7 @@ public interface AndroidTestApp extends TestProject {
      * Remove a source file from the test app.
      */
     boolean removeFile(TestSourceFile file);
+
+    /** Replaces a source file, searching by path and name. */
+    void replaceFile(TestSourceFile file);
 }

@@ -18,8 +18,9 @@ package com.android.manifmerger;
 
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_NAME;
+import static com.android.SdkConstants.ATTR_PACKAGE;
 import static com.android.manifmerger.AttributeModel.Hexadecimal32BitsWithMinimumValue;
-import static com.android.manifmerger.AttributeModel.MultiValueValidator;
+import static com.android.manifmerger.AttributeModel.SeparatedValuesValidator;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
@@ -31,15 +32,14 @@ import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-
-import org.w3c.dom.Attr;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Model for the manifest file merging activities.
@@ -124,6 +124,22 @@ class ManifestModel {
                 ? xmlElement.getAttribute(mAttributeName)
                 : xmlElement.getAttributeNS(mNamespaceUri, mAttributeName);
             if (Strings.isNullOrEmpty(key)) return null;
+
+            // Resolve unqualified names
+            if (key.startsWith(".") && ATTR_NAME.equals(mAttributeName) &&
+                    ANDROID_URI.equals(mNamespaceUri)) {
+                Document document = xmlElement.getOwnerDocument();
+                if (document != null) {
+                    Element root = document.getDocumentElement();
+                    if (root != null) {
+                        String pkg = root.getAttribute(ATTR_PACKAGE);
+                        if (!pkg.isEmpty()) {
+                            key = pkg + key;
+                        }
+                    }
+                }
+            }
+
             return key;
         }
 
@@ -411,12 +427,15 @@ class ManifestModel {
          */
         META_DATA(MergeType.MERGE, DEFAULT_NAME_ATTRIBUTE_RESOLVER),
 
+        /** Child packages declaration (contained in manifest) */
+        PACKAGE(
+                MergeType.MERGE,
+                new AttributeBasedNodeKeyResolver(null /* nameSpace */, SdkConstants.ATTR_PACKAGE)),
         /**
-         * Path-permission (contained in provider)
-         * <br>
-         * <b>See also : </b>
-         * {@link <a href=http://developer.android.com/guide/topics/manifest/path-permission-element.html>
-         *     Meta-data Xml documentation</a>}
+         * Path-permission (contained in provider) <br>
+         * <b>See also : </b> {@link <a
+         * href=http://developer.android.com/guide/topics/manifest/path-permission-element.html>
+         * Meta-data Xml documentation</a>}
          */
         PATH_PERMISSION(MergeType.MERGE, DEFAULT_NO_KEY_NODE_RESOLVER),
 
@@ -432,21 +451,36 @@ class ManifestModel {
                 AttributeModel.newModel(SdkConstants.ATTR_NAME)),
 
         /**
-         * Permission (contained in manifest).
-         * <br>
-         * <b>See also : </b>
-         * {@link <a href=http://developer.android.com/guide/topics/manifest/permission-element.html>
-         *     Permission Xml documentation</a>}
-         *
+         * Permission (contained in manifest). <br>
+         * <b>See also : </b> {@link <a
+         * href=http://developer.android.com/guide/topics/manifest/permission-element.html>
+         * Permission Xml documentation</a>}
          */
-        PERMISSION(MergeType.MERGE, DEFAULT_NAME_ATTRIBUTE_RESOLVER,
+        PERMISSION(
+                MergeType.MERGE,
+                DEFAULT_NAME_ATTRIBUTE_RESOLVER,
                 AttributeModel.newModel(SdkConstants.ATTR_NAME),
                 AttributeModel.newModel("protectionLevel")
                         .setDefaultValue("normal")
                         // TODO : this will need to be populated from
                         // sdk/platforms/android-19/data/res/values.attrs_manifest.xml
-                        .setOnReadValidator(new MultiValueValidator(
-                                "normal", "dangerous", "signature", "signatureOrSystem"))),
+                        .setOnReadValidator(
+                                new SeparatedValuesValidator(
+                                        SdkConstants.VALUE_DELIMITER_PIPE,
+                                        "normal",
+                                        "dangerous",
+                                        "signature",
+                                        "signatureOrSystem",
+                                        "privileged",
+                                        "system",
+                                        "development",
+                                        "appop",
+                                        "pre23",
+                                        "installer",
+                                        "verifier",
+                                        "preinstalled",
+                                        "setup",
+                                        "ephemeral"))),
 
         /**
          * Permission-tree (contained in manifest).
@@ -558,13 +592,20 @@ class ManifestModel {
                         .setMergingPolicy(AttributeModel.OR_MERGING_POLICY)),
 
         /**
-         * Uses-permission (contained in application)
-         * <br>
-         * <b>See also : </b>
-         * {@link <a href=http://developer.android.com/guide/topics/manifest/uses-permission-element.html>
-         *     Uses-permission Xml documentation</a>}
+         * Uses-permission (contained in manifest) <br>
+         * <b>See also : </b> {@link <a
+         * href=http://developer.android.com/guide/topics/manifest/uses-permission-element.html>
+         * Uses-permission Xml documentation</a>}
          */
         USES_PERMISSION(MergeType.MERGE, DEFAULT_NAME_ATTRIBUTE_RESOLVER),
+
+        /**
+         * Uses-permission-sdk-23 (contained in manifest) <br>
+         * <b>See also : </b> {@link <a
+         * href=http://developer.android.com/guide/topics/manifest/uses-permission-sdk-23-element.html>
+         * Uses-permission Xml documentation</a>}
+         */
+        USES_PERMISSION_SDK_23(MergeType.MERGE, DEFAULT_NAME_ATTRIBUTE_RESOLVER),
 
         /**
          * Uses-sdk (contained in manifest)

@@ -22,61 +22,25 @@ import com.android.build.gradle.integration.common.fixture.GradleBuildResult;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldLibraryApp;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
-import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import java.io.IOException;
 import java.util.List;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 
 public class GenerateSourcesOnlyTest {
-
-
     @Rule
     public GradleTestProject project =
-            GradleTestProject.builder()
-                    .fromTestApp(new HelloWorldLibraryApp())
-                    .create();
-
-    @Before
-    public void createBuildFiles() throws IOException {
-        TestFileUtils.appendToFile(project.getSubproject("app").getBuildFile(), "\n"
-                + "apply plugin: \"com.android.application\"\n"
-                + "\n"
-                + "dependencies {\n"
-                + "    compile project(':lib')\n"
-                + "}\n"
-                + "\n"
-                + "android {\n"
-                + "     compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n"
-                + "     buildToolsVersion '" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "'\n"
-                + "}");
-
-        TestFileUtils.appendToFile(project.getSubproject("lib").getBuildFile(), "\n"
-                + "apply plugin: \"com.android.library\"\n"
-                + "\n"
-                + "android {\n"
-                + "     compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n"
-                + "     buildToolsVersion '" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "'\n"
-                + "}");
-    }
+            GradleTestProject.builder().fromTestApp(HelloWorldLibraryApp.create()).create();
 
     @Test
-    public void checkLibraryNotBuilt() {
+    public void checkLibraryNotBuilt() throws Exception {
         List<String> generateSources =
                 ModelHelper.getDebugGenerateSourcesCommands(project.model().getMulti().getModelMap());
 
         GradleBuildResult result =
                 project.executor()
-                        .withArgument("-Pandroid.injected.generateSourcesOnly=true")
                         .run(generateSources);
 
         assertThat(result.getStdout()).doesNotContain("compileDebugJava");
         assertThat(result.getStdout()).doesNotContain("compileReleaseJava");
-
-        GradleBuildResult resultWithout = project.executor()
-                .run(generateSources);
-
-        assertThat(resultWithout.getStdout()).contains("compileReleaseJava");
     }
 }

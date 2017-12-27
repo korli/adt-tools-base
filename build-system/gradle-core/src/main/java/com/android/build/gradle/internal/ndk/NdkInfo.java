@@ -20,8 +20,8 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.core.Toolchain;
-
 import java.io.File;
+import java.util.Collection;
 
 /**
  * Interface describing the NDK.
@@ -34,11 +34,14 @@ public interface NdkInfo {
     @NonNull
     File getRootDirectory();
 
-    /**
-     * Returns the sysroot directory for the toolchain.
-     */
+    /** Returns the sysroot path for compilation. */
     @NonNull
-    String getSysrootPath(@NonNull Abi abi, @NonNull String platformVersion);
+    String getCompilerSysrootPath(
+            @NonNull Abi abi, @NonNull String platformVersion, boolean useUnifiedHeaders);
+
+    /** Returns the sysroot path for linking. */
+    @NonNull
+    String getLinkerSysrootPath(@NonNull Abi abi, @NonNull String platformVersion);
 
     /**
      * Retrieve the newest supported version if it is not the specified version is not supported.
@@ -127,4 +130,16 @@ public interface NdkInfo {
      */
     @NonNull
     String getDefaultToolchainVersion(@NonNull Toolchain toolchain, @NonNull Abi abi);
+
+    @NonNull
+    Collection<Abi> getDefault32BitsAbis();
+
+    @NonNull
+    Collection<Abi> getDefaultAbis();
+
+    @NonNull
+    Collection<Abi> getSupported32BitsAbis();
+
+    @NonNull
+    Collection<Abi> getSupportedAbis();
 }

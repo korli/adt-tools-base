@@ -21,6 +21,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 import com.google.wireless.android.sdk.stats.GradleBuildProfile;
 import com.google.wireless.android.sdk.stats.GradleBuildProfileSpan;
@@ -44,8 +45,8 @@ public class ProcessProfileWriterTest {
     @Before
     public void setUp() throws IOException {
         // reset for each test.
-        outputFile = Jimfs.newFileSystem().getPath("/tmp/profile_proto");
-        ProcessProfileWriterFactory.initializeForTests(outputFile);
+        outputFile = Jimfs.newFileSystem(Configuration.unix()).getPath("/tmp/profile_proto");
+        ProcessProfileWriterFactory.initializeForTests();
         threadRecorder = ThreadRecorder.get();
     }
 
@@ -53,7 +54,7 @@ public class ProcessProfileWriterTest {
     public void testBasicRecord() throws Exception {
         threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                 ":projectName", null, () -> 10);
-        ProcessProfileWriterFactory.shutdown();
+        ProcessProfileWriterFactory.shutdownAndMaybeWrite(outputFile);
         GradleBuildProfile profile = loadProfile();
         assertThat(profile.getSpanList()).hasSize(1);
         assertThat(profile.getSpan(0).getType()).isEqualTo(ExecutionType.SOME_RANDOM_PROCESSING);
@@ -66,7 +67,7 @@ public class ProcessProfileWriterTest {
     public void testRecordWithAttributes() throws Exception {
         threadRecorder.record(
                 ExecutionType.SOME_RANDOM_PROCESSING, ":projectName", "foo", () -> 10);
-        ProcessProfileWriterFactory.shutdown();
+        ProcessProfileWriterFactory.shutdownAndMaybeWrite(outputFile);
         GradleBuildProfile profile = loadProfile();
         assertThat(profile.getSpanList()).hasSize(1);
         assertThat(profile.getSpan(0).getType()).isEqualTo(ExecutionType.SOME_RANDOM_PROCESSING);
@@ -80,7 +81,7 @@ public class ProcessProfileWriterTest {
                 ExecutionType.SOME_RANDOM_PROCESSING, ":projectName", null, () ->
                         threadRecorder.record(ExecutionType.SOME_RANDOM_PROCESSING,
                                 ":projectName", null, () -> 10));
-        ProcessProfileWriterFactory.shutdown();
+        ProcessProfileWriterFactory.shutdownAndMaybeWrite(outputFile);
         GradleBuildProfile profile = loadProfile();
         assertThat(profile.getSpanList()).hasSize(2);
         GradleBuildProfileSpan parent = profile.getSpan(1);
@@ -125,7 +126,7 @@ public class ProcessProfileWriterTest {
 
         assertNotNull(value);
         assertEquals(16, value.intValue());
-        ProcessProfileWriterFactory.shutdown();
+        ProcessProfileWriterFactory.shutdownAndMaybeWrite(outputFile);
         GradleBuildProfile profile = loadProfile();
         assertThat(profile.getSpanList()).hasSize(6);
 
@@ -171,7 +172,7 @@ public class ProcessProfileWriterTest {
         for (Thread thread : threads) {
             thread.join();
         }
-        ProcessProfileWriter.get().finish();
+        ProcessProfileWriter.get().finishAndMaybeWrite(outputFile);
     }
 
     @Test
@@ -197,7 +198,7 @@ public class ProcessProfileWriterTest {
         for (Thread thread : threads) {
             thread.join();
         }
-        ProcessProfileWriter.get().finish();
+        ProcessProfileWriter.get().finishAndMaybeWrite(outputFile);
 
         GradleBuildProfile profile = loadProfile();
         List<Long> threadValues =

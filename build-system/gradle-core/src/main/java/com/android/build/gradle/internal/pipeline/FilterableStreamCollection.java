@@ -17,21 +17,18 @@
 package com.android.build.gradle.internal.pipeline;
 
 import com.android.annotations.NonNull;
-import com.android.build.api.transform.DirectoryInput;
-import com.android.build.api.transform.Format;
-import com.android.build.api.transform.JarInput;
-import com.android.build.api.transform.TransformInput;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-
-import java.io.File;
 import java.util.Collection;
-import java.util.Map;
+import org.gradle.api.Project;
+import org.gradle.api.file.ConfigurableFileCollection;
+import org.gradle.api.file.FileCollection;
 
 /**
  * A collection of {@link TransformStream} that can be queried.
  */
 public abstract class FilterableStreamCollection {
+
+    abstract Project getProject();
 
     @NonNull
     abstract Collection<TransformStream> getStreams();
@@ -48,27 +45,33 @@ public abstract class FilterableStreamCollection {
         return streamsByType.build();
     }
 
+    /**
+     * Returns a single collection that contains all the files and task dependencies from the
+     * streams matching the {@link StreamFilter}.
+     * @param streamFilter the stream filter.
+     * @return a collection.
+     */
     @NonNull
-    public Map<File, Format> getPipelineOutput(
+    public FileCollection getPipelineOutputAsFileCollection(
             @NonNull StreamFilter streamFilter) {
+        final Project project = getProject();
+
         ImmutableList<TransformStream> streams = getStreams(streamFilter);
         if (streams.isEmpty()) {
-            return ImmutableMap.of();
+            return project.files();
         }
 
-        ImmutableMap.Builder<File, Format> builder = ImmutableMap.builder();
+        if (streams.size() == 1) {
+            return streams.get(0).getOutputFileCollection(project, streamFilter);
+        }
+
+        // create a global collection that will return all the collections.
+        ConfigurableFileCollection collection = project.files();
+
         for (TransformStream stream : streams) {
-            // get the input for it
-            TransformInput input = stream.asNonIncrementalInput();
-
-            for (JarInput jarInput : input.getJarInputs()) {
-                builder.put(jarInput.getFile(), Format.JAR);
-            }
-            for (DirectoryInput directoryInput : input.getDirectoryInputs()) {
-                builder.put(directoryInput.getFile(), Format.DIRECTORY);
-            }
+            collection.from(stream.getOutputFileCollection(project, streamFilter));
         }
 
-        return builder.build();
+        return collection;
     }
 }

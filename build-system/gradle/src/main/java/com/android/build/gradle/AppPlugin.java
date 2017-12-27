@@ -18,8 +18,8 @@ package com.android.build.gradle;
 
 import android.databinding.tool.DataBindingBuilder;
 import com.android.annotations.NonNull;
+import com.android.build.gradle.api.BaseVariantOutput;
 import com.android.build.gradle.internal.ApplicationTaskManager;
-import com.android.build.gradle.internal.DependencyManager;
 import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.TaskManager;
@@ -27,8 +27,9 @@ import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
 import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.variant.ApplicationVariantFactory;
-import com.android.build.gradle.internal.variant.VariantFactory;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.profile.Recorder;
@@ -58,24 +59,28 @@ public class AppPlugin extends BasePlugin implements Plugin<Project> {
     @Override
     protected BaseExtension createExtension(
             @NonNull Project project,
+            @NonNull ProjectOptions projectOptions,
             @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
             @NonNull NamedDomainObjectContainer<BuildType> buildTypeContainer,
             @NonNull NamedDomainObjectContainer<ProductFlavor> productFlavorContainer,
             @NonNull NamedDomainObjectContainer<SigningConfig> signingConfigContainer,
+            @NonNull NamedDomainObjectContainer<BaseVariantOutput> buildOutputs,
             @NonNull ExtraModelInfo extraModelInfo) {
         return project.getExtensions()
                 .create(
                         "android",
                         AppExtension.class,
                         project,
+                        projectOptions,
                         instantiator,
                         androidBuilder,
                         sdkHandler,
                         buildTypeContainer,
                         productFlavorContainer,
                         signingConfigContainer,
+                        buildOutputs,
                         extraModelInfo);
     }
 
@@ -88,23 +93,24 @@ public class AppPlugin extends BasePlugin implements Plugin<Project> {
     @NonNull
     @Override
     protected TaskManager createTaskManager(
+            @NonNull GlobalScope globalScope,
             @NonNull Project project,
+            @NonNull ProjectOptions projectOptions,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull DataBindingBuilder dataBindingBuilder,
             @NonNull AndroidConfig androidConfig,
             @NonNull SdkHandler sdkHandler,
             @NonNull NdkHandler ndkHandler,
-            @NonNull DependencyManager dependencyManager,
             @NonNull ToolingModelBuilderRegistry toolingRegistry,
             @NonNull Recorder recorder) {
         return new ApplicationTaskManager(
+                globalScope,
                 project,
+                projectOptions,
                 androidBuilder,
                 dataBindingBuilder,
                 androidConfig,
                 sdkHandler,
-                ndkHandler,
-                dependencyManager,
                 toolingRegistry,
                 recorder);
     }
@@ -116,10 +122,12 @@ public class AppPlugin extends BasePlugin implements Plugin<Project> {
 
     @NonNull
     @Override
-    protected VariantFactory createVariantFactory(
+    protected ApplicationVariantFactory createVariantFactory(
+            @NonNull GlobalScope globalScope,
             @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull AndroidConfig androidConfig) {
-        return new ApplicationVariantFactory(instantiator, androidBuilder, androidConfig);
+        return new ApplicationVariantFactory(
+                globalScope, instantiator, androidBuilder, androidConfig);
     }
 }

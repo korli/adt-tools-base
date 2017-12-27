@@ -18,15 +18,15 @@ package com.android.build.gradle.managed.adaptor;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.api.JavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreBuildType;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeBuildOptions;
 import com.android.build.gradle.internal.dsl.CoreJackOptions;
-import com.android.build.gradle.internal.dsl.CoreJavaCompileOptions;
 import com.android.build.gradle.internal.dsl.CoreNdkOptions;
 import com.android.build.gradle.internal.dsl.CoreShaderOptions;
 import com.android.build.gradle.managed.BuildType;
 import com.android.builder.model.SigningConfig;
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 
 /**
  * An adaptor to convert a BuildType to a CoreBuildType.
@@ -45,6 +45,12 @@ public class BuildTypeAdaptor extends BaseConfigAdaptor implements CoreBuildType
         return buildType.getDebuggable();
     }
 
+    @Nullable
+    @Override
+    public Boolean isCrunchPngs() {
+        return buildType.getCrunchPngs();
+    }
+
     @Override
     public boolean isTestCoverageEnabled() {
         return buildType.getTestCoverageEnabled();
@@ -52,7 +58,7 @@ public class BuildTypeAdaptor extends BaseConfigAdaptor implements CoreBuildType
 
     @Override
     public boolean isJniDebuggable() {
-        return Objects.firstNonNull(buildType.getNdk().getDebuggable(), false);
+        return MoreObjects.firstNonNull(buildType.getNdk().getDebuggable(), false);
     }
 
     @Override
@@ -110,7 +116,7 @@ public class BuildTypeAdaptor extends BaseConfigAdaptor implements CoreBuildType
 
     @Override
     @NonNull
-    public CoreJavaCompileOptions getJavaCompileOptions() {
+    public JavaCompileOptions getJavaCompileOptions() {
         return new JavaCompileOptionsAdaptor(buildType.getJavaCompileOptions());
     }
 
@@ -120,13 +126,19 @@ public class BuildTypeAdaptor extends BaseConfigAdaptor implements CoreBuildType
         return new ShaderOptionsAdaptor(buildType.getShaders());
     }
 
+    @Deprecated
+    @Override
+    public boolean isCrunchPngsDefault() {
+        return true;
+    }
+
     @Override
     public boolean isShrinkResources() {
         return buildType.getShrinkResources();
     }
 
     @Override
-    public boolean isUseProguard() {
+    public Boolean isUseProguard() {
         return buildType.getUseProguard();
     }
 }

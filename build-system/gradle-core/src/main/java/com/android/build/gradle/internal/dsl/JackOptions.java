@@ -18,22 +18,43 @@ package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.builder.core.ErrorReporter;
+import com.android.builder.model.SyncIssue;
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 /**
- * DSL object for configuring Jack options.
+ * The Jack toolchain is <em>deprecated</em>.
  *
- * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
+ * <p>If you want to use Java 8 language features, use the improved support included in the default
+ * toolchain. To learn more, read <a
+ * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
+ * features</a>.
+ *
+ * @deprecated For more information, read <a
+ *     href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
+ *     features</a>.
  */
+@Deprecated
 @SuppressWarnings("UnnecessaryInheritDoc")
 public class JackOptions implements CoreJackOptions {
+
+    static final String DEPRECATION_WARNING =
+            "The Jack toolchain is deprecated and will not run. "
+                    + "To enable support for Java 8 language features "
+                    + "built into the plugin, remove 'jackOptions { ... }' from your "
+                    + "build.gradle file, and add\n\n"
+                    + "android.compileOptions.sourceCompatibility 1.8\n"
+                    + "android.compileOptions.targetCompatibility 1.8\n\n"
+                    + "Future versions of the plugin will not support usage of 'jackOptions' "
+                    + "in build.gradle.\n"
+                    + "To learn more, go to "
+                    + "https://d.android.com/r/tools/java-8-support-message.html\n";
+
     @Nullable
     private Boolean isEnabledFlag;
     @Nullable
@@ -43,6 +64,12 @@ public class JackOptions implements CoreJackOptions {
     @NonNull
     private List<String> pluginNames = Lists.newArrayList();
 
+    @NonNull private final ErrorReporter errorReporter;
+
+    public JackOptions(@NonNull ErrorReporter errorReporter) {
+        this.errorReporter = errorReporter;
+    }
+
     void _initWith(CoreJackOptions that) {
         isEnabledFlag = that.isEnabled();
         isJackInProcessFlag = that.isJackInProcess();
@@ -51,17 +78,20 @@ public class JackOptions implements CoreJackOptions {
     }
 
     /** {@inheritDoc} */
+    @Deprecated
     @Override
     @Nullable
     public Boolean isEnabled() {
-        return isEnabledFlag;
+        // Jack toolchain has been deprecated
+        return null;
     }
 
     public void setEnabled(@Nullable Boolean enabled) {
-        isEnabledFlag = enabled;
+        errorReporter.handleSyncWarning(null, SyncIssue.TYPE_GENERIC, DEPRECATION_WARNING);
     }
 
     /** {@inheritDoc} */
+    @Deprecated
     @Override
     @Nullable
     public Boolean isJackInProcess() {
@@ -73,6 +103,7 @@ public class JackOptions implements CoreJackOptions {
     }
 
     /** {@inheritDoc} */
+    @Deprecated
     @Override
     @NonNull
     public Map<String, String> getAdditionalParameters() {
@@ -99,31 +130,11 @@ public class JackOptions implements CoreJackOptions {
     }
 
     /** {@inheritDoc} */
+    @Deprecated
     @Override
     @NonNull
     public List<String> getPluginNames() {
         return pluginNames;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        JackOptions that = (JackOptions) o;
-        return Objects.equal(isEnabledFlag, that.isEnabledFlag)
-                && Objects.equal(isJackInProcessFlag, that.isJackInProcessFlag)
-                && Objects.equal(additionalParameters, that.additionalParameters)
-                && Objects.equal(pluginNames, that.pluginNames);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(
-                isEnabledFlag, isJackInProcessFlag, additionalParameters, pluginNames);
     }
 
     @Override

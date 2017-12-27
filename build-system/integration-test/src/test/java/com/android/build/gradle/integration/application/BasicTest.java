@@ -16,7 +16,6 @@
 
 package com.android.build.gradle.integration.application;
 
-import static com.android.builder.model.AndroidProject.PROPERTY_BUILD_DENSITY;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -24,18 +23,29 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import com.android.build.OutputFile;
 import com.android.build.gradle.integration.common.category.DeviceTests;
 import com.android.build.gradle.integration.common.category.SmokeTests;
 import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
+import com.android.build.gradle.options.StringOption;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.JavaCompileOptions;
 import com.android.builder.model.OptionalCompilationStep;
+import com.android.builder.model.ProjectBuildOutput;
+import com.android.builder.model.SyncIssue;
+import com.android.builder.model.TestVariantBuildOutput;
 import com.android.builder.model.Variant;
-import java.io.IOException;
+import com.android.builder.model.VariantBuildOutput;
+import com.android.sdklib.AndroidVersion;
+import com.google.common.collect.Iterators;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.gradle.api.JavaVersion;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -61,8 +71,17 @@ public class BasicTest {
     public static AndroidProject model;
 
     @BeforeClass
-    public static void getModel() throws IOException {
-        model = project.executeAndReturnModel("clean", "assembleDebug").getOnlyModel();
+    public static void getModel() throws Exception {
+        project.execute("clean", "assembleDebug");
+        // basic project overwrites buildConfigField which emits a sync warning
+        model = project.model().ignoreSyncIssues().getSingle().getOnlyModel();
+        model.getSyncIssues()
+                .forEach(
+                        issue -> {
+                            assertThat(issue.getSeverity()).isEqualTo(SyncIssue.SEVERITY_WARNING);
+                            assertThat(issue.getMessage())
+                                    .containsMatch(Pattern.compile(".*value is being replaced.*"));
+                        });
     }
 
     @AfterClass
@@ -72,7 +91,7 @@ public class BasicTest {
     }
 
     @Test
-    public void report() {
+    public void report() throws Exception {
         project.execute("androidDependencies");
     }
 
@@ -81,9 +100,7 @@ public class BasicTest {
         assertFalse("Library Project", model.isLibrary());
         assertEquals("Project Type", AndroidProject.PROJECT_TYPE_APP, model.getProjectType());
         assertEquals(
-                "Compile Target",
-                "android-" + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION,
-                model.getCompileTarget());
+                "Compile Target", GradleTestProject.getCompileSdkHash(), model.getCompileTarget());
         assertFalse("Non empty bootclasspath", model.getBootClasspath().isEmpty());
 
         assertNotNull("aaptOptions not null", model.getAaptOptions());
@@ -130,12 +147,12 @@ public class BasicTest {
     }
 
     @Test
-    public void checkDebugAndReleaseOutputHaveDifferentNames() {
+    public void checkDebugAndReleaseOutputHaveDifferentNames() throws Exception {
         ModelHelper.compareDebugAndReleaseOutput(model);
     }
 
     @Test
-    public void weDontFailOnLicenceDotTxtWhenPackagingDependencies() {
+    public void weDontFailOnLicenceDotTxtWhenPackagingDependencies() throws Exception {
         project.execute("assembleAndroidTest");
     }
 
@@ -149,21 +166,81 @@ public class BasicTest {
     @Test
     public void checkDensityAndResourceConfigs() throws Exception {
         project.executor()
-                .withInstantRun(23, ColdswapMode.AUTO, OptionalCompilationStep.RESTART_ONLY)
-                .withProperty(PROPERTY_BUILD_DENSITY, "xxhdpi")
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.RESTART_ONLY)
+                .with(StringOption.IDE_BUILD_TARGET_DENSITY, "xxhdpi")
                 .run("assembleDebug");
     }
 
     @Test
-    @Category(DeviceTests.class)
-    public void install() throws IOException {
-        adb.exclusiveAccess();
-        project.execute("installDebug", "uninstallAll");
+    public void testBuildOutputModel() throws Exception {
+        project.executor()
+                .withEnabledAapt2(true)
+                .run("assemble", "assembleDebugAndroidTest", "testDebugUnitTest");
+
+        // get the initial minimalistic model.
+        Map<String, ProjectBuildOutput> multi = project.model().getMulti(ProjectBuildOutput.class);
+        ProjectBuildOutput mainModule = multi.get(":");
+        assertThat(mainModule.getVariantsBuildOutput()).hasSize(2);
+        assertThat(
+                        mainModule
+                                .getVariantsBuildOutput()
+                                .stream()
+                                .map(VariantBuildOutput::getName)
+                                .collect(Collectors.toList()))
+                .containsExactly("debug", "release");
+
+        for (VariantBuildOutput variantBuildOutput : mainModule.getVariantsBuildOutput()) {
+            assertThat(variantBuildOutput.getOutputs()).hasSize(1);
+            OutputFile output = variantBuildOutput.getOutputs().iterator().next();
+            assertThat(output.getOutputFile().exists()).isTrue();
+            assertThat(output.getFilters()).isEmpty();
+            assertThat(output.getOutputType()).isEqualTo("MAIN");
+
+            int expectedTestedVariants = variantBuildOutput.getName().equals("debug") ? 2 : 1;
+            assertThat(variantBuildOutput.getTestingVariants()).hasSize(expectedTestedVariants);
+            List<String> testVariantTypes =
+                    variantBuildOutput
+                            .getTestingVariants()
+                            .stream()
+                            .map(TestVariantBuildOutput::getType)
+                            .collect(Collectors.toList());
+            if (expectedTestedVariants == 1) {
+                assertThat(testVariantTypes).containsExactly("UNIT");
+            } else {
+                assertThat(testVariantTypes).containsExactly("UNIT", "ANDROID_TEST");
+            }
+
+            for (TestVariantBuildOutput testVariantBuildOutput :
+                    variantBuildOutput.getTestingVariants()) {
+                assertThat(testVariantBuildOutput.getTestedVariantName())
+                        .isEqualTo(variantBuildOutput.getName());
+                assertThat(testVariantBuildOutput.getOutputs()).hasSize(1);
+                output = Iterators.getOnlyElement(testVariantBuildOutput.getOutputs().iterator());
+                assertThat(output.getOutputType()).isEqualTo("MAIN");
+                assertThat(output.getFilters()).isEmpty();
+                if (variantBuildOutput.getName().equals("debug")) {
+                    assertThat(output.getOutputFile().exists()).isTrue();
+                }
+            }
+        }
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void install() throws Exception {
+        adb.exclusiveAccess();
+        try {
+            project.execute("installDebug", "uninstallAll");
+            // b/37498215 - Try again.  Behavior may be different when tasks are up-to-date.
+            project.execute("installDebug");
+        } finally {
+            project.execute("uninstallAll");
+        }
+    }
+
+    @Test
+    @Category(DeviceTests.class)
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

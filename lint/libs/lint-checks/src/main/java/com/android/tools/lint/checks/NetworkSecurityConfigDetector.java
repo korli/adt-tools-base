@@ -18,18 +18,20 @@ package com.android.tools.lint.checks;
 
 import com.android.annotations.NonNull;
 import com.android.ide.common.res2.AbstractResourceRepository;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.ResourceFolderType;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.utils.XmlUtils;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import java.time.LocalDate;
@@ -127,8 +129,6 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
     private static final String ATTR_CLEARTEXT_TRAFFIC_PERMITTED =
             "cleartextTrafficPermitted";
 
-    private static final String INVALID_DIGEST_ALGORITHM =
-            "Invalid digest algorithm. Supported digests: `%1$s`";
     private static final String PIN_DIGEST_ALGORITHM = "SHA-256";
     // SHA 256 bit = 32 bytes
     private static final int PIN_DECODED_DIGEST_LEN_SHA_256 = 32;
@@ -180,7 +180,7 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
         // 0 or 1 of <base-config>
         // Any number of <domain-config>
         // 0 or 1 of <debug-overrides>
-        for (Element child : LintUtils.getChildren(root)) {
+        for (Element child : XmlUtils.getSubTags(root)) {
             String tagName = child.getTagName();
             if (TAG_BASE_CONFIG.equals(tagName)) {
                 if (baseConfigHandle != null) {
@@ -223,7 +223,7 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
 
         checkForTyposInAttributes(context, config, ATTR_CLEARTEXT_TRAFFIC_PERMITTED, false);
 
-        for (Element node : LintUtils.getChildren(config)) {
+        for (Element node : XmlUtils.getSubTags(config)) {
             String tagName = node.getTagName();
             if (TAG_DOMAIN.equals(tagName)) {
                 if (!isDomainConfig) {
@@ -326,7 +326,7 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
 
         int pinElementCount = 0;
         boolean foundTyposInPin = false;
-        for (Element child : LintUtils.getChildren(node)) {
+        for (Element child : XmlUtils.getSubTags(node)) {
             String tagName = child.getTagName();
             if (TAG_PIN.equals(tagName)) {
                 pinElementCount += 1;
@@ -334,8 +334,16 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
                     Attr digestAttr = child.getAttributeNode(ATTR_DIGEST);
                     if (!PIN_DIGEST_ALGORITHM.equalsIgnoreCase(digestAttr.getValue())) {
                         String values = LintUtils.formatList(getSupportedPinDigestAlgorithms(), 2);
+                        LintFix.GroupBuilder fixBuilder = fix().group();
+                        for (String algorithm : getSupportedPinDigestAlgorithms()) {
+                            fixBuilder.add(fix()
+                                    .name(String.format("Set digest to \"%1$s\"", algorithm))
+                                    .replace().all().with(algorithm).build());
+                        }
+                        LintFix fix = fixBuilder.build();
+
                         context.report(ISSUE, digestAttr, context.getValueLocation(digestAttr),
-                                String.format(INVALID_DIGEST_ALGORITHM, values));
+                                String.format("Invalid digest algorithm. Supported digests: `%1$s`", values), fix);
                     }
                 } else {
                     checkForTyposInAttributes(context, child, ATTR_DIGEST, true);
@@ -385,7 +393,7 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
     }
 
     private static void handleTrustAnchors(XmlContext context, Element node) {
-        for (Element child : LintUtils.getChildren(node)) {
+        for (Element child : XmlUtils.getSubTags(node)) {
             if (TAG_CERTIFICATES.equals(child.getTagName())) {
                 if (!child.hasAttribute(ATTR_SRC)) {
                     checkForTyposInAttributes(context, child, ATTR_SRC, true);
@@ -594,10 +602,5 @@ public class NetworkSecurityConfigDetector extends ResourceXmlDetector {
      */
     public static List<String> getSupportedPinDigestAlgorithms() {
         return Collections.singletonList(PIN_DIGEST_ALGORITHM);
-    }
-
-    @SuppressWarnings("unused")
-    public static boolean isInvalidDigestAlgorithmMessage(String message) {
-        return message.startsWith("Invalid digest algorithm");
     }
 }

@@ -18,7 +18,6 @@ package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.fixture.BuildModel.Feature.FULL_DEPENDENCIES;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAar;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Filter.PROVIDED;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.GRADLE_PATH;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.MODULE;
@@ -31,10 +30,8 @@ import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
-import com.android.ide.common.process.ProcessException;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -52,7 +49,7 @@ public class LibWithProvidedAarAsJarTest {
     static ModelContainer<AndroidProject> modelContainer;
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         Files.write("include 'library', 'library2'", project.getSettingsFile(), Charsets.UTF_8);
 
         appendToFile(project.getSubproject("library").getBuildFile(),
@@ -86,13 +83,13 @@ public class LibWithProvidedAarAsJarTest {
     }
 
     @Test
-    public void checkProjectJarIsNotPackaged() throws IOException, ProcessException {
-        assertThatAar(project.getSubproject("library").getAar("debug"))
+    public void checkProjectJarIsNotPackaged() throws Exception {
+        assertThat(project.getSubproject("library").getAar("debug"))
                 .doesNotContainClass("Lcom/example/android/multiproject/library2/PersionView2;");
     }
 
     @Test
-    public void checkProvidedJarIsInTheMainArtifactDependency() {
+    public void checkProvidedJarIsInTheMainArtifactDependency() throws Exception {
         LibraryGraphHelper helper = new LibraryGraphHelper(modelContainer);
 
         Variant variant = ModelHelper.getVariant(

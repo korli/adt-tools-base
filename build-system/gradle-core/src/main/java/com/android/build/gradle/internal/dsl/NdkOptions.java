@@ -18,18 +18,15 @@ package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-
-import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.Optional;
-
 import java.io.Serializable;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.Optional;
 
 /**
  * DSL object for per-variant NDK settings, such as the ABI filter.
@@ -113,18 +110,10 @@ public class NdkOptions implements CoreNdkOptions, Serializable {
         return this;
     }
 
-    /**
-     * ABI configurations of your native libraries Gradle should
-     * build and package with your APK. You can list any subset of the
-     * <a href="https://developer.android.com/ndk/guides/abis.html#sa">
-     * ABIs the NDK supports</a>.
-     * <p>For example:</p>
-     * <p><code>abiFilters 'x86', 'x86_64', 'armeabi'</code></p>
-     *
-     * <p>When this flag is not configured, Gradle builds and packages all available ABIs.</p>
-     */
+    /** {@inheritDoc} */
     @Override
-    @Input @Optional
+    @Input
+    @Optional
     public Set<String> getAbiFilters() {
         return abiFilters;
     }
@@ -181,27 +170,5 @@ public class NdkOptions implements CoreNdkOptions, Serializable {
 
     public void setJobs(Integer jobs) {
         this.jobs = jobs;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        NdkOptions that = (NdkOptions) o;
-        return Objects.equal(moduleName, that.moduleName) &&
-                Objects.equal(cFlags, that.cFlags) &&
-                Objects.equal(ldLibs, that.ldLibs) &&
-                Objects.equal(abiFilters, that.abiFilters) &&
-                Objects.equal(stl, that.stl) &&
-                Objects.equal(jobs, that.jobs);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(moduleName, cFlags, ldLibs, abiFilters, stl, jobs);
     }
 }

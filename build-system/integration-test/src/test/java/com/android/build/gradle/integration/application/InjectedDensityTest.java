@@ -17,20 +17,16 @@
 package com.android.build.gradle.integration.application;
 
 import static com.android.build.gradle.integration.common.fixture.GradleTestProject.SUPPORT_LIB_VERSION;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.EmptyAndroidTestApp;
-import com.android.build.gradle.integration.common.truth.ApkSubject;
-import com.android.builder.model.AndroidProject;
-import com.android.ide.common.process.ProcessException;
+import com.android.build.gradle.options.StringOption;
+import com.android.testutils.apk.Apk;
 import com.google.common.base.Charsets;
-import com.google.common.collect.ImmutableList;
 import com.google.common.io.Files;
 import com.google.common.truth.Expect;
-import java.io.IOException;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -41,17 +37,17 @@ import org.junit.Test;
  */
 public class InjectedDensityTest {
 
-    @ClassRule
-    public static GradleTestProject sProject =
+    @Rule
+    public GradleTestProject project =
             GradleTestProject.builder()
-                    .fromTestApp(new EmptyAndroidTestApp("com.example.app.densities")).create();
+                    .fromTestApp(new EmptyAndroidTestApp("com.example.app.densities"))
+                    .create();
 
     @Rule
     public Expect expect = Expect.createAndEnableStackTrace();
 
-    @BeforeClass
-    public static void setup() throws IOException {
-
+    @Before
+    public void setup() throws Exception {
         String buildScript =
                 GradleTestProject.getGradleBuildscript()
                         + "\n"
@@ -68,41 +64,41 @@ public class InjectedDensityTest {
                         + "    }"
                         + "}";
 
-        Files.write(buildScript, sProject.getBuildFile(), Charsets.UTF_8);
+        Files.write(buildScript, project.getBuildFile(), Charsets.UTF_8);
 
-    }
-
-    @AfterClass
-    public static void cleanUp() {
-        sProject = null;
     }
 
     @Test
-    public void buildNormallyThenFiltered() throws IOException, ProcessException {
-        sProject.execute("clean");
+    public void buildNormallyThenFiltered() throws Exception {
+        project.execute("clean");
         checkFilteredBuild();
         checkFullBuild();
     }
 
-    private void checkFullBuild() throws IOException, ProcessException {
-        sProject.execute("assembleDebug");
-        ApkSubject debug = expect.about(ApkSubject.FACTORY).that(sProject.getApk("debug"));
-        debug.containsResource("drawable-xxxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.containsResource("drawable-xxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.containsResource("drawable-xhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.containsResource("drawable-hdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.containsResource("drawable-mdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+    private void checkFullBuild() throws Exception {
+        project.execute("assembleDebug");
+        Apk debug = project.getApk(GradleTestProject.ApkType.DEBUG);
+        assertThat(debug)
+                .containsResource("drawable-xxxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug).containsResource("drawable-xxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug).containsResource("drawable-xhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug).containsResource("drawable-hdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug).containsResource("drawable-mdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
     }
 
-    private void checkFilteredBuild() throws IOException, ProcessException {
-        sProject.execute(
-                ImmutableList.of("-P" + AndroidProject.PROPERTY_BUILD_DENSITY + "=xxhdpi"),
-                "assembleDebug");
-        ApkSubject debug = expect.about(ApkSubject.FACTORY).that(sProject.getApk("debug"));
-        debug.doesNotContainResource("drawable-xxxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.containsResource("drawable-xxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.doesNotContainResource("drawable-xhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.doesNotContainResource("drawable-hdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
-        debug.doesNotContainResource("drawable-mdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+    private void checkFilteredBuild() throws Exception {
+        project.executor()
+                .with(StringOption.IDE_BUILD_TARGET_DENSITY, "xxhdpi")
+                .run("assembleDebug");
+        Apk debug = project.getApk(GradleTestProject.ApkType.DEBUG);
+        assertThat(debug)
+                .doesNotContainResource("drawable-xxxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug).containsResource("drawable-xxhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug)
+                .doesNotContainResource("drawable-xhdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug)
+                .doesNotContainResource("drawable-hdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
+        assertThat(debug)
+                .doesNotContainResource("drawable-mdpi-v4/abc_ic_menu_copy_mtrl_am_alpha.png");
     }
 }

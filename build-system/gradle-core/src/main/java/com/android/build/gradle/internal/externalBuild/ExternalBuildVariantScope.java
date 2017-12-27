@@ -19,21 +19,29 @@ package com.android.build.gradle.internal.externalBuild;
 import com.android.annotations.NonNull;
 import com.android.build.OutputFile;
 import com.android.build.gradle.api.ApkOutputFile;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.scope.GenericVariantScopeImpl;
 import com.android.build.gradle.internal.scope.InstantRunVariantScope;
+import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.TransformGlobalScope;
 import com.android.build.gradle.internal.scope.TransformVariantScope;
+import com.android.build.gradle.internal.variant.MultiOutputPolicy;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.DeploymentDevice;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.StringOption;
 import com.android.builder.core.ManifestAttributeSupplier;
-import com.android.builder.model.AaptOptions;
+import com.android.builder.internal.aapt.AaptOptions;
+import com.android.ide.common.build.ApkData;
 import com.android.sdklib.IAndroidTarget;
 import com.android.utils.FileUtils;
 import com.android.utils.StringHelper;
 import com.google.common.collect.ImmutableList;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
+import org.gradle.api.Project;
 
 /**
  * Implementation of the {@link TransformVariantScope} for external build system integration.
@@ -44,27 +52,50 @@ import java.util.Collections;
     private final TransformGlobalScope globalScope;
     private final File outputRootFolder;
     private final ExternalBuildContext externalBuildContext;
-    private final InstantRunBuildContext mInstantRunBuildContext = new InstantRunBuildContext();
+    private final InstantRunBuildContext mInstantRunBuildContext;
     private final AaptOptions aaptOptions;
     private final ManifestAttributeSupplier manifestAttributeSupplier;
+    private final OutputScope outputScope;
 
     ExternalBuildVariantScope(
             @NonNull TransformGlobalScope globalScope,
             @NonNull File outputRootFolder,
             @NonNull ExternalBuildContext externalBuildContext,
             @NonNull AaptOptions aaptOptions,
-            @NonNull ManifestAttributeSupplier manifestAttributeSupplier) {
+            @NonNull ManifestAttributeSupplier manifestAttributeSupplier,
+            @NonNull Collection<ApkData> apkDatas) {
         this.globalScope = globalScope;
         this.outputRootFolder = outputRootFolder;
         this.externalBuildContext = externalBuildContext;
         this.aaptOptions = aaptOptions;
         this.manifestAttributeSupplier = manifestAttributeSupplier;
+        ProjectOptions projectOptions = globalScope.getProjectOptions();
+        this.mInstantRunBuildContext =
+                new InstantRunBuildContext(
+                        true,
+                        AaptGeneration.fromProjectOptions(projectOptions),
+                        DeploymentDevice.getDeploymentDeviceAndroidVersion(projectOptions),
+                        projectOptions.get(StringOption.IDE_BUILD_TARGET_ABI),
+                        projectOptions.get(StringOption.IDE_BUILD_TARGET_DENSITY),
+                        projectOptions.get(BooleanOption.ENABLE_SEPARATE_APK_RESOURCES));
+        this.outputScope = new OutputScope(MultiOutputPolicy.SPLITS, apkDatas);
+    }
+
+    @NonNull
+    @Override
+    public OutputScope getOutputScope() {
+        return outputScope;
     }
 
     @NonNull
     @Override
     public TransformGlobalScope getGlobalScope() {
         return globalScope;
+    }
+
+    @Override
+    protected Project getProject() {
+        return globalScope.getProject();
     }
 
     @NonNull
@@ -112,6 +143,12 @@ import java.util.Collections;
 
     @NonNull
     @Override
+    public File getBuildInfoOutputFolder() {
+        return new File(outputRootFolder, "/build-info/debug");
+    }
+
+    @NonNull
+    @Override
     public File getReloadDexOutputFolder() {
         return new File(outputRootFolder, "/reload-dex/debug");
     }
@@ -134,8 +171,8 @@ import java.util.Collections;
         return new File(outputRootFolder, "/incremental-verifier/debug");
     }
 
-    @NonNull
     @Override
+    @NonNull
     public InstantRunBuildContext getInstantRunBuildContext() {
         return mInstantRunBuildContext;
     }
@@ -182,15 +219,8 @@ import java.util.Collections;
         return new ApkOutputFile(
                 OutputFile.OutputType.MAIN,
                 Collections.emptySet(),
-                () -> new File(outputRootFolder, "/outputs/apk/debug.apk"));
-    }
-
-    public File getIntermediateApk() {
-        return new File(outputRootFolder, "/outputs/apk/debug-unaligned.apk");
-    }
-
-    public File getPreDexOutputDir() {
-        return FileUtils.join(outputRootFolder, "intermediates", "pre-dexed");
+                () -> new File(outputRootFolder, "/outputs/apk/debug.apk"),
+                getVersionCode());
     }
 
     public File getIncrementalDir(String name) {
@@ -217,7 +247,8 @@ import java.util.Collections;
         return manifestAttributeSupplier.getVersionName();
     }
 
-    public File getAssetsDir() {
-        return new File(outputRootFolder, "assets");
+    @NonNull
+    public File getInstantRunResourceApkFolder() {
+        return FileUtils.join(outputRootFolder, "incremental", "instant-run-resources");
     }
 }

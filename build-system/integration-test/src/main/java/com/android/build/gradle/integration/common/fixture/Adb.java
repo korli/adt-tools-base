@@ -19,6 +19,8 @@ package com.android.build.gradle.integration.common.fixture;
 import static org.junit.Assert.assertNotNull;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.build.gradle.integration.common.utils.AndroidVersionMatcher;
 import com.android.build.gradle.integration.common.utils.DeviceHelper;
 import com.android.build.gradle.integration.common.utils.SdkHelper;
 import com.android.ddmlib.AndroidDebugBridge;
@@ -32,6 +34,7 @@ import com.google.common.collect.Lists;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
+import java.util.function.Consumer;
 import org.hamcrest.Matcher;
 import org.hamcrest.StringDescription;
 import org.junit.rules.TestRule;
@@ -42,13 +45,13 @@ import org.junit.runners.model.Statement;
 /**
  * Utilities for handling real devices.
  *
- * To request a device use {@link #getDevice(Matcher)}. This reserves the device from the device
+ * <p>To request a device use {@link #getDevice(Matcher)}. This reserves the device from the device
  * pool, allowing the connected integration tests to run in parallel without interfering with each
  * other.
  *
- * At the end of the test method, the device is returned to the pool.
+ * <p>At the end of the test method, the device is returned to the pool.
  */
-public class Adb implements TestRule, Closeable {
+public class Adb implements TestRule {
 
     private List<String> devicesToReturn = Lists.newArrayList();
     private boolean exclusiveAccess = false;
@@ -59,7 +62,7 @@ public class Adb implements TestRule, Closeable {
         return new Statement() {
             @Override
             public void evaluate() throws Throwable {
-                try (Closeable ignored = Adb.this) {
+                try (Closeable ignored = Adb.this::close) {
                     displayName = description.getDisplayName();
                     base.evaluate();
                 }
@@ -67,7 +70,6 @@ public class Adb implements TestRule, Closeable {
         };
     }
 
-    @Override
     public void close() throws IOException {
         if (!devicesToReturn.isEmpty()) {
             DevicePoolClient.returnDevices(devicesToReturn, displayName);
@@ -76,10 +78,27 @@ public class Adb implements TestRule, Closeable {
         }
     }
 
+    /** Reserves and returns a connected device that has a version that satisfies the matcher. */
+    @NonNull
+    public IDevice getDevice(@NonNull Matcher<AndroidVersion> matcher) {
+        IDevice device =
+                getDevice(
+                        matcher,
+                        error -> {
+                            throw new AssertionError(error);
+                        });
+        assert device != null;
+        return device;
+    }
+
     /**
      * Reserves and returns a connected device that has a version that satisfies the matcher.
+     *
+     * @param errorHandler called with a descriptive error message if a device cannot be allocated.
      */
-    public IDevice getDevice(@NonNull Matcher<AndroidVersion> matcher) {
+    @Nullable
+    public IDevice getDevice(
+            @NonNull Matcher<AndroidVersion> matcher, @NonNull Consumer<String> errorHandler) {
         if (exclusiveAccess) {
             throw new IllegalStateException("Cannot call both getDevice() and exclusiveAccess() "
                     + "in one test");
@@ -112,7 +131,7 @@ public class Adb implements TestRule, Closeable {
 
         // Failed to find, make a pretty error message.
         StringBuilder errorMessage = new StringBuilder("Test requires device that matches ")
-                .append(StringDescription.toString(matcher)).append("\nConnected Devices:");
+                .append(StringDescription.toString(matcher)).append("\nConnected Devices:\n");
         for (IDevice device: devices) {
             errorMessage.append("    ").append(device).append(": ");
             StringDescription mismatch = new StringDescription();
@@ -120,7 +139,12 @@ public class Adb implements TestRule, Closeable {
             errorMessage.append(mismatch.toString()).append('\n');
         }
 
-        throw new AssertionError(errorMessage);
+        errorHandler.accept(errorMessage.toString());
+        return null;
+    }
+
+    public IDevice getDevice(int version) {
+        return getDevice(AndroidVersionMatcher.exactly(version));
     }
 
     /**
@@ -165,10 +189,5 @@ public class Adb implements TestRule, Closeable {
 
     private static AndroidDebugBridge getBridge() {
         return sAdbGetter.get();
-    }
-
-
-    public static String getInjectToDeviceProviderProperty(@NonNull IDevice device) {
-        return "-Pcom.android.test.devicepool.serial=" + device.getSerialNumber();
     }
 }

@@ -18,15 +18,16 @@ package com.android.ide.common.util;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.concurrency.Immutable;
+import com.android.utils.FileUtils;
 import com.google.common.base.Preconditions;
-import com.google.common.reflect.TypeParameter;
 import com.google.common.reflect.TypeToken;
+import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-import java.nio.file.Path;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.StandardOpenOption;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -34,17 +35,17 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * A lock similar to {@link ReentrantReadWriteLock} used to synchronize threads both within the same
- * JVM and across different JVMs, even in the presence of multiple custom class loaders.
+ * JVM and across different JVMs, even in the event of duplicate class loadings.
  *
  * <p>Typically, there exists only one JVM in a process. Therefore, we call this class {@code
  * ReadWriteProcessLock}, although in a multi-JVM process, this is not strictly correct. Also, from
  * here we will use the term JVM and process interchangeably.
  *
  * <p>Threads and processes will be synchronized on the same lock file (two lock files are the same
- * if one equals() the other). The client using {@code ReadWriteProcessLock} will provide a lock
- * file when constructing a {@code ReadWriteProcessLock} instance. Then, different threads and
- * processes using the same or different {@code ReadWriteProcessLock} instances on the same lock
- * file can be synchronized.
+ * if they refer to the same physical file). The client using {@code ReadWriteProcessLock} will
+ * provide a lock file when constructing a {@code ReadWriteProcessLock} instance. Then, different
+ * threads and processes using the same or different {@code ReadWriteProcessLock} instances on the
+ * same lock file can be synchronized.
  *
  * <p>The basic usage of this class is similar to {@link ReentrantReadWriteLock} and {@link
  * java.util.concurrent.locks.Lock}. Below is a typical example.
@@ -69,10 +70,10 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * object (a lock file in this case). Therefore, there could be multiple instances of {@code
  * ReadWriteProcessLock} on the same lock file.
  *
- * <p>Another distinction is that two lock files are considered the same if one equals() the
- * other. Internally, this class normalizes the lock file's path so that the paths can be
- * correctly compared by equals(), but it is good practice for the client to also normalize the file
- * paths when creating {@code ReadWriteProcessLock} instances.
+ * <p>Two lock files are considered the same if they refer to the same physical file. Internally,
+ * this class normalizes the lock file's path to detect same physical files via equals(). Therefore,
+ * the client does not need to normalize the lock file's path when constructing a {@code
+ * ReadWriteProcessLock}.
  *
  * <p>This lock is not reentrant.
  *
@@ -87,34 +88,49 @@ public final class ReadWriteProcessLock {
     private final ReadWriteProcessLock.Lock writeLock = new ReadWriteProcessLock.WriteLock();
 
     /**
-     * JVM-wide map from a lock file to a {@link FileChannel}, used to make sure that there is only
-     * one instance of {@code FileChannel} per lock file within the current process.
+     * Map from a lock file to a {@link FileChannel}, used to make sure that there is only one
+     * instance of {@code FileChannel} per lock file within the current process.
      */
+    @SuppressWarnings("ConstantConditions") // Guaranteed to be non-null
     @NonNull
-    private static final JvmWideVariable<ConcurrentMap<Path, FileChannel>> fileChannelMap =
+    private static final ConcurrentMap<File, FileChannel> fileChannelMap =
             new JvmWideVariable<>(
-                    ReadWriteProcessLock.class.getName(),
-                    "fileChannelMap",
-                    concurrentMapToken(Path.class, FileChannel.class),
-                    new ConcurrentHashMap<>());
+                            ReadWriteProcessLock.class,
+                            "fileChannelMap",
+                            new TypeToken<ConcurrentMap<File, FileChannel>>() {},
+                            ConcurrentHashMap::new)
+                    .get();
 
     /**
-     * JVM-wide map from a lock file to a {@link FileLock}, used to make sure that there is only one
-     * instance of {@code FileLock} per lock file within the current process.
+     * Map from a lock file to a {@link FileLock}, used to make sure that there is only one instance
+     * of {@code FileLock} per lock file within the current process.
      */
+    @SuppressWarnings("ConstantConditions") // Guaranteed to be non-null
     @NonNull
-    private static final JvmWideVariable<ConcurrentMap<Path, FileLock>> fileLockMap =
+    private static final ConcurrentMap<File, FileLock> fileLockMap =
             new JvmWideVariable<>(
-                    ReadWriteProcessLock.class.getName(),
-                    "fileLockMap",
-                    concurrentMapToken(Path.class, FileLock.class),
-                    new ConcurrentHashMap<>());
+                            ReadWriteProcessLock.class,
+                            "fileLockMap",
+                            new TypeToken<ConcurrentMap<File, FileLock>>() {},
+                            ConcurrentHashMap::new)
+                    .get();
 
     /**
-     * The lock file, used solely for synchronization purposes.
+     * Map from a lock file to an {@link AtomicInteger} that counts the number of actions that are
+     * holding the within-process read lock on the given lock file.
      */
+    @SuppressWarnings("ConstantConditions") // Guaranteed to be non-null
     @NonNull
-    private final Path lockFile;
+    private static final ConcurrentMap<File, AtomicInteger> numOfReadingActionsMap =
+            new JvmWideVariable<>(
+                            ReadWriteProcessLock.class,
+                            "numOfReadingActionsMap",
+                            new TypeToken<ConcurrentMap<File, AtomicInteger>>() {},
+                            ConcurrentHashMap::new)
+                    .get();
+
+    /** The lock file, used solely for synchronization purposes. */
+    @NonNull private final File lockFile;
 
     /**
      * Lock used to synchronize threads within the current process.
@@ -136,38 +152,49 @@ public final class ReadWriteProcessLock {
     private final AtomicInteger numOfReadingActions;
 
     /**
-     * Creates a {@link ReadWriteProcessLock} instance for the given lock file. Threads and
-     * processes will be synchronized on the same lock file (two lock files are the same if one
-     * equals() the other).
+     * Creates a {@code ReadWriteProcessLock} instance for the given lock file. Threads and
+     * processes will be synchronized on the same lock file (two lock files are the same if they
+     * refer to the same physical file).
      *
      * <p>It is strongly recommended that the lock file is used solely for synchronization purposes.
      * The client of this class should not access (read, write, or delete) the lock file. The lock
      * file may or may not exist when this method is called. However, it will be created and will
-     * not be deleted once the client starts using the locking mechanism provided by this class.
-     * The client may delete the lock files only when the locking mechanism is no longer in use.
+     * not be deleted once the client starts using the locking mechanism provided by this class. The
+     * client may delete the lock files only when the locking mechanism is no longer in use.
      *
-     * <p>This method will normalize the lock file's path first so that the paths can be correctly
-     * compared by equals().
+     * <p>This method will normalize the lock file's path first to detect same physical files via
+     * equals(), so the client does not need to normalize the file's path in advance.
      *
-     * @param lockFile the lock file, used solely for synchronization purposes
+     * <p>The lock file may not yet exist. In order for the lock file to be created, the parent
+     * directory of the lock file must exist when this method is called.
+     *
+     * @param lockFile the lock file, used solely for synchronization purposes; it may not yet
+     *     exist, but its parent directory must exist
+     * @throws IllegalArgumentException if the parent directory of lock file does not exist, or a
+     *     regular file with the same path as the lock file accidentally exists
      */
-    public ReadWriteProcessLock(@NonNull Path lockFile) {
+    public ReadWriteProcessLock(@NonNull File lockFile) {
         // Normalize the lock file's path first
-        Path normalizedLockFile = lockFile.normalize();
+        try {
+            lockFile = lockFile.getCanonicalFile();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
 
-        this.lockFile = normalizedLockFile;
-        this.readWriteThreadLock = new ReadWriteThreadLock(normalizedLockFile);
+        Preconditions.checkArgument(
+                FileUtils.parentDirExists(lockFile),
+                "Parent directory of " + lockFile.getAbsolutePath() + " does not exist");
+        Preconditions.checkArgument(
+                !lockFile.exists() || (lockFile.isFile() && lockFile.length() == 0),
+                "Unexpected lock file found: "
+                        + lockFile.getAbsolutePath()
+                        + " with length="
+                        + lockFile.length());
 
-        // To make this.numOfReadingActions contain a value shared among all the threads, we use a
-        // JvmWideVariable map
-        JvmWideVariable<ConcurrentMap<Path, AtomicInteger>> map =
-                new JvmWideVariable<>(
-                        ReadWriteProcessLock.class.getName(),
-                        "numOfReadingActions",
-                        concurrentMapToken(Path.class, AtomicInteger.class),
-                        new ConcurrentHashMap<>());
+        this.lockFile = lockFile;
+        this.readWriteThreadLock = new ReadWriteThreadLock(lockFile);
         this.numOfReadingActions =
-                map.get().computeIfAbsent(lockFile, (Path) -> new AtomicInteger(0));
+                numOfReadingActionsMap.computeIfAbsent(lockFile, (any) -> new AtomicInteger(0));
     }
 
     /** Returns the lock used for reading. */
@@ -257,34 +284,34 @@ public final class ReadWriteProcessLock {
         // ineffective. Therefore, we do not allow deleting lock files in this class. As long as the
         // lock files are not deleted, this method and releaseFileLock() are safe to be called from
         // multiple processes.
-        Map<Path, FileChannel> channelMap = fileChannelMap.get();
-        Map<Path, FileLock> lockMap = fileLockMap.get();
-
         Preconditions.checkState(
-                !channelMap.containsKey(lockFile) && !lockMap.containsKey(lockFile),
+                !fileChannelMap.containsKey(lockFile) && !fileLockMap.containsKey(lockFile),
                 "acquireFileLock() must not be called twice"
                         + " (ReadWriteProcessLock is not reentrant)");
 
         FileChannel fileChannel =
                 FileChannel.open(
-                        lockFile,
+                        lockFile.toPath(),
                         StandardOpenOption.READ,
                         StandardOpenOption.WRITE,
                         StandardOpenOption.CREATE);
-        FileLock fileLock = fileChannel.lock(0L, Long.MAX_VALUE, shared);
+        FileLock fileLock;
+        try {
+            fileLock = fileChannel.lock(0L, Long.MAX_VALUE, shared);
+        } catch (OverlappingFileLockException e) {
+            throw new RuntimeException(
+                    "Unable to acquire a file lock for " + lockFile.getAbsolutePath(), e);
+        }
 
-        channelMap.put(lockFile, fileChannel);
-        lockMap.put(lockFile, fileLock);
+        fileChannelMap.put(lockFile, fileChannel);
+        fileLockMap.put(lockFile, fileLock);
     }
 
     private void releaseFileLock() throws IOException  {
         // As commented in acquireFileLock(), this method and acquireFileLock() are never called
         // from more than one thread per process and are safe to be called from multiple processes.
-        Map<Path, FileChannel> channelMap = fileChannelMap.get();
-        Map<Path, FileLock> lockMap = fileLockMap.get();
-
-        FileChannel fileChannel = channelMap.get(lockFile);
-        FileLock fileLock = lockMap.get(lockFile);
+        FileChannel fileChannel = fileChannelMap.get(lockFile);
+        FileLock fileLock = fileLockMap.get(lockFile);
 
         Preconditions.checkNotNull(fileChannel);
         Preconditions.checkNotNull(fileLock);
@@ -295,8 +322,8 @@ public final class ReadWriteProcessLock {
         fileLock.release();
         fileChannel.close();
 
-        channelMap.remove(lockFile);
-        lockMap.remove(lockFile);
+        fileChannelMap.remove(lockFile);
+        fileLockMap.remove(lockFile);
     }
 
     public interface Lock {
@@ -332,16 +359,5 @@ public final class ReadWriteProcessLock {
         public void unlock() throws IOException {
             releaseWriteLock();
         }
-    }
-
-    /**
-     * Returns the {@link TypeToken} for a {@link ConcurrentMap}.
-     */
-    @NonNull
-    private static <K, V> TypeToken<ConcurrentMap<K, V>> concurrentMapToken(
-            @NonNull Class<K> keyClass, @NonNull Class<V> valueClass) {
-        return new TypeToken<ConcurrentMap<K, V>>() {}
-                .where(new TypeParameter<K>() {}, TypeToken.of(keyClass))
-                .where(new TypeParameter<V>() {}, TypeToken.of(valueClass));
     }
 }

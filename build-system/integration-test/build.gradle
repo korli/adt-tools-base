@@ -1,6 +1,6 @@
 import com.android.tools.internal.testing.DevicePool;
 
-apply plugin: 'groovy'
+apply plugin: 'kotlin'
 apply plugin: 'jacoco-tools-base'
 apply plugin: 'com.google.protobuf'
 
@@ -15,9 +15,8 @@ repositories {
 }
 
 dependencies {
-    compile gradleApi()
-    compile localGroovy()
     compile project(':analytics-library:protos')
+    compile project(':apksig')
     compile project(':base:apkzlib')
     compile project(':base:builder')
     compile project(':base:builder-model')
@@ -28,16 +27,22 @@ dependencies {
     compile project(':base:sdk-common')
     compile project(':base:testing-infrastructure:device-pool:device-provider')
     compile project(':base:testutils')
+    compile project(':base:java-lib-model')
 
-    compile libs.junit
+    compile libs.kotlin_stdlib
+
+    compile gradleApi()
     compile libs.apache_commons_io
     compile libs.apache_commons_lang
+    compile libs.google_api_client
+    compile libs.google_storage_client
+    compile libs.groovy
+    compile libs.junit
     compile libs.protobuf
     compile libs.protobuf_util
     compile libs.truth
-    compile libs.google_api_client
-    compile libs.google_storage_client
-    testCompile libs.mockito_all
+
+    testCompile libs.mockito_core
 
     // Jacoco version should be the version bundled with Gradle.  Not the default version used by
     // the plugin.
@@ -61,32 +66,42 @@ configurations {
     compile.exclude group: 'com.google.guava', module: 'guava-jdk5'
 }
 
-File getCheckedInSdk() {
-    String directoryName;
-    String os = System.getProperty("os.name")
-    if (os.startsWith("Mac")) {
-        directoryName = "darwin"
-    } else if (os.startsWith("Linux")) {
-        directoryName = "linux"
-    } else if (os.startsWith("Windows")) {
-        directoryName = "windows"
-    }
+def testEnvironment =
+        /*
+         * We keep the following properties:
+         * - starting with CUSTOM_ e.g. CUSTOM_ANDROID_HOME
+         * - DEBUG_INNER_TEST: to allow us to debug tests
+         * - starting with LC_ or LANG_, so the locale is set up correctly
+         * - BUILDBOT_: to get BuildBot specific information e.g. buildId used for performance tests
+         */
+        System.getenv().findAll { entry ->
+            String key = entry.key
+            key.startsWith("CUSTOM_") ||
+                    key == "USE_GRADLE_NIGHTLY" ||
+                    key == "BENCHMARK_EXPERIMENT" ||
+                    key == "DEBUG_INNER_TEST" ||
+                    // For NDK tests on Windows. See init.mk.
+                    key == "OS" ||
+                    key == "PROCESSOR_ARCHITECTURE" ||
+                    key == "ProgramW6432" ||
+                    key == "ProgramFiles(x86)" ||
+                    key == "TMP" ||
+                    key == "TEMP" ||
+                    // For AccentCharacterAndProguardTest
+                    key.startsWith("LC_") ||
+                    key.startsWith("LANG") ||
+                    key.startsWith("BUILDBOT_")
+        }
 
-    return rootProject.file("../prebuilts/studio/sdk/" + directoryName)
-}
-
-def testEnvironment = System.getenv().findAll {it.value != null}
 testEnvironment << [
-        GRADLE_USER_HOME : new File(project.buildDir, "GRADLE_USER_HOME"),
-        PROJECT_BUILD_DIR : project.buildDir,
-        CUSTOM_REPO : rootProject.file("../out/repo"),
-        INTEGRATION_TEST : "true",
-        DATA_BINDING_INTERNAL_REPO : rootProject.file("../tools/data-binding/internal-prebuilts"),
-        DATA_BINDING_REPO : rootProject.file("../tools/data-binding/maven-repo")
+        TEST_TMPDIR: project.buildDir, // Use the same environment variable as Bazel for now.
+        CUSTOM_REPO: rootProject.file("../out/repo").toString()
+                + File.pathSeparator
+                + rootProject.file("../prebuilts/tools/common/m2/repository/").toString(),
+        DATA_BINDING_INTERNAL_REPO: rootProject.file("../tools/data-binding/internal-prebuilts"),
+        DATA_BINDING_REPO: rootProject.file("../tools/data-binding/maven-repo"),
+        CUSTOM_IMPROVED_DEPENDENCY_RESOLUTION : "true"
 ]
-def testEnvironmentCheckedInSdk = new HashMap()
-testEnvironmentCheckedInSdk << testEnvironment
-testEnvironmentCheckedInSdk['ANDROID_HOME'] = getCheckedInSdk()
 
 // These tasks will not depend on publishLocal, so they will run integration
 // tests against whatever version of the plugin is in ../../../out/repo. This
@@ -94,6 +109,7 @@ testEnvironmentCheckedInSdk['ANDROID_HOME'] = getCheckedInSdk()
 // rebuilding the plugin.
 task testPrebuilts(type: Test)
 task connectedIntegrationTestPrebuilts(type: Test)
+task connectedIntegrationTestPrebuiltsQuarantine(type: Test)
 
 File tempFile = new File(project.buildDir, 'tmp')
 tempFile.mkdirs()
@@ -104,13 +120,18 @@ configure([test, testPrebuilts]) {
                     "source tree, under out/..., or an env var ANDROID_HOME."
     systemProperties['jar.path'] = jar.archivePath
     systemProperties['java.io.tmpdir'] = tempFile.absolutePath
-    environment = testEnvironmentCheckedInSdk
+    environment = testEnvironment
 
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
 
-    forkEvery = 1
     maxParallelForks = Runtime.runtime.availableProcessors() / 4
+
+    // FIXME: Temporarily disable multi-threading on Windows to address http://b/38119382.
+    // We will remove this work-around once the issue is resolved.
+    if (org.gradle.internal.os.OperatingSystem.current().windows) {
+        maxParallelForks = 1
+    }
 
     useJUnit {
         if (System.properties['test.includeCategories'] != null) {
@@ -121,25 +142,26 @@ configure([test, testPrebuilts]) {
         }
         excludeCategories "com.android.build.gradle.integration.common.category.DeviceTests"
         excludeCategories "com.android.build.gradle.integration.common.category.OnlineTests"
+        excludeCategories "com.android.build.gradle.integration.common.category.DeviceTestsQuarantine"
     }
+
     exclude "com/android/build/gradle/integration/performance/**"
     exclude "com/android/build/gradle/integration/automatic/**"
+    exclude "**/BazelIntegrationTestsSuite*"
 }
 
 task automaticTest(type: Test) {
     include "com/android/build/gradle/integration/automatic/**"
 
-    systemProperties['junit.parallel.threads'] = Runtime.runtime.availableProcessors() / 2
-
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
-    environment = testEnvironmentCheckedInSdk
+    environment = testEnvironment
 }
 
 task onlineTest(type: Test) {
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
-    environment = testEnvironmentCheckedInSdk
+    environment = testEnvironment
 
     useJUnit {
         includeCategories "com.android.build.gradle.integration.common.category.OnlineTests"
@@ -149,9 +171,18 @@ task onlineTest(type: Test) {
 check.dependsOn automaticTest
 
 task connectedIntegrationTest(type: Test)
+task connectedIntegrationTestQuarantine(type: Test)
 
-configure([connectedIntegrationTest, connectedIntegrationTestPrebuilts]) {
-    testClassesDir = sourceSets.test.output.classesDir
+def allConnectedTestTasks = [
+        connectedIntegrationTest,
+        connectedIntegrationTestPrebuilts,
+        connectedIntegrationTestQuarantine,
+        connectedIntegrationTestPrebuiltsQuarantine,
+]
+
+
+configure(allConnectedTestTasks) {
+    testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
 
     description =
@@ -167,24 +198,40 @@ configure([connectedIntegrationTest, connectedIntegrationTestPrebuilts]) {
     // Always run the task, when requested.
     outputs.upToDateWhen { false }
 
-    forkEvery= 1
     def count = Math.ceil(Runtime.runtime.availableProcessors() / 4)
     if (count > 8) {
         count = 8
     }
     maxParallelForks = count
 
-    useJUnit {
-        includeCategories "com.android.build.gradle.integration.common.category.DeviceTests"
+    // FIXME: Temporarily disable multi-threading on Windows to address http://b/38119382.
+    // We will remove this work-around once the issue is resolved.
+    if (org.gradle.internal.os.OperatingSystem.current().windows) {
+        maxParallelForks = 1
     }
+
     exclude "com/android/build/gradle/integration/performance/**"
     exclude "com/android/build/gradle/integration/automatic/**"
 }
 
+configure([connectedIntegrationTest, connectedIntegrationTestPrebuilts]) {
+    useJUnit {
+        includeCategories "com.android.build.gradle.integration.common.category.DeviceTests"
+        excludeCategories "com.android.build.gradle.integration.common.category.DeviceTestsQuarantine"
+    }
+}
+
+configure([connectedIntegrationTestQuarantine, connectedIntegrationTestPrebuiltsQuarantine]) {
+    useJUnit {
+        includeCategories "com.android.build.gradle.integration.common.category.DeviceTestsQuarantine"
+    }
+}
+
+
 task performanceTest(type: Test) {
     include "com/android/build/gradle/integration/performance/**"
 
-    testClassesDir = sourceSets.test.output.classesDir
+    testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
 
     description =
@@ -195,7 +242,7 @@ task performanceTest(type: Test) {
     environment = testEnvironment
 
     reports {
-        junitXml.destination "${project.buildDir}/perf-results"
+        junitXml.destination project.file("${project.buildDir}/perf-results")
     }
     outputs.upToDateWhen { false }
 
@@ -204,7 +251,7 @@ task performanceTest(type: Test) {
 configure([test, testPrebuilts, onlineTest, connectedIntegrationTest,
            connectedIntegrationTestPrebuilts, performanceTest]) {
     testLogging {
-        events = ['FAILED', 'PASSED', 'SKIPPED', 'STANDARD_ERROR', 'STARTED']
+        events = ['FAILED', 'SKIPPED', 'STANDARD_ERROR']
         displayGranularity = 2 // Show test class and method.
         exceptionFormat = 'full'
         showCauses = true
@@ -217,24 +264,25 @@ task buildTestDependencies {
 
 DevicePool devicePool = new DevicePool();
 
-task startDevicePool << {
+task('startDevicePool').doLast {
     // This port number needs to be kept in sync with DevicePoolClient.
     devicePool.start(3431)
 }
 
-task stopDevicePool << {
+task('stopDevicePool').doLast {
     devicePool.stop()
 }
 
 startDevicePool.finalizedBy stopDevicePool
-stopDevicePool.mustRunAfter connectedIntegrationTestPrebuilts, connectedIntegrationTest
+allConnectedTestTasks.forEach({task -> stopDevicePool.mustRunAfter(task)})
 
 automaticTest.dependsOn ':publishLocal'
 onlineTest.dependsOn ':publishLocal'
 test.dependsOn buildTestDependencies, ':publishLocal'
 testPrebuilts.dependsOn buildTestDependencies
-connectedIntegrationTest.dependsOn buildTestDependencies, ':publishLocal', startDevicePool
-connectedIntegrationTestPrebuilts.dependsOn buildTestDependencies, startDevicePool
+allConnectedTestTasks.forEach({task -> task.dependsOn buildTestDependencies, startDevicePool})
+connectedIntegrationTest.dependsOn ':publishLocal'
+connectedIntegrationTestQuarantine.dependsOn ':publishLocal'
 performanceTest.dependsOn ':publishLocal'
 
 

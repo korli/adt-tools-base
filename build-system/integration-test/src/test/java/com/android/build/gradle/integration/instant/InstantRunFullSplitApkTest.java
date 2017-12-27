@@ -20,16 +20,15 @@ import static com.android.build.gradle.integration.common.truth.TruthHelper.asse
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.build.gradle.options.StringOption;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
-import java.io.IOException;
+import com.android.sdklib.AndroidVersion;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import java.util.List;
 import org.junit.Before;
 import org.junit.Rule;
@@ -47,9 +46,7 @@ public class InstantRunFullSplitApkTest {
     private InstantRun instantRunModel;
 
     @Before
-    public void getModel() throws IOException {
-        // IR currently does not work with Jack - http://b.android.com/224374
-        AssumeUtil.assumeNotUsingJack();
+    public void getModel() throws Exception {
         TestFileUtils.appendToFile(
                 mProject.getBuildFile(),
                 "android {\n"
@@ -61,15 +58,20 @@ public class InstantRunFullSplitApkTest {
                         + "            universalApk false\n"
                         + "        }\n"
                         + "    }\n"
+                        + "    defaultConfig{\n"
+                        + "        ndk {\n"
+                        + "            abiFilters 'x86', 'armeabi', 'armeabi-v7a', 'arm64-v8a'\n"
+                        + "        }\n"
+                        + "    }\n"
                         + "}\n"
                         + "ext.abiCodes = ['x86':1, 'armeabi-v7a':2]\n"
                         + "android.applicationVariants.all { variant ->\n"
-                        + "  variant.outputs.each { output ->\n"
+                        + " variant.outputs.all { output ->\n"
                         + "    def baseAbiVersionCode =\n"
                         + "        project.ext.abiCodes.get(\n"
                         + "            output.getFilter(com.android.build.OutputFile.ABI), 0)\n"
-                        + "    output.versionCodeOverride =\n"
-                        + "        baseAbiVersionCode * 1000 + variant.versionCode\n"
+                        + "         output.versionCodeOverride=\n"
+                        + "             baseAbiVersionCode * 1000 + variant.versionCode\n"
                         + "  }\n"
                         + "}");
 
@@ -82,11 +84,8 @@ public class InstantRunFullSplitApkTest {
     @Test
     public void testSplit() throws Exception {
         mProject.executor()
-                .withInstantRun(
-                        24,
-                        ColdswapMode.AUTO,
-                        OptionalCompilationStep.FULL_APK)
-                .withProperty(AndroidProject.PROPERTY_BUILD_ABI, "armeabi-v7a")
+                .withInstantRun(new AndroidVersion(24, null), OptionalCompilationStep.FULL_APK)
+                .with(StringOption.IDE_BUILD_TARGET_ABI, "armeabi-v7a")
                 .run("assembleDebug");
         InstantRunBuildInfo initialContext = InstantRunTestUtils.loadContext(instantRunModel);
         List<InstantRunArtifact> artifacts = initialContext.getArtifacts();
@@ -101,5 +100,17 @@ public class InstantRunFullSplitApkTest {
                                 "build/intermediates/instant-run-support/debug/slice_0"
                                         + "/AndroidManifest.xml"))
                 .contains("android:versionCode=\"2001\"");
+
+        // Run the second time as regression test for bug 62100695
+        mProject.executor()
+                .withInstantRun(new AndroidVersion(24, null), OptionalCompilationStep.FULL_APK)
+                .with(StringOption.IDE_BUILD_TARGET_ABI, "armeabi-v7a")
+                .run("assembleDebug");
+
+        // Run with several ABIs as regression test for bug 62909130
+        mProject.executor()
+                .withInstantRun(new AndroidVersion(24, null), OptionalCompilationStep.FULL_APK)
+                .with(StringOption.IDE_BUILD_TARGET_ABI, "arm64-v8a,armeabi-v7a,armeabi")
+                .run("assembleDebug");
     }
 }

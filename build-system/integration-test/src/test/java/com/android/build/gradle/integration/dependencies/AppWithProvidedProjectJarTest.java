@@ -18,7 +18,6 @@ package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.fixture.BuildModel.Feature.FULL_DEPENDENCIES;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.MODULE;
 import static com.android.build.gradle.integration.common.utils.TestFileUtils.appendToFile;
 
@@ -28,12 +27,10 @@ import com.android.build.gradle.integration.common.utils.LibraryGraphHelper;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
-import com.android.builder.model.level2.GraphItem;
 import com.android.builder.model.level2.DependencyGraphs;
-import com.android.ide.common.process.ProcessException;
+import com.android.builder.model.level2.GraphItem;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -50,7 +47,7 @@ public class AppWithProvidedProjectJarTest {
             .create();
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         Files.write("include 'app', 'jar'", project.getSettingsFile(), Charsets.UTF_8);
 
         appendToFile(project.getSubproject("app").getBuildFile(),
@@ -68,13 +65,13 @@ public class AppWithProvidedProjectJarTest {
     }
 
     @Test
-    public void checkProvidedJarIsNotPackaged() throws IOException, ProcessException {
-        assertThatApk(project.getSubproject("app").getApk("debug"))
+    public void checkProvidedJarIsNotPackaged() throws Exception {
+        assertThat(project.getSubproject("app").getApk("debug"))
                 .doesNotContainClass("Lcom/example/android/multiproject/person/People;");
     }
 
     @Test
-    public void checkProvidedJarIsInTheMainArtifactDependency() {
+    public void checkProvidedJarIsInTheMainArtifactDependency() throws Exception {
         ModelContainer<AndroidProject> modelContainer = project.model()
                 .withFeature(FULL_DEPENDENCIES).getMulti();
 

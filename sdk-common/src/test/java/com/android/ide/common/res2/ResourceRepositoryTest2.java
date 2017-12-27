@@ -33,15 +33,13 @@ import com.android.testutils.TestUtils;
 import com.android.utils.ILogger;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-
-import junit.framework.TestCase;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
+import junit.framework.TestCase;
 
 @SuppressWarnings("javadoc")
 public class ResourceRepositoryTest2 extends TestCase {
@@ -129,13 +127,13 @@ public class ResourceRepositoryTest2 extends TestCase {
         }
 
         mResourceMerger = new ResourceMerger(0);
-        ResourceSet resourceSet = new ResourceSet("main", null);
+        ResourceSet resourceSet = new ResourceSet("main", null, null, true);
         resourceSet.addSource(mRes);
         resourceSet.loadFromFiles(mLogger = new RecordingLogger());
         mResourceMerger.addDataSet(resourceSet);
 
-        mRepository = new ResourceRepository(false);
-        mResourceMerger.mergeData(mRepository.createMergeConsumer(), true /*doCleanUp*/);
+        mRepository = new ResourceRepository();
+        mRepository.getItems().update(mResourceMerger);
     }
 
     @Override
@@ -317,7 +315,7 @@ public class ResourceRepositoryTest2 extends TestCase {
         File graphicFile = new File(drawableFolder, "graphic.9.png");
 
         resourceSet.updateWith(mRes, graphicFile, FileStatus.REMOVED, mLogger);
-        mResourceMerger.mergeData(mRepository.createMergeConsumer(), true /*doCleanUp*/);
+        mRepository.getItems().update(mResourceMerger);
 
         assertFalse(mRepository.hasResourceItem("@drawable/graphic"));
         assertFalse(mRepository.hasResourcesOfType(ResourceType.DRAWABLE));
@@ -333,7 +331,7 @@ public class ResourceRepositoryTest2 extends TestCase {
         File layoutFile = new File(layoutFolder, "layout1.xml");
 
         resourceSet.updateWith(mRes, layoutFile, FileStatus.REMOVED, mLogger);
-        mResourceMerger.mergeData(mRepository.createMergeConsumer(), true /*doCleanUp*/);
+        mRepository.getItems().update(mResourceMerger);
 
         // We still have a layout1: only default now
         assertTrue(mRepository.hasResourceItem("@layout/layout1"));
@@ -356,7 +354,7 @@ public class ResourceRepositoryTest2 extends TestCase {
         Files.write(strings, stringFile, Charsets.UTF_8);
 
         resourceSet.updateWith(mRes, stringFile, FileStatus.CHANGED, mLogger);
-        mResourceMerger.mergeData(mRepository.createMergeConsumer(), true /*doCleanUp*/);
+        mRepository.getItems().update(mResourceMerger);
 
         assertTrue(mRepository.hasResourceItem("@string/myDummy"));
         assertFalse(mRepository.hasResourceItem("@string/dummy"));
@@ -368,29 +366,31 @@ public class ResourceRepositoryTest2 extends TestCase {
         boolean created = newFile.createNewFile();
         assertTrue(created);
         resourceSet.updateWith(mRes, newFile, FileStatus.NEW, mLogger);
-        mResourceMerger.mergeData(mRepository.createMergeConsumer(), true /*doCleanUp*/);
+        mRepository.getItems().update(mResourceMerger);
         assertTrue(mRepository.hasResourceItem("@layout/layout5"));
     }
 
     @SuppressWarnings("ConstantConditions")
     public void testXliff() throws Exception {
-        ResourceRepository resources = TestResourceRepository.createRes2(false, new Object[]{
-                "values/strings.xml", ""
-                + "<resources xmlns:xliff=\"urn:oasis:names:tc:xliff:document:1.2\" >\n"
-                + "    <string name=\"share_with_application\">\n"
-                + "        Share your score of <xliff:g id=\"score\" example=\"1337\">%1$s</xliff:g>\n"
-                + "        with <xliff:g id=\"application_name\" example=\"Bluetooth\">%2$s</xliff:g>!\n"
-                + "    </string>\n"
-                + "    <string name=\"callDetailsDurationFormat\"><xliff:g id=\"minutes\" example=\"42\">%s</xliff:g> mins <xliff:g id=\"seconds\" example=\"28\">%s</xliff:g> secs</string>\n"
-                + "    <string name=\"description_call\">Call <xliff:g id=\"name\">%1$s</xliff:g></string>\n"
-                + "    <string name=\"other\"><xliff:g id=\"number_of_sessions\">%1$s</xliff:g> sessions removed from your schedule</string>\n"
-                + "    <!-- Format string used to add a suffix like \"KB\" or \"MB\" to a number\n"
-                + "         to display a size in kilobytes, megabytes, or other size units.\n"
-                + "         Some languages (like French) will want to add a space between\n"
-                + "         the placeholders. -->\n"
-                + "    <string name=\"fileSizeSuffix\"><xliff:g id=\"number\" example=\"123\">%1$s</xliff:g><xliff:g id=\"unit\" example=\"KB\">%2$s</xliff:g></string>"
-                + "</resources>\n"
-        });
+        String content =
+                ""
+                        + "<resources xmlns:xliff=\"urn:oasis:names:tc:xliff:document:1.2\" >\n"
+                        + "    <string name=\"share_with_application\">\n"
+                        + "        Share your score of <xliff:g id=\"score\" example=\"1337\">%1$s</xliff:g>\n"
+                        + "        with <xliff:g id=\"application_name\" example=\"Bluetooth\">%2$s</xliff:g>!\n"
+                        + "    </string>\n"
+                        + "    <string name=\"callDetailsDurationFormat\"><xliff:g id=\"minutes\" example=\"42\">%s</xliff:g> mins <xliff:g id=\"seconds\" example=\"28\">%s</xliff:g> secs</string>\n"
+                        + "    <string name=\"description_call\">Call <xliff:g id=\"name\">%1$s</xliff:g></string>\n"
+                        + "    <string name=\"other\"><xliff:g id=\"number_of_sessions\">%1$s</xliff:g> sessions removed from your schedule</string>\n"
+                        + "    <!-- Format string used to add a suffix like \"KB\" or \"MB\" to a number\n"
+                        + "         to display a size in kilobytes, megabytes, or other size units.\n"
+                        + "         Some languages (like French) will want to add a space between\n"
+                        + "         the placeholders. -->\n"
+                        + "    <string name=\"fileSizeSuffix\"><xliff:g id=\"number\" example=\"123\">%1$s</xliff:g><xliff:g id=\"unit\" example=\"KB\">%2$s</xliff:g></string>"
+                        + "</resources>\n";
+        ResourceRepository resources =
+                TestResourceRepository.createRes2(new Object[] {"values/strings.xml", content});
+
         assertFalse(resources.isFramework());
         assertNotNull(resources);
 

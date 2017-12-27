@@ -23,19 +23,17 @@ import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import com.google.common.truth.Expect;
-import java.io.IOException;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -63,17 +61,11 @@ public class InstantRunAddLibraryTest {
     public Expect expect = Expect.createAndEnableStackTrace();
 
     @Before
-    public void addBlankUtilClass() throws IOException {
+    public void addBlankUtilClass() throws Exception {
         writeClass("throw new RuntimeException();");
         TestFileUtils.appendToFile(project.getBuildFile(), "\n"
                 + "android.packagingOptions.exclude 'META-INF/maven/com.google.guava/guava/pom.xml'\n"
                 + "android.packagingOptions.exclude 'META-INF/maven/com.google.guava/guava/pom.properties'\n");
-    }
-
-    @Before
-    public void skipOnJack() throws Exception {
-        // IR currently does not work with Jack - http://b.android.com/224374
-        AssumeUtil.assumeNotUsingJack();
     }
 
     @Test
@@ -83,20 +75,18 @@ public class InstantRunAddLibraryTest {
                 .getInstantRunModel(project.model().getSingle().getOnlyModel());
 
         project.executor()
-                .withInstantRun(23, ColdswapMode.DEFAULT, OptionalCompilationStep.RESTART_ONLY)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.RESTART_ONLY)
                 .run("assembleDebug");
 
         // Add dependency
-        TestFileUtils.appendToFile(project.getBuildFile(), "\n"
-                + "dependencies {\n"
-                + "    compile 'com.google.guava:guava:17.0'\n"
-                + "}\n");
+        TestFileUtils.appendToFile(
+                project.getBuildFile(),
+                "dependencies { compile 'com.google.guava:guava:18.0' }\n");
 
         // Use that dependency
         writeClass("com.google.common.base.Strings.nullToEmpty(null);");
 
-        project.executor().withInstantRun(23, ColdswapMode.MULTIDEX)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
 
@@ -104,19 +94,19 @@ public class InstantRunAddLibraryTest {
                 InstantRunVerifierStatus.DEPENDENCY_CHANGED.toString());
 
         boolean foundDependencies = false;
-        assertThat(context.getArtifacts()).hasSize(2);
+        assertThat(context.getArtifacts()).hasSize(3);
         for (InstantRunArtifact artifact: context.getArtifacts()) {
-            expect.that(artifact.type).isEqualTo(InstantRunArtifactType.DEX);
-            if (artifact.file.getParentFile().getName().contains("guava")) {
-                //TODO: a real test for the dependencies dex being rebuilt.
+            expect.that(artifact.type).isAnyOf(
+                    InstantRunArtifactType.SPLIT, InstantRunArtifactType.SPLIT_MAIN);
+            if (artifact.file.getName().contains("dependencies")) {
                 foundDependencies = true;
             }
         }
-        assertTrue("The dependencies dex needs to be redeployed", foundDependencies);
+        assertTrue("The dependencies split apk needs to be redeployed", foundDependencies);
     }
 
 
-    public void writeClass(String action) throws IOException {
+    public void writeClass(String action) throws Exception {
         String contents = "package com.example.helloworld;" +
                 "public class Util {\n" +
                 "    public static void doStuff() {\n" +

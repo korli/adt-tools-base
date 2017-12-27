@@ -28,7 +28,6 @@ import com.android.build.gradle.model.internal.AndroidBinaryInternal;
 import com.android.build.gradle.model.internal.AndroidComponentSpecInternal;
 import com.android.builder.core.BuilderConstants;
 import com.google.common.base.Preconditions;
-
 import org.gradle.api.Task;
 import org.gradle.model.ModelMap;
 import org.gradle.model.Mutate;
@@ -49,31 +48,29 @@ public class AndroidComponentModelTestPlugin extends RuleSource {
             ModelMap<AndroidComponentSpecInternal> specs) {
         final VariantManager variantManager = specs.get(COMPONENT_NAME).getVariantManager();
         for (AndroidBinaryInternal binary : binaries.values()) {
-            // Create test tasks.
-            BaseVariantData testedVariantData = binary.getVariantData();
+            for (BaseVariantData testedVariantData : binary.getVariantData()) {
+                // Create test tasks.
+                TestVariantData unitTestVariantData =
+                        variantManager.createTestVariantData(testedVariantData, UNIT_TEST);
+                variantManager.addVariant(unitTestVariantData);
+                variantManager.createTasksForVariantData(
+                        new TaskModelMapAdaptor(tasks), unitTestVariantData.getScope());
 
-            TestVariantData unitTestVariantData = variantManager.createTestVariantData(
-                    testedVariantData,
-                    UNIT_TEST);
-            variantManager.getVariantDataList().add(unitTestVariantData);
-            variantManager.createTasksForVariantData(
-                    new TaskModelMapAdaptor(tasks),
-                    unitTestVariantData);
+                // TODO: compare against testBuildType instead of BuilderConstants.DEBUG.
+                if (!binary.getBuildType().getName().equals(BuilderConstants.DEBUG)) {
+                    continue;
+                }
 
-            // TODO: compare against testBuildType instead of BuilderConstants.DEBUG.
-            if (!binary.getBuildType().getName().equals(BuilderConstants.DEBUG)) {
-                continue;
+                Preconditions.checkState(
+                        testedVariantData != null,
+                        "Internal error: tested variant must be created before test variant.");
+
+                TestVariantData testVariantData =
+                        variantManager.createTestVariantData(testedVariantData, ANDROID_TEST);
+                variantManager.addVariant(testVariantData);
+                variantManager.createTasksForVariantData(
+                        new TaskModelMapAdaptor(tasks), testVariantData.getScope());
             }
-
-            Preconditions.checkState(testedVariantData != null,
-                    "Internal error: tested variant must be created before test variant.");
-
-            TestVariantData testVariantData =
-                    variantManager.createTestVariantData(testedVariantData, ANDROID_TEST);
-            variantManager.getVariantDataList().add(testVariantData);
-            variantManager.createTasksForVariantData(
-                    new TaskModelMapAdaptor(tasks),
-                    testVariantData);
         }
     }
 }

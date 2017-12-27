@@ -85,7 +85,7 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     new DefaultPosition(6, 4, 198), new DefaultPosition(6, 42, 236));
 
             Warning warning2 = new Warning(HardcodedValuesDetector.ISSUE,
-                    "[I18N] Hardcoded string \"Fooo\", should use @string resource",
+                    "Hardcoded string \"Fooo\", should use @string resource",
                     Severity.WARNING, project);
             warning2.line = 11;
             warning2.file = main;
@@ -362,7 +362,7 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "<div class=\"id\"><a href=\"#\" title=\"Return to top\">HardcodedText: Hardcoded text</a><div class=\"issueSeparator\"></div>\n"
                     + "</div>\n"
                     + "<div class=\"warningslist\">\n"
-                    + "<span class=\"location\"><a href=\"../res/layout/main.xml\">res/layout/main.xml</a>:12</span>: <span class=\"message\">[I18N] Hardcoded string \"Fooo\", should use @string resource</span><br />\n"
+                    + "<span class=\"location\"><a href=\"../res/layout/main.xml\">res/layout/main.xml</a>:12</span>: <span class=\"message\">Hardcoded string \"Fooo\", should use @string resource</span><br />\n"
                     + "</div>\n"
                     + "<div class=\"metadata\">Priority: 5 / 10<br/>\n"
                     + "Category: Internationalization</div>\n"
@@ -422,6 +422,11 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "<br/>\n"
                     + "&lt;?xml version=\"1.0\" encoding=\"UTF-8\"?><br/>\n"
                     + "&lt;lint><br/>\n"
+                    + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;!-- Ignore everything in the test source set --><br/>\n"
+                    + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;issue id=\"all\"><br/>\n"
+                    + "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ignore path=\"*/test/*\" /><br/>\n"
+                    + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;/issue><br/>\n"
+                    + "<br/>\n"
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;!-- Disable this given check in this project --><br/>\n"
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;issue id=\"IconMissingDensityFolder\" severity=\"ignore\" /><br/>\n"
                     + "<br/>\n"
@@ -429,6 +434,7 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;issue id=\"ObsoleteLayoutParam\"><br/>\n"
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ignore path=\"res/layout/activation.xml\" /><br/>\n"
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ignore path=\"res/layout-xlarge/activation.xml\" /><br/>\n"
+                    + "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;ignore regexp=\"(foo|bar).java\" /><br/>\n"
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;/issue><br/>\n"
                     + "<br/>\n"
                     + "&nbsp;&nbsp;&nbsp;&nbsp;&lt;!-- Ignore the UselessLeaf issue in the given file --><br/>\n"
@@ -448,7 +454,7 @@ public class HtmlReporterTest extends AbstractCheckTest {
                     + "\n"
                     + "</body>\n"
                     + "</html>",
-                report);
+                report.replace("\r\n", "\n"));
         } finally {
             deleteFile(projectDir);
         }

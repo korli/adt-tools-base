@@ -24,7 +24,7 @@ import static org.junit.Assert.assertNotNull;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
@@ -36,40 +36,42 @@ import com.android.ddmlib.IDevice;
 import com.android.ddmlib.IShellOutputReceiver;
 import com.android.ddmlib.InstallException;
 import com.android.sdklib.AndroidVersion;
-import com.android.tools.fd.client.AppState;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
-import com.android.tools.fd.client.InstantRunClient;
+import com.android.testutils.apk.Apk;
+import com.android.testutils.apk.SplitApks;
+import com.android.tools.ir.client.AppState;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
+import com.android.tools.ir.client.InstantRunClient;
 import com.google.common.base.Charsets;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public final class InstantRunTestUtils {
-
-    private static final int SLEEP_TIME_MSEC = 200;
 
     // each test class, has a port used for IR to avoid interference
     public static final Map<String, Integer> PORTS =
             ImmutableMap.<String, Integer>builder()
                     .put("ConnectedColdSwapTest", 8115)
-                    .put("NativeLibraryInstantRunTest", 8116)
+                    .put("NdkBuildInstantRunTest", 8116)
                     .put("HotSwapTest", 8117)
                     .put("ButterKnifeTest", 8118)
                     .put("DaggerTest", 8119)
                     .put("ResourcesSwapTest", 8120)
                     .build();
+    private static final int SLEEP_TIME_MSEC = 200;
 
     @NonNull
     public static InstantRunBuildInfo loadContext(@NonNull InstantRun instantRunModel)
@@ -82,10 +84,10 @@ public final class InstantRunTestUtils {
 
     @NonNull
     public static InstantRunBuildContext loadBuildContext(
-            int apiLevel,
-            @NonNull InstantRun instantRunModel) throws Exception {
-        InstantRunBuildContext context = new InstantRunBuildContext();
-        context.setApiLevel(apiLevel, null, null);
+            AndroidVersion androidVersion, @NonNull InstantRun instantRunModel) throws Exception {
+        InstantRunBuildContext context =
+                new InstantRunBuildContext(
+                        true, AaptGeneration.AAPT_V2_DAEMON_MODE, androidVersion, null, null, true);
         context.loadFromXml(Files.toString(instantRunModel.getInfoFile(), Charsets.UTF_8));
         return context;
     }
@@ -101,18 +103,29 @@ public final class InstantRunTestUtils {
         throw new AssertionError("Could not find debug variant.");
     }
 
-    static void doInstall(
-            @NonNull IDevice device,
-            @NonNull List<InstantRunArtifact> artifacts) throws DeviceException,
-            InstallException {
-        if (artifacts.size()==1 && artifacts.get(0).type == InstantRunArtifactType.MAIN) {
-            device.installPackage(artifacts.get(0).file.getAbsolutePath(), true /*reinstall*/);
+
+    /** This performs the same work as the SplitApkDeployTask in studio. */
+    static void doInstall(@NonNull IDevice device, @NonNull InstantRunBuildInfo info)
+            throws DeviceException, InstallException {
+
+        if (info.canHotswap()) {
+            throw new AssertionError("Tried to install a hot swap build");
+        }
+        if (info.hasNoChanges()) {
+            throw new AssertionError("Tried to deploy with no changes");
+        }
+
+        if (info.getFeatureLevel() <= 19) {
+            assertThat(info.getArtifacts()).hasSize(1);
+            InstantRunArtifact artifact = info.getArtifacts().get(0);
+            assertThat(artifact.type).isEqualTo(InstantRunArtifactType.MAIN);
+            device.installPackage(artifact.file.getAbsolutePath(), true /*reinstall*/, "-t");
             return;
         }
 
         assertThat(device.getVersion()).isAtLeast(AndroidVersion.ART_RUNTIME);
         List<File> apkFiles = Lists.newArrayList();
-        for (InstantRunArtifact artifact : artifacts) {
+        for (InstantRunArtifact artifact : info.getArtifacts()) {
             switch (artifact.type) {
                 case SPLIT_MAIN:
                     apkFiles.add(0, artifact.file);
@@ -124,10 +137,14 @@ public final class InstantRunTestUtils {
                     throw new AssertionError("Unexpected artifact to install: " + artifact);
             }
         }
+        List<String> installOptions = Lists.newArrayList("-t");
+        if (info.isPatchBuild()) {
+            installOptions.add("-p");
+        }
         device.installPackages(
                 apkFiles,
                 true /*reinstall*/,
-                ImmutableList.<String>of(),
+                installOptions,
                 DEFAULT_ADB_TIMEOUT_MSEC,
                 MILLISECONDS);
     }
@@ -164,15 +181,14 @@ public final class InstantRunTestUtils {
 
     @NonNull
     static InstantRun doInitialBuild(
-            @NonNull GradleTestProject project,
-            int apiLevel,
-            @NonNull ColdswapMode coldswapMode) {
+            @NonNull GradleTestProject project, @NonNull AndroidVersion androidVersion)
+            throws IOException, InterruptedException {
         project.execute("clean");
         InstantRun instantRunModel = getInstantRunModel(
                 Iterables.getOnlyElement(project.model().getSingle().getModelMap().values()));
 
         project.executor()
-                .withInstantRun(apiLevel, coldswapMode, OptionalCompilationStep.FULL_APK)
+                .withInstantRun(androidVersion, OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
 
         return instantRunModel;
@@ -191,8 +207,8 @@ public final class InstantRunTestUtils {
      * Gets the RELOAD_DEX {@link InstantRunArtifact} produced by last build.
      */
     @NonNull
-    public static InstantRunArtifact getReloadDexArtifact(
-            @NonNull InstantRun instantRunModel) throws Exception {
+    public static InstantRunArtifact getReloadDexArtifact(@NonNull InstantRun instantRunModel)
+            throws Exception {
         InstantRunArtifact artifact = getOnlyArtifact(instantRunModel);
         assertThat(artifact.type).isEqualTo(InstantRunArtifactType.RELOAD_DEX);
         return artifact;
@@ -209,32 +225,50 @@ public final class InstantRunTestUtils {
         return artifact;
     }
 
+    public static List<InstantRunArtifact> getArtifactsOfType(
+            @NonNull InstantRunBuildInfo buildInfo, @NonNull InstantRunArtifactType type) {
+        return buildInfo
+                .getArtifacts()
+                .stream()
+                .filter(artifact -> artifact.type == type)
+                .collect(Collectors.toList());
+    }
+
+    public static InstantRunArtifact getOnlyArtifactOfType(
+            @NonNull InstantRunBuildInfo buildInfo, @NonNull InstantRunArtifactType type) {
+        List<InstantRunArtifact> artifacts = getArtifactsOfType(buildInfo, type);
+        if (artifacts.isEmpty()) {
+            throw new AssertionError(
+                    "Unable to find artifact of type " + type + " in build info " + buildInfo);
+        }
+        return Iterables.getOnlyElement(artifacts);
+    }
+
     @NonNull
-    public static List<InstantRunArtifact> getCompiledColdSwapChange(
-            @NonNull InstantRun instantRunModel,
-            @NonNull ColdswapMode coldswapMode) throws Exception {
-        List<InstantRunArtifact> artifacts =  loadContext(instantRunModel).getArtifacts();
+    public static SplitApks getCompiledColdSwapChange(@NonNull InstantRun instantRunModel)
+            throws Exception {
+        return getCompiledColdSwapChange(loadContext(instantRunModel).getArtifacts());
+    }
+
+    @NonNull
+    public static SplitApks getCompiledColdSwapChange(@NonNull List<InstantRunArtifact> artifacts)
+            throws Exception {
         assertThat(artifacts).isNotEmpty();
 
-        EnumSet<InstantRunArtifactType> allowedArtifactTypes;
-        switch (coldswapMode) {
-            case MULTIAPK:
-                allowedArtifactTypes = EnumSet.of(
-                        InstantRunArtifactType.SPLIT, InstantRunArtifactType.SPLIT_MAIN);
-                break;
-            case MULTIDEX:
-                allowedArtifactTypes = EnumSet.of(InstantRunArtifactType.DEX);
-                break;
-            default:
-                throw new IllegalArgumentException(
-                        "Expecting cold swap mode to be explicitly specified");
-        }
-        for (InstantRunArtifact artifact: artifacts) {
+        EnumSet<InstantRunArtifactType> allowedArtifactTypes =
+                EnumSet.of(
+                        InstantRunArtifactType.SPLIT,
+                        InstantRunArtifactType.SPLIT_MAIN,
+                        InstantRunArtifactType.MAIN);
+
+        List<Apk> apks = new ArrayList<>();
+        for (InstantRunArtifact artifact : artifacts) {
             if (!allowedArtifactTypes.contains(artifact.type)) {
                 throw new AssertionError("Unexpected artifact " + artifact);
             }
+            apks.add(new InstantRunApk(artifact.file.toPath(), artifact.type));
         }
-        return artifacts;
+        return new SplitApks(apks);
     }
 
     public static void printBuildInfoFile(@Nullable InstantRun instantRunModel) {

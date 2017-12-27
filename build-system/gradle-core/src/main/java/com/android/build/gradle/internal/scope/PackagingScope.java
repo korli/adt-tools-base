@@ -18,25 +18,24 @@ package com.android.build.gradle.internal.scope;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.api.ApkOutputFile;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
 import com.android.build.gradle.internal.dsl.PackagingOptions;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
-import com.android.build.gradle.internal.variant.SplitHandlingPolicy;
+import com.android.build.gradle.internal.variant.MultiOutputPolicy;
+import com.android.build.gradle.internal.variant.TaskContainer;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.VariantType;
-import com.android.builder.model.AaptOptions;
-import com.android.builder.model.ApiVersion;
-
-import org.gradle.api.Project;
-
+import com.android.builder.internal.aapt.AaptOptions;
+import com.android.sdklib.AndroidVersion;
 import java.io.File;
 import java.util.Set;
+import org.gradle.api.Project;
+import org.gradle.api.Task;
+import org.gradle.api.file.FileCollection;
+import org.gradle.internal.impldep.org.jetbrains.annotations.NotNull;
 
-/**
- * Data needed by the packaging tasks.
- */
-public interface PackagingScope {
+/** Data needed by the packaging tasks. */
+public interface PackagingScope extends TaskOutputHolder {
 
     /**
      * The {@link AndroidBuilder} to use.
@@ -45,22 +44,14 @@ public interface PackagingScope {
     AndroidBuilder getAndroidBuilder();
 
     /**
-     * Location of the *.ap_ file with processed resources.
-     */
-    @NonNull
-    File getFinalResourcesFile();
-
-    /**
      * Full name of the variant.
      */
     @NonNull
     String getFullVariantName();
 
-    /**
-     * Min SDK version of the artifact to create.
-     */
+    /** Min SDK version of the artifact to create. */
     @NonNull
-    ApiVersion getMinSdkVersion();
+    AndroidVersion getMinSdkVersion();
 
     @NonNull
     InstantRunBuildContext getInstantRunBuildContext();
@@ -78,25 +69,19 @@ public interface PackagingScope {
     File getIncrementalDir(@NonNull String name);
 
     @NonNull
-    Set<File> getDexFolders();
+    FileCollection getDexFolders();
 
     @NonNull
-    Set<File> getJavaResources();
+    FileCollection getJavaResources();
 
     @NonNull
-    File getAssetsDir();
+    FileCollection getJniFolders();
 
     @NonNull
-    Set<File> getJniFolders();
-
-    @NonNull
-    SplitHandlingPolicy getSplitHandlingPolicy();
+    MultiOutputPolicy getMultiOutputPolicy();
 
     @NonNull
     Set<String> getAbiFilters();
-
-    @NonNull
-    ApkOutputFile getMainOutputFile();
 
     @Nullable
     Set<String> getSupportedAbis();
@@ -120,23 +105,11 @@ public interface PackagingScope {
     @NonNull
     Project getProject();
 
-    /**
-     * Returns the output package file.
-     */
-    @NonNull
-    File getOutputPackage();
-
-    /**
-     * Returns the intermediate APK file.
-     */
-    @NonNull
-    File getIntermediateApk();
+    /** Returns the project base name */
+    String getProjectBaseName();
 
     @NonNull
     File getInstantRunSplitApkOutputFolder();
-
-    @Nullable
-    File getAtomMetadataBaseFolder();
 
     @NonNull
     String getApplicationId();
@@ -149,9 +122,17 @@ public interface PackagingScope {
     @NonNull
     AaptOptions getAaptOptions();
 
-    @NonNull
-    VariantType getVariantType();
+    @NotNull
+    ProjectOptions getProjectOptions();
+
+    OutputScope getOutputScope();
+
+    void addTask(TaskContainer.TaskKind taskKind, Task task);
 
     @NonNull
-    File getManifestFile();
+    File getInstantRunResourceApkFolder();
+
+    boolean isAbiSplitsEnabled();
+
+    boolean isDensitySplitsEnabled();
 }

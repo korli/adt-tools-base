@@ -1,15 +1,21 @@
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-apply plugin: 'groovy'
+apply plugin: 'kotlin'
 apply plugin: 'clone-artifacts'
 apply plugin: 'idea'
 apply plugin: 'jacoco-tools-base'
 apply plugin: 'license-report'
 
+licenseReport {
+    whiteList = ['org.jetbrains.trove4j:trove4j:20160824']
+}
+
 dependencies {
     compile project(':base:gradle-core')
     compile gradleApi()
+
+    testCompile libs.kotlin_stdlib
 
     testCompile project(':base:project-test-lib')
     testCompile project(':base:testutils')
@@ -34,14 +40,18 @@ def generated = new File("${project.buildDir}/generated/resources")
 sourceSets.main.resources.srcDir generated
 
 task copyVersionProperties(type: Copy) {
-    from project.file("$rootDir/buildSrc/base/version.properties")
+    from project.file(project.getRootProject().getProperty("versionProperties"))
+    rename({"version.properties"})
     into project.file("$generated/com/android/build/gradle/internal")
 }
 
 tasks.compileJava.dependsOn copyVersionProperties
 
 test {
-    environment("CUSTOM_REPO", rootProject.file("../out/repo"))
+    environment("CUSTOM_REPO",
+            rootProject.file("../out/repo").toString()
+                    + File.pathSeparator
+                    + rootProject.file("../prebuilts/tools/common/m2/repository/").toString())
 
     testLogging {
         events "failed"

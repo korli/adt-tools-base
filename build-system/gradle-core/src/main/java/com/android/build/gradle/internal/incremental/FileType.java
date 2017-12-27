@@ -17,28 +17,19 @@
 package com.android.build.gradle.internal.incremental;
 
 /**
- * Enumeration of the possible file types produced by an instant run enabled build.
+ * Enumeration of the possible file types produced by a build.
  */
 public enum FileType {
-    /**
-     * Main APK file for 19, and 21 platforms when using the {@link ColdswapMode#MULTIDEX} mode.
-     */
+    /** Main APK file for 19, and below. */
+    @Deprecated
     MAIN,
-    /**
-     * Main APK file when application is using the {@link ColdswapMode#MULTIAPK} mode.
-     */
+    /** Main APK file when application is using the Split APK mode. */
     SPLIT_MAIN,
     /**
      * Reload dex file that can be used to patch application live.
      */
     RELOAD_DEX,
-    /**
-     * Shard dex file that can be used to replace originally installed multi-dex shard.
-     */
-    DEX,
-    /**
-     * Pure split (code only) that can be installed individually on M+ devices.
-     */
+    /** Pure split (code only) that can be installed individually on L+ devices. */
     SPLIT,
     /**
      * Resources: res.ap_ file

@@ -19,6 +19,7 @@ package com.android.build.gradle.integration.performance;
 import com.android.annotations.NonNull;
 import com.android.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
+import com.google.common.base.Strings;
 import com.google.common.primitives.Longs;
 import com.google.protobuf.Timestamp;
 import com.google.protobuf.util.Timestamps;
@@ -53,24 +54,24 @@ public final class BenchmarkRecorder {
 
     @NonNull private final Logging.Benchmark benchmark;
 
-    @NonNull private final Set<ProjectScenario> projectScenarios;
+    @NonNull private final ProjectScenario projectScenario;
 
     @NonNull private final ProfileUploader uploader;
 
     @NonNull private final List<GradleBenchmarkResult.Builder> benchmarkResults = new ArrayList<>();
 
     public BenchmarkRecorder(
-            @NonNull Logging.Benchmark benchmark, @NonNull Set<ProjectScenario> projectScenarios) {
-        this(benchmark, projectScenarios, GoogleStorageProfileUploader.INSTANCE);
+            @NonNull Logging.Benchmark benchmark, @NonNull ProjectScenario projectScenario) {
+        this(benchmark, projectScenario, GoogleStorageProfileUploader.INSTANCE);
     }
 
     @VisibleForTesting
     public BenchmarkRecorder(
             @NonNull Logging.Benchmark benchmark,
-            @NonNull Set<ProjectScenario> projectScenarios,
+            @NonNull ProjectScenario projectScenario,
             @NonNull ProfileUploader uploader) {
         this.benchmark = benchmark;
-        this.projectScenarios = projectScenarios;
+        this.projectScenario = projectScenario;
         this.uploader = uploader;
     }
 
@@ -108,14 +109,14 @@ public final class BenchmarkRecorder {
         }
 
         GradleBenchmarkResult.Flags.Builder flags = GradleBenchmarkResult.Flags.newBuilder();
-        for (ProjectScenario scenario : projectScenarios) {
-            flags.mergeFrom(scenario.getFlags());
-        }
+
+        flags.mergeFrom(projectScenario.getFlags());
 
         GradleBuildProfile profile = benchmarkResult.getProfile();
 
         if (profile.hasGradleVersion()) {
-            if (profile.getGradleVersion().endsWith("+0000")) {
+            if (profile.getGradleVersion().endsWith("+0000")
+                    || !Strings.isNullOrEmpty(System.getenv("USE_GRADLE_NIGHTLY"))) {
                 // Using nightly gradle version.
                 flags.setGradleVersion(GradleBenchmarkResult.Flags.GradleVersion.UPCOMING_GRADLE);
             }

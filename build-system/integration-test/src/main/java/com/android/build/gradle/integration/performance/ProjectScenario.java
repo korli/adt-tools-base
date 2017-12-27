@@ -21,17 +21,57 @@ import java.util.function.Consumer;
 
 /**
  * Project scenarios for performance tests set-up.
+ *
+ * <p>This is a flat list to explicitly include all the combinations that are
+ * actually tested.
  */
 public enum ProjectScenario {
     NORMAL(flags -> {}),
     DEX_OUT_OF_PROCESS(flags -> flags.setDexInProcess(Flags.DexInProcess.DEX_OUT_OF_PROCESS)),
     NATIVE_MULTIDEX(flags -> flags.setMultiDex(Flags.MultiDexMode.NATIVE)),
     LEGACY_MULTIDEX(flags -> flags.setMultiDex(Flags.MultiDexMode.LEGACY)),
-    JACK_ON(flags -> flags.setCompiler(Flags.Compiler.JACK)),
-    JACK_OUT_OF_PROCESS(flags -> {
-        flags.setCompiler(Flags.Compiler.JACK);
-        // Flag will be renamed to "InProcess" once data is migrated.
-        flags.setDexInProcess(Flags.DexInProcess.DEX_OUT_OF_PROCESS);})
+    DEX_ARCHIVE_MONODEX(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.DEX_ARCHIVE);
+                flags.setMultiDex(Flags.MultiDexMode.NO_MULTIDEX);
+            }),
+    DEX_ARCHIVE_NATIVE_MULTIDEX(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.DEX_ARCHIVE);
+                flags.setMultiDex(Flags.MultiDexMode.NATIVE);
+            }),
+    DEX_ARCHIVE_LEGACY_MULTIDEX(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.DEX_ARCHIVE);
+                flags.setMultiDex(Flags.MultiDexMode.LEGACY);
+            }),
+    NORMAL_J8(flags -> flags.setJava8LangSupport(Flags.Java8LangSupport.DESUGAR_TOOL)),
+    DEX_OUT_OF_PROCESS_J8(
+            flags -> {
+                flags.setDexInProcess(Flags.DexInProcess.DEX_OUT_OF_PROCESS);
+                flags.setJava8LangSupport(Flags.Java8LangSupport.DESUGAR_TOOL);
+            }),
+    DEX_ARCHIVE_MONODEX_J8(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.DEX_ARCHIVE);
+                flags.setMultiDex(Flags.MultiDexMode.NO_MULTIDEX);
+                flags.setJava8LangSupport(Flags.Java8LangSupport.DESUGAR_TOOL);
+            }),
+    D8_MONODEX_J8(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.D8);
+                flags.setJava8LangSupport(Flags.Java8LangSupport.DESUGAR_TOOL);
+            }),
+    D8_NATIVE_MULTIDEX(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.D8);
+                flags.setMultiDex(Flags.MultiDexMode.NATIVE);
+            }),
+    D8_LEGACY_MULTIDEX(
+            flags -> {
+                flags.setCompiler(Flags.Compiler.D8);
+                flags.setMultiDex(Flags.MultiDexMode.LEGACY);
+            }),
     ;
 
     private final Flags flags;
@@ -51,5 +91,13 @@ public enum ProjectScenario {
 
     public Flags getFlags() {
         return flags;
+    }
+
+    public boolean useDexArchive() {
+        return flags.getCompiler() == Flags.Compiler.DEX_ARCHIVE || useD8();
+    }
+
+    public boolean useD8() {
+        return flags.getCompiler() == Flags.Compiler.D8;
     }
 }

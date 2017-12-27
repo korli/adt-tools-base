@@ -23,7 +23,12 @@ import java.util.Collection;
 /**
  * A {@link ResourcePreprocessor} used when no other preprocessor is enabled.
  */
-public class NoOpResourcePreprocessor implements ResourcePreprocessor {
+public final class NoOpResourcePreprocessor implements ResourcePreprocessor {
+
+    public static final NoOpResourcePreprocessor INSTANCE = new NoOpResourcePreprocessor();
+
+    // private constructor to avoid new instances.
+    private NoOpResourcePreprocessor() { }
 
     @Override
     public boolean needsPreprocessing(File file) {

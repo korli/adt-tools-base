@@ -19,9 +19,7 @@ package com.android.manifmerger;
 import static org.mockito.Mockito.verify;
 
 import com.android.utils.ILogger;
-
 import junit.framework.TestCase;
-
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
@@ -90,6 +88,24 @@ public class AttributeModelTest extends TestCase {
         assertTrue(multiValueValidator.validates(mergingReport, mXmlAttribute, "doh !"));
 
         assertFalse(multiValueValidator.validates(mergingReport, mXmlAttribute, "oh no !"));
+    }
+
+    public void testSeparatedValuesValidator() {
+        AttributeModel.SeparatedValuesValidator separatedValuesValidator =
+                new AttributeModel.SeparatedValuesValidator(",", "foo", "bar", "doh !");
+        MergingReport.Builder mergingReport = new MergingReport.Builder(mMockLog);
+        assertTrue(separatedValuesValidator.validates(mergingReport, mXmlAttribute, "foo"));
+        assertTrue(separatedValuesValidator.validates(mergingReport, mXmlAttribute, "foo,bar"));
+        assertTrue(separatedValuesValidator.validates(mergingReport, mXmlAttribute, "foo,foo"));
+        assertTrue(
+                separatedValuesValidator.validates(mergingReport, mXmlAttribute, "doh !,bar,foo"));
+
+        assertFalse(separatedValuesValidator.validates(mergingReport, mXmlAttribute, "oh no !"));
+        assertFalse(
+                separatedValuesValidator.validates(mergingReport, mXmlAttribute, "foo,oh no !"));
+        assertFalse(separatedValuesValidator.validates(mergingReport, mXmlAttribute, ""));
+        assertFalse(separatedValuesValidator.validates(mergingReport, mXmlAttribute, ",,"));
+        assertFalse(separatedValuesValidator.validates(mergingReport, mXmlAttribute, "foo, bar"));
     }
 
     public void testIntegerValueValidator() {

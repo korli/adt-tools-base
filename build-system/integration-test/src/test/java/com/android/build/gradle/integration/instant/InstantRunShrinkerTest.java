@@ -16,19 +16,18 @@
 
 package com.android.build.gradle.integration.instant;
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
 import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.builder.model.AndroidProject;
 import com.android.builder.model.OptionalCompilationStep;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.SplitApks;
 import com.google.common.truth.Expect;
-import java.io.IOException;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -81,8 +80,7 @@ public class InstantRunShrinkerTest {
     public Expect expect = Expect.createAndEnableStackTrace();
 
     @Before
-    public void addProvidedLibrary() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
+    public void addProvidedLibrary() throws Exception {
         TestFileUtils.appendToFile(project.getBuildFile(), "\n"
                 + "android.buildTypes.debug {\n"
                 + "    minifyEnabled true\n"
@@ -96,14 +94,17 @@ public class InstantRunShrinkerTest {
     public void checkApplicationIsNotRemoved() throws Exception {
         project.execute("clean");
         project.executor()
-                .withInstantRun(23, ColdswapMode.DEFAULT, OptionalCompilationStep.RESTART_ONLY)
+                .withInstantRun(new AndroidVersion(23, null), OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
 
-        // Check the custom application class was included.
-        assertThatApk(project.getApk("debug"))
-                .containsClass("Lcom/example/helloworld/MyApplication;",
-                        AbstractAndroidSubject.ClassFileScope.INSTANT_RUN);
-    }
+        AndroidProject model = project.model().getSingle().getOnlyModel();
 
+        SplitApks apks =
+                InstantRunTestUtils.getCompiledColdSwapChange(
+                        InstantRunTestUtils.getInstantRunModel(model));
+
+        // Check the custom application class was included.
+        assertThat(apks).hasClass("Lcom/example/helloworld/MyApplication;");
+    }
 
 }

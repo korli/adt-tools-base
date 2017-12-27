@@ -24,8 +24,6 @@ import com.android.build.gradle.external.gson.NativeBuildConfigValue;
 import com.android.build.gradle.external.gson.NativeLibraryValue;
 import com.android.build.gradle.internal.VariantManager;
 import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.variant.BaseVariantData;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
 import com.android.build.gradle.ndk.internal.NativeCompilerArgsUtil;
 import com.android.build.gradle.tasks.ExternalNativeJsonGenerator;
 import com.android.builder.model.NativeAndroidProject;
@@ -42,10 +40,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-
-import org.gradle.api.Project;
-import org.gradle.tooling.provider.model.ToolingModelBuilder;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -53,6 +47,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.gradle.api.Project;
+import org.gradle.tooling.provider.model.ToolingModelBuilder;
 
 /**
  * Builder for the custom Native Android model.
@@ -99,9 +95,7 @@ public class NativeModelBuilder implements ToolingModelBuilder {
             NativeAndroidProjectBuilder info = new NativeAndroidProjectBuilder();
 
             Set<String> buildSystems = Sets.newHashSet();
-            for (BaseVariantData<? extends BaseVariantOutputData> variantData
-                    : variantManager.getVariantDataList()) {
-                VariantScope scope = variantData.getScope();
+            for (VariantScope scope : variantManager.getVariantScopes()) {
                 ExternalNativeJsonGenerator generator = scope.getExternalNativeJsonGenerator();
                 if (generator != null) {
                     buildSystems.add(generator.getNativeBuildSystem().getName());

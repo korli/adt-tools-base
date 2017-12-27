@@ -23,7 +23,6 @@ import com.android.builder.model.BaseConfig;
 import com.android.builder.model.ClassField;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-
 import java.io.File;
 import java.io.Serializable;
 import java.util.Collection;
@@ -139,20 +138,32 @@ abstract class BaseConfigImpl implements BaseConfig, Serializable {
     @NonNull
     @Override
     public List<File> getJarJarRuleFiles() {
+        if (mJarJarRuleFiles == null) {
+            return ImmutableList.of();
+        }
         return mJarJarRuleFiles;
     }
 
     @Override
     public String toString() {
-        return "BaseConfigImpl{" +
-                "applicationIdSuffix='" + mApplicationIdSuffix + '\'' +
-                ", versionNameSuffix='" + mVersionNameSuffix + '\'' +
-                ", mManifestPlaceholders=" + mManifestPlaceholders +
-                ", mBuildConfigFields=" + mBuildConfigFields +
-                ", mResValues=" + mResValues +
-                ", mMultiDexEnabled=" + mMultiDexEnabled +
-                ", mJarJarRuleFiles=" + mJarJarRuleFiles +
-                '}';
+        return "BaseConfigImpl{"
+                + "applicationIdSuffix='"
+                + mApplicationIdSuffix
+                + '\''
+                + ", versionNameSuffix='"
+                + mVersionNameSuffix
+                + '\''
+                + ", mManifestPlaceholders="
+                + mManifestPlaceholders
+                + ", mBuildConfigFields="
+                + mBuildConfigFields
+                + ", mResValues="
+                + mResValues
+                + ", mMultiDexEnabled="
+                + mMultiDexEnabled
+                + ", mJarJarRuleFiles="
+                + mJarJarRuleFiles
+                + '}';
     }
 
     @Override
@@ -164,21 +175,28 @@ abstract class BaseConfigImpl implements BaseConfig, Serializable {
             return false;
         }
         BaseConfigImpl that = (BaseConfigImpl) o;
-        return Objects.equals(mApplicationIdSuffix, that.mApplicationIdSuffix) &&
-                Objects.equals(mVersionNameSuffix, that.mVersionNameSuffix) &&
-                Objects.equals(mManifestPlaceholders, that.mManifestPlaceholders) &&
-                Objects.equals(mBuildConfigFields, that.mBuildConfigFields) &&
-                Objects.equals(mResValues, that.mResValues) &&
-                Objects.equals(mMultiDexEnabled, that.mMultiDexEnabled) &&
-                Objects.equals(mMultiDexKeepFile, that.mMultiDexKeepFile) &&
-                Objects.equals(mMultiDexKeepProguard, that.mMultiDexKeepProguard) &&
-                Objects.equals(mJarJarRuleFiles, that.mJarJarRuleFiles);
+        return Objects.equals(mApplicationIdSuffix, that.mApplicationIdSuffix)
+                && Objects.equals(mVersionNameSuffix, that.mVersionNameSuffix)
+                && Objects.equals(mManifestPlaceholders, that.mManifestPlaceholders)
+                && Objects.equals(mBuildConfigFields, that.mBuildConfigFields)
+                && Objects.equals(mResValues, that.mResValues)
+                && Objects.equals(mMultiDexEnabled, that.mMultiDexEnabled)
+                && Objects.equals(mMultiDexKeepFile, that.mMultiDexKeepFile)
+                && Objects.equals(mMultiDexKeepProguard, that.mMultiDexKeepProguard)
+                && Objects.equals(mJarJarRuleFiles, that.mJarJarRuleFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(mApplicationIdSuffix, mVersionNameSuffix, mManifestPlaceholders,
-                mBuildConfigFields, mResValues, mMultiDexEnabled, mMultiDexKeepFile,
-                mMultiDexKeepProguard, mJarJarRuleFiles);
+        return Objects.hash(
+                mApplicationIdSuffix,
+                mVersionNameSuffix,
+                mManifestPlaceholders,
+                mBuildConfigFields,
+                mResValues,
+                mMultiDexEnabled,
+                mMultiDexKeepFile,
+                mMultiDexKeepProguard,
+                mJarJarRuleFiles);
     }
 }

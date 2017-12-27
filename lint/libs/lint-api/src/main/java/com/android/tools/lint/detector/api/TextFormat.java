@@ -35,9 +35,16 @@ public enum TextFormat {
      * Raw output format which is similar to text but allows some markup:
      * <ul>
      * <li>HTTP urls (http://...)
-     * <li>Sentences immediately surrounded by * will be shown as bold.
+     * <li>Sentences immediately surrounded by * will be shown as italics.
+     * <li>Sentences immediately surrounded by ** will be shown as bold.
+     * <li>Sentences immediately surrounded by *** will be shown as bold italics.
      * <li>Sentences immediately surrounded by ` will be shown using monospace
      * fonts
+     * <li>You can escape the previous characters with a backslash, \. Backslash
+     * characters must themselves be escaped with a backslash, e.g. use \\.
+     * <li>If you want to use bold or italics within a word, you can use the
+     * trick of putting a zero-width space between the characters by entering
+     * a \\u200b unicode character.</li>
      * </ul>
      * Furthermore, newlines are converted to br's when converting newlines.
      * Note: It does not insert {@code <html>} tags around the fragment for HTML output.
@@ -116,8 +123,9 @@ public enum TextFormat {
             }
             case TEXT: {
                 switch (to) {
-                    case TEXT:
                     case RAW:
+                        return textToRaw(message);
+                    case TEXT:
                         return message;
                     case HTML:
                     case HTML_WITH_UNICODE:
@@ -151,6 +159,34 @@ public enum TextFormat {
             }
         }
         return message;
+    }
+
+    @NonNull
+    private static String textToRaw(@NonNull String message) {
+        boolean mustEscape = false;
+        int n = message.length();
+        for (int i = 0; i < n; i++) {
+            char c = message.charAt(i);
+            if (c == '\\' || c == '*' || c == '`') {
+                mustEscape = true;
+                break;
+            }
+        }
+
+        if (!mustEscape) {
+            return message;
+        }
+
+        StringBuilder sb = new StringBuilder(message.length() * 2);
+        for (int i = 0; i < n; i++) {
+            char c = message.charAt(i);
+            if (c == '\\' || c == '*' || c == '`') {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+
+        return sb.toString();
     }
 
     /** Converts to this output format from the given HTML-format text */
@@ -266,6 +302,7 @@ public enum TextFormat {
     }
 
     private static final String HTTP_PREFIX = "http://";
+    private static final String HTTPS_PREFIX = "https://";
 
     /** Converts to this output format from the given raw-format text */
     @NonNull
@@ -278,35 +315,83 @@ public enum TextFormat {
         char prev = 0;
         int flushIndex = 0;
         int n = text.length();
+        boolean escaped = false;
         for (int i = 0; i < n; i++) {
             char c = text.charAt(i);
-            if ((c == '*' || c == '`') && i < n - 1) {
+            if (c == '\\' && !escaped) {
+                escaped = true;
+                if (i > flushIndex) {
+                    appendEscapedText(sb, text, html, flushIndex, i, escapeUnicode);
+                }
+                flushIndex = i + 1;
+                continue;
+            }
+
+            if (!escaped && (c == '*' || c == '`') && i < n - 1) {
                 // Scout ahead for range end
                 if (!Character.isLetterOrDigit(prev)
                         && !Character.isWhitespace(text.charAt(i + 1))) {
                     // Found * or ` immediately before a letter, and not in the middle of a word
                     // Find end
                     int end = text.indexOf(c, i + 1);
+                    boolean bold = false;
+                    if (end == i + 1 && c == '*') {
+                        int end2 = text.indexOf('*', end + 1);
+                        if (end2 == end + 1) {
+                            end2 = text.indexOf("***", end2 + 1);
+                            if (end2 != -1) {
+                                // *** means bold italics
+                                if (i > flushIndex) {
+                                    appendEscapedText(sb, text, html, flushIndex, i, escapeUnicode);
+                                }
+                                if (html) {
+                                    sb.append("<b><i>");
+                                    appendEscapedText(sb, text, true, i + 3, end2, escapeUnicode);
+                                    sb.append("</i></b>");
+                                } else {
+                                    appendEscapedText(sb, text, false, i + 3, end2, escapeUnicode);
+                                }
+                                flushIndex = end2 + 3;
+                                i = flushIndex - 1; // -1: account for the i++ in the loop
+                            }
+                            continue;
+                        } else if (end2 != -1 && end2 > end + 1 && end2 < n - 1 &&
+                                text.charAt(end2 + 1) == '*') {
+                            end = end2;
+                            bold = true;
+                        }
+                    }
+
                     if (end != -1 && (end == n - 1 || !Character.isLetter(text.charAt(end + 1)))) {
                         if (i > flushIndex) {
                             appendEscapedText(sb, text, html, flushIndex, i, escapeUnicode);
                         }
+                        if (bold) {
+                            i++;
+                        }
                         if (html) {
-                            String tag = c == '*' ? "b" : "code";
+                            String tag = bold ? "b" : c == '*' ? "i" : "code";
                             sb.append('<').append(tag).append('>');
-                            appendEscapedText(sb, text, html, i + 1, end, escapeUnicode);
+                            appendEscapedText(sb, text, true, i + 1, end, escapeUnicode);
                             sb.append('<').append('/').append(tag).append('>');
                         } else {
-                            appendEscapedText(sb, text, html, i + 1, end, escapeUnicode);
+                            appendEscapedText(sb, text, false, i + 1, end, escapeUnicode);
                         }
                         flushIndex = end + 1;
+                        if (bold) {
+                            flushIndex++;
+                        }
                         i = flushIndex - 1; // -1: account for the i++ in the loop
                     }
                 }
-            } else if (html && c == 'h' && i < n - 1 && text.charAt(i + 1) == 't'
-                    && text.startsWith(HTTP_PREFIX, i) && !Character.isLetterOrDigit(prev)) {
+            } else if (html
+                    && c == 'h' && i < n - 1 && text.charAt(i + 1) == 't'
+                    && (text.startsWith(HTTP_PREFIX, i) || text.startsWith(HTTPS_PREFIX, i))
+                    && !Character.isLetterOrDigit(prev)) {
                 // Find url end
-                int end = i + HTTP_PREFIX.length();
+                int length = text.startsWith(HTTP_PREFIX, i) ?
+                        HTTP_PREFIX.length() : HTTPS_PREFIX.length();
+                int end = i + length;
                 while (end < n) {
                     char d = text.charAt(end);
                     if (Character.isWhitespace(d)) {
@@ -318,9 +403,9 @@ public enum TextFormat {
                 if (last == '.' || last == ')' || last == '!') {
                     end--;
                 }
-                if (end > i + HTTP_PREFIX.length()) {
+                if (end > i + length) {
                     if (i > flushIndex) {
-                        appendEscapedText(sb, text, html, flushIndex, i, escapeUnicode);
+                        appendEscapedText(sb, text, true, flushIndex, i, escapeUnicode);
                     }
 
                     String url = text.substring(i, end);
@@ -333,8 +418,11 @@ public enum TextFormat {
                     flushIndex = end;
                     i = flushIndex - 1; // -1: account for the i++ in the loop
                 }
+            } else if (c == '\n' && escaped) {
+                flushIndex++;
             }
             prev = c;
+            escaped = false;
         }
 
         if (flushIndex < n) {
@@ -385,6 +473,14 @@ public enum TextFormat {
                     sb.append("<br/>\n");
                 } else {
                     if (c > 255 && escapeUnicode) {
+                        if (c == '\u200b') {
+                            // Skip zero-width spaces; they're there to let you insert "word"
+                            // separators when you want to use * characters for formatting,
+                            // e.g. to get italics for "NN" in "values-vNN" you can't use
+                            // "values-v*NN*" since "*" is in the middle of the word, but you
+                            // can use "values-v\u200b*NN*"
+                            continue;
+                        }
                         sb.append("&#");
                         sb.append(Integer.toString(c));
                         sb.append(';');
@@ -398,6 +494,10 @@ public enum TextFormat {
         } else {
             for (int i = start; i < end; i++) {
                 char c = text.charAt(i);
+                if (c == '\u200b') {
+                    // See comment under HTML section
+                    continue;
+                }
                 sb.append(c);
             }
         }

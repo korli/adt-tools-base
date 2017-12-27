@@ -18,7 +18,6 @@ package com.android.builder.model;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-
 import com.android.builder.model.level2.DependencyGraphs;
 import java.io.File;
 import java.util.Collection;
@@ -56,6 +55,10 @@ public interface BaseArtifact {
      */
     @NonNull
     File getClassesFolder();
+
+    /** Folders with additional classes registered by third-party plugins like Kotlin. */
+    @NonNull
+    Set<File> getAdditionalClassesFolders();
 
     /**
      * Returns the folder containing resource files that classes form this artifact expect to find

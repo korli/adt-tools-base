@@ -16,118 +16,52 @@
 
 package com.android.build.gradle.tasks;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.incremental.DexPackagingPolicy;
 import com.android.build.gradle.internal.incremental.FileType;
 import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
+import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.PackagingScope;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
+import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.builder.profile.ProcessProfileWriter;
-import com.android.ide.common.res2.FileStatus;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.io.Files;
+import com.android.builder.utils.FileCache;
 import com.google.wireless.android.sdk.stats.GradleBuildProjectMetrics;
-import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Map;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipOutputStream;
-import org.gradle.api.tasks.ParallelizableTask;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.tasks.CacheableTask;
+import org.gradle.api.tasks.Internal;
 
-/**
- * Task to package an Android application (APK).
- */
-@ParallelizableTask
+/** Task to package an Android application (APK). */
 public class PackageApplication extends PackageAndroidArtifact {
 
+    TaskOutputHolder.TaskOutputType expectedOutputType;
+
     @Override
+    @Internal
+    protected VariantScope.TaskOutputType getTaskOutputType() {
+        return expectedOutputType;
+    }
+
+    @Override
+    @Internal
     protected boolean isIncremental() {
         return true;
     }
 
     @Override
-    protected void doFullTaskAction() throws IOException {
-        super.doFullTaskAction();
-        recordMetrics();
-    }
-
-    @Override
-    protected void doIncrementalTaskAction(Map<File, FileStatus> changedInputs) throws IOException {
-        super.doIncrementalTaskAction(changedInputs);
-        recordMetrics();
-    }
-
-    private File zipDexesForInstantRun(Iterable<File> dexFolders,
-            ImmutableSet.Builder<File> dexFoldersForApk)
-            throws IOException {
-
-        File tmpZipFile = new File(instantRunSupportDir, "classes.zip");
-        Files.createParentDirs(tmpZipFile);
-        ZipOutputStream zipFile = new ZipOutputStream(
-                new BufferedOutputStream(new FileOutputStream(tmpZipFile)));
-        // no need to compress a zip, the APK itself gets compressed.
-        zipFile.setLevel(0);
-
-        try {
-            for (File dexFolder : dexFolders) {
-                if (dexFolder.getName().contains(INSTANT_RUN_PACKAGES_PREFIX)) {
-                    dexFoldersForApk.add(dexFolder);
-                } else {
-                    for (File file : Files.fileTreeTraverser().breadthFirstTraversal(dexFolder)) {
-                        if (file.isFile() && file.getName().endsWith(SdkConstants.DOT_DEX)) {
-                            // There are several pieces of code in the runtime library which depends on
-                            // this exact pattern, so it should not be changed without thorough testing
-                            // (it's basically part of the contract).
-                            String entryName = file.getParentFile().getName() + "-" + file.getName();
-                            zipFile.putNextEntry(new ZipEntry(entryName));
-                            try {
-                                Files.copy(file, zipFile);
-                            } finally {
-                                zipFile.closeEntry();
-                            }
-                        }
-
-                    }
-                }
-            }
-        } finally {
-            zipFile.close();
-        }
-
-        // now package that zip file as a zip since this is what the packager is expecting !
-        File finalResourceFile = new File(instantRunSupportDir, "resources.zip");
-        zipFile = new ZipOutputStream(new BufferedOutputStream(
-                new FileOutputStream(finalResourceFile)));
-        try {
-            zipFile.putNextEntry(new ZipEntry("instant-run.zip"));
-            try {
-                Files.copy(tmpZipFile, zipFile);
-            } finally {
-                zipFile.closeEntry();
-            }
-        } finally {
-            zipFile.close();
-        }
-
-        return finalResourceFile;
-    }
-
-    private void recordMetrics() {
+    void recordMetrics(File apkOutputFile, File resourcesApFile) {
         long metricsStartTime = System.nanoTime();
         GradleBuildProjectMetrics.Builder metrics = GradleBuildProjectMetrics.newBuilder();
 
-        Long apkSize = getSize(getOutputFile());
+        Long apkSize = getSize(apkOutputFile);
         if (apkSize != null) {
             metrics.setApkSize(apkSize);
         }
 
-        Long resourcesApSize = getSize(getResourceFile());
+        Long resourcesApSize = getSize(resourcesApFile);
         if (resourcesApSize != null) {
             metrics.setResourcesApSize(resourcesApSize);
         }
@@ -138,6 +72,7 @@ public class PackageApplication extends PackageAndroidArtifact {
     }
 
     @Nullable
+    @Internal
     private static Long getSize(@Nullable File file) {
         if (file == null) {
             return null;
@@ -152,16 +87,36 @@ public class PackageApplication extends PackageAndroidArtifact {
     // ----- ConfigAction -----
 
     /**
-     * Configures the task to perform the "standard" packaging, including all
-     * files that should end up in the APK.
+     * Configures the task to perform the "standard" packaging, including all files that should end
+     * up in the APK.
      */
     public static class StandardConfigAction
             extends PackageAndroidArtifact.ConfigAction<PackageApplication> {
 
+        private final TaskOutputHolder.TaskOutputType expectedOutputType;
+
         public StandardConfigAction(
-                @NonNull PackagingScope scope,
-                @Nullable InstantRunPatchingPolicy patchingPolicy) {
-            super(scope, patchingPolicy);
+                @NonNull PackagingScope packagingScope,
+                @NonNull File outputDirectory,
+                @Nullable InstantRunPatchingPolicy patchingPolicy,
+                @NonNull VariantScope.TaskOutputType inputResourceFilesType,
+                @NonNull FileCollection resourceFiles,
+                @NonNull FileCollection manifests,
+                @NonNull VariantScope.TaskOutputType manifestType,
+                @NonNull OutputScope outputScope,
+                @Nullable FileCache fileCache,
+                @NonNull TaskOutputHolder.TaskOutputType expectedOutputType) {
+            super(
+                    packagingScope,
+                    outputDirectory,
+                    patchingPolicy,
+                    inputResourceFilesType,
+                    resourceFiles,
+                    manifests,
+                    manifestType,
+                    fileCache,
+                    outputScope);
+            this.expectedOutputType = expectedOutputType;
         }
 
         @NonNull
@@ -177,12 +132,9 @@ public class PackageApplication extends PackageAndroidArtifact {
         }
 
         @Override
-        public void execute(@NonNull final PackageApplication packageApplication) {
-            ConventionMappingHelper.map(
-                    packageApplication,
-                    "outputFile",
-                    packagingScope::getOutputPackage);
-            super.execute(packageApplication);
+        protected void configure(PackageApplication task) {
+            super.configure(task);
+            task.expectedOutputType = expectedOutputType;
         }
     }
 
@@ -198,8 +150,23 @@ public class PackageApplication extends PackageAndroidArtifact {
         public InstantRunResourcesConfigAction(
                 @NonNull File outputFile,
                 @NonNull PackagingScope scope,
-                @Nullable InstantRunPatchingPolicy patchingPolicy) {
-            super(scope, patchingPolicy);
+                @Nullable InstantRunPatchingPolicy patchingPolicy,
+                @NonNull VariantScope.TaskOutputType inputResourceFilesType,
+                @NonNull FileCollection resourceFiles,
+                @NonNull FileCollection manifests,
+                @NonNull VariantScope.TaskOutputType manifestType,
+                @Nullable FileCache fileCache,
+                @NonNull OutputScope outputScope) {
+            super(
+                    scope,
+                    outputFile.getParentFile(),
+                    patchingPolicy,
+                    inputResourceFilesType,
+                    resourceFiles,
+                    manifests,
+                    manifestType,
+                    fileCache,
+                    outputScope);
             mOutputFile = outputFile;
         }
 
@@ -216,23 +183,24 @@ public class PackageApplication extends PackageAndroidArtifact {
         }
 
         @Override
-        public void execute(@NonNull final PackageApplication packageApplication) {
-            packageApplication.setOutputFile(mOutputFile);
-
-            super.execute(packageApplication);
+        protected void configure(@NonNull PackageApplication packageApplication) {
+            packageApplication.expectedOutputType =
+                    TaskOutputHolder.TaskOutputType.INSTANT_RUN_PACKAGED_RESOURCES;
             packageApplication.instantRunFileType = FileType.RESOURCES;
 
             // Don't try to add any special dex files to this zip.
             packageApplication.dexPackagingPolicy = DexPackagingPolicy.STANDARD;
 
             // Skip files which are not needed for hot/cold swap.
-            for (String prop : ImmutableList.of("dexFolders", "jniFolders", "javaResourceFiles")) {
-                ConventionMappingHelper.map(
-                        packageApplication, prop, Collections::<File>emptySet);
-            }
+            FileCollection emptyCollection = packagingScope.getProject().files();
+
+            packageApplication.dexFolders = emptyCollection;
+            packageApplication.jniFolders = emptyCollection;
+            packageApplication.javaResourceFiles = emptyCollection;
 
             // Don't sign.
             packageApplication.setSigningConfig(null);
+            packageApplication.outputFileProvider = (split) -> mOutputFile;
         }
     }
 }

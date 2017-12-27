@@ -27,7 +27,6 @@ import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Position;
-import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.annotations.Beta;
 import com.google.common.base.Splitter;
 import com.intellij.openapi.util.TextRange;
@@ -51,6 +50,7 @@ import lombok.ast.Throw;
 import lombok.ast.TypeReference;
 import lombok.ast.TypeReferencePart;
 import lombok.ast.While;
+import org.jetbrains.uast.UFile;
 
 /**
  * A wrapper for a Java parser. This allows tools integrating lint to map directly
@@ -163,7 +163,7 @@ public abstract class JavaParser {
         PsiFile containingFile = element.getContainingFile();
         File file = context.file;
         CharSequence contents = context.getContents();
-        if (containingFile != context.getJavaFile()) {
+        if (!containingFile.equals(context.getPsiFile())) {
             // Reporting an error in a different file.
             if (context.getDriver().getScope().size() == 1) {
                 // Don't bother with this error if it's in a different file during single-file analysis
@@ -177,7 +177,7 @@ public abstract class JavaParser {
             contents = getFileContents(containingFile);
         }
         return Location.create(file, contents, range.getStartOffset(),
-                               range.getEndOffset());
+                               range.getEndOffset()).withSource(element);
     }
 
     @Nullable
@@ -199,7 +199,7 @@ public abstract class JavaParser {
         }
         contents = getFileContents(containingFile);
         return Location.create(file, contents, range.getStartOffset(),
-                range.getEndOffset());
+                range.getEndOffset()).withSource(element);
     }
 
     /**
@@ -250,9 +250,10 @@ public abstract class JavaParser {
                 to.getTextRange().getEndOffset() + toDelta);
         if (end <= start) {
             // Some AST nodes don't have proper bounds, such as empty parameter lists
-            return Location.create(context.file, contents, start, fromRange.getEndOffset());
+            return Location.create(context.file, contents, start, fromRange.getEndOffset())
+                    .withSource(from);
         }
-        return Location.create(context.file, contents, start, end);
+        return Location.create(context.file, contents, start, end).withSource(from);
     }
 
     /**
@@ -311,7 +312,7 @@ public abstract class JavaParser {
                     int length = node.getClass().getSimpleName().length();
                     return Location.create(location.getFile(), start,
                             new DefaultPosition(start.getLine(), start.getColumn() + length,
-                                    start.getOffset() + length));
+                                    start.getOffset() + length)).withSource(node);
                 }
             }
         }
@@ -348,6 +349,7 @@ public abstract class JavaParser {
 
         return getLocation(context, element);
     }
+
     /**
      * Creates a light-weight handle to a location for the given node. It can be
      * turned into a full fledged location by
@@ -380,6 +382,14 @@ public abstract class JavaParser {
      * @param compilationUnit the compilation unit being disposed
      */
     public void dispose(@NonNull JavaContext context, @NonNull PsiJavaFile compilationUnit) {
+    }
+
+    /**
+     * Dispose any data structures held for the given context.
+     * @param context information about the file previously parsed
+     * @param compilationUnit the compilation unit being disposed
+     */
+    public void dispose(@NonNull JavaContext context, @NonNull UFile compilationUnit) {
     }
 
     /**
@@ -458,7 +468,7 @@ public abstract class JavaParser {
     public abstract static class TypeDescriptor {
         /**
          * Returns the fully qualified name of the type, such as "int" or "android.app.Activity"
-         * */
+         */
         @NonNull public abstract String getName();
 
         /** Returns the simple name of this class */

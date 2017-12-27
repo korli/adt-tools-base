@@ -22,11 +22,15 @@ import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.concurrency.GuardedBy;
-import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.SyncOptions;
 import com.android.builder.core.AndroidBuilder;
+import com.android.builder.core.ErrorReporter;
 import com.android.builder.core.LibraryRequest;
 import com.android.builder.model.OptionalCompilationStep;
+import com.android.builder.model.SyncIssue;
+import com.android.builder.model.Version;
 import com.android.builder.sdk.DefaultSdkLoader;
 import com.android.builder.sdk.PlatformLoader;
 import com.android.builder.sdk.SdkInfo;
@@ -52,6 +56,8 @@ import java.io.InputStreamReader;
 import java.util.Collection;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
 
@@ -74,8 +80,12 @@ public class SdkHandler {
     private SdkLoader sdkLoader;
     private File sdkFolder;
     private File ndkFolder;
+    private File cmakePathInLocalProp = null;
     private SdkLibData sdkLibData = SdkLibData.dontDownload();
     private boolean isRegularSdk = true;
+
+    // Regex pattern to find quotes
+    private static final Pattern PATTERN_FIND_QUOTES = Pattern.compile("\"([^\"]*)\"");
 
     public static void setTestSdkFolder(File testSdkFolder) {
         sTestSdkFolder = testSdkFolder;
@@ -85,12 +95,14 @@ public class SdkHandler {
      * Returns true if we should use a cached SDK, false if we should force the re-parsing of the
      * SDK components.
      */
-    public static boolean useCachedSdk(Project project) {
+    public static boolean useCachedSdk(ProjectOptions projectOptions) {
         // only used cached version of the sdk when in instant run mode but not
         // syncing.
-        return AndroidGradleOptions.getOptionalCompilationSteps(project).contains(
-                OptionalCompilationStep.INSTANT_DEV)
-                && !AndroidGradleOptions.buildModelOnlyAdvanced(project);
+        return projectOptions
+                        .getOptionalCompilationSteps()
+                        .contains(OptionalCompilationStep.INSTANT_DEV)
+                && SyncOptions.getModelQueryMode(projectOptions)
+                        == ErrorReporter.EvaluationMode.STANDARD;
     }
 
     public SdkHandler(@NonNull Project project,
@@ -128,6 +140,29 @@ public class SdkHandler {
             sdkLoader = sSdkLoader;
         }
 
+        if (buildToolRevision.compareTo(AndroidBuilder.MIN_BUILD_TOOLS_REV) < 0) {
+            androidBuilder
+                    .getErrorReporter()
+                    .handleSyncWarning(
+                            AndroidBuilder.DEFAULT_BUILD_TOOLS_REVISION.toString(),
+                            SyncIssue.TYPE_BUILD_TOOLS_TOO_LOW,
+                            String.format(
+                                    "The specified Android SDK Build Tools version (%1$s) is "
+                                            + "ignored, as it is below the minimum supported "
+                                            + "version (%2$s) for Android Gradle Plugin %3$s.\n"
+                                            + "Android SDK Build Tools %4$s will be used.\n"
+                                            + "To suppress this warning, "
+                                            + "remove \"buildToolsVersion '%1$s'\" "
+                                            + "from your build.gradle file, as each "
+                                            + "version of the Android Gradle Plugin now has a "
+                                            + "default version of the build tools.",
+                                    buildToolRevision,
+                                    AndroidBuilder.MIN_BUILD_TOOLS_REV,
+                                    Version.ANDROID_GRADLE_PLUGIN_VERSION,
+                                    AndroidBuilder.DEFAULT_BUILD_TOOLS_REVISION));
+            buildToolRevision = AndroidBuilder.DEFAULT_BUILD_TOOLS_REVISION;
+        }
+
 
         Stopwatch stopwatch = Stopwatch.createStarted();
         SdkInfo sdkInfo = sdkLoader.getSdkInfo(logger);
@@ -143,21 +178,38 @@ public class SdkHandler {
         androidBuilder.setTargetInfo(targetInfo);
         androidBuilder.setLibraryRequests(usedLibraries);
 
+        logger.verbose("SDK initialized in %1$d ms", stopwatch.elapsed(TimeUnit.MILLISECONDS));
+    }
+
+    public void ensurePlatformToolsIsInstalled(ErrorReporter errorReporter) {
         // Check if platform-tools are installed. We check here because realistically, all projects
         // should have platform-tools in order to build.
         ProgressIndicator progress = new ConsoleProgressIndicator();
         AndroidSdkHandler sdk = AndroidSdkHandler.getInstance(getSdkFolder());
         LocalPackage platformToolsPackage =
-                sdk.getLatestLocalPackageForPrefix(SdkConstants.FD_PLATFORM_TOOLS, true, progress);
+                sdk.getLatestLocalPackageForPrefix(
+                        SdkConstants.FD_PLATFORM_TOOLS, null, true, progress);
         if (platformToolsPackage == null) {
-            sdkLoader.installSdkTool(sdkLibData, SdkConstants.FD_PLATFORM_TOOLS);
+            if (sdkLibData.useSdkDownload()) {
+                sdkLoader.installSdkTool(sdkLibData, SdkConstants.FD_PLATFORM_TOOLS);
+            } else {
+                errorReporter.handleSyncWarning(
+                        SdkConstants.FD_PLATFORM_TOOLS,
+                        SyncIssue.TYPE_MISSING_SDK_PACKAGE,
+                        SdkConstants.FD_PLATFORM_TOOLS + " package is not installed.");
+            }
         }
-        logger.verbose("SDK initialized in %1$d ms", stopwatch.elapsed(TimeUnit.MILLISECONDS));
     }
 
     @Nullable
     public File getSdkFolder() {
         return sdkFolder;
+    }
+
+    // Returns the Cmake folder set in local.properties.
+    @Nullable
+    public File getCmakePathInLocalProp() {
+        return cmakePathInLocalProp;
     }
 
     @Nullable
@@ -289,6 +341,23 @@ public class SdkHandler {
         sdkFolder = sdkLocation.getFirst();
         isRegularSdk = sdkLocation.getSecond();
         ndkFolder = NdkHandler.findNdkDirectory(properties, rootDir);
+
+        // Check if the user has specified a cmake directory in local properties and assign the
+        // cmake folder.
+        String cmakeProperty = properties.getProperty("cmake.dir");
+        if (cmakeProperty != null) {
+            // cmake.dir can be specified one of two ways
+            // 1. cmake.dir="value"
+            // 2. cmake.dir=value
+            // Inorder to create a file, we just need the value without the quotes, so if the CMake
+            // directory's value is within quotes, extract that value.
+            Matcher m = PATTERN_FIND_QUOTES.matcher(cmakeProperty);
+            if (m.find()) {
+                cmakePathInLocalProp = new File(m.group(1));
+            } else {
+                cmakePathInLocalProp = new File(cmakeProperty);
+            }
+        }
     }
 
     public void setSdkLibData(SdkLibData sdkLibData) {

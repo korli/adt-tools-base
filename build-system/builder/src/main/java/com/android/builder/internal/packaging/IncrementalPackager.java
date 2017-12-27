@@ -19,10 +19,10 @@ package com.android.builder.internal.packaging;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.builder.files.NativeLibraryAbiPredicate;
-import com.android.builder.files.RelativeFile;
 import com.android.apkzlib.zfile.ApkCreator;
 import com.android.apkzlib.zfile.ApkCreatorFactory;
+import com.android.builder.files.NativeLibraryAbiPredicate;
+import com.android.builder.files.RelativeFile;
 import com.android.builder.packaging.PackagerException;
 import com.android.ide.common.res2.FileStatus;
 import com.google.common.base.Preconditions;
@@ -31,7 +31,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.io.Closer;
-
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -47,7 +46,6 @@ import java.util.stream.Collectors;
  *     <li>Java resource files;
  *     <li>JNI libraries;
  *     <li>Dex files;
- *     <li>Atom metadata files;</li>
  * </ul>
  *
  * <p>The {@code IncrementalPackager} class can create an APK from scratch and can incrementally
@@ -120,8 +118,10 @@ public class IncrementalPackager implements Closeable {
             @NonNull File intermediateDir, @NonNull ApkCreatorFactory factory,
             @NonNull Set<String> acceptedAbis, boolean jniDebugMode)
             throws PackagerException, IOException {
-        Preconditions.checkArgument(intermediateDir.isDirectory(),
-                "!intermediateDir.isDirectory()");
+        if (!intermediateDir.isDirectory()) {
+            throw new IllegalArgumentException(
+                    "!intermediateDir.isDirectory(): " + intermediateDir);
+        }
         checkOutputFile(creationData.getApkPath());
 
         mApkCreator = factory.make(creationData);
@@ -200,18 +200,18 @@ public class IncrementalPackager implements Closeable {
     }
 
     /**
-     * Updates resources in the archive.
+     * Updates java resources in the archive.
+     *
+     * <p>The implementation of the transform API means that some streams will contain classes and
+     * resources intermingled. This is true for when proguard is used and because annotation
+     * processors can generate resources. Therefore this method ignores resources ending with {@code
+     * .class}.
      *
      * @param files the resources to update
      * @throws IOException failed to update the archive
      */
     public void updateJavaResources(@NonNull ImmutableMap<RelativeFile, FileStatus> files)
             throws IOException {
-        /*
-         * There is a bug somewhere in the proguard build tasks that places .class files as
-         * resources. These will be removed here, but this filtering code can -- and should -- be
-         * removed once that bug is fixed.
-         */
         updateFiles(
                 PackagedFileUpdates.fromIncrementalRelativeFileSet(
                         Maps.filterKeys(
@@ -267,29 +267,6 @@ public class IncrementalPackager implements Closeable {
     }
 
     /**
-     * Updates the atom metadata file.
-     *
-     * @param files the atom metadata folder.
-     * @throws IOException failed
-     */
-    public void updateAtomMetadata(@NonNull ImmutableMap<RelativeFile, FileStatus> files)
-            throws IOException {
-        Predicate<File> isAtomMetadataFile = input ->
-                input.getName().equals(SdkConstants.FN_ATOM_METADATA) ||
-                        input.getName().equals(SdkConstants.FN_INSTANTAPP_METADATA);
-
-        updateFiles(PackagedFileUpdates.fromIncrementalRelativeFileSet(
-                Maps.filterKeys(files, rf -> isAtomMetadataFile.test(rf.getFile())))
-                .stream()
-                .map(pfu -> new PackagedFileUpdate(
-                        pfu.getSource(),
-                        "META-INF/" + pfu.getName(),
-                        pfu.getStatus()))
-                .collect(Collectors.toSet())
-        );
-    }
-
-    /**
      * Checks that output path is a valid file. This will generally provide a friendler error
      * message if the file cannot be created.
      *
@@ -334,6 +311,10 @@ public class IncrementalPackager implements Closeable {
                         file.getAbsolutePath()), e);
             }
         }
+    }
+
+    public boolean hasPendingChangesWithWait() throws IOException {
+        return mApkCreator != null && mApkCreator.hasPendingChangesWithWait();
     }
 
     @Override

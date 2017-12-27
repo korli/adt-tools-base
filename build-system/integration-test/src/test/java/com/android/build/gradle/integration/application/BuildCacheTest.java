@@ -18,17 +18,17 @@ package com.android.build.gradle.integration.application;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
-import com.android.build.gradle.AndroidGradleOptions;
-import com.android.build.gradle.integration.common.fixture.GradleBuildResult;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.RunGradleTasks;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
+import com.android.build.gradle.integration.common.fixture.app.TransformOutputContent;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
+import com.android.build.gradle.internal.pipeline.SubStream;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.StringOption;
 import com.android.utils.FileUtils;
-import com.google.common.base.Throwables;
+import com.google.common.truth.Truth;
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -46,49 +46,55 @@ public class BuildCacheTest {
                     .create();
 
     @Before
-    public void setUp() throws IOException {
-        AssumeUtil.assumeNotUsingJack();
+    public void setUp() throws Exception {
         // Add a dependency on an external library (guava)
         TestFileUtils.appendToFile(
                 project.getBuildFile(),
-                "\ndependencies {\n    compile 'com.google.guava:guava:17.0'\n}\n");
+                "\ndependencies {\n    compile 'com.google.guava:guava:18.0'\n}\n");
     }
 
     @Test
-    public void testBuildCacheEnabled() throws IOException {
+    public void testBuildCacheEnabled() throws Exception {
         File buildCacheDir = new File(project.getTestDir(), "build-cache");
         FileUtils.deletePath(buildCacheDir);
 
         RunGradleTasks executor =
                 project.executor()
-                        .withProperty("android.enableBuildCache", "true")
-                        .withProperty("android.buildCacheDir", buildCacheDir.getAbsolutePath());
+                        .withUseDexArchive(false)
+                        .with(BooleanOption.ENABLE_BUILD_CACHE, true)
+                        .with(StringOption.BUILD_CACHE_DIR, buildCacheDir.getAbsolutePath());
         executor.run("clean", "assembleDebug");
 
-        File preDexDir = FileUtils.join(project.getIntermediatesDir(), "pre-dexed", "debug");
-        List<File> dexFiles = Arrays.asList(preDexDir.listFiles());
+        File preDexDir =
+                FileUtils.join(project.getIntermediatesDir(), "transforms", "preDex", "debug");
+        TransformOutputContent preDexContent = new TransformOutputContent(preDexDir);
+
         List<File> cachedEntryDirs =
-                Arrays.asList(buildCacheDir.listFiles())
-                        .stream()
+                Arrays.stream(buildCacheDir.listFiles())
                         .filter(File::isDirectory) // Remove the lock files
+                        .filter(f -> !containsAapt(f)) // Remove aapt2 cache
                         .collect(Collectors.toList());
 
-        assertThat(dexFiles).hasSize(2);
+        assertThat(preDexContent).hasSize(2);
         assertThat(cachedEntryDirs).hasSize(1);
 
         // Check the timestamps of the guava library's pre-dexed file and the cached file to make
         // sure we actually copied one to the other and did not run pre-dexing twice to create the
         // two files
         File cachedGuavaDexFile = new File(cachedEntryDirs.get(0), "output");
-        File guavaDexFile;
-        File projectDexFile;
-        if (dexFiles.get(0).getName().contains("guava")) {
-            guavaDexFile = dexFiles.get(0);
-            projectDexFile = dexFiles.get(1);
-        } else {
-            guavaDexFile = dexFiles.get(1);
-            projectDexFile = dexFiles.get(0);
+        File guavaDexFile = null;
+        File projectDexFile = null;
+        for (SubStream subStream : preDexContent) {
+            if (subStream.getName().contains("guava")) {
+                guavaDexFile = preDexContent.getLocation(subStream);
+            } else {
+                projectDexFile = preDexContent.getLocation(subStream);
+            }
         }
+
+        Truth.assertThat(guavaDexFile).named("guava dex file from: " + preDexDir).isNotNull();
+        Truth.assertThat(projectDexFile).named("project dex file from: " + preDexDir).isNotNull();
+
         long cachedGuavaTimestamp = cachedGuavaDexFile.lastModified();
         long projectTimestamp = projectDexFile.lastModified();
 
@@ -97,12 +103,14 @@ public class BuildCacheTest {
         executor.run("clean", "assembleDebug");
 
         cachedEntryDirs =
-                Arrays.asList(buildCacheDir.listFiles())
-                        .stream()
+                Arrays.stream(buildCacheDir.listFiles())
                         .filter(File::isDirectory) // Remove the lock files
+                        .filter(f -> !containsAapt(f)) // Remove aapt2 cache
                         .collect(Collectors.toList());
-        assertThat(preDexDir.list()).hasLength(2);
         assertThat(cachedEntryDirs).hasSize(1);
+
+        preDexContent = new TransformOutputContent(preDexDir);
+        assertThat(preDexContent).hasSize(2);
 
         // Assert that the cached file is unchanged and the guava library's pre-dexed file is copied
         // from the cache
@@ -115,24 +123,28 @@ public class BuildCacheTest {
     }
 
     @Test
-    public void testBuildCacheDisabled() throws IOException {
+    public void testBuildCacheDisabled() throws Exception {
+        TestFileUtils.appendToFile(
+                project.getBuildFile(),
+                "\nandroid.defaultConfig.minSdkVersion 13\n"
+                        + "dependencies {\n"
+                        + "    compile \"com.android.support:support-v13:${rootProject.supportLibVersion}\"\n"
+                        + "}\n");
         File buildCacheDir = new File(project.getTestDir(), "build-cache");
         FileUtils.deletePath(buildCacheDir);
 
-        RunGradleTasks executor =
-                project.executor()
-                        .withProperty("android.enableBuildCache", "false")
-                        .withProperty("android.buildCacheDir", buildCacheDir.getAbsolutePath());
+        project.executor()
+                .with(BooleanOption.ENABLE_BUILD_CACHE, false)
+                .with(StringOption.BUILD_CACHE_DIR, buildCacheDir.getAbsolutePath())
+                .run("clean", "assembleDebug");
 
-        // Improved dependency resolution must be disabled if build cache is disabled.
-        executor.withProperty(
-                AndroidGradleOptions.PROPERTY_ENABLE_IMPROVED_DEPENDENCY_RESOLUTION, "false");
-
-        executor.run("clean", "assembleDebug");
         assertThat(buildCacheDir).doesNotExist();
+    }
 
-        GradleBuildResult result = executor.expectFailure().run("cleanBuildCache");
-        assertThat(Throwables.getRootCause(result.getException()).getMessage())
-                .contains("Task 'cleanBuildCache' not found in root project");
+    private boolean containsAapt(File dir) {
+        if (dir.isFile()) {
+            return dir.getName().contains("libaapt2_jni");
+        }
+        return Arrays.stream(dir.listFiles()).anyMatch(f -> containsAapt(f));
     }
 }

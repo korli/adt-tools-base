@@ -6,26 +6,16 @@ apply plugin: 'clone-artifacts'
 apply plugin: 'idea'
 apply plugin: 'jacoco-tools-base'
 
-// Extract gradle libraries to ensure gradle-core is compatible with older version.
-String gradleVersion = "3.3"
-File gradleBinary = file("$rootProject.projectDir/external/gradle/gradle-$gradleVersion-bin.zip")
-File gradleLib = file("$rootProject.ext.androidHostOut/alternate-gradle/gradle-$gradleVersion/lib")
-
-task extractGradleLibs(type: Copy) {
-    from zipTree(gradleBinary)
-    into gradleLib.parentFile.parentFile
-}
-
-task setupGradleInIde {
-    dependsOn extractGradleLibs
-}
-
 dependencies {
-    compile fileTree(dir:gradleLib)
+    compile gradleApi()
     compile project(':base:gradle-core')
 
     testCompile libs.junit
+    testCompile libs.truth
     testCompile project(':base:project-test-lib')
+}
+
+task setupGradleInIde {
 }
 
 group = 'com.android.tools.build'
@@ -44,14 +34,18 @@ jar.manifest.attributes("Inception-Date": DateTimeFormatter.ISO_LOCAL_DATE.forma
 def generated = new File("${project.buildDir}/generated/resources")
 sourceSets.main.resources.srcDir generated
 task copyVersionProperties(type: Copy) {
-    from project.file("$rootDir/buildSrc/base/version.properties")
+    from project.file(project.getRootProject().getProperty("versionProperties"))
+    rename({"version.properties"})
     into project.file("$generated/com/android/build/gradle/model")
 }
 
 tasks.compileJava.dependsOn copyVersionProperties
 
 test {
-    environment("CUSTOM_REPO", rootProject.file("../out/repo"))
+    environment("CUSTOM_REPO",
+            rootProject.file("../out/repo").toString()
+                    + File.pathSeparator
+                    + rootProject.file("../prebuilts/tools/common/m2/repository/").toString())
 
     testLogging {
         events "failed"
@@ -72,10 +66,6 @@ task javadocJar(type: Jar, dependsOn:javadoc) {
     classifier  'javadoc'
     from        javadoc.destinationDir
 
-}
-
-tasks.withType(Javadoc) {
-    classpath += fileTree(dir:gradleLib)
 }
 
 // Only package JavaDoc if using --init-script=buildSrc/base/release.gradle

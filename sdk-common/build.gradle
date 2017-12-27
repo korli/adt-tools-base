@@ -1,27 +1,54 @@
 apply plugin: 'java'
+apply plugin: 'kotlin'
 apply plugin: 'jacoco-tools-base'
 apply plugin: 'sdk-java-lib'
+apply plugin: 'com.google.protobuf'
 
 group = 'com.android.tools'
 archivesBaseName = 'sdk-common'
 version = rootProject.ext.baseVersion
 
 dependencies {
+    compileOnly libs.auto_value
+
     compile project(':base:sdklib')
     compile project(':base:builder-test-api')
     compile project(':base:builder-model')
+    compile project(':base:ddmlib')
     compile libs.bouncycastle_pkix
     compile libs.bouncycastle_prov
+    compile libs.kotlin_stdlib
+    compile libs.protobuf
 
     testCompile libs.junit
     testCompile project(':base:testutils')
     testCompile 'org.easymock:easymock:3.3'
-    testCompile libs.mockito_all
+    testCompile libs.jimfs
+    testCompile libs.mockito_core
     testCompile libs.truth
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.0.0"
+    }
+}
+
+sourceSets {
+    main.proto.srcDir 'aia-manifest-jar-generator/src'
 }
 
 project.ext.pomName = 'Android Tools sdk-common library'
 project.ext.pomDesc = 'sdk-common library used by other Android tools libraries.'
+
+File generatedSources = new File(project.buildDir, 'generated/generated')
+tasks.compileJava {
+    doFirst {
+        generatedSources.mkdirs()
+    }
+    options.compilerArgs += ['-s', generatedSources]
+    outputs.dir(generatedSources)
+}
 
 apply from: "$rootDir/buildSrc/base/publish.gradle"
 apply from: "$rootDir/buildSrc/base/bintray.gradle"

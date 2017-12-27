@@ -20,10 +20,8 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.BaseConfig;
 import com.android.builder.model.ClassField;
-import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.io.Serializable;
 import java.util.List;
@@ -65,10 +63,13 @@ public abstract class BaseConfigImpl implements Serializable, BaseConfig {
     }
 
     /**
-     * Application id suffix.
+     * Application id suffix. It is appended to the "base" application id when calculating the final
+     * application id for a variant.
      *
-     * <p>This is appended to the "base" application id when calculating the final application id
-     * for a variant.
+     * <p>In case there are product flavor dimensions specified, the final application id suffix
+     * will contain the suffix from the default product flavor, followed by the suffix from product
+     * flavor of the first dimension, second dimension and so on. All of these will have a dot in
+     * between e.g. &quot;defaultSuffix.dimension1Suffix.dimensions2Suffix&quot;.
      */
     @Override
     @Nullable
@@ -86,10 +87,12 @@ public abstract class BaseConfigImpl implements Serializable, BaseConfig {
     }
 
     /**
-     * Version name suffix.
+     * Version name suffix. It is appended to the "base" version name when calculating the final
+     * version name for a variant.
      *
-     * <p>This is appended to the "base" version name when calculating the final version name
-     * for a variant.
+     * <p>In case there are product flavor dimensions specified, the final version name suffix will
+     * contain the suffix from the default product flavor, followed by the suffix from product
+     * flavor of the first dimension, second dimension and so on.
      */
     @Override
     @Nullable
@@ -142,19 +145,7 @@ public abstract class BaseConfigImpl implements Serializable, BaseConfig {
         return mResValues;
     }
 
-    /**
-     * Returns ProGuard configuration files to be used.
-     *
-     * <p>There are 2 default rules files
-     * <ul>
-     *     <li>proguard-android.txt
-     *     <li>proguard-android-optimize.txt
-     * </ul>
-     * <p>They are located in the SDK. Using <code>getDefaultProguardFile(String filename)</code> will return the
-     * full path to the files. They are identical except for enabling optimizations.
-     *
-     * <p>See similarly named methods to specify the files.
-     */
+    /** {@inheritDoc} */
     @Override
     @NonNull
     public List<File> getProguardFiles() {
@@ -310,47 +301,6 @@ public abstract class BaseConfigImpl implements Serializable, BaseConfig {
     @Override
     public List<File> getJarJarRuleFiles() {
         return mJarJarRuleFiles;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof BaseConfigImpl)) {
-            return false;
-        }
-
-        BaseConfigImpl that = (BaseConfigImpl) o;
-
-        return Objects.equal(mApplicationIdSuffix, that.mApplicationIdSuffix) &&
-                Objects.equal(mVersionNameSuffix, that.mVersionNameSuffix) &&
-                Objects.equal(mBuildConfigFields, that.mBuildConfigFields) &&
-                Objects.equal(mConsumerProguardFiles, that.mConsumerProguardFiles) &&
-                Objects.equal(mManifestPlaceholders, that.mManifestPlaceholders) &&
-                Objects.equal(mMultiDexEnabled, that.mMultiDexEnabled) &&
-                Objects.equal(mMultiDexKeepFile, that.mMultiDexKeepFile) &&
-                Objects.equal(mMultiDexKeepProguard, that.mMultiDexKeepProguard) &&
-                Objects.equal(mProguardFiles, that.mProguardFiles) &&
-                Objects.equal(mResValues, that.mResValues) &&
-                Objects.equal(mJarJarRuleFiles, that.mJarJarRuleFiles);
-
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hashCode(
-                mApplicationIdSuffix,
-                mVersionNameSuffix,
-                mBuildConfigFields,
-                mResValues,
-                mProguardFiles,
-                mConsumerProguardFiles,
-                mManifestPlaceholders,
-                mMultiDexEnabled,
-                mMultiDexKeepFile,
-                mMultiDexKeepProguard,
-                mJarJarRuleFiles);
     }
 
     @Override

@@ -31,16 +31,13 @@ import com.android.utils.StdLogger;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-
-import junit.framework.TestCase;
-
-import org.w3c.dom.Element;
-import org.xml.sax.SAXException;
-
 import java.io.IOException;
 import java.util.List;
-
 import javax.xml.parsers.ParserConfigurationException;
+import junit.framework.TestCase;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.xml.sax.SAXException;
 
 /**
  * Tests for {@link Actions} class
@@ -196,10 +193,10 @@ public class ActionsTest extends TestCase {
         assertTrue(result.isPresent());
 
         ILogger logger = new MockLog();
-        XmlDocument cleanedDocument =
+        Optional<Document> cleanedDocument =
                 ToolsInstructionsCleaner.cleanToolsReferences(
-                        ManifestMerger2.MergeType.APPLICATION, result.get(), logger);
-        assertNotNull(cleanedDocument);
+                        ManifestMerger2.MergeType.APPLICATION, result.get().getXml(), logger);
+        assertTrue(cleanedDocument.isPresent());
 
         Actions actions = mergingReportBuilder.getActionRecorder().build();
         String expectedMappings = "1<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
@@ -229,7 +226,7 @@ public class ActionsTest extends TestCase {
                 + "16    </permission>\n"
                 + "17\n"
                 + "18</manifest>\n";
-        assertEquals(expectedMappings, actions.blame(cleanedDocument));
+        assertEquals(expectedMappings, actions.blame(result.get().reparse()));
 
         // persist the records
         String persistedMappings = actions.persist();

@@ -21,20 +21,20 @@
 #include "perfd/network/network_collector.h"
 #include "perfd/network/network_service.h"
 #include "perfd/profiler_component.h"
+#include "utils/file_cache.h"
 
 namespace profiler {
 
 class NetworkProfilerComponent final : public ProfilerComponent {
  public:
-  explicit NetworkProfilerComponent(const Daemon& daemon)
-      : network_cache_(daemon.clock()),
-        public_service_(&network_cache_),
-        internal_service_(&network_cache_) {}
+  explicit NetworkProfilerComponent(Daemon::Utilities* utilities)
+      : public_service_(&network_cache_),
+        internal_service_(utilities, &network_cache_) {}
 
   // Returns the service that talks to desktop clients (e.g., Studio).
   grpc::Service* GetPublicService() override { return &public_service_; }
 
-  // Returns the service that talks to device clients (e.g., perfa).
+  // Returns the service that talks to device clients (e.g., the agent).
   grpc::Service* GetInternalService() override { return &internal_service_; }
 
  private:

@@ -17,7 +17,6 @@
 package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.GRADLE_PATH;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.ANDROID;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.JAVA;
@@ -31,8 +30,6 @@ import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
-import com.android.ide.common.process.ProcessException;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -50,7 +47,7 @@ public class DepOnLocalJarThroughAModuleTest {
     static ModelContainer<AndroidProject> models;
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         appendToFile(project.getSubproject("app").getBuildFile(),
                 "\n" +
                         "\n" +
@@ -67,13 +64,13 @@ public class DepOnLocalJarThroughAModuleTest {
     }
 
     @Test
-    public void checkJarIsPackaged() throws IOException, ProcessException {
-        assertThatApk(project.getSubproject("app").getApk("debug"))
+    public void checkJarIsPackaged() throws Exception {
+        assertThat(project.getSubproject("app").getApk("debug"))
                 .containsClass("Lcom/example/android/multiproject/person/People;");
     }
 
     @Test
-    public void checkJarModuleIsInTheTestArtifactModel() {
+    public void checkJarModuleIsInTheTestArtifactModel() throws Exception {
         Variant variant = ModelHelper.getVariant(
                 models.getModelMap().get(":app").getVariants(), "debug");
 

@@ -20,6 +20,8 @@ import static com.android.SdkConstants.ANDROID_MANIFEST_XML;
 import static com.android.SdkConstants.ANDROID_PREFIX;
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_LOCALE;
+import static com.android.SdkConstants.ATTR_NAME;
+import static com.android.SdkConstants.ATTR_PACKAGE;
 import static com.android.SdkConstants.BIN_FOLDER;
 import static com.android.SdkConstants.DOT_GIF;
 import static com.android.SdkConstants.DOT_JPEG;
@@ -29,7 +31,10 @@ import static com.android.SdkConstants.DOT_WEBP;
 import static com.android.SdkConstants.DOT_XML;
 import static com.android.SdkConstants.FN_BUILD_GRADLE;
 import static com.android.SdkConstants.ID_PREFIX;
+import static com.android.SdkConstants.MANIFEST_PLACEHOLDER_PREFIX;
 import static com.android.SdkConstants.NEW_ID_PREFIX;
+import static com.android.SdkConstants.PREFIX_BINDING_EXPR;
+import static com.android.SdkConstants.PREFIX_TWOWAY_BINDING_EXPR;
 import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.SdkConstants.UTF_8;
 import static com.android.ide.common.resources.configuration.FolderConfiguration.QUALIFIER_SPLITTER;
@@ -56,26 +61,34 @@ import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.ApiVersion;
+import com.android.builder.model.BuildTypeContainer;
+import com.android.builder.model.ProductFlavorContainer;
+import com.android.builder.model.SourceProvider;
+import com.android.builder.model.SourceProviderContainer;
+import com.android.builder.model.Variant;
 import com.android.ide.common.rendering.api.ItemResourceValue;
 import com.android.ide.common.rendering.api.ResourceValue;
 import com.android.ide.common.rendering.api.StyleResourceValue;
 import com.android.ide.common.repository.GradleVersion;
 import com.android.ide.common.res2.AbstractResourceRepository;
 import com.android.ide.common.res2.ResourceItem;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.ide.common.resources.configuration.LocaleQualifier;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.tools.lint.client.api.LintClient;
+import com.android.utils.CharSequences;
 import com.android.utils.PositionXmlParser;
 import com.android.utils.SdkUtils;
+import com.android.utils.XmlUtils;
 import com.google.common.annotations.Beta;
 import com.google.common.base.Charsets;
 import com.google.common.base.Objects;
@@ -83,19 +96,31 @@ import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.common.io.ByteStreams;
+import com.intellij.ide.util.JavaAnonymousClassesHelper;
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.PsiAnonymousClass;
 import com.intellij.psi.PsiCallExpression;
+import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiImportStatement;
+import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiLiteral;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiParenthesizedExpression;
 import com.intellij.psi.PsiType;
 import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.util.ClassUtil;
+import com.intellij.psi.util.PsiTreeUtil;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.URL;
+import java.net.URLConnection;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -110,6 +135,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import lombok.ast.ImportDeclaration;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UFile;
+import org.jetbrains.uast.UParenthesizedExpression;
+import org.jetbrains.uast.UastUtils;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
@@ -129,6 +158,33 @@ import org.w3c.dom.NodeList;
 public class LintUtils {
     // Utility class, do not instantiate
     private LintUtils() {
+    }
+
+    @Nullable
+    public static String getInternalName(@NonNull PsiClass psiClass) {
+        if (psiClass instanceof PsiAnonymousClass) {
+            PsiClass parent = PsiTreeUtil.getParentOfType(psiClass, PsiClass.class);
+            if (parent != null) {
+                String internalName = getInternalName(parent);
+                if (internalName == null) {
+                    return null;
+                }
+                return internalName + JavaAnonymousClassesHelper.getName((PsiAnonymousClass)psiClass);
+            }
+        }
+        String sig = ClassUtil.getJVMClassName(psiClass);
+        if (sig == null) {
+            String qualifiedName = psiClass.getQualifiedName();
+            if (qualifiedName != null) {
+                return ClassContext.getInternalName(qualifiedName);
+            }
+            return null;
+        } else if (sig.indexOf('.') != -1) {
+            // Workaround -- ClassUtil doesn't treat this correctly!
+            // .replace('.', '/');
+            sig = ClassContext.getInternalName(sig);
+        }
+        return sig;
     }
 
     /** Returns the internal method name */
@@ -176,10 +232,29 @@ public class LintUtils {
      *
      * @param strings the list of strings to print out as a comma separated list
      * @param maxItems the maximum number of items to print
-     * @return a comma separated list
+     * @return a comma separated list-string
      */
     @NonNull
     public static String formatList(@NonNull List<String> strings, int maxItems) {
+        return formatList(strings, maxItems, true);
+    }
+
+    /**
+     * Format a list of strings, and cut of the list at {@code maxItems} if the number of items are
+     * greater.
+     *
+     * @param strings  the list of strings to print out as a comma separated list
+     * @param maxItems the maximum number of items to print
+     * @param sort     whether the items should be sorted before printing.
+     * @return a comma separated list-string
+     */
+    public static String formatList(@NonNull List<String> strings, int maxItems, boolean sort) {
+        if (sort) {
+            List<String> sorted = Lists.newArrayList(strings);
+            Collections.sort(sorted);
+            strings = sorted;
+        }
+
         StringBuilder sb = new StringBuilder(20 * strings.size());
 
         for (int i = 0, n = strings.size(); i < n; i++) {
@@ -289,12 +364,18 @@ public class LintUtils {
      * @param errorCount   the count of errors
      * @param warningCount the count of warnings
      * @param comma        if true, use a comma to separate messages, otherwise "and"
+     * @param capitalize   whether we should capitalize sentence
      * @return a description string
      */
     @NonNull
-    public static String describeCounts(int errorCount, int warningCount, boolean comma) {
+    public static String describeCounts(int errorCount, int warningCount, boolean comma,
+            boolean capitalize) {
         if (errorCount == 0 && warningCount == 0) {
-            return "No errors or warnings";
+            if (capitalize) {
+                return "No errors or warnings";
+            } else {
+                return "no errors or warnings";
+            }
         }
         String errors = pluralize(errorCount, "error");
         String warnings = pluralize(warningCount, "warning");
@@ -345,16 +426,7 @@ public class LintUtils {
      * @return the count of element children
      */
     public static int getChildCount(@NonNull Node node) {
-        NodeList childNodes = node.getChildNodes();
-        int childCount = 0;
-        for (int i = 0, n = childNodes.getLength(); i < n; i++) {
-            Node child = childNodes.item(i);
-            if (child.getNodeType() == Node.ELEMENT_NODE) {
-                childCount++;
-            }
-        }
-
-        return childCount;
+        return XmlUtils.getSubTagCount(node);
     }
 
     /**
@@ -438,6 +510,21 @@ public class LintUtils {
                                 id1.length() - ID_PREFIX.length());
             }
         }
+    }
+
+    /**
+     * Computes a canonical "display path" for a resource (which typically
+     * is the parent name plus a file separator, plus the file name)
+     *
+     * @param client lint client used for formatting
+     * @param file   resource file
+     * @return the display path
+     */
+    @NonNull
+    public static String getFileNameWithParent(@NonNull LintClient client,
+            @NonNull File file) {
+        return client.getDisplayPath(
+                new File(file.getParentFile().getName(), file.getName()));
     }
 
     /**
@@ -673,6 +760,22 @@ public class LintUtils {
         }
 
         return getEncodedString(bytes, createString);
+    }
+
+    /**
+     * Returns true if the given resource value is a data binding expression
+     *
+     * @param expression the expression to test
+     * @return true if this is a data binding expression
+     */
+    public static boolean isDataBindingExpression(@NonNull String expression) {
+        return (expression.startsWith(PREFIX_BINDING_EXPR) ||
+                expression.startsWith(PREFIX_TWOWAY_BINDING_EXPR));
+    }
+
+    /** Returns true if the given resource value is a manifest place holder expression */
+    public static boolean isManifestPlaceHolderExpression(@NonNull String expression) {
+        return expression.contains(MANIFEST_PLACEHOLDER_PREFIX);
     }
 
     /**
@@ -1054,7 +1157,7 @@ public class LintUtils {
         List<ResourceValue> result = null;
 
         Queue<ResourceValue> queue = new ArrayDeque<>();
-        queue.add(new ResourceValue(style.type, style.name, false));
+        queue.add(new ResourceValue(ResourceUrl.create(style.type, style.name, false), null));
         Set<String> seen = Sets.newHashSet();
         int count = 0;
         boolean isFrameworkAttribute = ANDROID_URI.equals(namespace);
@@ -1083,8 +1186,11 @@ public class LintUtils {
                             ResourceUrl p = ResourceUrl.parse(parent);
                             if (p != null && !p.framework && !seen.contains(p.name)) {
                                 seen.add(p.name);
-                                queue.add(new ResourceValue(ResourceType.STYLE, p.name,
-                                        false));
+                                queue.add(
+                                        new ResourceValue(
+                                                ResourceUrl.create(
+                                                        ResourceType.STYLE, p.name, false),
+                                                null));
                             }
                         }
 
@@ -1093,8 +1199,11 @@ public class LintUtils {
                             String parentName = name.substring(0, index);
                             if (!seen.contains(parentName)) {
                                 seen.add(parentName);
-                                queue.add(new ResourceValue(ResourceType.STYLE, parentName,
-                                        false));
+                                queue.add(
+                                        new ResourceValue(
+                                                ResourceUrl.create(
+                                                        ResourceType.STYLE, parentName, false),
+                                                null));
                             }
                         }
                     }
@@ -1128,7 +1237,7 @@ public class LintUtils {
         List<StyleResourceValue> result = null;
 
         Queue<ResourceValue> queue = new ArrayDeque<>();
-        queue.add(new ResourceValue(style.type, style.name, false));
+        queue.add(new ResourceValue(ResourceUrl.create(null, style.type, style.name), null));
         Set<String> seen = Sets.newHashSet();
         int count = 0;
         while (count < 30 && !queue.isEmpty()) {
@@ -1151,8 +1260,11 @@ public class LintUtils {
                             ResourceUrl p = ResourceUrl.parse(parent);
                             if (p != null && !p.framework && !seen.contains(p.name)) {
                                 seen.add(p.name);
-                                queue.add(new ResourceValue(ResourceType.STYLE, p.name,
-                                        false));
+                                queue.add(
+                                        new ResourceValue(
+                                                ResourceUrl.create(
+                                                        null, ResourceType.STYLE, p.name),
+                                                null));
                             }
                         }
 
@@ -1161,8 +1273,11 @@ public class LintUtils {
                             String parentName = name.substring(0, index);
                             if (!seen.contains(parentName)) {
                                 seen.add(parentName);
-                                queue.add(new ResourceValue(ResourceType.STYLE, parentName,
-                                        false));
+                                queue.add(
+                                        new ResourceValue(
+                                                ResourceUrl.create(
+                                                        null, ResourceType.STYLE, parentName),
+                                                null));
                             }
                         }
                     }
@@ -1303,9 +1418,17 @@ public class LintUtils {
      */
     public static boolean isModelOlderThan(@NonNull Project project,
             int major, int minor, int micro) {
+        return isModelOlderThan(project, major, minor, micro, false);
+    }
+
+    /**
+     * Returns true if the given Gradle model is older than the given version number
+     */
+    public static boolean isModelOlderThan(@NonNull Project project,
+            int major, int minor, int micro, boolean defaultForNonGradleProjects) {
         GradleVersion version = project.getGradleModelVersion();
         if (version == null) {
-            return false;
+            return defaultForNonGradleProjects;
         }
 
         if (version.getMajor() != major) {
@@ -1315,6 +1438,41 @@ public class LintUtils {
             return version.getMinor() < minor;
         }
         return version.getMicro() < micro;
+    }
+
+
+    /**
+     * Returns the Java language level for the given element, or the default level
+     * if an applicable the language level is not found (for example if the element
+     * is not a Java element
+     */
+    @NonNull
+    public static LanguageLevel getLanguageLevel(@NonNull UElement element,
+            @NonNull LanguageLevel defaultLevel) {
+        UFile containingFile = UastUtils.getContainingFile(element);
+        if (containingFile == null) {
+            return defaultLevel;
+        }
+
+        return getLanguageLevel(containingFile.getPsi(), defaultLevel);
+    }
+
+    /**
+     * Returns the Java language level for the given element, or the default level
+     * if an applicable the language level is not found (for example if the element
+     * is not a Java element
+     */
+    @NonNull
+    public static LanguageLevel getLanguageLevel(@NonNull PsiElement element,
+            @NonNull LanguageLevel defaultLevel) {
+        PsiFile containingFile = element instanceof PsiFile
+                ? (PsiFile) element
+                : element.getContainingFile();
+        if (containingFile instanceof PsiJavaFile) {
+            return ((PsiJavaFile) containingFile).getLanguageLevel();
+        }
+
+        return defaultLevel;
     }
 
     /**
@@ -1432,7 +1590,14 @@ public class LintUtils {
         if (root != null) {
             String locale = root.getAttributeNS(TOOLS_URI, ATTR_LOCALE);
             if (locale != null && !locale.isEmpty()) {
-                return getLocale(locale);
+                if (locale.indexOf('-') == -1) {
+                    return LocaleQualifier.getQualifier(locale);
+                }
+                FolderConfiguration config = FolderConfiguration.getConfigForQualifierString(
+                        locale);
+                if (config != null) {
+                    return config.getLocaleQualifier();
+                }
             }
         }
 
@@ -1462,6 +1627,7 @@ public class LintUtils {
      * @return location for the top level gradle file if it exists, otherwise fall back to
      *     the project directory.
      */
+    @NonNull
     public static Location guessGradleLocation(@NonNull Project project) {
         File dir = project.getDir();
         Location location;
@@ -1472,6 +1638,66 @@ public class LintUtils {
             location = Location.create(dir);
         }
         return location;
+    }
+
+    /**
+     * Attempts to find a string in the build.gradle file for a given project directory.
+     * It will skip comments.
+     *
+     * @param client     the client (used to read the file)
+     * @param projectDir the project directory
+     * @param string     the string to locate
+     * @return a suitable location (or just the build.gradle file, or the project directory, if not
+     * found)
+     */
+    @NonNull
+    public static Location guessGradleLocation(
+            @NonNull LintClient client,
+            @NonNull File projectDir,
+            @NonNull String string) {
+        File gradle = new File(projectDir, FN_BUILD_GRADLE);
+        if (gradle.isFile()) {
+            String contents = client.readFile(gradle).toString();
+            int match = contents.indexOf(string);
+            if (match != -1) {
+                int length = string.length();
+                if (contents.indexOf(string, match + length) == -1) {
+                    // Only one match in the file: just use it
+                    return Location.create(gradle, contents, match, match + length);
+                }
+                // Tokenize the file such that we can skip comments
+                int end = contents.length();
+                char first = string.charAt(0);
+                for (int offset = 0; offset < end - 1; offset++) {
+                    char c = contents.charAt(offset);
+                    if (c == '/') {
+                        char next = contents.charAt(offset + 1); // safe because we loop to end-1
+                        if (next == '/') {
+                            // Line comment: jump to end of line
+                            offset = contents.indexOf('\n', offset);
+                            if (offset == -1) {
+                                break;
+                            }
+                            continue;
+                        } else if (next == '*') {
+                            // Comment: jump to end of comment
+                            offset = contents.indexOf("*/", offset);
+                            if (offset == -1) {
+                                break;
+                            }
+                            continue;
+                        }
+                    }
+                    if (c == first && contents.regionMatches(offset, string, 0, length)) {
+                        return Location.create(gradle, contents, offset, offset + length);
+                    }
+                }
+            }
+
+            return Location.create(gradle);
+        }
+
+        return Location.create(projectDir);
     }
 
     /**
@@ -1496,6 +1722,15 @@ public class LintUtils {
     public static PsiElement skipParentheses(@Nullable PsiElement element) {
         while (element instanceof PsiParenthesizedExpression) {
             element = element.getParent();
+        }
+
+        return element;
+    }
+
+    @Nullable
+    public static UElement skipParentheses(@Nullable UElement element) {
+        while (element instanceof UParenthesizedExpression) {
+            element = element.getUastParent();
         }
 
         return element;
@@ -1578,6 +1813,236 @@ public class LintUtils {
             return TYPE_BYTE;
         }
 
+        return null;
+    }
+
+    /**
+     * Returns the fully qualified class name for a manifest entry element that
+     * specifies a name attribute. Will also replace $ with dots for inner classes.
+     *
+     * @param element the element
+     * @return the fully qualified class name
+     */
+    @NonNull
+    public static String resolveManifestName(@NonNull Element element) {
+        String className = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
+        className = className.replace('$', '.');
+        if (className.startsWith(".")) { //$NON-NLS-1$
+            // If the activity class name starts with a '.', it is shorthand for prepending the
+            // package name specified in the manifest.
+            String pkg = element.getOwnerDocument().getDocumentElement()
+                    .getAttribute(ATTR_PACKAGE);   // required to exist
+            return pkg + className;
+        } else if (className.indexOf('.') == -1) {
+            String pkg = element.getOwnerDocument().getDocumentElement()
+                    .getAttribute(ATTR_PACKAGE);   // required to exist
+
+            // According to the <activity> manifest element documentation, this is not
+            // valid ( http://developer.android.com/guide/topics/manifest/activity-element.html )
+            // but it appears in manifest files and appears to be supported by the runtime
+            // so handle this in code as well:
+            return pkg + '.' + className;
+        } // else: the class name is already a fully qualified class name
+
+        return className;
+    }
+
+    @NonNull
+    public static List<SourceProvider> getSourceProviders(
+            @NonNull AndroidProject project,
+            @NonNull Variant variant) {
+        List<SourceProvider> providers = Lists.newArrayList();
+        AndroidArtifact mainArtifact = variant.getMainArtifact();
+
+        providers.add(project.getDefaultConfig().getSourceProvider());
+
+        for (String flavorName : variant.getProductFlavors()) {
+            for (ProductFlavorContainer flavor : project.getProductFlavors()) {
+                if (flavorName.equals(flavor.getProductFlavor().getName())) {
+                    providers.add(flavor.getSourceProvider());
+                    break;
+                }
+            }
+        }
+
+        SourceProvider multiProvider = mainArtifact.getMultiFlavorSourceProvider();
+        if (multiProvider != null) {
+            providers.add(multiProvider);
+        }
+
+        String buildTypeName = variant.getBuildType();
+        for (BuildTypeContainer buildType : project.getBuildTypes()) {
+            if (buildTypeName.equals(buildType.getBuildType().getName())) {
+                providers.add(buildType.getSourceProvider());
+                break;
+            }
+        }
+
+        SourceProvider variantProvider = mainArtifact.getVariantSourceProvider();
+        if (variantProvider != null) {
+            providers.add(variantProvider);
+        }
+
+        return providers;
+    }
+
+    private static boolean isTestArtifact(@NonNull SourceProviderContainer extra) {
+        String artifactName = extra.getArtifactName();
+        return AndroidProject.ARTIFACT_ANDROID_TEST.equals(artifactName)
+                || AndroidProject.ARTIFACT_UNIT_TEST.equals(artifactName);
+    }
+
+    @NonNull
+    public static List<SourceProvider> getTestSourceProviders(
+            @NonNull AndroidProject project,
+            @NonNull Variant variant) {
+        List<SourceProvider> providers = Lists.newArrayList();
+
+        ProductFlavorContainer defaultConfig = project.getDefaultConfig();
+        for (SourceProviderContainer extra : defaultConfig.getExtraSourceProviders()) {
+            if (isTestArtifact(extra)) {
+                providers.add(extra.getSourceProvider());
+            }
+        }
+
+        for (String flavorName : variant.getProductFlavors()) {
+            for (ProductFlavorContainer flavor : project.getProductFlavors()) {
+                if (flavorName.equals(flavor.getProductFlavor().getName())) {
+                    for (SourceProviderContainer extra : flavor.getExtraSourceProviders()) {
+                        if (isTestArtifact(extra)) {
+                            providers.add(extra.getSourceProvider());
+                        }
+                    }
+                }
+            }
+        }
+
+        String buildTypeName = variant.getBuildType();
+        for (BuildTypeContainer buildType : project.getBuildTypes()) {
+            if (buildTypeName.equals(buildType.getBuildType().getName())) {
+                for (SourceProviderContainer extra : buildType.getExtraSourceProviders()) {
+                    if (isTestArtifact(extra)) {
+                        providers.add(extra.getSourceProvider());
+                    }
+                }
+            }
+        }
+
+        return providers;
+    }
+
+    /** Returns true if the given string is a reserved Java keyword */
+    public static boolean isJavaKeyword(@NonNull String keyword) {
+        // TODO when we built on top of IDEA core replace this with
+        //   JavaLexer.isKeyword(candidate, LanguageLevel.JDK_1_5)
+        switch (keyword) {
+            case "abstract":
+            case "assert":
+            case "boolean":
+            case "break":
+            case "byte":
+            case "case":
+            case "catch":
+            case "char":
+            case "class":
+            case "const":
+            case "continue":
+            case "default":
+            case "do":
+            case "double":
+            case "else":
+            case "enum":
+            case "extends":
+            case "false":
+            case "final":
+            case "finally":
+            case "float":
+            case "for":
+            case "goto":
+            case "if":
+            case "implements":
+            case "import":
+            case "instanceof":
+            case "int":
+            case "interface":
+            case "long":
+            case "native":
+            case "new":
+            case "null":
+            case "package":
+            case "private":
+            case "protected":
+            case "public":
+            case "return":
+            case "short":
+            case "static":
+            case "strictfp":
+            case "super":
+            case "switch":
+            case "synchronized":
+            case "this":
+            case "throw":
+            case "throws":
+            case "transient":
+            case "true":
+            case "try":
+            case "void":
+            case "volatile":
+            case "while":
+                return true;
+        }
+
+        return false;
+    }
+
+    /** Reads the data from the given URL, with an optional timeout (in milliseconds) */
+    @Nullable
+    public static byte[] readUrlData(
+            @NonNull LintClient client,
+            @NonNull String query,
+            int timeout) throws IOException {
+        URL url = new URL(query);
+
+        URLConnection connection = client.openConnection(url, timeout);
+        if (connection == null) {
+            return null;
+        }
+        try {
+            InputStream is = connection.getInputStream();
+            if (is == null) {
+                return null;
+            }
+            return ByteStreams.toByteArray(is);
+        } finally {
+            client.closeConnection(connection);
+        }
+    }
+
+    /**
+     * Reads the data from the given URL, with an optional timeout (in milliseconds),
+     * and returns it as a UTF-8 encoded String
+     */
+    @Nullable
+    public static String readUrlDataAsString(
+            @NonNull LintClient client,
+            @NonNull String query,
+            int timeout) throws IOException {
+        byte[] bytes = readUrlData(client, query, timeout);
+        if (bytes != null) {
+            return new String(bytes, Charsets.UTF_8);
+        } else {
+            return null;
+        }
+    }
+
+    @SafeVarargs
+    @Nullable
+    public static <T> T coalesce(@NonNull T... ts) {
+        for (T t : ts) {
+            if (t != null) {
+                return t;
+            }
+        }
         return null;
     }
 }

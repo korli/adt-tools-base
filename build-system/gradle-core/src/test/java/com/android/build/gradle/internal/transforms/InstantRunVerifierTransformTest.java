@@ -51,15 +51,15 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
 /**
  * Tests for the {@link InstantRunVerifierTransform}
  */
-@RunWith(MockitoJUnitRunner.class)
 public class InstantRunVerifierTransformTest {
+    @Rule public MockitoRule rule = MockitoJUnit.rule();
 
     final Map<File, File> recordedVerification = new HashMap<>();
     final Map<File, File> recordedCopies = new HashMap<>();
@@ -77,8 +77,7 @@ public class InstantRunVerifierTransformTest {
     @Mock
     TransformOutputProvider transformOutputProvider;
 
-    @Mock
-    InstantRunBuildContext instantRunBuildContext;
+    @Mock InstantRunBuildContext buildContext;
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -87,9 +86,9 @@ public class InstantRunVerifierTransformTest {
     public void setUpMock() throws IOException {
         backupDir = temporaryFolder.newFolder();
         when(variantScope.getIncrementalVerifierDir()).thenReturn(backupDir);
-        when(variantScope.getInstantRunBuildContext()).thenReturn(instantRunBuildContext);
+        when(variantScope.getInstantRunBuildContext()).thenReturn(buildContext);
         when(variantScope.getGlobalScope()).thenReturn(globalScope);
-        when(instantRunBuildContext.getVerifierResult()).thenReturn(
+        when(buildContext.getVerifierResult()).thenReturn(
                 InstantRunVerifierStatus.NO_CHANGES);
         when(globalScope.isActive(OptionalCompilationStep.RESTART_ONLY)).thenReturn(false);
     }
@@ -415,7 +414,7 @@ public class InstantRunVerifierTransformTest {
     @Test
     public void testStatusAlreadySet()
             throws TransformException, InterruptedException, IOException {
-        when(instantRunBuildContext.getVerifierResult()).thenReturn(
+        when(buildContext.getVerifierResult()).thenReturn(
                 InstantRunVerifierStatus.DEPENDENCY_CHANGED);
 
         final File inputDir = temporaryFolder.newFolder();
@@ -456,7 +455,7 @@ public class InstantRunVerifierTransformTest {
                 .build());
 
         // check the verifier status is not reset.
-        assertThat(instantRunBuildContext.getVerifierResult()).isEqualTo(
+        assertThat(buildContext.getVerifierResult()).isEqualTo(
                 InstantRunVerifierStatus.DEPENDENCY_CHANGED);
     }
 

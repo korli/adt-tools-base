@@ -5,11 +5,12 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.google.common.collect.ImmutableList;
 import java.nio.file.Path;
 import java.util.List;
+import org.apache.maven.repository.internal.ArtifactDescriptorReaderDelegate;
 import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
 import org.eclipse.aether.DefaultRepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
-import org.eclipse.aether.collection.DependencyGraphTransformer;
 import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory;
+import org.eclipse.aether.graph.Exclusion;
 import org.eclipse.aether.impl.DefaultServiceLocator;
 import org.eclipse.aether.internal.impl.SimpleLocalRepositoryManagerFactory;
 import org.eclipse.aether.repository.LocalRepository;
@@ -18,24 +19,30 @@ import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
 import org.eclipse.aether.spi.connector.transport.TransporterFactory;
 import org.eclipse.aether.spi.localrepo.LocalRepositoryManagerFactory;
 import org.eclipse.aether.transport.http.HttpTransporterFactory;
-import org.eclipse.aether.util.graph.transformer.ConflictResolver;
-import org.eclipse.aether.util.graph.transformer.JavaScopeDeriver;
-import org.eclipse.aether.util.graph.transformer.JavaScopeSelector;
-import org.eclipse.aether.util.graph.transformer.SimpleOptionalitySelector;
+import org.eclipse.aether.util.artifact.JavaScopes;
+import org.eclipse.aether.util.graph.selector.AndDependencySelector;
+import org.eclipse.aether.util.graph.selector.ExclusionDependencySelector;
+import org.eclipse.aether.util.graph.selector.OptionalDependencySelector;
+import org.eclipse.aether.util.graph.selector.ScopeDependencySelector;
 
 /** Constructs Aether objects. */
-class AetherUtils {
+public class AetherUtils {
     static final RemoteRepository MAVEN_CENTRAL =
             new RemoteRepository.Builder(
                             "Maven Central", "default", "https://repo1.maven.org/maven2/")
                     .build();
 
     static final RemoteRepository JCENTER =
-            new RemoteRepository.Builder("JCenter", "default", "http://jcenter.bintray.com/")
+            new RemoteRepository.Builder("JCenter", "default", "https://jcenter.bintray.com/")
                     .build();
 
-    static final ImmutableList<RemoteRepository> REPOSITORIES =
-            ImmutableList.of(MAVEN_CENTRAL, JCENTER);
+    static final RemoteRepository GOOGLE =
+            new RemoteRepository.Builder("Google", "default", "https://maven.google.com/").build();
+
+    public static final ImmutableList<RemoteRepository> REPOSITORIES =
+            ImmutableList.of(MAVEN_CENTRAL, JCENTER, GOOGLE);
+
+    private AetherUtils() {}
 
     static RepositorySystem getRepositorySystem() {
         DefaultServiceLocator serviceLocator = MavenRepositorySystemUtils.newServiceLocator();
@@ -65,18 +72,21 @@ class AetherUtils {
                 repositorySystem.newLocalRepositoryManager(
                         session, new LocalRepository(localRepo.toFile())));
 
-        DependencyGraphTransformer transformer =
-                new ConflictResolver(
-                        new HighestVersionSelector(),
-                        new JavaScopeSelector(),
-                        new SimpleOptionalitySelector(),
-                        new JavaScopeDeriver());
-        session.setDependencyGraphTransformer(transformer);
-
         session.setRepositoryListener(new ResolutionErrorRepositoryListener());
+
+        session.setConfigProperty(
+                ArtifactDescriptorReaderDelegate.class.getName(),
+                new HandleAarDescriptorReaderDelegate());
 
         return session;
     }
 
-    private AetherUtils() {}
+    public static AndDependencySelector buildDependencySelector(
+            ImmutableList<Exclusion> exclusions) {
+        return new AndDependencySelector(
+                new OptionalDependencySelector(),
+                new ScopeDependencySelector(
+                        ImmutableList.of(JavaScopes.COMPILE, JavaScopes.RUNTIME), null),
+                new ExclusionDependencySelector(exclusions));
+    }
 }

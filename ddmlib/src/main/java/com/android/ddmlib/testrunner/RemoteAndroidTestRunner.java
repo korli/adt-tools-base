@@ -23,7 +23,6 @@ import com.android.ddmlib.IShellEnabledDevice;
 import com.android.ddmlib.Log;
 import com.android.ddmlib.ShellCommandUnresponsiveException;
 import com.android.ddmlib.TimeoutException;
-
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -41,9 +40,11 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
     private final String mRunnerName;
     private IShellEnabledDevice mRemoteDevice;
     // default to no timeout
-    private long mMaxTimeToOutputResponse = 0;
-    private TimeUnit mMaxTimeUnits = TimeUnit.MILLISECONDS;
+    private long mMaxTimeoutMs = 0L;
+    private long mMaxTimeToOutputResponseMs = 0L;
+
     private String mRunName = null;
+    private boolean mEnforceTimeStamp = false;
 
     /** map of name-value instrumentation argument pairs */
     private Map<String, String> mArgMap;
@@ -110,10 +111,8 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
         return mRunnerName;
     }
 
-    /**
-     * Returns the complete instrumentation component path.
-     */
-    private String getRunnerPath() {
+    /** Returns the complete instrumentation component path. */
+    protected String getRunnerPath() {
         return getPackageName() + RUNNER_SEPARATOR + getRunnerName();
     }
 
@@ -182,6 +181,11 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
     }
 
     @Override
+    public void setEnforceTimeStamp(boolean timestamp) {
+        mEnforceTimeStamp = timestamp;
+    }
+
+    @Override
     public void setTestSize(TestSize size) {
         addInstrumentationArg(SIZE_ARG_NAME, size.getRunnerValue());
     }
@@ -201,7 +205,7 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
         } else {
             setLogOnly(false);
             // restore timeout to its original set value
-            setMaxTimeToOutputResponse(mMaxTimeToOutputResponse, mMaxTimeUnits);
+            setMaxTimeToOutputResponse(mMaxTimeToOutputResponseMs, TimeUnit.MILLISECONDS);
             if (getApiLevel() < 16 ) {
                 // remove delay
                 removeInstrumentationArg(DELAY_MSEC_ARG_NAME);
@@ -222,6 +226,7 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
         }
     }
 
+    @Deprecated
     @Override
     public void setMaxtimeToOutputResponse(int maxTimeToOutputResponse) {
         setMaxTimeToOutputResponse(maxTimeToOutputResponse, TimeUnit.MILLISECONDS);
@@ -229,8 +234,12 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
 
     @Override
     public void setMaxTimeToOutputResponse(long maxTimeToOutputResponse, TimeUnit maxTimeUnits) {
-        mMaxTimeToOutputResponse = maxTimeToOutputResponse;
-        mMaxTimeUnits = maxTimeUnits;
+        mMaxTimeToOutputResponseMs = maxTimeUnits.toMillis(maxTimeToOutputResponse);
+    }
+
+    @Override
+    public void setMaxTimeout(long maxTimeout, TimeUnit maxTimeUnits) {
+        mMaxTimeoutMs = maxTimeUnits.toMillis(maxTimeout);
     }
 
     @Override
@@ -254,10 +263,15 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
                 mRemoteDevice.getName()));
         String runName = mRunName == null ? mPackageName : mRunName;
         mParser = new InstrumentationResultParser(runName, listeners);
+        mParser.setEnforceTimeStamp(mEnforceTimeStamp);
 
         try {
-            mRemoteDevice.executeShellCommand(runCaseCommandStr, mParser, mMaxTimeToOutputResponse,
-                    mMaxTimeUnits);
+            mRemoteDevice.executeShellCommand(
+                    runCaseCommandStr,
+                    mParser,
+                    mMaxTimeoutMs,
+                    mMaxTimeToOutputResponseMs,
+                    TimeUnit.MILLISECONDS);
         } catch (IOException e) {
             Log.w(LOG_TAG, String.format("IOException %1$s when running tests %2$s on %3$s",
                     e.toString(), getPackageName(), mRemoteDevice.getName()));
@@ -268,10 +282,11 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
             Log.w(LOG_TAG, String.format(
                     "ShellCommandUnresponsiveException %1$s when running tests %2$s on %3$s",
                     e.toString(), getPackageName(), mRemoteDevice.getName()));
-            mParser.handleTestRunFailed(String.format(
-                    "Failed to receive adb shell test output within %1$d ms. " +
-                    "Test may have timed out, or adb connection to device became unresponsive",
-                    mMaxTimeToOutputResponse));
+            mParser.handleTestRunFailed(
+                    String.format(
+                            "Failed to receive adb shell test output within %1$d ms. Test may have "
+                                    + "timed out, or adb connection to device became unresponsive",
+                            mMaxTimeToOutputResponseMs));
             throw e;
         } catch (TimeoutException e) {
             Log.w(LOG_TAG, String.format(
@@ -318,10 +333,9 @@ public class RemoteAndroidTestRunner implements IRemoteAndroidTestRunner  {
 
     /**
      * Returns the full instrumentation command line syntax for the provided instrumentation
-     * arguments.
-     * Returns an empty string if no arguments were specified.
+     * arguments. Returns an empty string if no arguments were specified.
      */
-    private String getArgsCommand() {
+    protected String getArgsCommand() {
         StringBuilder commandBuilder = new StringBuilder();
         for (Entry<String, String> argPair : mArgMap.entrySet()) {
             final String argCmd = String.format(" -e %1$s %2$s", argPair.getKey(),

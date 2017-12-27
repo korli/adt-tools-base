@@ -17,6 +17,7 @@
 package com.android.manifmerger;
 
 import static com.android.manifmerger.PlaceholderHandler.KeyBasedValueResolver;
+import static com.android.testutils.BazelRunfilesManifestProcessor.logger;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Matchers.eq;
@@ -29,16 +30,12 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.android.testutils.MockLog;
 import com.google.common.base.Optional;
-
+import java.io.IOException;
+import javax.xml.parsers.ParserConfigurationException;
 import junit.framework.TestCase;
-
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.xml.sax.SAXException;
-
-import java.io.IOException;
-
-import javax.xml.parsers.ParserConfigurationException;
 
 /**
  * Tests for the {@link com.android.manifmerger.PlaceholderHandler}
@@ -86,13 +83,7 @@ public class PlaceholderHandlerTest extends TestCase {
                 TestUtils.sourceFile(getClass(), "testPlaceholders#xml"), xml);
 
         PlaceholderHandler.visit(
-                ManifestMerger2.MergeType.APPLICATION,
-                refDocument, new KeyBasedValueResolver<String>() {
-                    @Override
-                    public String getValue(@NonNull String key) {
-                        return "newValue";
-                    }
-                }, mBuilder);
+                MergingReport.Record.Severity.ERROR, refDocument, key -> "newValue", mBuilder);
 
         Optional<XmlElement> activityOne = refDocument.getRootNode()
                 .getNodeByTypeAndKey(ManifestModel.NodeTypes.ACTIVITY, ".activityOne");
@@ -140,17 +131,16 @@ public class PlaceholderHandlerTest extends TestCase {
                 TestUtils.sourceFile(getClass(), "testPlaceholders#xml"), xml);
 
         PlaceholderHandler.visit(
-                ManifestMerger2.MergeType.APPLICATION,
-                refDocument, new KeyBasedValueResolver<String>() {
-                    @Override
-                    public String getValue(@NonNull String key) {
-                        if (key.equals("first")) {
-                            return "firstValue";
-                        } else {
-                            return "secondValue";
-                        }
+                MergingReport.Record.Severity.ERROR,
+                refDocument,
+                key -> {
+                    if (key.equals("first")) {
+                        return "firstValue";
+                    } else {
+                        return "secondValue";
                     }
-                }, mBuilder);
+                },
+                mBuilder);
 
         Optional<XmlElement> activityOne = refDocument.getRootNode()
                 .getNodeByTypeAndKey(ManifestModel.NodeTypes.ACTIVITY, ".activityOne");
@@ -199,8 +189,8 @@ public class PlaceholderHandlerTest extends TestCase {
         XmlDocument refDocument = TestUtils.xmlDocumentFromString(
                 TestUtils.sourceFile(getClass(), "testPlaceholders#xml"), xml);
 
-        PlaceholderHandler
-                .visit(ManifestMerger2.MergeType.APPLICATION, refDocument, nullResolver, mBuilder);
+        PlaceholderHandler.visit(
+                MergingReport.Record.Severity.ERROR, refDocument, nullResolver, mBuilder);
         // verify the error was recorded.
         verify(mBuilder).addMessage(
                 any(SourceFilePosition.class),
@@ -219,11 +209,37 @@ public class PlaceholderHandlerTest extends TestCase {
         XmlDocument refDocument = TestUtils.xmlDocumentFromString(
                 TestUtils.sourceFile(getClass(), "testPlaceholders#xml"), xml);
 
-        PlaceholderHandler
-                .visit(ManifestMerger2.MergeType.LIBRARY, refDocument, nullResolver, mBuilder);
+        PlaceholderHandler.visit(
+                MergingReport.Record.Severity.INFO, refDocument, nullResolver, mBuilder);
         // verify the error was recorded.
         verify(mBuilder).addMessage(
                 any(SourceFilePosition.class),
                 eq(MergingReport.Record.Severity.INFO), anyString());
     }
+
+    public void testPlaceHolder_change_keyId()
+            throws ParserConfigurationException, SAXException, IOException {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <activity android:name=\"${activityName}\"\n"
+                        + "         android:attr1=\"value\"/>\n"
+                        + "</manifest>";
+
+        XmlDocument refDocument =
+                TestUtils.xmlDocumentFromString(
+                        TestUtils.sourceFile(getClass(), "testPlaceholders#xml"), xml);
+
+        MergingReport.Builder builder = new MergingReport.Builder(logger);
+        PlaceholderHandler.visit(
+                MergingReport.Record.Severity.ERROR, refDocument, key -> ".activityOne", builder);
+
+        Optional<XmlElement> activityOne =
+                refDocument
+                        .getRootNode()
+                        .getNodeByTypeAndKey(ManifestModel.NodeTypes.ACTIVITY, ".activityOne");
+        assertTrue(activityOne.isPresent());
+    }
+
 }

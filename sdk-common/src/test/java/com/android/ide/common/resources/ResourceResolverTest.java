@@ -1,5 +1,6 @@
 package com.android.ide.common.resources;
 
+import com.android.SdkConstants;
 import com.android.ide.common.rendering.api.ArrayResourceValue;
 import com.android.ide.common.rendering.api.DensityBasedResourceValue;
 import com.android.ide.common.rendering.api.LayoutLog;
@@ -8,14 +9,14 @@ import com.android.ide.common.rendering.api.StyleResourceValue;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.resources.Density;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.google.common.collect.Lists;
-
-import junit.framework.TestCase;
-
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import junit.framework.TestCase;
 
 public class ResourceResolverTest extends TestCase {
     public void test() throws Exception {
@@ -136,28 +137,39 @@ public class ResourceResolverTest extends TestCase {
                 "MyTheme", true);
         assertNotNull(resolver);
 
-        LayoutLog logger = new LayoutLog() {
-            @Override
-            public void warning(String tag, String message, Object data) {
-                fail(message);
-            }
+        LayoutLog logger =
+                new LayoutLog() {
+                    @Override
+                    public void warning(
+                            String tag, String message, Object viewCookie, Object data) {
+                        fail(message);
+                    }
 
-            @Override
-            public void fidelityWarning(String tag, String message, Throwable throwable,
-                    Object data) {
-                fail(message);
-            }
+                    @Override
+                    public void fidelityWarning(
+                            String tag,
+                            String message,
+                            Throwable throwable,
+                            Object viewCookie,
+                            Object data) {
+                        fail(message);
+                    }
 
-            @Override
-            public void error(String tag, String message, Object data) {
-                fail(message);
-            }
+                    @Override
+                    public void error(String tag, String message, Object viewCookie, Object data) {
+                        fail(message);
+                    }
 
-            @Override
-            public void error(String tag, String message, Throwable throwable, Object data) {
-                fail(message);
-            }
-        };
+                    @Override
+                    public void error(
+                            String tag,
+                            String message,
+                            Throwable throwable,
+                            Object viewCookie,
+                            Object data) {
+                        fail(message);
+                    }
+                };
         resolver.setLogger(logger);
 
         assertEquals("MyTheme", resolver.getThemeName());
@@ -241,8 +253,8 @@ public class ResourceResolverTest extends TestCase {
                 resolver.findItemInTheme("colorForeground", true).getValue());
         assertEquals("@color/bright_foreground_light",
                 resolver.findResValue("?colorForeground", true).getValue());
-        ResourceValue target = new ResourceValue(ResourceType.STRING, "dummy", false);
-        target.setValue("?foo");
+        ResourceValue target =
+                new ResourceValue(ResourceUrl.create(null, ResourceType.STRING, "dummy"), "?foo");
         assertEquals("#ff000000", resolver.resolveResValue(target).getValue());
 
         // getFrameworkResource
@@ -264,18 +276,33 @@ public class ResourceResolverTest extends TestCase {
         assertEquals("#ffffffff", resolver.resolveResValue(
                 resolver.findResValue("@android:color/bright_foreground_dark", false)).getValue());
 
-        // resolveValue
-        assertEquals("#ffffffff",
-                resolver.resolveValue(ResourceType.STRING, "bright_foreground_dark",
-                        "@android:color/background_light", true).getValue());
-        assertFalse(resolver.resolveValue(null, "id", "@+id/some_framework_id", false)
-                .isFramework());
+        assertEquals(
+                "#ffffffff",
+                resolver.resolveResValue(
+                                new ResourceValue(
+                                        ResourceUrl.create(
+                                                SdkConstants.ANDROID_NS_NAME,
+                                                ResourceType.STRING,
+                                                "bright_foreground_dark"),
+                                        "@android:color/background_light"))
+                        .getValue());
+
+        assertFalse(
+                resolver.resolveResValue(
+                                new ResourceValue(
+                                        ResourceUrl.create(null, ResourceType.ID, "my_id"),
+                                        "@+id/some_new_id"))
+                        .isFramework());
         // error expected.
         boolean failed = false;
         ResourceValue val = null;
         try {
-            val = resolver.resolveValue(ResourceType.STRING, "bright_foreground_dark",
-                    "@color/background_light", false);
+            val =
+                    resolver.resolveResValue(
+                            new ResourceValue(
+                                    ResourceUrl.create(
+                                            null, ResourceType.STRING, "bright_foreground_dark"),
+                                    "@color/background_light"));
         } catch (AssertionError expected) {
             failed = true;
         }
@@ -352,16 +379,19 @@ public class ResourceResolverTest extends TestCase {
         ResourceResolver resolver = ResourceResolver.create(projectResources, projectResources,
                 "MyTheme", true);
         final AtomicBoolean wasWarned = new AtomicBoolean(false);
-        LayoutLog logger = new LayoutLog() {
-            @Override
-            public void warning(String tag, String message, Object data) {
-                if ("Couldn't resolve resource @android:string/show_all_apps".equals(message)) {
-                    wasWarned.set(true);
-                } else {
-                    fail(message);
-                }
-            }
-        };
+        LayoutLog logger =
+                new LayoutLog() {
+                    @Override
+                    public void warning(
+                            String tag, String message, Object viewCookie, Object data) {
+                        if ("Couldn't resolve resource @android:string/show_all_apps"
+                                .equals(message)) {
+                            wasWarned.set(true);
+                        } else {
+                            fail(message);
+                        }
+                    }
+                };
         resolver.setLogger(logger);
         assertNull(resolver.findResValue("@string/show_all_apps", true));
         assertTrue(wasWarned.get());
@@ -392,22 +422,25 @@ public class ResourceResolverTest extends TestCase {
         assertNotNull(resolver);
 
         final AtomicBoolean wasWarned = new AtomicBoolean(false);
-        LayoutLog logger = new LayoutLog() {
-            @Override
-            public void error(String tag, String message, Object data) {
-                if (("Potential stack overflow trying to resolve "
-                        + "'@color/loop1': cyclic resource definitions?"
-                        + " Render may not be accurate.").equals(message)) {
-                    wasWarned.set(true);
-                } else if (("Potential stack overflow trying to resolve "
-                        + "'@color/loop2b': cyclic resource definitions? "
-                        + "Render may not be accurate.").equals(message)) {
-                    wasWarned.set(true);
-                } else {
-                    fail(message);
-                }
-            }
-        };
+        LayoutLog logger =
+                new LayoutLog() {
+                    @Override
+                    public void error(String tag, String message, Object viewCookie, Object data) {
+                        if (("Potential stack overflow trying to resolve "
+                                        + "'@color/loop1': cyclic resource definitions?"
+                                        + " Render may not be accurate.")
+                                .equals(message)) {
+                            wasWarned.set(true);
+                        } else if (("Potential stack overflow trying to resolve "
+                                        + "'@color/loop2b': cyclic resource definitions? "
+                                        + "Render may not be accurate.")
+                                .equals(message)) {
+                            wasWarned.set(true);
+                        } else {
+                            fail(message);
+                        }
+                    }
+                };
         resolver.setLogger(logger);
 
         assertNotNull(resolver.findResValue("@color/loop1", false));
@@ -423,33 +456,35 @@ public class ResourceResolverTest extends TestCase {
     }
 
     public void testParentCycle() throws IOException {
-        TestResourceRepository projectRepository = TestResourceRepository.create(false,
-                new Object[]{
-                        "values/styles.xml", ""
-                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<resources>\n"
-                        + "    <style name=\"ButtonStyle.Base\">\n"
-                        + "        <item name=\"android:textColor\">#ff0000</item>\n"
-                        + "    </style>\n"
-                        + "    <style name=\"ButtonStyle\" parent=\"ButtonStyle.Base\">\n"
-                        + "        <item name=\"android:layout_height\">40dp</item>\n"
-                        + "    </style>\n"
-                        + "</resources>\n",
-
-                        "layouts/layout.xml", ""
-                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<RelativeLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                        + "    android:layout_width=\"match_parent\"\n"
-                        + "    android:layout_height=\"match_parent\">\n"
-                        + "\n"
-                        + "    <TextView\n"
-                        + "        style=\"@style/ButtonStyle\"\n"
-                        + "        android:layout_width=\"wrap_content\"\n"
-                        + "        android:layout_height=\"wrap_content\" />\n"
-                        + "\n"
-                        + "</RelativeLayout>\n",
-
-                });
+        TestResourceRepository projectRepository =
+                TestResourceRepository.create(
+                        false,
+                        new Object[] {
+                            "values/styles.xml",
+                                    ""
+                                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                            + "<resources>\n"
+                                            + "    <style name=\"ButtonStyle.Base\">\n"
+                                            + "        <item name=\"android:textColor\">#ff0000</item>\n"
+                                            + "    </style>\n"
+                                            + "    <style name=\"ButtonStyle\" parent=\"ButtonStyle.Base\">\n"
+                                            + "        <item name=\"android:layout_height\">40dp</item>\n"
+                                            + "    </style>\n"
+                                            + "</resources>\n",
+                            "layouts/layout.xml",
+                                    ""
+                                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                            + "<RelativeLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                                            + "    android:layout_width=\"match_parent\"\n"
+                                            + "    android:layout_height=\"match_parent\">\n"
+                                            + "\n"
+                                            + "    <TextView\n"
+                                            + "        style=\"@style/ButtonStyle\"\n"
+                                            + "        android:layout_width=\"wrap_content\"\n"
+                                            + "        android:layout_height=\"wrap_content\" />\n"
+                                            + "\n"
+                                            + "</RelativeLayout>\n",
+                        });
         assertFalse(projectRepository.isFrameworkRepository());
         FolderConfiguration config = FolderConfiguration.getConfigForFolder("values-es-land");
         assertNotNull(config);
@@ -461,15 +496,18 @@ public class ResourceResolverTest extends TestCase {
         assertNotNull(resolver);
 
         final AtomicBoolean wasWarned = new AtomicBoolean(false);
-        LayoutLog logger = new LayoutLog() {
-            @Override
-            public void error(String tag, String message, Object data) {
-                assertEquals("Cyclic style parent definitions: \"ButtonStyle\" specifies "
-                        + "parent \"ButtonStyle.Base\" implies parent \"ButtonStyle\"", message);
-                assertEquals(LayoutLog.TAG_BROKEN, tag);
-                wasWarned.set(true);
-            }
-        };
+        LayoutLog logger =
+                new LayoutLog() {
+                    @Override
+                    public void error(String tag, String message, Object viewCookie, Object data) {
+                        assertEquals(
+                                "Cyclic style parent definitions: \"ButtonStyle\" specifies "
+                                        + "parent \"ButtonStyle.Base\" implies parent \"ButtonStyle\"",
+                                message);
+                        assertEquals(LayoutLog.TAG_BROKEN, tag);
+                        wasWarned.set(true);
+                    }
+                };
         resolver.setLogger(logger);
 
         StyleResourceValue buttonStyle = (StyleResourceValue) resolver.findResValue(
@@ -599,17 +637,20 @@ public class ResourceResolverTest extends TestCase {
                         + "</resources>\n",
                 });
 
-        TestResourceRepository projectRepository = TestResourceRepository.create(false,
-                new Object[] {
-                        "values/themes.xml", ""
-                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<resources>\n"
-                        + "    <style name=\"AppTheme\" parent=\"android:Theme.DeviceDefault.Light\"/>\n"
-                        + "    <style name=\"AppTheme.Dark\" parent=\"android:Theme.DeviceDefault\"/>\n"
-                        + "    <style name=\"foo\" parent=\"bar\"/>\n"
-                        + "    <style name=\"bar\" parent=\"foo\"/>\n"
-                        + "</resources>\n"
-                });
+        TestResourceRepository projectRepository =
+                TestResourceRepository.create(
+                        false,
+                        new Object[] {
+                            "values/themes.xml",
+                            ""
+                                    + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                    + "<resources>\n"
+                                    + "    <style name=\"AppTheme\" parent=\"android:Theme.DeviceDefault.Light\"/>\n"
+                                    + "    <style name=\"AppTheme.Dark\" parent=\"android:Theme.DeviceDefault\"/>\n"
+                                    + "    <style name=\"foo\" parent=\"bar\"/>\n"
+                                    + "    <style name=\"bar\" parent=\"foo\"/>\n"
+                                    + "</resources>\n"
+                        });
 
         assertFalse(projectRepository.isFrameworkRepository());
         FolderConfiguration config = FolderConfiguration.getConfigForFolder("values");
@@ -623,16 +664,18 @@ public class ResourceResolverTest extends TestCase {
                 frameworkResources, "AppTheme", true);
 
         final AtomicBoolean wasWarned = new AtomicBoolean(false);
-        LayoutLog logger = new LayoutLog() {
-            @Override
-            public void error(String tag, String message, Object data) {
-                if ("Cyclic style parent definitions: \"foo\" specifies parent \"bar\" specifies parent \"foo\"".equals(message)) {
-                    wasWarned.set(true);
-                } else {
-                    fail(message);
-                }
-            }
-        };
+        LayoutLog logger =
+                new LayoutLog() {
+                    @Override
+                    public void error(String tag, String message, Object viewCookie, Object data) {
+                        if ("Cyclic style parent definitions: \"foo\" specifies parent \"bar\" specifies parent \"foo\""
+                                .equals(message)) {
+                            wasWarned.set(true);
+                        } else {
+                            fail(message);
+                        }
+                    }
+                };
         resolver.setLogger(logger);
         assertFalse(resolver.isTheme(resolver.findResValue("@style/foo", false), null));
         assertTrue(wasWarned.get());
@@ -694,5 +737,17 @@ public class ResourceResolverTest extends TestCase {
 
         frameworkRepository.dispose();
         projectRepository.dispose();
+    }
+
+    public void testEmptyRepository() throws Exception {
+        // If the LocalResourceRespository fails to be loaded, the resolver will be created with empty maps. Make sure
+        // empty maps are valid inputs
+        ResourceResolver resolver =
+                ResourceResolver.create(
+                        Collections.emptyMap(), Collections.emptyMap(), null, false);
+        assertNotNull(ResourceResolver.copy(resolver));
+
+        assertNull(resolver.findResValue("@color/doesnt_exist", false));
+        assertNull(resolver.findResValue("@android:color/doesnt_exist", false));
     }
 }

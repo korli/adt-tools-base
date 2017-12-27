@@ -25,7 +25,6 @@ import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.SourceProvider;
 import com.android.builder.model.SourceProviderContainer;
-
 import java.io.Serializable;
 import java.util.Collection;
 import java.util.List;
@@ -71,7 +70,7 @@ final class ProductFlavorContainerImpl implements ProductFlavorContainer, Serial
         }
 
         return new ProductFlavorContainerImpl(
-                new ProductFlavorImpl(productFlavorData.getProductFlavor(), null, null),
+                new ProductFlavorImpl(productFlavorData.getProductFlavor()),
                 new SourceProviderImpl(productFlavorData.getSourceSet()),
                 clonedContainers);
     }

@@ -1,5 +1,7 @@
 <?xml version="1.0"?>
+<#import "root://activities/common/kotlin_macros.ftl" as kt>
 <recipe>
+    <@kt.addAllKotlinDependencies />
 <#if appCompat && !(hasDependency('com.android.support:appcompat-v7'))>
     <dependency mavenUrl="com.android.support:appcompat-v7:${buildApi}.+"/>
 </#if>
@@ -33,8 +35,14 @@
     <open file="${escapeXmlAttribute(resOut)}/layout/${layoutName}.xml" />
 </#if>
 
+<#if generateKotlin>
+    <instantiate from="root/src/app_package/ScrollActivity.kt.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${activityClass}.kt" />
+    <open file="${escapeXmlAttribute(srcOut)}/${activityClass}.kt" />
+<#else>
     <instantiate from="root/src/app_package/ScrollActivity.java.ftl"
                    to="${escapeXmlAttribute(srcOut)}/${activityClass}.java" />
-
     <open file="${escapeXmlAttribute(srcOut)}/${activityClass}.java" />
+</#if>
+
 </recipe>

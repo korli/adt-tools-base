@@ -16,9 +16,11 @@
 
 package com.android.build.gradle.internal.transforms;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.build.api.transform.DirectoryInput;
 import com.android.build.api.transform.JarInput;
+import com.android.build.api.transform.QualifiedContent;
 import com.android.build.api.transform.QualifiedContent.ContentType;
 import com.android.build.api.transform.QualifiedContent.Scope;
 import com.android.build.api.transform.Status;
@@ -29,7 +31,8 @@ import com.android.build.api.transform.TransformInvocation;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.google.common.collect.ImmutableSet;
-
+import com.google.common.collect.Sets;
+import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Set;
@@ -41,12 +44,10 @@ public class NoChangesVerifierTransform extends Transform {
 
     @NonNull
     private final String transformName;
-    @NonNull
-    private final InstantRunBuildContext buildContext;
+    @NonNull private final InstantRunBuildContext buildContext;
     @NonNull
     private final Set<ContentType> inputTypes;
-    @NonNull
-    private final Set<Scope> mergeScopes;
+    @NonNull private final Set<? super Scope> mergeScopes;
     @NonNull
     private final InstantRunVerifierStatus failureStatus;
 
@@ -54,7 +55,7 @@ public class NoChangesVerifierTransform extends Transform {
             @NonNull String transformName,
             @NonNull InstantRunBuildContext buildContext,
             @NonNull Set<ContentType> inputTypes,
-            @NonNull Set<Scope> mergeScopes,
+            @NonNull Set<? super Scope> mergeScopes,
             @NonNull InstantRunVerifierStatus failureStatus) {
         this.transformName = transformName;
         this.buildContext = buildContext;
@@ -83,7 +84,7 @@ public class NoChangesVerifierTransform extends Transform {
 
     @NonNull
     @Override
-    public Set<Scope> getReferencedScopes() {
+    public Set<? super Scope> getReferencedScopes() {
         return mergeScopes;
     }
 
@@ -104,16 +105,29 @@ public class NoChangesVerifierTransform extends Transform {
         }
     }
 
-    private static boolean hasChangedInputs(Collection<TransformInput> inputs) {
+    private boolean hasChangedInputs(Collection<TransformInput> inputs) {
+        // Reference scopes are not filtered, so they will contain types we do not care about.
         for (TransformInput input : inputs) {
             for (DirectoryInput directoryInput : input.getDirectoryInputs()) {
-                if (!directoryInput.getChangedFiles().isEmpty()) {
-                    return true;
+                if (!Sets.intersection(directoryInput.getContentTypes(), inputTypes).isEmpty()) {
+                    if (!directoryInput.getChangedFiles().isEmpty()) {
+                        if (inputTypes.contains(QualifiedContent.DefaultContentType.CLASSES)) {
+                            return true;
+                        } else {
+                            for (File file : directoryInput.getChangedFiles().keySet()) {
+                                if (!file.getPath().endsWith(SdkConstants.DOT_CLASS)) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
                 }
             }
             for (JarInput jarInput : input.getJarInputs()) {
-                if (jarInput.getStatus() != Status.NOTCHANGED) {
-                    return true;
+                if (!Sets.intersection(jarInput.getContentTypes(), inputTypes).isEmpty()) {
+                    if (jarInput.getStatus() != Status.NOTCHANGED) {
+                        return true;
+                    }
                 }
             }
         }

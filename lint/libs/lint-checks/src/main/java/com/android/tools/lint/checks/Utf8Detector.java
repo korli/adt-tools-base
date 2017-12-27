@@ -16,12 +16,14 @@
 
 package com.android.tools.lint.checks;
 
-import static com.android.tools.lint.detector.api.CharSequences.lastIndexOf;
+import static com.android.utils.CharSequences.lastIndexOf;
 
 import com.android.annotations.NonNull;
+import com.android.resources.ResourceFolderType;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
@@ -67,6 +69,9 @@ public class Utf8Detector extends ResourceXmlDetector {
 
     @Override
     public void visitDocument(@NonNull XmlContext context, @NonNull Document document) {
+        if (context.getResourceFolderType() == ResourceFolderType.RAW) {
+            return;
+        }
         CharSequence xml = context.getContents();
         if (xml == null) {
             return;
@@ -99,9 +104,10 @@ public class Utf8Detector extends ResourceXmlDetector {
                 String encoding = matcher.group(1);
                 Location location = Location.create(context.file, xml,
                         matcher.start(1), matcher.end(1));
+                LintFix fix = fix().replace().all().with("utf-8").build();
                 context.report(ISSUE, null, location, String.format(
                         "%1$s: Not using UTF-8 as the file encoding. This can lead to subtle " +
-                                "bugs with non-ascii characters", encoding));
+                                "bugs with non-ascii characters", encoding), fix);
             }
         }
     }

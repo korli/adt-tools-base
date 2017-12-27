@@ -48,6 +48,9 @@ public final class NonFinalPluginExpiry {
      * @throws RuntimeException if the plugin is a non final plugin older than 40 days.
      */
     public static void verifyRetirementAge() {
+        // disable the time bomb for now.
+        if (true) return;
+
         URLClassLoader cl = (URLClassLoader) NonFinalPluginExpiry.class.getClassLoader();
         try (InputStream inputStream = cl.findResource("META-INF/MANIFEST.MF").openStream()) {
             verifyRetirementAge(
@@ -116,20 +119,23 @@ public final class NonFinalPluginExpiry {
                 System.err.println(message);
                 throw new AndroidGradlePluginTooOldException(message);
             } else {
-                if (!dailyOverride.equals(overrideValue)) {
-                    String message =
-                            String.format(
-                                    "The android gradle plugin version %1$s is too old,"
-                                            + "please update to the latest version.\n"
-                                            + "\n"
-                                            + "The ANDROID_DAILY_OVERRIDE value is outdated. "
-                                            + "Please set the ANDROID_DAILY_OVERRIDE environment "
-                                            + "variable to \"%2$s\"",
-                                    version,
-                                    overrideValue);
-                    System.err.println(message);
-                    throw new AndroidGradlePluginTooOldException(message);
+                // allow a version specific override.
+                String versionOverride =
+                        String.valueOf(Version.ANDROID_GRADLE_PLUGIN_VERSION.hashCode());
+                if (dailyOverride.equals(overrideValue) || dailyOverride.equals(versionOverride)) {
+                    return;
                 }
+                String message =
+                        String.format(
+                                "The android gradle plugin version %1$s is too old,"
+                                        + "please update to the latest version.\n"
+                                        + "\n"
+                                        + "The ANDROID_DAILY_OVERRIDE value is outdated. "
+                                        + "Please set the ANDROID_DAILY_OVERRIDE environment "
+                                        + "variable to \"%2$s\"",
+                                version, overrideValue);
+                System.err.println(message);
+                throw new AndroidGradlePluginTooOldException(message);
             }
         }
     }

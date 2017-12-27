@@ -15,6 +15,22 @@
  */
 package com.android.utils;
 
+import static com.android.SdkConstants.AMP_ENTITY;
+import static com.android.SdkConstants.ANDROID_NS_NAME;
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.APOS_ENTITY;
+import static com.android.SdkConstants.APP_PREFIX;
+import static com.android.SdkConstants.GT_ENTITY;
+import static com.android.SdkConstants.LT_ENTITY;
+import static com.android.SdkConstants.NEWLINE_ENTITY;
+import static com.android.SdkConstants.QUOT_ENTITY;
+import static com.android.SdkConstants.XMLNS;
+import static com.android.SdkConstants.XMLNS_PREFIX;
+import static com.android.SdkConstants.XMLNS_URI;
+import static com.google.common.base.Charsets.UTF_16BE;
+import static com.google.common.base.Charsets.UTF_16LE;
+import static com.google.common.base.Charsets.UTF_8;
+
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -23,23 +39,37 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.google.common.base.CharMatcher;
 import com.google.common.io.Files;
-import org.w3c.dom.*;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
-import org.xml.sax.XMLReader;
-
-import javax.xml.parsers.*;
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.StringReader;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
-import java.io.*;
-import java.util.HashSet;
-import java.util.Locale;
-import java.util.Map;
-
-import static com.android.SdkConstants.*;
-import static com.google.common.base.Charsets.*;
-import static com.google.common.base.Charsets.UTF_8;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
 
 /** XML Utilities */
 public class XmlUtils {
@@ -341,15 +371,16 @@ public class XmlUtils {
     }
 
     /**
-     * Appends text to the given {@link StringBuilder} and escapes it as required for a
-     * DOM text node.
+     * Appends text to the given {@link StringBuilder} and escapes it as required for a DOM text
+     * node.
      *
-     * @param sb        the string builder
-     * @param start     the starting offset in the text string
-     * @param end       the ending offset in the text string
+     * @param sb the string builder
+     * @param start the starting offset in the text string
+     * @param end the ending offset in the text string
      * @param textValue the text value to be appended and escaped
      */
-    public static void appendXmlTextValue(@NonNull StringBuilder sb, @NonNull String textValue, int start, int end) {
+    public static void appendXmlTextValue(
+            @NonNull StringBuilder sb, @NonNull String textValue, int start, int end) {
         for (int i = start, n = Math.min(textValue.length(), end); i < n; i++) {
             char c = textValue.charAt(i);
             if (c == '<') {
@@ -474,15 +505,8 @@ public class XmlUtils {
     @NonNull
     public static Document parseDocument(@NonNull Reader xml, boolean namespaceAware)
             throws ParserConfigurationException, IOException, SAXException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         InputSource is = new InputSource(xml);
-        factory.setNamespaceAware(namespaceAware);
-        factory.setValidating(false);
-        factory.setFeature(EXTERNAL_GENERAL_ENTITIES, false);
-        factory.setFeature(EXTERNAL_PARAMETER_ENTITIES, false);
-        factory.setFeature(LOAD_EXTERNAL_DTD, false);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        return builder.parse(is);
+        return createDocumentBuilder(namespaceAware).parse(is);
     }
 
     /**
@@ -496,19 +520,30 @@ public class XmlUtils {
     @NonNull
     public static Document parseUtfXmlFile(@NonNull File file, boolean namespaceAware)
             throws ParserConfigurationException, IOException, SAXException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        Reader reader = getUtfReader(file);
+        try (Reader reader = getUtfReader(file)) {
+            return parseDocument(reader, namespaceAware);
+        }
+    }
+
+    /** Creates and returns a new empty document. */
+    @NonNull
+    public static Document createDocument(boolean namespaceAware) {
+        return createDocumentBuilder(namespaceAware).newDocument();
+    }
+
+    /** Creates a preconfigured document builder. */
+    @NonNull
+    private static DocumentBuilder createDocumentBuilder(boolean namespaceAware) {
         try {
-            InputSource is = new InputSource(reader);
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setNamespaceAware(namespaceAware);
             factory.setValidating(false);
             factory.setFeature(EXTERNAL_GENERAL_ENTITIES, false);
             factory.setFeature(EXTERNAL_PARAMETER_ENTITIES, false);
             factory.setFeature(LOAD_EXTERNAL_DTD, false);
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            return builder.parse(is);
-        } finally {
-            reader.close();
+            return factory.newDocumentBuilder();
+        } catch (ParserConfigurationException e) {
+            throw new Error(e); // Impossible in the current context.
         }
     }
 
@@ -753,20 +788,30 @@ public class XmlUtils {
     }
 
     /**
-     * Format the given floating value into an XML string, omitting decimals if
-     * 0
+     * Formats the number and removes trailing zeros after the decimal dot and also the dot itself
+     * if there were non-zero digits after it.
      *
      * @param value the value to be formatted
      * @return the corresponding XML string for the value
      */
     public static String formatFloatAttribute(double value) {
-        if (value != (int) value) {
-            // Run String.format without a locale, because we don't want locale-specific
-            // conversions here like separating the decimal part with a comma instead of a dot!
-            return String.format((Locale) null, "%.2f", value); //$NON-NLS-1$
-        } else {
-            return Integer.toString((int) value);
+        // Use locale-independent conversion to make sure that the decimal separator is always dot.
+        // We use Float.toString as opposed to Double.toString to avoid writing too many
+        // insignificant digits.
+        String result = Float.toString((float) value);
+        int pos = result.lastIndexOf('.');
+        if (pos < 0) {
+            return result;
         }
+        if (pos == 0) {
+            pos = 2;
+        }
+
+        int i = result.length();
+        while (--i > pos && result.charAt(i) == '0') {
+            // Skip trailing zeros.
+        }
+        return result.substring(0, i == pos ? i : i + 1);
     }
 
     /**
@@ -777,8 +822,7 @@ public class XmlUtils {
     public static String getRootTagName(@NonNull File xmlFile) {
         try (InputStream stream = new BufferedInputStream(new FileInputStream(xmlFile))) {
             XMLInputFactory factory = XMLInputFactory.newFactory();
-            XMLStreamReader xmlStreamReader =
-                    factory.createXMLStreamReader(stream);
+            XMLStreamReader xmlStreamReader = factory.createXMLStreamReader(stream);
 
             while (xmlStreamReader.hasNext()) {
                 int event = xmlStreamReader.next();
@@ -791,5 +835,271 @@ public class XmlUtils {
         }
 
         return null;
+    }
+
+    /**
+     * Returns the name of the root element tag stored in the given file, or null if it can't be
+     * determined.
+     */
+    @Nullable
+    public static String getRootTagName(@NonNull String xmlText) {
+        XMLInputFactory factory = XMLInputFactory.newFactory();
+        try (Reader reader = new StringReader(xmlText)) {
+            XMLStreamReader xmlStreamReader = factory.createXMLStreamReader(reader);
+
+            while (xmlStreamReader.hasNext()) {
+                int event = xmlStreamReader.next();
+                if (event == XMLStreamReader.START_ELEMENT) {
+                    return xmlStreamReader.getLocalName();
+                }
+            }
+        } catch (IOException | XMLStreamException e) {
+            // Ignore.
+        }
+        return null;
+    }
+
+    /**
+     * Returns the children elements of the given node
+     *
+     * @param parent the parent node
+     * @return a list of element children, never null
+     */
+    @NonNull
+    public static List<Element> getSubTagsAsList(@NonNull Node parent) {
+        NodeList childNodes = parent.getChildNodes();
+        List<Element> children = new ArrayList<>(childNodes.getLength());
+        for (int i = 0, n = childNodes.getLength(); i < n; i++) {
+            Node child = childNodes.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                children.add((Element) child);
+            }
+        }
+
+        return children;
+    }
+
+    /**
+     * Returns an iterator for the children elements of the given node.
+     * If you want to access the children as a list, use
+     * {@link #getSubTagsAsList(Node)} instead.
+     * <p>
+     * <b>NOTE: The iterator() call can only be called once!</b>
+     */
+    @NonNull
+    public static Iterable<Element> getSubTags(@Nullable Node parent) {
+        return new SubTagIterator(parent);
+    }
+
+    /**
+     * Returns an iterator for the children elements of the given node matching the
+     * given tag name.
+     * <p>
+     * If you want to access the children as a list, use
+     * {@link #getSubTagsAsList(Node)} instead.
+     * <p>
+     * <b>NOTE: The iterator() call can only be called once!</b>
+     */
+    @NonNull
+    public static Iterable<Element> getSubTagsByName(@Nullable Node parent, @NonNull String tagName) {
+        return new NamedSubTagIterator(parent, tagName);
+    }
+
+    private static class SubTagIterator implements Iterator<Element>, Iterable<Element> {
+        private Element next;
+        private boolean used;
+
+        public SubTagIterator(@Nullable Node parent) {
+            this.next = getFirstSubTag(parent);
+        }
+
+        @Override
+        public boolean hasNext() {
+            return next != null;
+        }
+
+        @Override
+        public Element next() {
+            Element ret = next;
+            next = getNextTag(next);
+            return ret;
+        }
+
+        @NonNull
+        @Override
+        public Iterator<Element> iterator() {
+            assert !used;
+            used = true;
+            return this;
+        }
+    }
+
+    private static class NamedSubTagIterator implements Iterator<Element>, Iterable<Element> {
+        private final String name;
+        private Element next;
+        private boolean used;
+
+        public NamedSubTagIterator(@Nullable Node parent, @NonNull String name) {
+            this.name = name;
+            this.next = getFirstSubTagByName(parent, name);
+        }
+
+        @Override
+        public boolean hasNext() {
+            return next != null;
+        }
+
+        @Override
+        public Element next() {
+            Element ret = next;
+            next = getNextTagByName(next, name);
+            return ret;
+        }
+
+        @NonNull
+        @Override
+        public Iterator<Element> iterator() {
+            assert !used;
+            used = true;
+            return this;
+        }
+    }
+
+    /** Returns the first child element of the given node */
+    @Nullable
+    public static Element getFirstSubTag(@Nullable Node parent) {
+        if (parent == null) {
+            return null;
+        }
+        Node curr = parent.getFirstChild();
+        while (curr != null) {
+            if (curr.getNodeType() == Node.ELEMENT_NODE) {
+                return (Element) curr;
+            }
+
+            curr = curr.getNextSibling();
+        }
+
+        return null;
+    }
+
+    /** Returns the next sibling element from the given node */
+    @Nullable
+    public static Element getNextTag(@Nullable Node node) {
+        if (node == null) {
+            return null;
+        }
+        Node curr = node.getNextSibling();
+        while (curr != null) {
+            if (curr.getNodeType() == Node.ELEMENT_NODE) {
+                return (Element) curr;
+            }
+
+            curr = curr.getNextSibling();
+        }
+
+        return null;
+    }
+
+    /** Returns the previous sibling element from the given node */
+    @Nullable
+    public static Element getPreviousTag(@Nullable Node node) {
+        if (node == null) {
+            return null;
+        }
+        Node curr = node.getPreviousSibling();
+        while (curr != null) {
+            if (curr.getNodeType() == Node.ELEMENT_NODE) {
+                return (Element) curr;
+            }
+
+            curr = curr.getPreviousSibling();
+        }
+
+        return null;
+    }
+
+    @Deprecated
+    @Nullable
+    public static Element getFirstSubTagTagByName(@Nullable Node parent, @NonNull String name) {
+        return getFirstSubTagByName(parent, name);
+    }
+
+    /** Returns the next sibling element from the given node that matches the given name */
+    @Nullable
+    public static Element getFirstSubTagByName(@Nullable Node parent, @NonNull String name) {
+        if (parent == null) {
+            return null;
+        }
+        Node curr = parent.getFirstChild();
+        while (curr != null) {
+            if (curr.getNodeType() == Node.ELEMENT_NODE &&
+                    name.equals(curr.getLocalName())) {
+                return (Element) curr;
+            }
+
+            curr = curr.getNextSibling();
+        }
+
+        return null;
+    }
+
+    /** Returns the next sibling element from the given node */
+    @Nullable
+    public static Element getNextTagByName(@Nullable Node node, @NonNull String name) {
+        if (node == null) {
+            return null;
+        }
+        Node curr = node.getNextSibling();
+        while (curr != null) {
+            if (curr.getNodeType() == Node.ELEMENT_NODE &&
+                    name.equals(curr.getLocalName())) {
+                return (Element) curr;
+            }
+
+            curr = curr.getNextSibling();
+        }
+
+        return null;
+    }
+
+    @Nullable
+    public static Element getPreviousTagByName(@Nullable Node node, @NonNull String name) {
+        if (node == null) {
+            return null;
+        }
+        Node curr = node.getPreviousSibling();
+        while (curr != null) {
+            if (curr.getNodeType() == Node.ELEMENT_NODE &&
+                    name.equals(curr.getLocalName())) {
+                return (Element) curr;
+            }
+
+            curr = curr.getPreviousSibling();
+        }
+
+        return null;
+    }
+
+    /**
+     * Returns the <b>number</b> of children sub tags of the given node
+     *
+     * @param parent the parent node
+     * @return the count of element children
+     */
+    public static int getSubTagCount(@Nullable Node parent) {
+        if (parent == null) {
+            return 0;
+        }
+        NodeList childNodes = parent.getChildNodes();
+        int childCount = 0;
+        for (int i = 0, n = childNodes.getLength(); i < n; i++) {
+            Node child = childNodes.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                childCount++;
+            }
+        }
+
+        return childCount;
     }
 }

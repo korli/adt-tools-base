@@ -17,8 +17,6 @@
 package com.android.build.gradle.integration.instant;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
-import static com.android.build.gradle.integration.instant.HotSwapTester.COLDSWAP_MODE;
 import static com.android.build.gradle.integration.instant.InstantRunTestUtils.PORTS;
 import static com.android.testutils.truth.MoreTruth.assertThatZip;
 
@@ -29,21 +27,20 @@ import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
 import com.android.build.gradle.integration.common.utils.AndroidVersionMatcher;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
 import com.android.builder.model.InstantRun;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.logcat.LogCatMessage;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunClient;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunClient;
 import com.google.common.io.Files;
 import com.google.common.io.Resources;
 import java.io.File;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -65,14 +62,7 @@ public class ResourcesSwapTest {
     public Logcat logcat = Logcat.create();
 
     @Rule
-    @SuppressWarnings("IOResourceOpenedButNotSafelyClosed") // Handled by Adb
     public final Adb adb = new Adb();
-
-    @Before
-    public void checkEnvironment() {
-        // IR currently does not work with Jack - http://b.android.com/224374
-        AssumeUtil.assumeNotUsingJack();
-    }
 
     @Test
     public void artifactContents() throws Exception {
@@ -83,24 +73,20 @@ public class ResourcesSwapTest {
         InstantRun instantRunModel =
                 InstantRunTestUtils.getInstantRunModel(mProject.model().getSingle().getOnlyModel());
 
-        InstantRunTestUtils.doInitialBuild(mProject, 21, COLDSWAP_MODE);
-        File apk = mProject.getApk("debug");
-        assertThatApk(apk).contains("assets/movie.mp4");
-        assertThatApk(apk).contains("classes.dex");
-        assertThatApk(apk).contains("instant-run.zip");
+        InstantRunTestUtils.doInitialBuild(mProject, new AndroidVersion(21, null));
+        Apk apk = mProject.getApk("debug");
+        assertThat(apk).contains("assets/movie.mp4");
+        assertThat(apk).contains("classes.dex");
 
         TestFileUtils.appendToFile(asset, " upgraded");
 
-        mProject.executor()
-                .withInstantRun(21, COLDSWAP_MODE)
-                .run("assembleDebug");
+        mProject.executor().withInstantRun(new AndroidVersion(21, null)).run("assembleDebug");
 
         InstantRunArtifact artifact = InstantRunTestUtils.getResourcesArtifact(instantRunModel);
 
         assertThat(artifact.file.getName()).endsWith(".ir.ap_");
         assertThatZip(artifact.file).contains("assets/movie.mp4");
         assertThatZip(artifact.file).doesNotContain("classes.dex");
-        assertThatZip(artifact.file).doesNotContain("instant-run.zip");
     }
 
     @Test
@@ -208,7 +194,7 @@ public class ResourcesSwapTest {
                 });
     }
 
-    private void copyTestResourceToProjectFile(String resourceName) throws IOException {
+    private void copyTestResourceToProjectFile(String resourceName) throws Exception {
         File file = mProject.file("src/main/res/drawable/image.png");
         Files.createParentDirs(file);
 

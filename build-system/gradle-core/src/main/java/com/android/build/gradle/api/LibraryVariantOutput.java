@@ -17,7 +17,6 @@
 package com.android.build.gradle.api;
 
 import com.android.annotations.Nullable;
-
 import org.gradle.api.tasks.bundling.Zip;
 
 /**
@@ -25,9 +24,8 @@ import org.gradle.api.tasks.bundling.Zip;
  */
 public interface LibraryVariantOutput {
 
-    /**
-     * Returns the Library AAR packaging task.
-     */
+    /** Returns the Library AAR packaging task. */
     @Nullable
+    @Deprecated
     Zip getPackageLibrary();
 }

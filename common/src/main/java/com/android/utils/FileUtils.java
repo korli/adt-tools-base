@@ -29,11 +29,15 @@ import com.google.common.hash.HashCode;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hashing;
 import com.google.common.io.Files;
-import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -67,7 +71,7 @@ public final class FileUtils {
     }
 
     /**
-     * Recursively deletes a directory or file.
+     * Recursively deletes a directory content (including the sub directories) but not itself.
      *
      * @param directory the directory, that must exist and be a valid directory
      * @throws IOException failed to delete the file / directory
@@ -456,55 +460,81 @@ public final class FileUtils {
     }
 
     /**
-     * Returns {@code true} if a file/directory is in a given directory or in a subdirectory of the
-     * given directory, and {@code false} otherwise.
+     * Returns {@code true} if the parent directory of the given file/directory exists, and {@code
+     * false} otherwise. Note that this method resolves the real path of the given file/directory
+     * first via {@link File#getCanonicalFile()}.
      */
-    public static boolean isFileInDirectory(File file, File directory) throws IOException {
-        File canonicalFile = file.getCanonicalFile();
-        File canonicalDirectory = directory.getCanonicalFile();
+    public static boolean parentDirExists(@NonNull File file) {
+        File canonicalFile;
+        try {
+            canonicalFile = file.getCanonicalFile();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
 
-        canonicalFile = canonicalFile.getParentFile();
-        while (canonicalFile != null) {
-            if (canonicalFile.equals(canonicalDirectory)) {
+        return canonicalFile.getParentFile() != null && canonicalFile.getParentFile().exists();
+    }
+
+    /**
+     * Returns {@code true} if a file/directory is in a given directory or in a subdirectory of the
+     * given directory, and {@code false} otherwise. Note that this method resolves the real paths
+     * of the given file/directory first via {@link File#getCanonicalFile()}.
+     */
+    public static boolean isFileInDirectory(@NonNull File file, @NonNull File directory) {
+        File parentFile;
+        try {
+            parentFile = file.getCanonicalFile().getParentFile();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        while (parentFile != null) {
+            if (isSameFile(parentFile, directory)) {
                 return true;
             }
-            canonicalFile = canonicalFile.getParentFile();
+            parentFile = parentFile.getParentFile();
         }
         return false;
     }
 
     /**
-     * Returns the modified canonical path of a file with consideration of the case sensitivity of
-     * the underlying file system.
+     * Returns {@code true} if the two files refer to the same physical file, and {@code false}
+     * otherwise. This is the correct way to compare physical files, instead of comparing using
+     * {@link File#equals(Object)} directly.
      *
-     * <p>This method addresses the scenario where we want to compute a unique path of a file such
-     * that two files with different computed paths are guaranteed to be different physical files,
-     * and vice versa. In such cases, using Java's {@link File#getCanonicalPath()} would not work
-     * because in case-insensitive file systems like Windows, two files having different canonical
-     * paths may actually refer to the same physical file (e.g., {@code "/foo"} and {@code "/Foo"}).
+     * <p>Unlike {@link java.nio.file.Files#isSameFile(Path, Path)}, this method does not require
+     * the files to exist.
      *
-     * <p>To address this issue, this method first detects whether the underlying file system is
-     * case-sensitive or not. If it is, this method returns the canonical path of the file, as would
-     * be returned by {@link File#getCanonicalPath()}. If it isn't, this method returns the
-     * lower-case canonical path of the file.
+     * <p>Internally, this method delegates to {@link java.nio.file.Files#isSameFile(Path, Path)} if
+     * the files exist.
+     *
+     * <p>If either of the files does not exist, this method instead compares the canonical files of
+     * the two files, since {@link java.nio.file.Files#isSameFile(Path, Path)} in some cases require
+     * that the files exist and therefore cannot be used. The downside of using {@link
+     * File#getCanonicalFile()} is that it may not handle hard links and symbolic links correctly as
+     * with {@link java.nio.file.Files#isSameFile(Path, Path)}.
+     */
+    public static boolean isSameFile(@NonNull File file1, @NonNull File file2) {
+        try {
+            if (file1.exists() && file2.exists()) {
+                return java.nio.file.Files.isSameFile(file1.toPath(), file2.toPath());
+            } else {
+                return file1.getCanonicalFile().equals(file2.getCanonicalFile());
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Creates a new {@link FileSystem} for a given ZIP file.
+     *
+     * <p>Note that NIO filesystems are unique per URI, so the returned {@link FileSystem} should be
+     * closed as soon as possible.
      */
     @NonNull
-    public static String getCaseSensitivityAwareCanonicalPath(@NonNull File file)
-            throws IOException {
-        boolean isFileSystemCaseSensitive = !new File("a").equals(new File("A"));
-        if (isFileSystemCaseSensitive) {
-            return file.getCanonicalPath();
-        } else {
-            // In a case-insensitive file system, Java's File.equals() compares the files by
-            // converting individual characters of the file paths first to uppercase, then to
-            // lowercase, and then compares each pair of characters one by one. The following
-            // implementation mimics that behavior.
-            String canonicalPath = file.getCanonicalPath();
-            char[] chars = new char[canonicalPath.length()];
-            for (int i = 0; i < chars.length; i++) {
-                chars[i] = Character.toLowerCase(Character.toUpperCase(canonicalPath.charAt(i)));
-            }
-            return String.valueOf(chars);
-        }
+    public static FileSystem createZipFilesystem(@NonNull Path archive) throws IOException {
+        URI uri = URI.create("jar:" + archive.toUri().toString());
+        return FileSystems.newFileSystem(uri, Collections.emptyMap());
     }
 }

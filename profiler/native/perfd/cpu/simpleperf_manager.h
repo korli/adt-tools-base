@@ -44,17 +44,17 @@ class SimplePerfManager {
   explicit SimplePerfManager(const Clock &clock) : clock_(clock) {}
   ~SimplePerfManager();
 
-  // Returns true if profiling of app |app_pkg_name| was started successfully.
+  // Returns true if profiling of app |app_name| was started successfully.
   // |trace_path| is also set to where the trace file will be made available
   // once profiling of this app is stopped. To call this method on an already
   // profiled app is a noop.
-  bool StartProfiling(const std::string &app_pkg_name, std::string *trace_path,
-                      std::string *error);
-  bool StopProfiling(const std::string &app_pkg_name, std::string *error);
+  bool StartProfiling(const std::string &app_name, int sampling_interval_us,
+                      std::string *trace_path, std::string *error);
+  bool StopProfiling(const std::string &app_name, std::string *error);
 
  private:
   const Clock &clock_;
-  static const char* kSimpleperfExecutable;
+  static const char *kSimpleperfExecutable;
   std::map<std::string, OnGoingProfiling> profiled_;
   std::mutex start_stop_mutex_;  // Protects simpleperf start/stop
 
@@ -64,7 +64,7 @@ class SimplePerfManager {
 
   // Generate the filename pattern used for trace and log (a name guaranteed
   // not to collide and without an extension).
-  std::string GetFileBaseName(const std::string &app_pkg_name) const;
+  std::string GetFileBaseName(const std::string &app_name) const;
 
   // Wait until simpleperf process has returned.
   bool WaitForSimplerPerf(const OnGoingProfiling &ongoing_recording,
@@ -93,7 +93,7 @@ class SimplePerfManager {
 
   // Returns true if the app is currently being profiled by a simple perf
   // process.
-  bool IsProfiling(const std::string &app_pkg_name);
+  bool IsProfiling(const std::string &app_name);
 };
 }
 

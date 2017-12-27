@@ -25,21 +25,23 @@ import com.android.build.gradle.internal.dsl.SigningConfig;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.pipeline.StreamFilter;
 import com.android.build.gradle.internal.pipeline.TransformManager;
+import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.PackagingScope;
-import com.android.build.gradle.internal.variant.SplitHandlingPolicy;
+import com.android.build.gradle.internal.variant.MultiOutputPolicy;
+import com.android.build.gradle.internal.variant.TaskContainer;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.DefaultApiVersion;
-import com.android.builder.core.VariantType;
-import com.android.builder.model.AaptOptions;
-import com.android.builder.model.ApiVersion;
+import com.android.builder.internal.aapt.AaptOptions;
+import com.android.sdklib.AndroidVersion;
 import com.android.utils.StringHelper;
 import com.google.devtools.build.lib.rules.android.apkmanifest.ExternalBuildApkManifest;
-
-import org.gradle.api.Project;
-
 import java.io.File;
 import java.util.Collections;
 import java.util.Set;
+import org.gradle.api.Project;
+import org.gradle.api.Task;
+import org.gradle.api.file.ConfigurableFileCollection;
+import org.gradle.api.file.FileCollection;
 
 /**
  * A {@link PackagingScope} used with external build plugin.
@@ -53,10 +55,10 @@ public class ExternalBuildPackagingScope implements PackagingScope {
     private final ExternalBuildVariantScope mVariantScope;
     @NonNull
     private final TransformManager mTransformManager;
-    private InstantRunBuildContext
-            mInstantRunBuildContext;
+    @NonNull private InstantRunBuildContext mInstantRunBuildContext;
     @Nullable
     private final SigningConfig mSigningConfig;
+    private final ProjectOptions mProjectOptions;
 
     public ExternalBuildPackagingScope(
             @NonNull Project project,
@@ -71,6 +73,7 @@ public class ExternalBuildPackagingScope implements PackagingScope {
         mTransformManager = transformManager;
         mSigningConfig = signingConfig;
         mInstantRunBuildContext = mVariantScope.getInstantRunBuildContext();
+        mProjectOptions = variantScope.getGlobalScope().getProjectOptions();
     }
 
     @NonNull
@@ -79,12 +82,10 @@ public class ExternalBuildPackagingScope implements PackagingScope {
         return mExternalBuildContext.getAndroidBuilder();
     }
 
-    @NonNull
     @Override
-    public File getFinalResourcesFile() {
-        return new File(
-                mExternalBuildContext.getExecutionRoot(),
-                mBuildManifest.getResourceApk().getExecRootPath());
+    public String getProjectBaseName() {
+        // FIX ME !
+        return mExternalBuildContext.getExecutionRoot().getName();
     }
 
     @NonNull
@@ -95,8 +96,10 @@ public class ExternalBuildPackagingScope implements PackagingScope {
 
     @NonNull
     @Override
-    public ApiVersion getMinSdkVersion() {
-        return new DefaultApiVersion(mInstantRunBuildContext.getFeatureLevel());
+    public AndroidVersion getMinSdkVersion() {
+        return new AndroidVersion(
+                mInstantRunBuildContext.getAndroidVersion().getApiLevel(),
+                mInstantRunBuildContext.getAndroidVersion().getCodename());
     }
 
     @NonNull
@@ -119,27 +122,27 @@ public class ExternalBuildPackagingScope implements PackagingScope {
 
     @NonNull
     @Override
-    public Set<File> getDexFolders() {
-        return mTransformManager.getPipelineOutput(StreamFilter.DEX).keySet();
+    public FileCollection getDexFolders() {
+        return mTransformManager.getPipelineOutputAsFileCollection(StreamFilter.DEX);
     }
 
     @NonNull
     @Override
-    public Set<File> getJavaResources() {
+    public FileCollection getJavaResources() {
         // TODO: do we want to support java resources?
-        return Collections.emptySet();
+        return getProject().files();
     }
 
     @NonNull
     @Override
-    public Set<File> getJniFolders() {
-        return Collections.emptySet();
+    public FileCollection getJniFolders() {
+        return getProject().files();
     }
 
     @NonNull
     @Override
-    public SplitHandlingPolicy getSplitHandlingPolicy() {
-        return SplitHandlingPolicy.RELEASE_21_AND_AFTER_POLICY;
+    public MultiOutputPolicy getMultiOutputPolicy() {
+        return MultiOutputPolicy.SPLITS;
     }
 
     @NonNull
@@ -149,8 +152,7 @@ public class ExternalBuildPackagingScope implements PackagingScope {
     }
 
     @NonNull
-    @Override
-    public ApkOutputFile getMainOutputFile() {
+    private ApkOutputFile getMainOutputFile() {
         return mVariantScope.getMainOutputFile();
     }
 
@@ -174,6 +176,11 @@ public class ExternalBuildPackagingScope implements PackagingScope {
     @Override
     public CoreSigningConfig getSigningConfig() {
         return mSigningConfig;
+    }
+
+    @Override
+    public ProjectOptions getProjectOptions() {
+        return mProjectOptions;
     }
 
     @NonNull
@@ -202,32 +209,8 @@ public class ExternalBuildPackagingScope implements PackagingScope {
 
     @NonNull
     @Override
-    public File getOutputPackage() {
-        return getMainOutputFile().getOutputFile();
-    }
-
-    @NonNull
-    @Override
-    public File getIntermediateApk() {
-        return mVariantScope.getIntermediateApk();
-    }
-
-    @NonNull
-    @Override
-    public File getAssetsDir() {
-        return mVariantScope.getAssetsDir();
-    }
-
-    @NonNull
-    @Override
     public File getInstantRunSplitApkOutputFolder() {
         return mVariantScope.getInstantRunSplitApkOutputFolder();
-    }
-
-    @Nullable
-    @Override
-    public File getAtomMetadataBaseFolder() {
-        return null;
     }
 
     @NonNull
@@ -253,17 +236,66 @@ public class ExternalBuildPackagingScope implements PackagingScope {
         return mVariantScope.getAaptOptions();
     }
 
+    @Override
+    public OutputScope getOutputScope() {
+        return mVariantScope.getOutputScope();
+    }
+
+    // TaskOutputHolder
+
     @NonNull
     @Override
-    public VariantType getVariantType() {
-        return VariantType.DEFAULT;
+    public FileCollection getOutput(@NonNull OutputType outputType) {
+        return mVariantScope.getOutput(outputType);
+    }
+
+    @Override
+    public boolean hasOutput(@NonNull OutputType outputType) {
+        return mVariantScope.hasOutput(outputType);
+    }
+
+    @Override
+    public ConfigurableFileCollection addTaskOutput(
+            @NonNull TaskOutputType outputType, @NonNull Object file, @Nullable String taskName) {
+        return mVariantScope.addTaskOutput(outputType, file, taskName);
     }
 
     @NonNull
     @Override
-    public File getManifestFile() {
-        return new File(
-                mExternalBuildContext.getExecutionRoot(),
-                mBuildManifest.getAndroidManifest().getExecRootPath());
+    public ConfigurableFileCollection createAnchorOutput(@NonNull AnchorOutputType outputType) {
+        return mVariantScope.createAnchorOutput(outputType);
+    }
+
+    @Override
+    public void addToAnchorOutput(
+            @NonNull AnchorOutputType outputType, @NonNull File file, @NonNull String taskName) {
+        mVariantScope.addToAnchorOutput(outputType, file, taskName);
+    }
+
+    @Override
+    public void addToAnchorOutput(
+            @NonNull AnchorOutputType outputType, @NonNull FileCollection fileCollection) {
+        mVariantScope.addToAnchorOutput(outputType, fileCollection);
+    }
+
+    @Override
+    public void addTask(TaskContainer.TaskKind taskKind, Task task) {
+        // not needed as customization not allowed in external build system.
+    }
+
+    @NonNull
+    @Override
+    public File getInstantRunResourceApkFolder() {
+        return mVariantScope.getInstantRunResourceApkFolder();
+    }
+
+    @Override
+    public boolean isAbiSplitsEnabled() {
+        return false;
+    }
+
+    @Override
+    public boolean isDensitySplitsEnabled() {
+        return false;
     }
 }

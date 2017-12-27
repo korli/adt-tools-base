@@ -19,8 +19,6 @@ package com.android.build.gradle.integration.instant;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.build.gradle.integration.instant.InstantRunTestUtils.PORTS;
 import static com.android.testutils.truth.MoreTruth.assertThatDex;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.integration.common.category.DeviceTests;
@@ -28,21 +26,21 @@ import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
-import com.android.build.gradle.integration.common.truth.ApkSubject;
 import com.android.build.gradle.integration.common.utils.AndroidVersionMatcher;
-import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
+import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
+import com.android.builder.model.OptionalCompilationStep;
 import com.android.ddmlib.IDevice;
-import com.android.tools.fd.client.InstantRunArtifact;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.testutils.apk.SplitApks;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import com.google.common.truth.Expect;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -53,7 +51,6 @@ import org.junit.experimental.categories.Category;
  */
 public class HotSwapTest {
 
-    private static final ColdswapMode COLDSWAP_MODE = ColdswapMode.MULTIDEX;
     private static final String LOG_TAG = "hotswapTest";
     private static final String ORIGINAL_MESSAGE = "Original";
     private static final int CHANGES_COUNT = 3;
@@ -74,8 +71,7 @@ public class HotSwapTest {
     public Expect expect = Expect.createAndEnableStackTrace();
 
     @Before
-    public void activityClass() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
+    public void activityClass() throws Exception {
         createActivityClass(ORIGINAL_MESSAGE);
     }
 
@@ -84,22 +80,22 @@ public class HotSwapTest {
         InstantRun instantRunModel =
                 InstantRunTestUtils.getInstantRunModel(project.model().getSingle().getOnlyModel());
 
-        InstantRunTestUtils.doInitialBuild(project, 19, COLDSWAP_MODE);
+        InstantRunTestUtils.doInitialBuild(project, new AndroidVersion(19, null));
+
+        SplitApks apks = InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel);
+        assertThat(apks).hasSize(1);
+        Apk apk = apks.get(0);
 
         // As no injected API level, will default to no splits.
-        ApkSubject apkFile = expect.about(ApkSubject.FACTORY)
-                .that(project.getApk("debug"));
-        apkFile.hasClass("Lcom/example/helloworld/HelloWorld;",
-                AbstractAndroidSubject.ClassFileScope.MAIN)
-                .that().hasMethod("onCreate");
-        apkFile.hasClass("Lcom/android/tools/fd/runtime/InstantRunService;",
-                AbstractAndroidSubject.ClassFileScope.MAIN);
+        assertThat(apk)
+                .hasMainClass("Lcom/example/helloworld/HelloWorld;")
+                .that()
+                .hasMethod("onCreate");
+        assertThat(apk).hasMainClass("Lcom/android/tools/ir/server/InstantRunContentProvider;");
 
         createActivityClass("CHANGE");
 
-        project.executor()
-                .withInstantRun(19, COLDSWAP_MODE)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(19, null)).run("assembleDebug");
 
         InstantRunArtifact artifact =
                 InstantRunTestUtils.getReloadDexArtifact(instantRunModel);
@@ -111,19 +107,24 @@ public class HotSwapTest {
     }
 
     @Test
-    public void testModel() throws Exception {
-        InstantRun instantRunModel = InstantRunTestUtils.getInstantRunModel(
-                project.model().getSingle().getOnlyModel());
+    public void testBuildEligibilityWithColdSwapRequested() throws Exception {
+        InstantRun instantRunModel =
+                InstantRunTestUtils.getInstantRunModel(project.model().getSingle().getOnlyModel());
 
-        assertTrue(instantRunModel.isSupportedByArtifact());
+        InstantRunTestUtils.doInitialBuild(project, new AndroidVersion(19, null));
 
-        TestFileUtils.appendToFile(
-                project.getBuildFile(), "\nandroid.buildTypes.debug.useJack = true");
+        createActivityClass("CHANGE");
 
-        instantRunModel = InstantRunTestUtils.getInstantRunModel(
-                project.model().getSingle().getOnlyModel());
+        project.executor()
+                .withInstantRun(new AndroidVersion(19, null), OptionalCompilationStep.RESTART_ONLY)
+                .run("assembleDebug");
 
-        assertFalse(instantRunModel.isSupportedByArtifact());
+        InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
+        assertThat(context.getVerifierStatus())
+                .isEqualTo(InstantRunVerifierStatus.COLD_SWAP_REQUESTED.toString());
+
+        assertThat(context.getBuildInstantRunEligibility())
+                .isEqualTo(InstantRunVerifierStatus.COMPATIBLE.toString());
     }
 
     @Test
@@ -165,8 +166,7 @@ public class HotSwapTest {
                 changes);
     }
 
-    private void createActivityClass(String message)
-            throws IOException {
+    private void createActivityClass(String message) throws Exception {
         String javaCompile = "package com.example.helloworld;\n"
                 + "import android.app.Activity;\n"
                 + "import android.os.Bundle;\n"

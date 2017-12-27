@@ -17,9 +17,12 @@
 package com.android.tools.lint.detector.api;
 
 import com.android.tools.lint.client.api.JavaParser.TypeDescriptor;
+import com.android.utils.Pair;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.psi.JavaRecursiveElementVisitor;
 import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiLocalVariable;
 import com.intellij.psi.PsiType;
 import java.io.File;
@@ -30,14 +33,67 @@ import lombok.ast.Expression;
 import lombok.ast.ForwardingAstVisitor;
 import lombok.ast.VariableDefinitionEntry;
 import org.intellij.lang.annotations.Language;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UFile;
+import org.jetbrains.uast.UVariable;
+import org.jetbrains.uast.visitor.AbstractUastVisitor;
 
 @SuppressWarnings("ClassNameDiffersFromFileName")
 public class TypeEvaluatorTest extends TestCase {
+    private static void checkUast(Object expected, @Language("JAVA") String source,
+            final String targetVariable) {
+        Pair<JavaContext, Disposable> pair =
+                LintUtilsTest.parseUast(source, new File("src/test/pkg/Test.java"));
+        JavaContext context = pair.getFirst();
+        Disposable disposable = pair.getSecond();
+
+        assertNotNull(context);
+        UFile uFile = context.getUastFile();
+        assertNotNull(uFile);
+
+        // Find the expression
+        final AtomicReference<UExpression> reference = new AtomicReference<>();
+        uFile.accept(new AbstractUastVisitor() {
+            @Override
+            public boolean visitVariable(UVariable variable) {
+                String name = variable.getName();
+                if (name != null && name.equals(targetVariable)) {
+                    reference.set(variable.getUastInitializer());
+                }
+
+                return super.visitVariable(variable);
+            }
+        });
+
+        UExpression expression = reference.get();
+        PsiType actual = TypeEvaluator.evaluate(expression);
+        if (expected == null) {
+            assertNull(actual);
+        } else {
+            assertNotNull("Couldn't compute type for " + source + ", expected " + expected,
+                    actual);
+
+            if (expected instanceof PsiType) {
+                assertEquals(expected, actual);
+            } else {
+                String expectedString = expected.toString();
+                if (expectedString.startsWith("class ")) {
+                    expectedString = expectedString.substring("class ".length());
+                }
+                assertEquals(expectedString, actual.getCanonicalText());
+            }
+        }
+        Disposer.dispose(disposable);
+    }
+
     private static void checkPsi(Object expected, @Language("JAVA") String source,
             final String targetVariable) {
-        JavaContext context = LintUtilsTest.parsePsi(source, new File("src/test/pkg/Test.java"));
+        Pair<JavaContext, Disposable> pair =
+                LintUtilsTest.parsePsi(source, new File("src/test/pkg/Test.java"));
+        JavaContext context = pair.getFirst();
+        Disposable disposable = pair.getSecond();
         assertNotNull(context);
-        PsiJavaFile javaFile = context.getJavaFile();
+        PsiFile javaFile = context.getPsiFile();
         assertNotNull(javaFile);
 
         // Find the expression
@@ -70,10 +126,12 @@ public class TypeEvaluatorTest extends TestCase {
                 assertEquals(expectedString, actual.getCanonicalText());
             }
         }
+        Disposer.dispose(disposable);
     }
 
     private static void check(Object expected, @Language("JAVA") String source,
             final String targetVariable) {
+        checkUast(expected, source, targetVariable);
         checkPsi(expected, source, targetVariable);
 
         JavaContext context = LintUtilsTest.parse(source, new File("src/test/pkg/Test.java"));

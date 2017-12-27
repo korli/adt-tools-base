@@ -18,7 +18,6 @@ package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.fixture.BuildModel.Feature.FULL_DEPENDENCIES;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.COORDINATES;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.ANDROID;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.JAVA;
@@ -37,14 +36,14 @@ import com.android.builder.model.Dependencies;
 import com.android.builder.model.JavaLibrary;
 import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
-import com.android.ide.common.process.ProcessException;
+import com.android.builder.model.level2.GraphItem;
+import com.android.testutils.apk.Apk;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 import com.google.common.truth.Truth;
-import java.io.File;
-import java.io.IOException;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -62,30 +61,29 @@ public class AppWithCompileIndirectJavaProjectTest {
             .create();
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         Files.write("include 'app', 'library', 'jar'", project.getSettingsFile(), Charsets.UTF_8);
 
-        appendToFile(project.getBuildFile(),
-"\nsubprojects {\n" +
-"    apply from: \"$rootDir/../commonLocalRepo.gradle\"\n" +
-"}\n");
+        appendToFile(
+                project.getBuildFile(),
+                "\nsubprojects {\n"
+                        + "    apply from: \"$rootDir/../commonLocalRepo.gradle\"\n"
+                        + "}\n");
 
-        appendToFile(project.getSubproject("app").getBuildFile(),
-"\ndependencies {\n" +
-"    compile project(':library')\n" +
-"    apk 'com.google.guava:guava:18.0'\n" +
-"}\n");
+        appendToFile(
+                project.getSubproject("app").getBuildFile(),
+                "\ndependencies {\n"
+                        + "    implementation project(':library')\n"
+                        + "    runtimeOnly 'com.google.guava:guava:19.0'\n"
+                        + "}\n");
 
-        appendToFile(project.getSubproject("library").getBuildFile(),
-"\ndependencies {\n" +
-"    compile project(':jar')\n" +
-"}\n");
+        appendToFile(
+                project.getSubproject("library").getBuildFile(),
+                "\ndependencies { api project(':jar') }");
 
-        appendToFile(project.getSubproject("jar").getBuildFile(),
-"\ndependencies {\n" +
-"    compile 'com.google.guava:guava:17.0'\n" +
-"}\n");
-
+        appendToFile(
+                project.getSubproject("jar").getBuildFile(),
+                "\ndependencies { compile 'com.google.guava:guava:18.0' }");
     }
 
     @AfterClass
@@ -94,19 +92,21 @@ public class AppWithCompileIndirectJavaProjectTest {
     }
 
     @Test
-    public void checkPackagedJar() throws IOException, ProcessException {
+    public void checkPackagedJar() throws Exception {
         project.execute("clean", ":app:assembleDebug");
 
-        File apk = project.getSubproject("app").getApk("debug");
+        Apk apk = project.getSubproject("app").getApk("debug");
 
-        assertThatApk(apk).containsClass("Lcom/example/android/multiproject/person/People;");
-        assertThatApk(apk).containsClass("Lcom/example/android/multiproject/library/PersonView;");
+        assertThat(apk).containsClass("Lcom/example/android/multiproject/person/People;");
+        assertThat(apk).containsClass("Lcom/example/android/multiproject/library/PersonView;");
     }
 
     @Test
-    public void checkLevel1Model() {
-        ModelContainer<AndroidProject> modelContainer = project.model()
-                .level(AndroidProject.MODEL_LEVEL_1_SYNC_ISSUE).getMulti();
+    public void checkLevel1Model() throws Exception {
+        ModelContainer<AndroidProject> modelContainer =
+                project.model()
+                        .level(AndroidProject.MODEL_LEVEL_3_VARIANT_OUTPUT_POST_BUILD)
+                        .getMulti();
 
         Map<String, AndroidProject> models = modelContainer.getModelMap();
 
@@ -124,10 +124,12 @@ public class AppWithCompileIndirectJavaProjectTest {
         assertThat(appAndroidLibrary.getProject()).named("app(androidlibs[0]) project").isEqualTo(":library");
 
         Collection<String> appProjectDeps = appDeps.getProjects();
-        assertThat(appProjectDeps).named("app(modules) count").isEmpty();
+        assertThat(appProjectDeps).named("app(modules) count").containsExactly(":jar");
 
         Collection<JavaLibrary> appJavaLibDeps = appDeps.getJavaLibraries();
-        assertThat(appJavaLibDeps).named("app(javalibs) count").isEmpty();
+        assertThat(appJavaLibDeps).named("app(javalibs) count").hasSize(1);
+        JavaLibrary javaLibrary = Iterables.getOnlyElement(appJavaLibDeps);
+        assertThat(javaLibrary.getResolvedCoordinates()).isEqualTo("com.google.guava", "guava", "18.0", "jar", null);
 
         // ---
         // test the dependencies on the :library module.
@@ -145,11 +147,13 @@ public class AppWithCompileIndirectJavaProjectTest {
         assertThat(libProjectDep).named("lib->:jar project").isEqualTo(":jar");
 
         Collection<JavaLibrary> libJavaLibDeps = appDeps.getJavaLibraries();
-        assertThat(libJavaLibDeps).named("lib(javalibs) count").isEmpty();
+        assertThat(libJavaLibDeps).named("lib(javalibs) count").hasSize(1);
+        javaLibrary = Iterables.getOnlyElement(libJavaLibDeps);
+        assertThat(javaLibrary.getResolvedCoordinates()).isEqualTo("com.google.guava", "guava", "18.0", "jar", null);
     }
 
     @Test
-    public void checkLevel2Model() {
+    public void checkLevel4Model() throws Exception {
         ModelContainer<AndroidProject> modelContainer = project.model()
                 .level(AndroidProject.MODEL_LEVEL_LATEST)
                 .withFeature(FULL_DEPENDENCIES)
@@ -175,54 +179,64 @@ public class AppWithCompileIndirectJavaProjectTest {
                     .isEmpty();
 
             // no direct java library
-            assertThat(helper.on(dependencyGraph).withType(JAVA).asList())
+            assertThat(helper.on(dependencyGraph).withType(JAVA).mapTo(COORDINATES))
                     .named(":app compile Java")
-                    .isEmpty();
+                    .containsExactly("com.google.guava:guava:18.0@jar");
 
             // look at direct modules
             Items moduleItems = helper.on(dependencyGraph).withType(MODULE);
 
             // should depend on :library
-            assertThat(moduleItems.mapTo(Property.GRADLE_PATH))
+            // For now it contains all the transitive in a single list, so also :jar
+            assertThat(moduleItems.mapTo(Property.COORDINATES))
                     .named(":app compile modules")
-                    .containsExactly(":library");
+                    .containsExactly(":library::debug", ":jar");
 
-            Items libraryItems = moduleItems.getTransitiveFromSingleItem();
+            // once there is a true graph, change this to false
+            if (true) {
+                // check there's not transitive info in the elements.
+                List<GraphItem> libs = moduleItems.asList();
+                for (GraphItem lib : libs) {
+                    assertThat(lib.getDependencies()).isEmpty();
+                }
+            } else {
+                Items libraryItems = moduleItems.getTransitiveFromSingleItem();
 
-            // now look at the transitive dependencies of this item
-            assertThat(libraryItems.withType(ANDROID).asList())
-                    .named(":app->:lib compile Android")
-                    .isEmpty();
+                // now look at the transitive dependencies of this item
+                assertThat(libraryItems.withType(ANDROID).asList())
+                        .named(":app->:lib compile Android")
+                        .isEmpty();
 
-            // no direct java library
-            assertThat(libraryItems.withType(JAVA).asList())
-                    .named(":app->:lib compile Java")
-                    .isEmpty();
+                // no direct java library
+                assertThat(libraryItems.withType(JAVA).asList())
+                        .named(":app->:lib compile Java")
+                        .isEmpty();
 
-            // look at direct module
-            Items librarySubModuleItems = libraryItems.withType(MODULE);
+                // look at direct module
+                Items librarySubModuleItems = libraryItems.withType(MODULE);
 
-            // should depend on :jar
-            assertThat(librarySubModuleItems.mapTo(Property.GRADLE_PATH))
-                    .named(":app compile modules")
-                    .containsExactly(":jar");
+                // should depend on :jar
+                assertThat(librarySubModuleItems.mapTo(Property.GRADLE_PATH))
+                        .named(":app compile modules")
+                        .containsExactly(":jar");
 
-            // follow the transitive dependencies again
-            Items libraryToJarItems = librarySubModuleItems.getTransitiveFromSingleItem();
+                // follow the transitive dependencies again
+                Items libraryToJarItems = librarySubModuleItems.getTransitiveFromSingleItem();
 
-            // no direct android library
-            assertThat(libraryToJarItems.withType(ANDROID).asList())
-                    .named(":app->:lib->:jar compile Android")
-                    .isEmpty();
+                // no direct android library
+                assertThat(libraryToJarItems.withType(ANDROID).asList())
+                        .named(":app->:lib->:jar compile Android")
+                        .isEmpty();
 
-            // no direct module dep
-            assertThat(libraryToJarItems.withType(MODULE).asList())
-                    .named(":app->:lib->:jar compile module")
-                    .isEmpty();
+                // no direct module dep
+                assertThat(libraryToJarItems.withType(MODULE).asList())
+                        .named(":app->:lib->:jar compile module")
+                        .isEmpty();
 
-            assertThat(libraryToJarItems.withType(JAVA).mapTo(COORDINATES))
-                    .named(":app->:lib->:jar compile java")
-                    .containsExactly("com.google.guava:guava:17.0@jar");
+                assertThat(libraryToJarItems.withType(JAVA).mapTo(COORDINATES))
+                        .named(":app->:lib->:jar compile java")
+                        .containsExactly("com.google.guava:guava:18.0@jar");
+            }
         }
 
         // same thing with the package deps. Main difference is guava available as direct
@@ -238,53 +252,63 @@ public class AppWithCompileIndirectJavaProjectTest {
             // dependency on guava.
             assertThat(packageItems.withType(JAVA).mapTo(COORDINATES))
                     .named(":app package Java")
-                    .containsExactly("com.google.guava:guava:18.0@jar");
+                    .containsExactly("com.google.guava:guava:19.0@jar");
 
             // look at direct module
             Items moduleItems = packageItems.withType(MODULE);
 
             // should depend on :library
-            assertThat(moduleItems.mapTo(Property.GRADLE_PATH))
+            // For now it contains all the transitive in a single list, so also :jar
+            assertThat(moduleItems.mapTo(Property.COORDINATES))
                     .named(":app package modules")
-                    .containsExactly(":library");
+                    .containsExactly(":library::debug", ":jar");
 
-            // now look at the transitive dependencies of this item
-            Items libraryItems = moduleItems.getTransitiveFromSingleItem();
+            // once there is a true graph, change this to false
+            if (true) {
+                // check there's not transitive info in the elements.
+                List<GraphItem> libs = moduleItems.asList();
+                for (GraphItem lib : libs) {
+                    assertThat(lib.getDependencies()).isEmpty();
+                }
+            } else {
+                // now look at the transitive dependencies of this item
+                Items libraryItems = moduleItems.getTransitiveFromSingleItem();
 
-            // no direct android lib
-            assertThat(libraryItems.withType(ANDROID).asList())
-                    .named(":app->:lib package Android")
-                    .isEmpty();
+                // no direct android lib
+                assertThat(libraryItems.withType(ANDROID).asList())
+                        .named(":app->:lib package Android")
+                        .isEmpty();
 
-            // no direct java library
-            assertThat(libraryItems.withType(JAVA).asList())
-                    .named(":app->:lib package Java")
-                    .isEmpty();
+                // no direct java library
+                assertThat(libraryItems.withType(JAVA).asList())
+                        .named(":app->:lib package Java")
+                        .isEmpty();
 
-            // look at direct module
-            Items librarySubModuleItems = libraryItems.withType(MODULE);
+                // look at direct module
+                Items librarySubModuleItems = libraryItems.withType(MODULE);
 
-            // should depend on :jar
-            assertThat(librarySubModuleItems.mapTo(Property.GRADLE_PATH))
-                    .named(":app->:lib package modules")
-                    .containsExactly(":jar");
+                // should depend on :jar
+                assertThat(librarySubModuleItems.mapTo(Property.GRADLE_PATH))
+                        .named(":app->:lib package modules")
+                        .containsExactly(":jar");
 
-            // follow the transitive dependencies again
-            Items libraryToJarItems = librarySubModuleItems.getTransitiveFromSingleItem();
+                // follow the transitive dependencies again
+                Items libraryToJarItems = librarySubModuleItems.getTransitiveFromSingleItem();
 
-            // no direct android library
-            assertThat(libraryToJarItems.withType(ANDROID).asList())
-                    .named(":app->:lib->:jar package Android")
-                    .isEmpty();
+                // no direct android library
+                assertThat(libraryToJarItems.withType(ANDROID).asList())
+                        .named(":app->:lib->:jar package Android")
+                        .isEmpty();
 
-            // no direct module dep
-            assertThat(libraryToJarItems.withType(MODULE).asList())
-                    .named(":app->:lib->:jar package module")
-                    .isEmpty();
+                // no direct module dep
+                assertThat(libraryToJarItems.withType(MODULE).asList())
+                        .named(":app->:lib->:jar package module")
+                        .isEmpty();
 
-            assertThat(libraryToJarItems.withType(JAVA).mapTo(COORDINATES))
-                    .named(":app->:lib->:jar package java")
-                    .containsExactly("com.google.guava:guava:18.0@jar");
+                assertThat(libraryToJarItems.withType(JAVA).mapTo(COORDINATES))
+                        .named(":app->:lib->:jar package java")
+                        .containsExactly("com.google.guava:guava:19.0@jar");
+            }
         }
 
         // ---
@@ -302,9 +326,10 @@ public class AppWithCompileIndirectJavaProjectTest {
                     .isEmpty();
 
             // no direct java library
-            assertThat(helper.on(compileGraph).withType(JAVA).asList())
+            // Right now guava shows up directly due to lack for graph
+            assertThat(helper.on(compileGraph).withType(JAVA).mapTo(COORDINATES))
                     .named(":lib compile Java")
-                    .isEmpty();
+                    .containsExactly("com.google.guava:guava:18.0@jar");
 
             // look at direct module
             Items moduleItems = helper.on(compileGraph).withType(MODULE);
@@ -317,19 +342,25 @@ public class AppWithCompileIndirectJavaProjectTest {
             // follow the transitive dependencies again
             Items jarItems = moduleItems.getTransitiveFromSingleItem();
 
-            // no direct android library
-            assertThat(jarItems.withType(ANDROID).asList())
-                    .named(":lib->:jar compile Android")
-                    .isEmpty();
 
-            // no direct module dep
-            assertThat(jarItems.withType(MODULE).asList())
-                    .named(":lib->:jar compile module")
-                    .isEmpty();
+            // once there is a true graph, change this to false
+            if (true) {
+                assertThat(jarItems.asLibraries()).isEmpty();
+            } else {
+                // no direct android library
+                assertThat(jarItems.withType(ANDROID).asList())
+                        .named(":lib->:jar compile Android")
+                        .isEmpty();
 
-            assertThat(jarItems.withType(JAVA).mapTo(COORDINATES))
-                    .named(":lib->:jar compile java")
-                    .containsExactly("com.google.guava:guava:17.0@jar");
+                // no direct module dep
+                assertThat(jarItems.withType(MODULE).asList())
+                        .named(":lib->:jar compile module")
+                        .isEmpty();
+
+                assertThat(jarItems.withType(JAVA).mapTo(COORDINATES))
+                        .named(":lib->:jar compile java")
+                        .containsExactly("com.google.guava:guava:18.0@jar");
+            }
         }
     }
 }

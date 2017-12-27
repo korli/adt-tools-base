@@ -29,8 +29,8 @@ import com.android.build.gradle.internal.dsl.CoreExternalNativeCmakeOptions;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeNdkBuildOptions;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.internal.tasks.BaseTask;
 import com.android.build.gradle.internal.variant.BaseVariantData;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.model.SyncIssue;
 import com.android.ide.common.process.BuildCommandException;
@@ -39,13 +39,10 @@ import com.android.utils.FileUtils;
 import com.android.utils.StringHelper;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
-import org.gradle.api.GradleException;
-import org.gradle.api.tasks.TaskAction;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
@@ -54,11 +51,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.gradle.api.GradleException;
+import org.gradle.api.tasks.TaskAction;
 
 /**
  * Task that takes set of JSON files of type NativeBuildConfigValue and does build steps with them.
+ *
+ * <p>It declares no inputs or outputs, as it's supposed to always run when invoked. Incrementality
+ * is left to the underlying build system.
  */
-public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
+public class ExternalNativeBuildTask extends BaseTask {
 
     private List<File> nativeBuildConfigurationsJsons;
 
@@ -69,6 +71,11 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
     private Set<String> targets;
 
     private Map<Abi, File> stlSharedObjectFiles;
+
+    /** Log low level diagnostic information. */
+    protected void diagnostic(String format, Object... args) {
+        getLogger().info(String.format(getName() + ": " + format, args));
+    }
 
     @TaskAction
     void build() throws BuildCommandException, IOException {
@@ -83,7 +90,8 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
         List<String> libraryNames = Lists.newArrayList();
 
         if (targets.isEmpty()) {
-            diagnostic("executing build commands for targets that produce .so files");
+            diagnostic(
+                    "executing build commands for targets that produce .so files or executables");
         } else {
             // Check the resulting JSON targets against the targets specified in ndkBuild.targets or
             // cmake.targets. If a target name specified by the user isn't present then provide an
@@ -116,6 +124,8 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
             }
         }
 
+
+
         for (NativeBuildConfigValue config : configValueList) {
             if (config.libraries == null) {
                 continue;
@@ -141,17 +151,28 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
                                 libraryValue.artifactName);
                         continue;
                     }
+
                     String extension = Files.getFileExtension(libraryValue.output.getName());
-                    if (!extension.equals("so")) {
-                        diagnostic("not building target %s because no targets are specified and "
-                                + "library build output file extension isn't 'so'. "
-                                + "Output file is %s",
-                                libraryValue.artifactName, libraryValue.output);
-                        continue;
+                    switch (extension) {
+                        case "so":
+                            diagnostic(
+                                    "building target library %s because no targets are "
+                                            + "specified.",
+                                    libraryValue.artifactName);
+                            break;
+                        case "":
+                            diagnostic(
+                                    "building target executable %s because no targets are "
+                                            + "specified.",
+                                    libraryValue.artifactName);
+                            break;
+                        default:
+                            diagnostic(
+                                    "not building target %s because the type cannot be "
+                                            + "determined.",
+                                    libraryValue.artifactName);
+                            continue;
                     }
-                    diagnostic("building target %s because no targets are specified and "
-                            + "library build output file extension is 'so'.",
-                            libraryValue.artifactName);
                 }
 
                 buildCommands.add(libraryValue.buildCommand);
@@ -167,8 +188,9 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
             if (config.libraries == null) {
                 continue;
             }
-            for (String libraryName : config.libraries.keySet()) {
-                NativeLibraryValue libraryValue = config.libraries.get(libraryName);
+            for (String library : config.libraries.keySet()) {
+                NativeLibraryValue libraryValue = config.libraries.get(library);
+                String libraryName = libraryValue.artifactName + " " + libraryValue.abi;
                 checkNotNull(libraryValue);
                 checkNotNull(libraryValue.output);
                 checkState(!Strings.isNullOrEmpty(libraryValue.artifactName));
@@ -188,6 +210,36 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
                 if (libraryValue.abi == null) {
                     throw new GradleException("Expected NativeLibraryValue to have non-null abi");
                 }
+
+                // If the build chose to write the library output somewhere besides objFolder
+                // then copy to objFolder (reference b.android.com/256515)
+                //
+                // Since there is now a .so file outside of the standard build/ folder we have to
+                // consider clean. Here's how the two files are covered.
+                // (1) Gradle plugin deletes the build/ folder. This covers the destination of the
+                //     copy.
+                // (2) ExternalNativeCleanTask calls the individual clean targets for everything
+                //     that was built. This should cover the source of the copy but it is up to the
+                //     CMakeLists.txt or Android.mk author to ensure this.
+                Abi abi = Abi.getByName(libraryValue.abi);
+                if (abi == null) {
+                    throw new RuntimeException(
+                            String.format("Unknown ABI seen %s", libraryValue.abi));
+                }
+                File expectedOutputFile =
+                        FileUtils.join(objFolder, abi.getName(), libraryValue.output.getName());
+                if (!FileUtils.isSameFile(libraryValue.output, expectedOutputFile)) {
+                    diagnostic(
+                            "external build set its own library output location for '%s', "
+                                    + "copy to expected location",
+                            libraryValue.output.getName());
+
+                    if (expectedOutputFile.getParentFile().mkdirs()) {
+                        diagnostic("created folder %s", expectedOutputFile.getParentFile());
+                    }
+                    diagnostic("copy file %s to %s", libraryValue.output, expectedOutputFile);
+                    Files.copy(libraryValue.output, expectedOutputFile);
+                }
             }
         }
 
@@ -195,10 +247,19 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
             diagnostic("copy STL shared object files");
             for (Abi abi : stlSharedObjectFiles.keySet()) {
                 File stlSharedObjectFile = checkNotNull(stlSharedObjectFiles.get(abi));
-                File objAbi = FileUtils.join(objFolder, abi.getName(),
-                        stlSharedObjectFile.getName());
-                diagnostic("copy file %s to %s", stlSharedObjectFile, objAbi);
-                Files.copy(stlSharedObjectFile, objAbi);
+                File objAbi =
+                        FileUtils.join(objFolder, abi.getName(), stlSharedObjectFile.getName());
+                if (!objAbi.getParentFile().isDirectory()) {
+                    // A build failure can leave the obj/abi folder missing. Just note that case
+                    // and continue without copying STL.
+                    diagnostic(
+                            "didn't copy STL file to %s because that folder wasn't created "
+                                    + "by the build ",
+                            objAbi.getParentFile());
+                } else {
+                    diagnostic("copy file %s to %s", stlSharedObjectFile, objAbi);
+                    Files.copy(stlSharedObjectFile, objAbi);
+                }
             }
         }
 
@@ -236,6 +297,7 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
     }
 
     @NonNull
+    @SuppressWarnings("unused") // Exposed in Variants API
     public File getSoFolder() {
         return soFolder;
     }
@@ -249,18 +311,17 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
     }
 
     @NonNull
-    @SuppressWarnings("unused")
+    @SuppressWarnings("unused") // Exposed in Variants API
     public File getObjFolder() {
         return objFolder;
     }
 
-    private void setObjFolder(@NonNull
-            File objFolder) {
+    private void setObjFolder(@NonNull File objFolder) {
         this.objFolder = objFolder;
     }
 
     @NonNull
-    @SuppressWarnings("unused")
+    @SuppressWarnings("unused") // Exposed in Variants API
     public List<File> getNativeBuildConfigurationsJsons() {
         return nativeBuildConfigurationsJsons;
     }
@@ -310,8 +371,7 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
 
         @Override
         public void execute(@NonNull ExternalNativeBuildTask task) {
-            final BaseVariantData<? extends BaseVariantOutputData> variantData =
-                    scope.getVariantData();
+            final BaseVariantData variantData = scope.getVariantData();
             final Set<String> targets;
             CoreExternalNativeBuildOptions nativeBuildOptions =
                     variantData.getVariantConfiguration().getExternalNativeBuildOptions();
@@ -365,6 +425,7 @@ public class ExternalNativeBuildTask extends ExternalNativeBaseTask {
                                     Joiner.on(", ").join(generator.getAbis().stream()
                                             .map(Abi::getName)
                                             .collect(Collectors.toList()))));
+                    task.setNativeBuildConfigurationsJsons(ImmutableList.of());
                 } else {
                     // Take the first JSON that matched the build configuration
                     task.setNativeBuildConfigurationsJsons(

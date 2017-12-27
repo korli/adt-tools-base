@@ -36,13 +36,14 @@ import com.android.ide.common.rendering.api.ResourceValue;
 import com.android.ide.common.res2.AbstractResourceRepository;
 import com.android.ide.common.res2.ResourceFile;
 import com.android.ide.common.res2.ResourceItem;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.ResourceFolderType;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.LayoutDetector;
+import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
@@ -216,7 +217,9 @@ public class NegativeMarginDetector extends LayoutDetector {
                                     String message = String.format(
                                             "Margin values should not be negative "
                                                     + "(`%1$s` is defined as `%2$s` in `%3$s`",
-                                            value, dimenValue, sourceFile.getFile());
+                                            value, dimenValue,
+                                            LintUtils.getFileNameWithParent(client,
+                                                    sourceFile.getFile()));
                                     context.report(ISSUE, scope,
                                             context.getLocation(scope),
                                             message);

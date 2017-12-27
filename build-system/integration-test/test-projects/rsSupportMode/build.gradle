@@ -1,22 +1,22 @@
 apply from: "../commonHeader.gradle"
 buildscript { apply from: "../commonBuildScript.gradle" }
+apply from: "../commonLocalRepo.gradle"
 
 apply plugin: 'com.android.application'
-
-project.ext['android.useDeprecatedNdk'] = true
 
 android {
     compileSdkVersion rootProject.latestCompileSdk
     buildToolsVersion = rootProject.buildToolsVersion
 
     defaultConfig {
-        minSdkVersion 8
+        minSdkVersion 9
         targetSdkVersion 16
         renderscriptTargetApi 18
         renderscriptSupportModeEnabled true
         renderscriptSupportModeBlasEnabled false
     }
 
+    flavorDimensions 'abi'
     productFlavors {
         x86 {
             ndk {
@@ -34,4 +34,8 @@ android {
             }
         }
     }
+}
+
+dependencies {
+    androidTestImplementation 'com.android.support.test:runner:1.0.0'
 }

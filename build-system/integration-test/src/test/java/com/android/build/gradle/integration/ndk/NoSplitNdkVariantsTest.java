@@ -23,13 +23,14 @@ import static org.junit.Assert.assertNull;
 import com.android.build.gradle.integration.common.category.DeviceTests;
 import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
+import com.android.build.gradle.integration.common.fixture.GradleTestProject.ApkType;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldJniApp;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.builder.testing.api.DeviceException;
+import com.android.build.gradle.options.StringOption;
 import com.android.ddmlib.IDevice;
-import java.io.IOException;
+import com.android.testutils.apk.Apk;
+import java.io.File;
 import java.util.Collection;
-import java.util.zip.ZipFile;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -48,47 +49,61 @@ public class NoSplitNdkVariantsTest {
     @ClassRule
     public static GradleTestProject project = GradleTestProject.builder()
             .fromTestApp(new HelloWorldJniApp())
-            .addGradleProperties("android.useDeprecatedNdk=true")
             .create();
 
     @BeforeClass
-    public static void setUp() throws IOException {
-        TestFileUtils.appendToFile(project.getBuildFile(), "\n"
-                + "apply plugin: 'com.android.application'\n"
-                + "\n"
-                + "android {\n"
-                + "    compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n"
-                + "    buildToolsVersion '" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "'\n"
-                + "    defaultConfig {\n"
-                + "        ndk {\n"
-                + "            moduleName 'hello-jni'\n"
-                + "        }\n"
-                + "    }\n"
-                + "    buildTypes {\n"
-                + "        release\n"
-                + "        debug {\n"
-                + "            jniDebuggable true\n"
-                + "        }\n"
-                + "    }\n"
-                + "    productFlavors {\n"
-                + "        x86 {\n"
-                + "            ndk {\n"
-                + "                abiFilter 'x86'\n"
-                + "            }\n"
-                + "        }\n"
-                + "        arm {\n"
-                + "            ndk {\n"
-                + "                abiFilters 'armeabi-v7a', 'armeabi'\n"
-                + "            }\n"
-                + "        }\n"
-                + "        mips {\n"
-                + "            ndk {\n"
-                + "                abiFilter 'mips'\n"
-                + "            }\n"
-                + "        }\n"
-                + "    }\n"
-                + "}");
-
+    public static void setUp() throws Exception {
+        TestFileUtils.appendToFile(
+                project.getBuildFile(),
+                "\n"
+                        + "apply plugin: 'com.android.application'\n"
+                        + "\n"
+                        + "android {\n"
+                        + "    compileSdkVersion "
+                        + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION
+                        + "\n"
+                        + "    buildToolsVersion '"
+                        + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION
+                        + "'\n"
+                        + "    externalNativeBuild {\n"
+                        + "        ndkBuild {\n"
+                        + "            path 'Android.mk'\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "    buildTypes {\n"
+                        + "        release\n"
+                        + "        debug {\n"
+                        + "            jniDebuggable true\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "    flavorDimensions 'abi'\n"
+                        + "    productFlavors {\n"
+                        + "        x86 {\n"
+                        + "            ndk {\n"
+                        + "                abiFilter 'x86'\n"
+                        + "            }\n"
+                        + "        }\n"
+                        + "        arm {\n"
+                        + "            ndk {\n"
+                        + "                abiFilters 'armeabi-v7a', 'armeabi'\n"
+                        + "            }\n"
+                        + "        }\n"
+                        + "        mips {\n"
+                        + "            ndk {\n"
+                        + "                abiFilter 'mips'\n"
+                        + "            }\n"
+                        + "        }\n"
+                        + "    }\n"
+                        + "}");
+        TestFileUtils.appendToFile(
+                new File(project.getBuildFile().getParentFile(), "Android.mk"),
+                "LOCAL_PATH := $(call my-dir)\n"
+                        + "include $(CLEAR_VARS)\n"
+                        + "\n"
+                        + "LOCAL_MODULE := hello-jni\n"
+                        + "LOCAL_SRC_FILES := src/main/jni/hello-jni.c\n"
+                        + "\n"
+                        + "include $(BUILD_SHARED_LIBRARY)");
     }
 
     @AfterClass
@@ -97,48 +112,45 @@ public class NoSplitNdkVariantsTest {
     }
 
     @Test
-    public void assembleX86Release() throws IOException {
+    public void assembleX86Release() throws Exception {
         project.execute("assembleX86Release");
 
         // Verify .so are built for all platform.
-        try (ZipFile apk = new ZipFile(project.getApk("x86", "release", "unsigned"))) {
-            assertNotNull(apk.getEntry("lib/x86/libhello-jni.so"));
-            assertNull(apk.getEntry("lib/mips/libhello-jni.so"));
-            assertNull(apk.getEntry("lib/armeabi/libhello-jni.so"));
-            assertNull(apk.getEntry("lib/armeabi-v7a/libhello-jni.so"));
-        }
+        Apk apk = project.getApk(null, ApkType.RELEASE, "x86");
+        assertNotNull(apk.getEntry("lib/x86/libhello-jni.so"));
+        assertNull(apk.getEntry("lib/mips/libhello-jni.so"));
+        assertNull(apk.getEntry("lib/armeabi/libhello-jni.so"));
+        assertNull(apk.getEntry("lib/armeabi-v7a/libhello-jni.so"));
     }
 
     @Test
-    public void assembleArmRelease() throws IOException {
+    public void assembleArmRelease() throws Exception {
         project.execute("assembleArmRelease");
 
         // Verify .so are built for all platform.
-        try (ZipFile apk = new ZipFile(project.getApk("arm", "release", "unsigned"))) {
-            assertNull(apk.getEntry("lib/x86/libhello-jni.so"));
-            assertNull(apk.getEntry("lib/mips/libhello-jni.so"));
-            assertNotNull(apk.getEntry("lib/armeabi/libhello-jni.so"));
-            assertNotNull(apk.getEntry("lib/armeabi-v7a/libhello-jni.so"));
-        }
+        Apk apk = project.getApk(null, ApkType.RELEASE, "arm");
+        assertNull(apk.getEntry("lib/x86/libhello-jni.so"));
+        assertNull(apk.getEntry("lib/mips/libhello-jni.so"));
+        assertNotNull(apk.getEntry("lib/armeabi/libhello-jni.so"));
+        assertNotNull(apk.getEntry("lib/armeabi-v7a/libhello-jni.so"));
 
     }
 
     @Test
-    public void assembleMipsRelease() throws IOException {
+    public void assembleMipsRelease() throws Exception {
         project.execute("assembleMipsRelease");
 
         // Verify .so are built for all platform.
-        try (ZipFile apk = new ZipFile(project.getApk("mips", "release", "unsigned"))) {
-            assertNull(apk.getEntry("lib/x86/libhello-jni.so"));
-            assertNotNull(apk.getEntry("lib/mips/libhello-jni.so"));
-            assertNull(apk.getEntry("lib/armeabi/libhello-jni.so"));
-            assertNull(apk.getEntry("lib/armeabi-v7a/libhello-jni.so"));
-        }
+        Apk apk = project.getApk(null, ApkType.RELEASE, "mips");
+        assertNull(apk.getEntry("lib/x86/libhello-jni.so"));
+        assertNotNull(apk.getEntry("lib/mips/libhello-jni.so"));
+        assertNull(apk.getEntry("lib/armeabi/libhello-jni.so"));
+        assertNull(apk.getEntry("lib/armeabi-v7a/libhello-jni.so"));
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedAndroidTest() throws DeviceException {
+    public void connectedAndroidTest() throws Exception {
         project.executor().run(
                 "assembleX86Debug", "assembleX86DebugAndroidTest",
                 "assembleArmDebug", "assembleArmDebugAndroidTest");
@@ -147,7 +159,7 @@ public class NoSplitNdkVariantsTest {
         String taskName = abis.contains("x86") ?
                 "devicePoolX86DebugAndroidTest" : "devicePoolArmDebugAndroidTest";
         project.executor()
-                .withArgument(Adb.getInjectToDeviceProviderProperty(testDevice))
+                .with(StringOption.DEVICE_POOL_SERIAL, testDevice.getSerialNumber())
                 .run(taskName);
     }
 }

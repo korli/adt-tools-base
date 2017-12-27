@@ -16,6 +16,8 @@
 
 package com.android.ide.common.resources.configuration;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import com.android.ide.common.res2.ResourceFile;
 import com.android.ide.common.res2.ResourceItem;
 import com.android.resources.Density;
@@ -28,14 +30,12 @@ import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
-
-import junit.framework.TestCase;
-
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import junit.framework.TestCase;
 
 public class FolderConfigurationTest extends TestCase {
 
@@ -51,7 +51,9 @@ public class FolderConfigurationTest extends TestCase {
 
         // make sure all the qualifiers were created.
         for (int i = 0 ; i < count ; i++) {
-            assertNotNull(defaultConfig.getQualifier(i));
+            assertThat(defaultConfig.getQualifier(i))
+                    .named("Qualifier with index " + i)
+                    .isNotNull();
         }
     }
 
@@ -430,6 +432,13 @@ public class FolderConfigurationTest extends TestCase {
         assertEquals("car", config.getLocaleQualifier().getLanguage());
     }
 
+    public void testVr() {
+        FolderConfiguration config = FolderConfiguration.getConfigForFolder("values-vrheadset");
+        assertNotNull(config);
+        assertNotNull(config.getUiModeQualifier());
+        assertEquals(UiMode.VR_HEADSET, config.getUiModeQualifier().getValue());
+    }
+
     public void testIsMatchForBcp47() {
         FolderConfiguration blankFolder = FolderConfiguration.getConfigForFolder("values");
         FolderConfiguration enFolder = FolderConfiguration.getConfigForFolder("values-en");
@@ -449,42 +458,46 @@ public class FolderConfigurationTest extends TestCase {
     }
 
     public void testFindMatchingConfigurables() {
-        ResourceItem itemBlank = new ResourceItem("foo", ResourceType.STRING, null, null) {
-            @Override
-            public String toString() {
-                return "itemBlank";
-            }
-        };
+        ResourceItem itemBlank =
+                new ResourceItem("foo", null, ResourceType.STRING, null, null) {
+                    @Override
+                    public String toString() {
+                        return "itemBlank";
+                    }
+                };
         ResourceFile sourceBlank = ResourceFile.createSingle(new File("sourceBlank"), itemBlank, "");
         itemBlank.setSource(sourceBlank);
         FolderConfiguration configBlank = itemBlank.getConfiguration();
 
-        ResourceItem itemEn = new ResourceItem("foo", ResourceType.STRING, null, null) {
-            @Override
-            public String toString() {
-                return "itemEn";
-            }
-        };
+        ResourceItem itemEn =
+                new ResourceItem("foo", null, ResourceType.STRING, null, null) {
+                    @Override
+                    public String toString() {
+                        return "itemEn";
+                    }
+                };
         ResourceFile sourceEn = ResourceFile.createSingle(new File("sourceEn"), itemBlank, "en");
         itemEn.setSource(sourceEn);
         FolderConfiguration configEn = itemEn.getConfiguration();
 
-        ResourceItem itemBcpEn = new ResourceItem("foo", ResourceType.STRING, null, null) {
-            @Override
-            public String toString() {
-                return "itemBcpEn";
-            }
-        };
+        ResourceItem itemBcpEn =
+                new ResourceItem("foo", null, ResourceType.STRING, null, null) {
+                    @Override
+                    public String toString() {
+                        return "itemBcpEn";
+                    }
+                };
         ResourceFile sourceBcpEn = ResourceFile.createSingle(new File("sourceBcpEn"), itemBlank, "b+en");
         itemBcpEn.setSource(sourceBcpEn);
         FolderConfiguration configBcpEn = itemBcpEn.getConfiguration();
 
-        ResourceItem itemDe = new ResourceItem("foo", ResourceType.STRING, null, null) {
-            @Override
-            public String toString() {
-                return "itemDe";
-            }
-        };
+        ResourceItem itemDe =
+                new ResourceItem("foo", null, ResourceType.STRING, null, null) {
+                    @Override
+                    public String toString() {
+                        return "itemDe";
+                    }
+                };
 
         ResourceFile sourceDe = ResourceFile.createSingle(new File("sourceDe"), itemBlank, "de");
         itemDe.setSource(sourceDe);

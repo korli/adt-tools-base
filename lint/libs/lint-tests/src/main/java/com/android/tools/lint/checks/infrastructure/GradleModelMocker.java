@@ -28,7 +28,6 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.build.FilterData;
-import com.android.build.OutputFile;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidArtifactOutput;
 import com.android.builder.model.AndroidLibrary;
@@ -38,8 +37,10 @@ import com.android.builder.model.BuildType;
 import com.android.builder.model.BuildTypeContainer;
 import com.android.builder.model.ClassField;
 import com.android.builder.model.Dependencies;
+import com.android.builder.model.JavaCompileOptions;
 import com.android.builder.model.JavaLibrary;
 import com.android.builder.model.Library;
+import com.android.builder.model.LintOptions;
 import com.android.builder.model.MavenCoordinates;
 import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.ProductFlavorContainer;
@@ -47,7 +48,11 @@ import com.android.builder.model.SourceProvider;
 import com.android.builder.model.SourceProviderContainer;
 import com.android.builder.model.Variant;
 import com.android.builder.model.VectorDrawablesOptions;
+import com.android.builder.model.level2.DependencyGraphs;
+import com.android.builder.model.level2.GlobalLibraryMap;
+import com.android.builder.model.level2.GraphItem;
 import com.android.ide.common.repository.GradleCoordinate;
+import com.android.ide.common.repository.GradleVersion;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.utils.FileUtils;
@@ -60,16 +65,26 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
 import com.google.common.hash.Hashing;
+import com.google.common.io.ByteStreams;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
+import java.util.zip.ZipEntry;
 import junit.framework.TestCase;
 import org.intellij.lang.annotations.Language;
 import org.jetbrains.annotations.Contract;
@@ -86,11 +101,14 @@ import org.mockito.stubbing.OngoingStubbing;
 public class GradleModelMocker {
     private AndroidProject project;
     private Variant variant;
+    private GlobalLibraryMap globalLibraryMap;
     private final List<BuildType> buildTypes = Lists.newArrayList();
     private final List<AndroidLibrary> androidLibraries = Lists.newArrayList();
     private final List<JavaLibrary> javaLibraries = Lists.newArrayList();
+    private final List<JavaLibrary> allJavaLibraries = Lists.newArrayList();
     private ProductFlavor mergedFlavor;
     private ProductFlavor defaultFlavor;
+    private LintOptions lintOptions;
     private File projectDir = new File("");
     private final List<ProductFlavor> productFlavors = Lists.newArrayList();
     private final Multimap<String, String> splits = ArrayListMultimap.create();
@@ -98,11 +116,15 @@ public class GradleModelMocker {
     private boolean initialized;
     @Language("Groovy")
     private final String gradle;
-    private String modelVersion = "2.2.2";
+    private GradleVersion modelVersion = GradleVersion.parse("2.2.2");
     private final Map<String, Dep> graphs = Maps.newHashMap();
     private boolean useBuildCache;
     private VectorDrawablesOptions vectorDrawablesOptions;
     private boolean allowUnrecognizedConstructs;
+    private boolean fullDependencies;
+    private JavaCompileOptions compileOptions;
+    private boolean javaPlugin;
+    private boolean javaLibraryPlugin;
 
     public GradleModelMocker(@Language("Groovy") String gradle) {
         this.gradle = gradle;
@@ -116,7 +138,7 @@ public class GradleModelMocker {
 
     @NonNull
     public GradleModelMocker withModelVersion(@NonNull String modelVersion) {
-        this.modelVersion = modelVersion;
+        this.modelVersion = GradleVersion.parse(modelVersion);
         return this;
     }
 
@@ -126,6 +148,7 @@ public class GradleModelMocker {
         return this;
     }
 
+    @NonNull
     public GradleModelMocker withDependencyGraph(@NonNull String graph) {
         parseDependencyGraph(graph, graphs);
         return this;
@@ -138,6 +161,17 @@ public class GradleModelMocker {
 
     public GradleModelMocker withBuildCache(boolean useBuildCache) {
         this.useBuildCache = useBuildCache;
+        return this;
+    }
+
+    /**
+     * If true, model a full/deep dependency graph in
+     * {@link com.android.builder.model.level2.DependencyGraphs}; the default
+     * is flat. (This is normally controlled by sync/model builder flag
+     * {@link AndroidProject#PROPERTY_BUILD_MODEL_FEATURE_FULL_DEPENDENCIES}.)
+     */
+    public GradleModelMocker withFullDependencies(boolean fullDependencies) {
+        this.fullDependencies = fullDependencies;
         return this;
     }
 
@@ -169,6 +203,26 @@ public class GradleModelMocker {
         }
     }
 
+    /** Whether the Gradle file applied the java plugin */
+    public boolean hasJavaPlugin() {
+        return javaPlugin;
+    }
+
+    /** Whether the Gradle file applied the java-library plugin */
+    public boolean hasJavaLibraryPlugin() {
+        return javaLibraryPlugin;
+    }
+
+    public boolean isLibrary() {
+        return project.getProjectType() == AndroidProject.PROJECT_TYPE_LIBRARY
+                || hasJavaLibraryPlugin();
+    }
+
+    /** Whether the Gradle file applied the java-library plugin */
+    public boolean hasAndroidLibraryPlugin() {
+        return javaLibraryPlugin;
+    }
+
     public AndroidProject getProject() {
         ensureInitialized();
         return project;
@@ -179,15 +233,30 @@ public class GradleModelMocker {
         return variant;
     }
 
+    @Nullable
+    public GlobalLibraryMap getGlobalLibraryMap() {
+        ensureInitialized();
+        return globalLibraryMap;
+    }
+
     private void initialize() {
         project = mock(AndroidProject.class);
 
-        when(project.getModelVersion()).thenReturn(modelVersion);
-        int apiVersion = !modelVersion.startsWith("1.") ? 3 : 2;
+        when(project.getModelVersion()).thenReturn(modelVersion.toString());
+        int apiVersion = modelVersion.getMajor() >= 2 ? 3 : 2;
         when(project.getApiVersion()).thenReturn(apiVersion);
         when(project.getFlavorDimensions()).thenReturn(Lists.newArrayList());
 
         variant = mock(Variant.class);
+
+        lintOptions = createLintOptions();
+        when(project.getLintOptions()).thenReturn(lintOptions);
+
+        compileOptions = mock(JavaCompileOptions.class);
+        when(compileOptions.getSourceCompatibility()).thenReturn("1.7");
+        when(compileOptions.getTargetCompatibility()).thenReturn("1.7");
+        when(compileOptions.getEncoding()).thenReturn("UTF-8");
+        when(project.getJavaCompileOptions()).thenReturn(compileOptions);
 
         // built-in build-types
         getBuildType("debug", true);
@@ -198,7 +267,13 @@ public class GradleModelMocker {
 
         Dependencies dependencies = mock(Dependencies.class);
         when(dependencies.getLibraries()).thenReturn(androidLibraries);
-        when(dependencies.getJavaLibraries()).thenReturn(javaLibraries);
+
+        if (modelVersion.isAtLeast(2, 0, 0)) {
+            when(dependencies.getJavaLibraries()).thenReturn(javaLibraries);
+        } else {
+            // Should really throw org.gradle.tooling.model.UnsupportedMethodException here!
+            when(dependencies.getJavaLibraries()).thenThrow(new RuntimeException());
+        }
 
         //mergedFlavor = mock(ProductFlavor.class);
         //when(variant.getMergedFlavor()).thenReturn(mergedFlavor);
@@ -226,11 +301,17 @@ public class GradleModelMocker {
         SourceProvider mainProvider = createSourceProvider(projectDir, "main");
         when(defaultContainer.getSourceProvider()).thenReturn(mainProvider);
 
-        SourceProviderContainer extraProvider = mock(SourceProviderContainer.class);
-        when(extraProvider.getArtifactName()).thenReturn(AndroidProject.ARTIFACT_ANDROID_TEST);
-        SourceProvider testSourceProvider = createSourceProvider(projectDir, "test");
-        when(extraProvider.getSourceProvider()).thenReturn(testSourceProvider);
-        List<SourceProviderContainer> extraProviders = Lists.newArrayList(extraProvider);
+        SourceProviderContainer androidTestProvider = mock(SourceProviderContainer.class);
+        when(androidTestProvider.getArtifactName()).thenReturn(AndroidProject.ARTIFACT_ANDROID_TEST);
+        SourceProvider androidSourceProvider = createSourceProvider(projectDir, "androidTest");
+        when(androidTestProvider.getSourceProvider()).thenReturn(androidSourceProvider);
+        SourceProviderContainer unitTestProvider = mock(SourceProviderContainer.class);
+        when(unitTestProvider.getArtifactName()).thenReturn(AndroidProject.ARTIFACT_UNIT_TEST);
+        SourceProvider unitSourceProvider = createSourceProvider(projectDir, "test");
+        when(unitTestProvider.getSourceProvider()).thenReturn(unitSourceProvider);
+
+        List<SourceProviderContainer> extraProviders = Lists.newArrayList(androidTestProvider,
+                unitTestProvider);
         when(defaultContainer.getExtraSourceProviders()).thenReturn(extraProviders);
 
         List<ProductFlavorContainer> flavorContainers = Lists.newArrayList();
@@ -251,8 +332,17 @@ public class GradleModelMocker {
         AndroidArtifact artifact = mock(AndroidArtifact.class);
         //noinspection deprecation
         when(artifact.getDependencies()).thenReturn(dependencies);
-
         when(variant.getMainArtifact()).thenReturn(artifact);
+
+        if (modelVersion.isAtLeast(2, 5, 0, "alpha", 1, false)) {
+            DependencyGraphs graphs = createDependencyGraphs();
+            when(artifact.getDependencyGraphs()).thenReturn(graphs);
+        } else {
+            // Should really throw org.gradle.tooling.model.UnsupportedMethodException here!
+            when(artifact.getDependencyGraphs()).thenThrow(new RuntimeException());
+        }
+
+        when(project.getBuildFolder()).thenReturn(new File(projectDir, "build"));
 
         Collection<AndroidArtifactOutput> outputs = Lists.newArrayList();
         outputs.add(createAndroidArtifactOutput("", ""));
@@ -282,6 +372,149 @@ public class GradleModelMocker {
         setVariantName(defaultVariant);
     }
 
+    private static LintOptions createLintOptions() {
+        LintOptions options = mock(LintOptions.class);
+        // Configure default (and make it mutable, e.g. lists that we can append to)
+        when(options.getEnable()).thenReturn(Sets.newHashSet());
+        when(options.getDisable()).thenReturn(Sets.newHashSet());
+        when(options.getCheck()).thenReturn(Sets.newHashSet());
+        when(options.getEnable()).thenReturn(Sets.newHashSet());
+        when(options.getSeverityOverrides()).thenReturn(Maps.newHashMap());
+
+        // Set the same defaults as the Gradle side
+        when(options.isAbortOnError()).thenReturn(true);
+        when(options.isCheckReleaseBuilds()).thenReturn(true);
+        when(options.getHtmlReport()).thenReturn(true);
+        when(options.getXmlReport()).thenReturn(true);
+
+        /* These are true in lint in general, but we want them to be false in the unit tests
+        when(options.isAbsolutePaths()).thenReturn(true);
+        when(options.isExplainIssues()).thenReturn(true);
+        */
+
+        return options;
+    }
+
+    @NonNull
+    private DependencyGraphs createDependencyGraphs() {
+        DependencyGraphs graphs = mock(DependencyGraphs.class);
+        List<GraphItem> compileItems = Lists.newArrayList();
+        Map<String, com.android.builder.model.level2.Library> globalMap = Maps.newHashMap();
+
+        when(graphs.getCompileDependencies()).thenReturn(compileItems);
+        when(graphs.getPackageDependencies()).thenReturn(compileItems);
+        when(graphs.getProvidedLibraries()).thenReturn(Collections.emptyList());
+        when(graphs.getSkippedLibraries()).thenReturn(Collections.emptyList());
+
+        HashSet<String> seen = Sets.newHashSet();
+        addGraphItems(compileItems, globalMap, seen, androidLibraries);
+        addGraphItems(compileItems, globalMap, seen, javaLibraries);
+
+        // Java libraries aren't available from the AndroidLibraries themselves;
+        // stored in a separate global map during initialization
+        for (JavaLibrary library : allJavaLibraries) {
+            com.android.builder.model.level2.Library lib = createLevel2Library(library);
+            globalMap.put(lib.getArtifactAddress(), lib);
+        }
+
+        globalLibraryMap = mock(GlobalLibraryMap.class);
+        when(globalLibraryMap.getLibraries()).thenReturn(globalMap);
+
+        return graphs;
+    }
+
+    private void addGraphItems(
+            List<GraphItem> result,
+            Map<String, com.android.builder.model.level2.Library> globalMap,
+            Set<String> seen,
+            Collection<? extends Library> libraries) {
+        for (Library library : libraries) {
+            MavenCoordinates coordinates = library.getResolvedCoordinates();
+            String name = coordinates.getGroupId() + ':' + coordinates.getArtifactId() + ':'
+                    + coordinates.getVersion() + '@' + coordinates.getPackaging();
+            if (fullDependencies || !seen.contains(name)) {
+                seen.add(name);
+
+                GraphItem item = mock(GraphItem.class);
+                result.add(item);
+                when(item.getArtifactAddress()).thenReturn(name);
+                when(item.getRequestedCoordinates()).thenReturn(name);
+                when(item.getDependencies()).thenReturn(Lists.newArrayList());
+
+                if (library instanceof AndroidLibrary) {
+                    AndroidLibrary androidLibrary = (AndroidLibrary) library;
+                    addGraphItems(fullDependencies ? item.getDependencies() : result, globalMap,
+                            seen, androidLibrary.getLibraryDependencies());
+                } else if (library instanceof JavaLibrary) {
+                    JavaLibrary javaLibrary = (JavaLibrary) library;
+                    addGraphItems(fullDependencies ? item.getDependencies() : result, globalMap,
+                            seen, javaLibrary.getDependencies());
+                }
+            }
+
+            globalMap.put(name, createLevel2Library(library));
+        }
+    }
+
+    @NonNull
+    private com.android.builder.model.level2.Library createLevel2Library(Library library) {
+        com.android.builder.model.level2.Library lib = mock(
+                com.android.builder.model.level2.Library.class);
+
+        MavenCoordinates coordinates = library.getResolvedCoordinates();
+        String name = coordinates.getGroupId() + ':' + coordinates.getArtifactId() + ':'
+                + coordinates.getVersion() + '@' + coordinates.getPackaging();
+        when(lib.getArtifactAddress()).thenReturn(name);
+        if (library instanceof AndroidLibrary) {
+            AndroidLibrary androidLibrary = (AndroidLibrary) library;
+            File folder = androidLibrary.getFolder();
+            when(lib.getType()).thenReturn(
+                    com.android.builder.model.level2.Library.LIBRARY_ANDROID);
+            when(lib.getFolder()).thenReturn(folder);
+            when(lib.getLintJar()).thenReturn("lint.jar");
+            when(lib.getLocalJars()).thenReturn(Collections.emptyList());
+            when(lib.getExternalAnnotations()).thenReturn(FN_ANNOTATIONS_ZIP);
+            when(lib.getJarFile()).thenReturn("jars/" + FN_CLASSES_JAR);
+            File jar = new File(folder, "jars/" + FN_CLASSES_JAR);
+            if (!jar.exists()) {
+                createEmptyJar(jar);
+            }
+            //when(l2.isProvided).thenReturn(androidLibrary.isProvided());
+        } else if (library instanceof JavaLibrary) {
+            JavaLibrary javaLibrary = (JavaLibrary) library;
+            when(lib.getType()).thenReturn(com.android.builder.model.level2.Library.LIBRARY_JAVA);
+            List<String> jars = Lists.newArrayList();
+            when(lib.getLocalJars()).thenReturn(jars);
+            File jarFile = javaLibrary.getJarFile();
+            when(lib.getArtifact()).thenReturn(jarFile);
+            when(lib.getFolder()).thenThrow(new UnsupportedOperationException());
+        }
+        return lib;
+    }
+
+    private void createEmptyJar(@NonNull File jar) {
+        if (!jar.exists()) {
+            File parentFile = jar.getParentFile();
+            if (parentFile != null && !parentFile.isDirectory()) {
+                //noinspection ResultOfMethodCallIgnored
+                parentFile.mkdirs();
+            }
+
+            Manifest manifest = new Manifest();
+            manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+
+            try (JarOutputStream jarOutputStream = new JarOutputStream(
+                    new BufferedOutputStream(new FileOutputStream(jar)), manifest)) {
+                jarOutputStream.putNextEntry(new ZipEntry("dummy.txt"));
+                ByteStreams.copy(new ByteArrayInputStream("Dummy".getBytes(Charsets.UTF_8)),
+                        jarOutputStream);
+                jarOutputStream.closeEntry();
+            } catch (IOException e) {
+                error(e.getMessage());
+            }
+        }
+    }
+
     @NonNull
     private static String normalize(@NonNull String line) {
         line = line.trim();
@@ -289,8 +522,33 @@ public class GradleModelMocker {
         if (commentIndex != -1) {
             line = line.substring(0, commentIndex).trim();
         }
+        while (true) {
+            // Strip out embedded comment markers, if any (there could be multiple)
+            commentIndex = line.indexOf("/*");
+            if (commentIndex == -1) {
+                break;
+            }
+            int commentEnd = line.indexOf("*/", commentIndex + 2);
+            if (commentEnd == -1) {
+                break;
+            }
+            line = line.substring(0, commentIndex) + line.substring(commentEnd + 2);
+        }
 
         return line.replaceAll("\\s+", " ").replace('"', '\'').replace(" = ", " ");
+    }
+
+    private static char findNonSpaceCharacterBackwards(@NonNull String s, int index) {
+        int curr = index;
+        while (curr > 0) {
+            char c = s.charAt(curr);
+            if (!Character.isWhitespace(c)) {
+                return c;
+            }
+            curr--;
+        }
+
+        return 0;
     }
 
     private void scan(@Language("Groovy") String gradle, @NonNull String context) {
@@ -300,8 +558,17 @@ public class GradleModelMocker {
             // Iterate line by line, but as soon as a line has an imbalance of {}'s
             // then report the block instead
             int lineEnd = gradle.indexOf('\n', start);
-            if (lineEnd == -1) {
-                lineEnd = end;
+
+            // Join comma statements
+            while (true) {
+                if (findNonSpaceCharacterBackwards(gradle, lineEnd) == ',') {
+                    lineEnd = gradle.indexOf('\n', lineEnd + 1);
+                } else {
+                    if (lineEnd == -1) {
+                        lineEnd = end;
+                    }
+                    break;
+                }
             }
 
             int balance = 0;
@@ -383,8 +650,17 @@ public class GradleModelMocker {
             when(project.isLibrary()).thenReturn(false);
             when(project.getProjectType()).thenReturn(AndroidProject.PROJECT_TYPE_APP);
             return;
+        } else if (line.equals("apply plugin: 'com.android.feature'")) {
+            when(project.getProjectType()).thenReturn(AndroidProject.PROJECT_TYPE_FEATURE);
+            return;
+        } else if (line.equals("apply plugin: 'com.android.instantapp'")) {
+            when(project.getProjectType()).thenReturn(AndroidProject.PROJECT_TYPE_INSTANTAPP);
+            return;
         } else if (line.equals("apply plugin: 'java'")) {
-            warn("Can't apply java plugin: There is no builder-model for Java currently");
+            javaPlugin = true;
+            return;
+        } else if (line.equals("apply plugin: 'java-library'")) {
+            javaLibraryPlugin = true;
             return;
         } else if (context.equals("buildscript.repositories")
                 || context.equals("allprojects.repositories")) {
@@ -393,7 +669,8 @@ public class GradleModelMocker {
         }
 
         String key = context.isEmpty() ? line : context + "." + line;
-        if (key.startsWith("dependencies.compile ")) {
+        if (key.startsWith("dependencies.compile ") ||
+                key.startsWith("dependencies.implementation ")) {
             String declaration = getUnquotedValue(key);
             if (GradleCoordinate.parseCoordinateString(declaration) != null) {
                 addDependency(declaration, null, false);
@@ -406,7 +683,7 @@ public class GradleModelMocker {
                     String artifact = null;
                     String version = null;
                     for (String part : Splitter.on(',').trimResults().omitEmptyStrings().split(
-                            line.substring("compile ".length()))) {
+                            line.substring(line.indexOf(' ') + 1))) {
                         if (part.startsWith("group:")) {
                             group = getUnquotedValue(part);
                         } else if (part.startsWith("name:")) {
@@ -471,6 +748,22 @@ public class GradleModelMocker {
             } else {
                 error("Unexpected flavor context " + context);
             }
+        } else if (line.startsWith("versionNameSuffix ")) {
+            String name = getUnquotedValue(key);
+            ProductFlavor flavor = getFlavorFromContext(context);
+            if (flavor != null) {
+                when(flavor.getVersionNameSuffix()).thenReturn(name);
+            } else {
+                error("Unexpected flavor context " + context);
+            }
+        } else if (line.startsWith("applicationIdSuffix ")) {
+            String name = getUnquotedValue(key);
+            ProductFlavor flavor = getFlavorFromContext(context);
+            if (flavor != null) {
+                when(flavor.getApplicationIdSuffix()).thenReturn(name);
+            } else {
+                error("Unexpected flavor context " + context);
+            }
         } else if (key.startsWith("android.resourcePrefix ")) {
             String value = getUnquotedValue(key);
             when(project.getResourcePrefix()).thenReturn(value);
@@ -512,11 +805,18 @@ public class GradleModelMocker {
                 VectorDrawablesOptions options = getVectorDrawableOptions();
                 when(options.getUseSupportLibrary()).thenReturn(true);
             }
+        } else if (key.startsWith("android.compileOptions.sourceCompatibility JavaVersion.VERSION_")) {
+            String s = key.substring(key.indexOf("VERSION_") + "VERSION_".length()).replace('_','.');
+            when(compileOptions.getSourceCompatibility()).thenReturn(s);
+        } else if (key.startsWith("android.compileOptions.targetCompatibility JavaVersion.VERSION_")) {
+            String s = key.substring(key.indexOf("VERSION_") + "VERSION_".length()).replace('_','.');
+            when(compileOptions.getTargetCompatibility()).thenReturn(s);
         } else if (key.startsWith("buildscript.dependencies.classpath ")) {
             if (key.contains("'com.android.tools.build:gradle:")) {
                 String value = getUnquotedValue(key);
                 GradleCoordinate gc = GradleCoordinate.parseCoordinateString(value);
                 if (gc != null) {
+                    modelVersion = GradleVersion.parse(gc.getRevision());
                     when(project.getModelVersion()).thenReturn(gc.getRevision());
                 }
             } // else ignore other class paths
@@ -654,9 +954,170 @@ public class GradleModelMocker {
             } else if (line.startsWith("exclude ")) {
                 warn("Warning: Split exclude not supported for mocked builder model yet");
             }
+        } else if (key.startsWith("android.lintOptions.")) {
+            key = key.substring("android.lintOptions.".length());
+            int argIndex = key.indexOf(' ');
+            if (argIndex == -1) {
+                error("No value supplied for lint option " + key);
+                return;
+            }
+            String arg = key.substring(argIndex).trim();
+            key = key.substring(0, argIndex);
+
+            switch (key) {
+                case "quiet":
+                    when(lintOptions.isQuiet()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "abortOnError":
+                    when(lintOptions.isAbortOnError()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "checkReleaseBuilds":
+                    when(lintOptions.isCheckReleaseBuilds()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "ignoreWarnings":
+                    when(lintOptions.isIgnoreWarnings()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "absolutePaths":
+                    when(lintOptions.isAbsolutePaths()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "checkAllWarnings":
+                    when(lintOptions.isCheckAllWarnings()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "warningsAsErrors":
+                    when(lintOptions.isWarningsAsErrors()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "noLines":
+                    when(lintOptions.isNoLines()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "showAll":
+                    when(lintOptions.isShowAll()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "explainIssues":
+                    when(lintOptions.isExplainIssues()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "textReport":
+                    when(lintOptions.getTextReport()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "xmlReport":
+                    when(lintOptions.getXmlReport()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "htmlReport":
+                    when(lintOptions.getHtmlReport()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "checkTestSources":
+                    when(lintOptions.isCheckTestSources()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "checkGeneratedSources":
+                    when(lintOptions.isCheckGeneratedSources()).thenReturn(Boolean.valueOf(arg));
+                    break;
+                case "enable": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getEnable().add(stripQuotes(s, true));
+                    }
+                    break;
+                }
+                case "disable": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getDisable().add(stripQuotes(s, true));
+                    }
+                    break;
+                }
+                case "check": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getCheck().add(stripQuotes(s, true));
+                    }
+                    break;
+                }
+                case "fatal": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getSeverityOverrides().put(stripQuotes(s, true),
+                                LintOptions.SEVERITY_FATAL);
+                    }
+                    break;
+                }
+                case "error": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getSeverityOverrides().put(stripQuotes(s, true),
+                                LintOptions.SEVERITY_ERROR);
+                    }
+                    break;
+                }
+                case "warning": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getSeverityOverrides().put(stripQuotes(s, true),
+                                LintOptions.SEVERITY_WARNING);
+                    }
+                    break;
+                }
+                case "informational": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getSeverityOverrides().put(stripQuotes(s, true),
+                                LintOptions.SEVERITY_INFORMATIONAL);
+                    }
+                    break;
+                }
+                case "ignore": {
+                    for (String s : Splitter.on(',').trimResults().omitEmptyStrings().split(arg)) {
+                        lintOptions.getSeverityOverrides().put(stripQuotes(s, true),
+                                LintOptions.SEVERITY_IGNORE);
+                    }
+                    break;
+                }
+
+                case "lintConfig": {
+                    when(lintOptions.getLintConfig()).thenReturn(file(arg, true));
+                    break;
+                }
+                case "textOutput": {
+                    when(lintOptions.getTextOutput()).thenReturn(file(arg, true));
+                    break;
+                }
+                case "xmlOutput": {
+                    when(lintOptions.getXmlOutput()).thenReturn(file(arg, true));
+                    break;
+                }
+                case "htmlOutput": {
+                    when(lintOptions.getHtmlOutput()).thenReturn(file(arg, true));
+                    break;
+                }
+                case "baseline": {
+                    when(lintOptions.getBaselineFile()).thenReturn(file(arg, true));
+                    break;
+                }
+            }
         } else {
             warn("ignored line: " + line + ", context=" + context);
         }
+    }
+
+    @NonNull
+    private File file(String gradle, boolean reportError) {
+        if (gradle.startsWith("file(\"") && gradle.endsWith("\")") ||
+                gradle.startsWith("file('") && gradle.endsWith("')")) {
+            String path = gradle.substring(6, gradle.length() - 2);
+            return new File(projectDir, path);
+        }
+        gradle = stripQuotes(gradle, true);
+        if (gradle.equals("stdout") || gradle.equals("stderr")) {
+            return new File(gradle);
+        }
+        if (reportError) {
+            error("Only support file(\"\") paths in gradle mocker");
+        }
+        return new File(gradle);
+    }
+
+    private String stripQuotes(String string, boolean reportError) {
+        if (string.startsWith("'") && string.endsWith("'") && string.length() >= 2) {
+            return string.substring(1, string.length() - 1);
+        }
+        if (string.startsWith("\"") && string.endsWith("\"") && string.length() >= 2) {
+            return string.substring(1, string.length() - 1);
+        }
+        if (reportError) {
+            error("Expected quotes around " + string);
+        }
+        return string;
     }
 
     @Nullable
@@ -758,31 +1219,18 @@ public class GradleModelMocker {
         AndroidArtifactOutput artifactOutput = mock(
                 AndroidArtifactOutput.class);
 
-        OutputFile outputFile = mock(OutputFile.class);
         if (filterType.isEmpty()) {
-            when(outputFile.getFilterTypes())
-                    .thenReturn(Collections.emptyList());
-            when(outputFile.getFilters())
-                    .thenReturn(Collections.emptyList());
+            when(artifactOutput.getFilterTypes()).thenReturn(Collections.emptyList());
+            when(artifactOutput.getFilters()).thenReturn(Collections.emptyList());
         } else {
-            when(outputFile.getFilterTypes())
-                    .thenReturn(Collections.singletonList(filterType));
+            when(artifactOutput.getFilterTypes()).thenReturn(Collections.singletonList(filterType));
             List<FilterData> filters = Lists.newArrayList();
             FilterData filter = mock(FilterData.class);
             when(filter.getFilterType()).thenReturn(filterType);
             when(filter.getIdentifier()).thenReturn(identifier);
             filters.add(filter);
-            when(outputFile.getFilters()).thenReturn(filters);
+            when(artifactOutput.getFilters()).thenReturn(filters);
         }
-
-        // Work around wildcard capture
-        //when(artifactOutput.getOutputs()).thenReturn(outputFiles);
-        List<OutputFile> outputFiles = Collections.singletonList(outputFile);
-        OngoingStubbing<? extends Collection<? extends OutputFile>> when = when(
-                artifactOutput.getOutputs());
-        //noinspection unchecked,RedundantCast
-        ((OngoingStubbing<Collection<? extends OutputFile>>) (OngoingStubbing<?>) when)
-                .thenReturn(outputFiles);
 
         return artifactOutput;
     }
@@ -797,6 +1245,16 @@ public class GradleModelMocker {
         List<File> javaDirectories = Lists.newArrayListWithCapacity(2);
         resDirectories.add(new File(root, "src/" + name + "/res"));
         javaDirectories.add(new File(root, "src/" + name + "/java"));
+        javaDirectories.add(new File(root, "src/" + name + "/kotlin"));
+
+        // Add generated source provider to let us test generated source handling
+        if ("main".equals(name)) {
+            File generated = new File(root, "generated");
+            if (generated.exists()) {
+                javaDirectories.add(generated);
+            }
+        }
+
         when(provider.getResDirectories()).thenReturn(resDirectories);
         when(provider.getJavaDirectories()).thenReturn(javaDirectories);
 
@@ -926,7 +1384,7 @@ public class GradleModelMocker {
         } else {
             // Look for the library in the dependency graph provided
             Dep dep = graphs.get(declaration);
-            if(dep != null) {
+            if (dep != null) {
                 addLibrary(dep);
             } else if (isJavaLibrary(declaration)) {
                 // Not found in dependency graphs: create a single Java library
@@ -976,12 +1434,19 @@ public class GradleModelMocker {
             return true;
         } else if (declaration.startsWith("com.android.support.constraint:constraint-layout-solver:")) {
             return true;
+        } else if (declaration.startsWith("junit:junit:")) {
+            return true;
         }
         return false;
     }
 
     @NonNull
     private AndroidLibrary createAndroidLibrary(String coordinateString, boolean isProvided) {
+        return createAndroidLibrary(coordinateString, null, isProvided);
+    }
+
+    private AndroidLibrary createAndroidLibrary(String coordinateString,
+            @Nullable String promotedTo, boolean isProvided) {
         GradleCoordinate coordinate = GradleCoordinate.parseCoordinateString(coordinateString);
         TestCase.assertNotNull(coordinateString, coordinate);
         MavenCoordinates mavenCoordinates = mock(MavenCoordinates.class);
@@ -994,7 +1459,21 @@ public class GradleModelMocker {
         when(mavenCoordinates.toString()).thenReturn(coordinateString);
 
         AndroidLibrary library = mock(AndroidLibrary.class);
-        when(library.getResolvedCoordinates()).thenReturn(mavenCoordinates);
+        when(library.getRequestedCoordinates()).thenReturn(mavenCoordinates);
+        if (promotedTo != null) {
+            mavenCoordinates = mock(MavenCoordinates.class);
+            when(mavenCoordinates.getGroupId()).thenReturn(coordinate.getGroupId());
+            when(mavenCoordinates.getArtifactId()).thenReturn(coordinate.getArtifactId());
+            when(mavenCoordinates.getVersion()).thenReturn(promotedTo);
+            when(mavenCoordinates.getVersionlessId()).thenReturn(
+                    coordinate.getGroupId() + ':' + coordinate.getArtifactId());
+            when(mavenCoordinates.getPackaging()).thenReturn("aar");
+            when(mavenCoordinates.toString()).thenReturn(
+                    coordinateString.replace(coordinate.getRevision(), promotedTo));
+            when(library.getResolvedCoordinates()).thenReturn(mavenCoordinates);
+        } else {
+            when(library.getResolvedCoordinates()).thenReturn(mavenCoordinates);
+        }
         File dir;
         if (useBuildCache) {
             // Not what build cache uses, but we just want something stable and unique
@@ -1007,18 +1486,29 @@ public class GradleModelMocker {
                     + coordinate.getGroupId() + "/"
                     + coordinate.getArtifactId() + "/" + coordinate.getRevision());
         }
+        when(library.getFolder()).thenReturn(dir);
         when(library.getLintJar()).thenReturn(new File(dir, "lint.jar"));
         when(library.isProvided()).thenReturn(isProvided);
         when(library.getLocalJars()).thenReturn(Collections.emptyList());
         when(library.getExternalAnnotations()).thenReturn(new File(dir, FN_ANNOTATIONS_ZIP));
-        when(library.getJarFile()).thenReturn(new File(dir, "jars/" + FN_CLASSES_JAR));
+        File jar = new File(dir, "jars/" + FN_CLASSES_JAR);
+        if (!jar.exists()) {
+            createEmptyJar(jar);
+        }
+        when(library.getJarFile()).thenReturn(jar);
 
         return library;
     }
 
     @NonNull
-    private static JavaLibrary createJavaLibrary(@NonNull String coordinateString,
+    private JavaLibrary createJavaLibrary(@NonNull String coordinateString,
             boolean isProvided) {
+        return createJavaLibrary(coordinateString, null, isProvided);
+    }
+
+    @NonNull
+    private JavaLibrary createJavaLibrary(@NonNull String coordinateString,
+            @Nullable String promotedTo, boolean isProvided) {
         GradleCoordinate coordinate = GradleCoordinate.parseCoordinateString(coordinateString);
         TestCase.assertNotNull(coordinate);
         MavenCoordinates mavenCoordinates = mock(MavenCoordinates.class);
@@ -1031,18 +1521,35 @@ public class GradleModelMocker {
         when(mavenCoordinates.toString()).thenReturn(coordinateString);
 
         JavaLibrary library = mock(JavaLibrary.class);
-        when(library.getResolvedCoordinates()).thenReturn(mavenCoordinates);
+        when(library.getRequestedCoordinates()).thenReturn(mavenCoordinates);
+        if (promotedTo != null) {
+            mavenCoordinates = mock(MavenCoordinates.class);
+            when(mavenCoordinates.getGroupId()).thenReturn(coordinate.getGroupId());
+            when(mavenCoordinates.getArtifactId()).thenReturn(coordinate.getArtifactId());
+            when(mavenCoordinates.getVersion()).thenReturn(promotedTo);
+            when(mavenCoordinates.getVersionlessId()).thenReturn(
+                    coordinate.getGroupId() + ':' + coordinate.getArtifactId());
+            when(mavenCoordinates.getPackaging()).thenReturn("jar");
+            when(mavenCoordinates.toString()).thenReturn(
+                    coordinateString.replace(coordinate.getRevision(), promotedTo));
+            when(library.getResolvedCoordinates()).thenReturn(mavenCoordinates);
+        } else {
+            when(library.getResolvedCoordinates()).thenReturn(mavenCoordinates);
+        }
         when(library.isProvided()).thenReturn(isProvided);
         when(library.getName()).thenReturn(coordinate.toString());
         when(library.toString()).thenReturn(coordinate.toString());
 
-        File jar = new File("caches/modules-2/files-2.1/"
+        File jar = new File(projectDir,"caches/modules-2/files-2.1/"
                 + coordinate.getGroupId() + "/"
                 + coordinate.getArtifactId() + "/" + coordinate.getRevision() +
                 // Usually some hex string here, but keep same to keep test behavior stable
                 "9c6ef172e8de35fd8d4d8783e4821e57cdef7445/"
                 + coordinate.getArtifactId() + "-" + coordinate.getRevision() +
                 DOT_JAR);
+        if (!jar.exists()) {
+            createEmptyJar(jar);
+        }
         when(library.getJarFile()).thenReturn(jar);
         when(library.isProvided()).thenReturn(isProvided);
 
@@ -1229,10 +1736,18 @@ public class GradleModelMocker {
     private class Dep {
         public final GradleCoordinate coordinate;
         public final String coordinateString;
+        public final String promotedTo;
         public final List<Dep> children = Lists.newArrayList();
         public final int depth;
 
         public Dep(String coordinateString, int depth) {
+            int promoted = coordinateString.indexOf(" -> ");
+            if (promoted != -1) {
+                promotedTo = coordinateString.substring(promoted + 4);
+                coordinateString = coordinateString.substring(0, promoted);
+            } else {
+                promotedTo = null;
+            }
             if (coordinateString.endsWith(" (*)")) {
                 coordinateString = coordinateString.substring(0,
                         coordinateString.length() - " (*)".length());
@@ -1272,17 +1787,17 @@ public class GradleModelMocker {
                 when(androidLibrary.getProject()).thenReturn(name);
                 when(androidLibrary.getName()).thenReturn(name);
             } else {
-                androidLibrary = GradleModelMocker.this.createAndroidLibrary(coordinateString, false);
+                androidLibrary = GradleModelMocker.this.createAndroidLibrary(coordinateString,
+                        promotedTo,false);
             }
             if (!children.isEmpty()) {
+                // We can't store these in the dependencies object but store it for the
+                // global dependency list
                 List<JavaLibrary> jc = createJavaLibraries(children);
+                allJavaLibraries.addAll(jc);
+
                 List<AndroidLibrary> ac = createAndroidLibraries(children);
                 // Work around wildcard capture
-                //when(javaLibrary.getDependencies()).thenReturn(childrenLibraries);
-                OngoingStubbing<? extends Collection<? extends JavaLibrary>> stub = when(
-                        androidLibrary.getJavaDependencies());
-                //noinspection unchecked,RedundantCast
-                ((OngoingStubbing<Collection<? extends JavaLibrary>>) stub).thenReturn(jc);
                 OngoingStubbing<? extends List<? extends AndroidLibrary>> stub2 = when(
                         androidLibrary.getLibraryDependencies());
                 //noinspection unchecked,RedundantCast
@@ -1292,7 +1807,8 @@ public class GradleModelMocker {
         }
 
         private JavaLibrary createJavaLibrary() {
-            JavaLibrary javaLibrary = GradleModelMocker.createJavaLibrary(coordinateString, false);
+            JavaLibrary javaLibrary = GradleModelMocker.this.createJavaLibrary(coordinateString,
+                    promotedTo,false);
 
             if (!children.isEmpty()) {
                 List<JavaLibrary> children = createJavaLibraries(this.children);

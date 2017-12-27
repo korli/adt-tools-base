@@ -8,7 +8,7 @@
 <#if hasAppBar && appBarLayoutName??>
     tools:showIn="@layout/${appBarLayoutName}"
 </#if>
-    tools:context="${relativePackage}.${fragmentClass}">
+    tools:context="${packageName}.${fragmentClass}">
 
 <#if isNewProject!false>
     <TextView
@@ -22,6 +22,6 @@
         app:layout_constraintLeft_toLeftOf="parent"
         app:layout_constraintRight_toRightOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
-</#if>
 
+</#if>
 </android.support.constraint.ConstraintLayout>

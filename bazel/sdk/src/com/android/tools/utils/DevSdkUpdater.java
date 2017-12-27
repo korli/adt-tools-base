@@ -17,7 +17,7 @@
 package com.android.tools.utils;
 
 import com.android.repository.impl.meta.Archive;
-import com.android.sdklib.tool.SdkManagerCli;
+import com.android.sdklib.tool.sdkmanager.SdkManagerCli;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -32,10 +32,13 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A utility class which manages updating an Android SDK for all supported platforms at the same
@@ -206,12 +209,13 @@ public final class DevSdkUpdater {
     private static boolean processPackageFile(Path packageFile, List<String> packageLines) {
         try {
             // Keep only non-empty lines (after # comments are removed)
-            packageLines.addAll(
-                    Files.lines(packageFile)
-                            .map(line -> line.replaceAll("#.*", ""))
-                            .map(String::trim)
-                            .filter(line -> !line.isEmpty())
-                            .collect(Collectors.toList()));
+            try (Stream<String> lines = Files.lines(packageFile)) {
+                packageLines.addAll(
+                        lines.map(line -> line.replaceAll("#.*", ""))
+                                .map(String::trim)
+                                .filter(line -> !line.isEmpty())
+                                .collect(Collectors.toList()));
+            }
         } catch (Exception e) {
             usage(
                     "Could not successfully read package-file: "
@@ -231,7 +235,7 @@ public final class DevSdkUpdater {
      */
     private static void downloadSdkPackages(
             File sdkDest, List<String> packageLines, String platform) throws IOException {
-        List<String> packages = new ArrayList<>(); // Just the packages, with filters stripped
+        Set<String> packages = new LinkedHashSet<>(); // Just the packages, with filters stripped
         // The following is a package -> filter mapping (if a filter present)
         // If no filter is found, then all downloaded files will be kept
         Map<String, Filters> filterMap = new HashMap<>();
@@ -239,6 +243,9 @@ public final class DevSdkUpdater {
         for (String packageLine : packageLines) {
             String[] packageFilters = packageLine.split(":", 3);
             String pkg = packageFilters[0];
+            if (packages.contains(pkg)) {
+                usage(String.format("Package %s specified twice in the package file.", pkg));
+            }
             packages.add(pkg);
             if (packageFilters.length > 1) {
                 if (packageFilters.length == 2) {
@@ -257,13 +264,13 @@ public final class DevSdkUpdater {
             File osSdkDest = new File(sdkDest, osEntry.mFolder);
             // Delegate download operation to SdkManagerCli program
             List<String> args = new ArrayList<>();
-            args.add("--channel=3");
             args.add("--sdk_root=" + osSdkDest.getAbsolutePath());
             args.add("--verbose");
+            args.add("--channel=2");
             args.addAll(packages);
 
             Archive.sHostConfig = new Archive.HostConfig(osEntry.mName);
-            SdkManagerCli.main(args.stream().toArray(String[]::new));
+            SdkManagerCli.main(args.toArray(new String[0]));
         }
 
         if (!filterMap.isEmpty()) {

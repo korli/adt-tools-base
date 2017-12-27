@@ -18,6 +18,7 @@ package com.android.apkzlib.zip;
 
 import com.android.apkzlib.utils.CachedSupplier;
 import com.android.apkzlib.zip.utils.MsDosDateTimeUtils;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
@@ -28,7 +29,6 @@ import com.google.common.util.concurrent.ListenableFuture;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,7 +53,8 @@ class CentralDirectory {
     /**
      * Field in the central directory with the minimum version required to extract the entry.
      */
-    private static final ZipField.F2 F_VERSION_EXTRACT = new ZipField.F2(F_MADE_BY.endOffset(),
+    @VisibleForTesting
+    static final ZipField.F2 F_VERSION_EXTRACT = new ZipField.F2(F_MADE_BY.endOffset(),
             "Version to extract", new ZipFieldInvariantNonNegative());
 
     /**
@@ -174,19 +175,25 @@ class CentralDirectory {
      * Contains all entries in the directory mapped from their names.
      */
     @Nonnull
-    private final Map<String, StoredEntry> mEntries;
+    private final Map<String, StoredEntry> entries;
 
     /**
      * The file where this directory belongs to.
      */
     @Nonnull
-    private final ZFile mFile;
+    private final ZFile file;
 
     /**
      * Supplier that provides a byte representation of the central directory.
      */
     @Nonnull
-    private final CachedSupplier<byte[]> mBytesSupplier;
+    private final CachedSupplier<byte[]> bytesSupplier;
+
+    /**
+     * Verify log for the central directory.
+     */
+    @Nonnull
+    private final VerifyLog verifyLog;
 
     /**
      * Creates a new, empty, central directory, for a given zip file.
@@ -194,9 +201,10 @@ class CentralDirectory {
      * @param file the file
      */
     CentralDirectory(@Nonnull ZFile file) {
-        mEntries = Maps.newHashMap();
-        mFile = file;
-        mBytesSupplier = new CachedSupplier<>(this::computeByteRepresentation);
+        entries = Maps.newHashMap();
+        this.file = file;
+        bytesSupplier = new CachedSupplier<>(this::computeByteRepresentation);
+        verifyLog = file.getVerifyLog();
     }
 
     /**
@@ -222,7 +230,7 @@ class CentralDirectory {
 
         for (int i = 0; i < count; i++) {
             try {
-                directory.readEntry(bytes, file);
+                directory.readEntry(bytes);
             } catch (IOException e) {
                 throw new IOException(
                         "Failed to read directory entry index "
@@ -246,52 +254,50 @@ class CentralDirectory {
      * @param file the zip file itself
      * @return the created central directory
      */
-    static CentralDirectory makeFromEntries(@Nonnull Set<StoredEntry> entries,
+    static CentralDirectory makeFromEntries(
+            @Nonnull Set<StoredEntry> entries,
             @Nonnull ZFile file) {
         CentralDirectory directory = new CentralDirectory(file);
         for (StoredEntry entry : entries) {
             CentralDirectoryHeader cdr = entry.getCentralDirectoryHeader();
             Preconditions.checkArgument(
-                    !directory.mEntries.containsKey(cdr.getName()),
+                    !directory.entries.containsKey(cdr.getName()),
                     "Duplicate filename");
-            directory.mEntries.put(cdr.getName(), entry);
+            directory.entries.put(cdr.getName(), entry);
         }
 
         return directory;
     }
 
     /**
-     * Reads the next entry from the central directory and adds it to {@link #mEntries}.
+     * Reads the next entry from the central directory and adds it to {@link #entries}.
      *
      * @param bytes the central directory's data, positioned starting at the beginning of the next
      * entry to read; when finished, the buffer's position will be at the first byte after the
      * entry
-     * @param file the file this entry belongs to
      * @throws IOException failed to read the directory entry, either because of an I/O error,
      * because it is corrupt or contains unsupported features
      */
-    private void readEntry(@Nonnull ByteBuffer bytes, @Nonnull ZFile file) throws IOException {
+    private void readEntry(@Nonnull ByteBuffer bytes) throws IOException {
         F_SIGNATURE.verify(bytes);
         long madeBy = F_MADE_BY.read(bytes);
 
         long versionNeededToExtract = F_VERSION_EXTRACT.read(bytes);
-        if (versionNeededToExtract > MAX_VERSION_TO_EXTRACT) {
-            throw new IOException("Unknown version needed to extract in zip directory entry: "
-                    + versionNeededToExtract + ".");
-        }
+        verifyLog.verify(
+                versionNeededToExtract <= MAX_VERSION_TO_EXTRACT,
+                "Ignored unknown version needed to extract in zip directory entry: %s.",
+                versionNeededToExtract);
 
         long gpBit = F_GP_BIT.read(bytes);
         GPFlags flags = GPFlags.from(gpBit);
 
         long methodCode = F_METHOD.read(bytes);
         CompressionMethod method = CompressionMethod.fromCode(methodCode);
-        if (method == null) {
-            throw new IOException("Unknown method in zip directory entry: " + methodCode + ".");
-        }
+        verifyLog.verify(method != null, "Unknown method in zip directory entry: %s.", methodCode);
 
         long lastModTime;
         long lastModDate;
-        if (mFile.areTimestampsIgnored()) {
+        if (file.areTimestampsIgnored()) {
             lastModTime = 0;
             lastModDate = 0;
             F_LAST_MOD_TIME.skip(bytes);
@@ -308,11 +314,12 @@ class CentralDirectory {
         int extraFieldLength = Ints.checkedCast(F_EXTRA_FIELD_LENGTH.read(bytes));
         int fileCommentLength = Ints.checkedCast(F_COMMENT_LENGTH.read(bytes));
 
-        F_DISK_NUMBER_START.verify(bytes);
+        F_DISK_NUMBER_START.verify(bytes, verifyLog);
         long internalAttributes = F_INTERNAL_ATTRIBUTES.read(bytes);
-        if ((internalAttributes & ~ASCII_BIT) != 0) {
-            throw new IOException("Invalid internal attributes: " + internalAttributes + ".");
-        }
+        verifyLog.verify(
+                (internalAttributes & ~ASCII_BIT) == 0,
+                "Ignored invalid internal attributes: %s.",
+                internalAttributes);
 
         long externalAttributes = F_EXTERNAL_ATTRIBUTES.read(bytes);
         long entryOffset = F_OFFSET.read(bytes);
@@ -320,13 +327,23 @@ class CentralDirectory {
         long remainingSize = fileNameLength + extraFieldLength + fileCommentLength;
 
         if (bytes.remaining() < fileNameLength + extraFieldLength + fileCommentLength) {
-            throw new IOException("Directory entry should have " + remainingSize
-                    + " bytes remaining (name = " + fileNameLength + ", extra = "
-                    + extraFieldLength + ", comment = " + fileCommentLength + "), but it has "
-                    + bytes.remaining() + ".");
+            throw new IOException(
+                    "Directory entry should have "
+                            + remainingSize
+                            + " bytes remaining (name = "
+                            + fileNameLength
+                            + ", extra = "
+                            + extraFieldLength
+                            + ", comment = "
+                            + fileCommentLength
+                            + "), but it has "
+                            + bytes.remaining()
+                            + ".");
         }
 
-        String fileName = EncodeUtils.decode(bytes, fileNameLength, flags);
+        byte[] encodedFileName = new byte[fileNameLength];
+        bytes.get(encodedFileName);
+        String fileName = EncodeUtils.decode(encodedFileName, flags);
 
         byte[] extraField = new byte[extraFieldLength];
         bytes.get(extraField);
@@ -340,15 +357,14 @@ class CentralDirectory {
          * information we need the CentralDirectoryHeader
          */
         ListenableFuture<CentralDirectoryHeaderCompressInfo> compressInfo =
-                Futures.immediateFuture(new CentralDirectoryHeaderCompressInfo(method,
-                        compressedSize, versionNeededToExtract));
+                Futures.immediateFuture(
+                        new CentralDirectoryHeaderCompressInfo(
+                                method,
+                                compressedSize,
+                                versionNeededToExtract));
         CentralDirectoryHeader centralDirectoryHeader =
                 new CentralDirectoryHeader(
-                        fileName,
-                        uncompressedSize,
-                        compressInfo,
-                        flags,
-                        file);
+                        fileName, encodedFileName, uncompressedSize, compressInfo, flags, file);
         centralDirectoryHeader.setMadeBy(madeBy);
         centralDirectoryHeader.setLastModTime(lastModTime);
         centralDirectoryHeader.setLastModDate(lastModDate);
@@ -362,16 +378,16 @@ class CentralDirectory {
         StoredEntry entry;
 
         try {
-            entry = new StoredEntry(centralDirectoryHeader, mFile, null);
+            entry = new StoredEntry(centralDirectoryHeader, file, null);
         } catch (IOException e) {
             throw new IOException("Failed to read stored entry '" + fileName + "'.", e);
         }
 
-        if (mEntries.containsKey(fileName)) {
-            throw new IOException("File file contains duplicate file '" + fileName + "'.");
+        if (entries.containsKey(fileName)) {
+            verifyLog.log("File file contains duplicate file '" + fileName + "'.");
         }
 
-        mEntries.put(fileName, entry);
+        entries.put(fileName, entry);
     }
 
     /**
@@ -381,7 +397,7 @@ class CentralDirectory {
      */
     @Nonnull
     Map<String, StoredEntry> getEntries() {
-        return ImmutableMap.copyOf(mEntries);
+        return ImmutableMap.copyOf(entries);
     }
 
     /**
@@ -391,7 +407,7 @@ class CentralDirectory {
      * @throws IOException failed to write the byte array
      */
     byte[] toBytes() throws IOException {
-        return mBytesSupplier.get();
+        return bytesSupplier.get();
     }
 
     /**
@@ -402,15 +418,15 @@ class CentralDirectory {
      */
     private byte[] computeByteRepresentation() {
 
-        List<StoredEntry> sorted = Lists.newArrayList(mEntries.values());
-        Collections.sort(sorted, StoredEntry.COMPARE_BY_NAME);
+        List<StoredEntry> sorted = Lists.newArrayList(entries.values());
+        sorted.sort(StoredEntry.COMPARE_BY_NAME);
 
-        CentralDirectoryHeader[] cdhs = new CentralDirectoryHeader[mEntries.size()];
+        CentralDirectoryHeader[] cdhs = new CentralDirectoryHeader[entries.size()];
         CentralDirectoryHeaderCompressInfo[] compressInfos =
-                new CentralDirectoryHeaderCompressInfo[mEntries.size()];
-        byte[][] encodedFileNames = new byte[mEntries.size()][];
-        byte[][] extraFields = new byte[mEntries.size()][];
-        byte[][] comments = new byte[mEntries.size()][];
+                new CentralDirectoryHeaderCompressInfo[entries.size()];
+        byte[][] encodedFileNames = new byte[entries.size()][];
+        byte[][] extraFields = new byte[entries.size()][];
+        byte[][] comments = new byte[entries.size()][];
 
         try {
             /*
@@ -433,14 +449,14 @@ class CentralDirectory {
 
             ByteBuffer out = ByteBuffer.allocate(total);
 
-            for (idx = 0; idx < mEntries.size(); idx++) {
+            for (idx = 0; idx < entries.size(); idx++) {
                 F_SIGNATURE.write(out);
                 F_MADE_BY.write(out, cdhs[idx].getMadeBy());
                 F_VERSION_EXTRACT.write(out, compressInfos[idx].getVersionExtract());
                 F_GP_BIT.write(out, cdhs[idx].getGpBit().getValue());
                 F_METHOD.write(out, compressInfos[idx].getMethod().methodCode);
 
-                if (mFile.areTimestampsIgnored()) {
+                if (file.areTimestampsIgnored()) {
                     F_LAST_MOD_TIME.write(out, 0);
                     F_LAST_MOD_DATE.write(out, 0);
                 } else {

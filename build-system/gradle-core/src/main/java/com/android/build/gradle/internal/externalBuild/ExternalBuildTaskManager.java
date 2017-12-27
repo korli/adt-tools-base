@@ -19,47 +19,57 @@ package com.android.build.gradle.internal.externalBuild;
 import static com.google.common.base.Preconditions.checkState;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
+import com.android.build.VariantOutput;
 import com.android.build.api.transform.QualifiedContent;
-import com.android.build.gradle.AndroidGradleOptions;
 import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.InstantRunTaskManager;
 import com.android.build.gradle.internal.TaskContainerAdaptor;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.dsl.DexOptions;
 import com.android.build.gradle.internal.dsl.SigningConfig;
-import com.android.build.gradle.internal.ide.AaptOptionsImpl;
 import com.android.build.gradle.internal.incremental.BuildInfoLoaderTask;
 import com.android.build.gradle.internal.incremental.BuildInfoWriterTask;
 import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
 import com.android.build.gradle.internal.pipeline.OriginalStream;
-import com.android.build.gradle.internal.pipeline.StreamFilter;
 import com.android.build.gradle.internal.pipeline.TransformManager;
-import com.android.build.gradle.internal.pipeline.TransformStream;
 import com.android.build.gradle.internal.pipeline.TransformTask;
 import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.AndroidTaskRegistry;
+import com.android.build.gradle.internal.scope.BuildOutput;
+import com.android.build.gradle.internal.scope.BuildOutputs;
+import com.android.build.gradle.internal.scope.OutputFactory;
+import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.PackagingScope;
-import com.android.build.gradle.internal.scope.SupplierTask;
-import com.android.build.gradle.internal.scope.TaskConfigAction;
-import com.android.build.gradle.internal.transforms.DexTransform;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
+import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.transforms.ExtractJarsTransform;
 import com.android.build.gradle.internal.transforms.InstantRunSliceSplitApkBuilder;
+import com.android.build.gradle.internal.transforms.PreDexTransform;
 import com.android.build.gradle.tasks.PackageApplication;
 import com.android.build.gradle.tasks.PreColdSwapTask;
+import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.core.DefaultDexOptions;
 import com.android.builder.core.DefaultManifestParser;
+import com.android.builder.dexing.DexingType;
+import com.android.builder.internal.aapt.AaptOptions;
 import com.android.builder.profile.Recorder;
 import com.android.builder.signing.DefaultSigningConfig;
+import com.android.ide.common.build.ApkData;
 import com.android.utils.FileUtils;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableSetMultimap;
+import com.google.common.io.Files;
 import java.io.File;
+import java.io.IOException;
 import java.util.EnumSet;
 import java.util.Optional;
+import org.apache.commons.io.Charsets;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Project;
-import org.gradle.api.Task;
+import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 
 /**
@@ -67,15 +77,21 @@ import org.gradle.api.logging.Logging;
  */
 class ExternalBuildTaskManager {
 
-    private final Project project;
-    private final AndroidTaskRegistry androidTasks = new AndroidTaskRegistry();
-    private final TaskContainerAdaptor tasks;
-    private final Recorder recorder;
+    @NonNull private final ExternalBuildGlobalScope globalScope;
+    @NonNull private final Project project;
+    @NonNull private final AndroidTaskRegistry androidTasks;
+    @NonNull private final TaskContainerAdaptor tasks;
+    @NonNull private final Recorder recorder;
 
-    ExternalBuildTaskManager(@NonNull Project project, @NonNull Recorder recorder) {
+    ExternalBuildTaskManager(
+            @NonNull ExternalBuildGlobalScope globalScope,
+            @NonNull Project project,
+            @NonNull Recorder recorder) {
+        this.globalScope = globalScope;
         this.project = project;
         this.tasks = new TaskContainerAdaptor(project.getTasks());
         this.recorder = recorder;
+        this.androidTasks = new AndroidTaskRegistry();
     }
 
     void createTasks(@NonNull ExternalBuildExtension externalBuildExtension) throws Exception {
@@ -90,36 +106,43 @@ class ExternalBuildTaskManager {
         File file = project.file(externalBuildExtension.buildManifestPath);
         ExternalBuildManifestLoader.loadAndPopulateContext(
                 new File(externalBuildExtension.getExecutionRoot()),
-                file, project, externalBuildContext);
+                file,
+                project,
+                globalScope.getProjectOptions(),
+                externalBuildContext);
 
-        ExtraModelInfo modelInfo = new ExtraModelInfo(project);
-        TransformManager transformManager = new TransformManager(androidTasks, modelInfo, recorder);
+        ExtraModelInfo modelInfo =
+                new ExtraModelInfo(globalScope.getProjectOptions(), project.getLogger());
+        TransformManager transformManager = new TransformManager(
+                project, androidTasks, modelInfo, recorder);
 
-        transformManager.addStream(OriginalStream.builder()
-                .addContentType(QualifiedContent.DefaultContentType.CLASSES)
-                .addScope(QualifiedContent.Scope.PROJECT)
-                .setJars(externalBuildContext::getInputJarFiles)
-                .build());
+        transformManager.addStream(
+                OriginalStream.builder(project, "project-classes")
+                        .addContentType(QualifiedContent.DefaultContentType.CLASSES)
+                        .addScope(QualifiedContent.Scope.PROJECT)
+                        .setJars(externalBuildContext::getInputJarFiles)
+                        .build());
 
         // add an empty java resources directory for now.
         // the folder itself doesn't actually matter, but it has to be consistent
         // for gradle's up-to-date check
-        transformManager.addStream(OriginalStream.builder()
-                .addContentType(QualifiedContent.DefaultContentType.RESOURCES)
-                .addScope(QualifiedContent.Scope.PROJECT)
-                .setFolder(new File(project.getBuildDir(), "temp/streams/resources"))
-                .build());
+        transformManager.addStream(
+                OriginalStream.builder(project, "project-res")
+                        .addContentType(QualifiedContent.DefaultContentType.RESOURCES)
+                        .addScope(QualifiedContent.Scope.PROJECT)
+                        .setFolder(new File(project.getBuildDir(), "temp/streams/resources"))
+                        .build());
 
         // add an empty native libraries resources directory for now.
         // the folder itself doesn't actually matter, but it has to be consistent
         // for gradle's up-to-date check
-        transformManager.addStream(OriginalStream.builder()
-                .addContentType(ExtendedContentType.NATIVE_LIBS)
-                .addScope(QualifiedContent.Scope.PROJECT)
-                .setFolder(new File(project.getBuildDir(), "temp/streams/native_libs"))
-                .build());
+        transformManager.addStream(
+                OriginalStream.builder(project, "project-jni–libs")
+                        .addContentType(ExtendedContentType.NATIVE_LIBS)
+                        .addScope(QualifiedContent.Scope.PROJECT)
+                        .setFolder(new File(project.getBuildDir(), "temp/streams/native_libs"))
+                        .build());
 
-        ExternalBuildGlobalScope globalScope = new ExternalBuildGlobalScope(project);
         File androidManifestFile =
                 new File(externalBuildContext.getExecutionRoot(),
                         externalBuildContext
@@ -131,11 +154,24 @@ class ExternalBuildTaskManager {
                 new File(externalBuildContext.getExecutionRoot(),
                         externalBuildContext.getBuildManifest().getResourceApk().getExecRootPath());
 
-        ExternalBuildVariantScope variantScope = new ExternalBuildVariantScope(globalScope,
-                project.getBuildDir(),
-                externalBuildContext,
-                new AaptOptionsImpl(null, null, false, null),
-                new DefaultManifestParser(androidManifestFile));
+        ApkData mainApkData =
+                new OutputFactory.DefaultApkData(
+                        VariantOutput.OutputType.MAIN,
+                        "",
+                        "main",
+                        "main",
+                        "main",
+                        "debug.apk",
+                        ImmutableList.of());
+
+        ExternalBuildVariantScope variantScope =
+                new ExternalBuildVariantScope(
+                        globalScope,
+                        project.getBuildDir(),
+                        externalBuildContext,
+                        new AaptOptions(null, false, null),
+                        new DefaultManifestParser(androidManifestFile),
+                        ImmutableList.of(mainApkData));
 
         // massage the manifest file.
 
@@ -155,6 +191,21 @@ class ExternalBuildTaskManager {
                         tasks,
                         recorder);
 
+        // create output.json for the provided built artifacts.
+        File manifest =
+                createBuildOutputs(
+                        androidManifestFile.getParentFile(),
+                        mainApkData,
+                        TaskOutputHolder.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
+                        androidManifestFile);
+
+        File resources =
+                createBuildOutputs(
+                        processedAndroidResourcesFile.getParentFile(),
+                        mainApkData,
+                        TaskOutputHolder.TaskOutputType.PROCESSED_RES,
+                        processedAndroidResourcesFile);
+
         AndroidTask<BuildInfoLoaderTask> buildInfoLoaderTask =
                 instantRunTaskManager.createInstantRunAllTasks(
                         new DexOptions(modelInfo),
@@ -162,62 +213,22 @@ class ExternalBuildTaskManager {
                         extractJarsTask.orElse(null),
                         externalBuildAnchorTask,
                         EnumSet.of(QualifiedContent.Scope.PROJECT),
-                        new SupplierTask<File>() {
-                            @Nullable
-                            @Override
-                            public AndroidTask<?> getBuilderTask() {
-                                // no task built the manifest file, it's supplied by the external
-                                // build system.
-                                return null;
-                            }
-
-                            @Override
-                            public File get() {
-                                return androidManifestFile;
-                            }
-                        },
-                        new SupplierTask<File>() {
-                            @Nullable
-                            @Override
-                            public AndroidTask<?> getBuilderTask() {
-                                // no task built the ap_ file, it's supplied by the external
-                                // build system.
-                                return null;
-                            }
-
-                            @Override
-                            public File get() {
-                                return processedAndroidResourcesFile;
-                            }
-                        },
-                        false /* addResourceVerifier */);
+                        project.files(manifest),
+                        project.files(resources),
+                        false /* addResourceVerifier */,
+                        1);
 
         extractJarsTask.ifPresent(t -> t.dependsOn(tasks, buildInfoLoaderTask));
 
-        AndroidTask<PreColdSwapTask> preColdswapTask = instantRunTaskManager
-                .createPreColdswapTask(project);
+        AndroidTask<PreColdSwapTask> preColdswapTask =
+                instantRunTaskManager.createPreColdswapTask(globalScope.getProjectOptions());
 
         if (variantScope.getInstantRunBuildContext().getPatchingPolicy()
                 != InstantRunPatchingPolicy.PRE_LOLLIPOP) {
             instantRunTaskManager.createSlicerTask();
         }
 
-        boolean multiDex =
-                variantScope.getInstantRunBuildContext().getPatchingPolicy().useMultiDex();
-        DexTransform dexTransform =
-                new DexTransform(
-                        new DefaultDexOptions(),
-                        true,
-                        multiDex,
-                        null,
-                        variantScope.getPreDexOutputDir(),
-                        externalBuildContext.getAndroidBuilder(),
-                        project.getLogger(),
-                        variantScope.getInstantRunBuildContext(),
-                        AndroidGradleOptions.getBuildCache(
-                                variantScope.getGlobalScope().getProject()));
-
-        transformManager.addTransform(tasks, variantScope, dexTransform);
+        createDexTasks(externalBuildContext, transformManager, variantScope);
 
         SigningConfig manifestSigningConfig = createManifestSigningConfig(externalBuildContext);
 
@@ -226,43 +237,47 @@ class ExternalBuildTaskManager {
                         project, externalBuildContext, variantScope, transformManager,
                         manifestSigningConfig);
 
+        OutputScope outputScope = packagingScope.getOutputScope();
+        outputScope.addOutputForSplit(
+                TaskOutputHolder.TaskOutputType.MERGED_MANIFESTS, mainApkData, androidManifestFile);
+        outputScope.addOutputForSplit(
+                TaskOutputHolder.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
+                mainApkData,
+                androidManifestFile);
+        outputScope.addOutputForSplit(
+                TaskOutputHolder.TaskOutputType.PROCESSED_RES,
+                mainApkData,
+                processedAndroidResourcesFile);
+
+        packagingScope.addTaskOutput(
+                TaskOutputHolder.TaskOutputType.MERGED_MANIFESTS, androidManifestFile, null);
+
         // TODO: Where should assets come from?
-        AndroidTask<Task> createAssetsDirectory =
-                androidTasks.create(
-                        tasks,
-                        new TaskConfigAction<Task>() {
-                            @NonNull
-                            @Override
-                            public String getName() {
-                                return "createAssetsDirectory";
-                            }
+        // For now, we need to fake an assets task output since we don't have one, use a
+        // non-existing folder name.
+        File assetsFolder = FileUtils.join(project.getBuildDir(), "__external_assets__");
+        packagingScope.addTaskOutput(
+                TaskOutputHolder.TaskOutputType.MERGED_ASSETS, assetsFolder, null);
 
-                            @NonNull
-                            @Override
-                            public Class<Task> getType() {
-                                return Task.class;
-                            }
-
-                            @Override
-                            public void execute(@NonNull Task task) {
-                                task.doLast(t -> {
-                                    FileUtils.mkdirs(variantScope.getAssetsDir());
-                                });
-                            }
-                        });
-
+        Logger logger = Logging.getLogger(ExternalBuildTaskManager.class);
 
         InstantRunSliceSplitApkBuilder slicesApkBuilder =
                 new InstantRunSliceSplitApkBuilder(
-                        Logging.getLogger(ExternalBuildTaskManager.class),
+                        logger,
                         project,
                         variantScope.getInstantRunBuildContext(),
                         externalBuildContext.getAndroidBuilder(),
+                        globalScope.getBuildCache(),
                         packagingScope,
                         packagingScope.getSigningConfig(),
+                        AaptGeneration.fromProjectOptions(globalScope.getProjectOptions()),
                         packagingScope.getAaptOptions(),
                         packagingScope.getInstantRunSplitApkOutputFolder(),
-                        packagingScope.getInstantRunSupportDir());
+                        packagingScope.getInstantRunSupportDir(),
+                        new File(
+                                packagingScope.getIncrementalDir("InstantRunSliceSplitApkBuilder"),
+                                "aapt-temp"),
+                        null);
 
         Optional<AndroidTask<TransformTask>> transformTaskAndroidTask =
                 transformManager.addTransform(tasks, variantScope, slicesApkBuilder);
@@ -272,29 +287,27 @@ class ExternalBuildTaskManager {
                         tasks,
                         new PackageApplication.StandardConfigAction(
                                 packagingScope,
-                                variantScope.getInstantRunBuildContext().getPatchingPolicy()));
+                                FileUtils.join(globalScope.getBuildDir(), "outputs", "apk"),
+                                variantScope.getInstantRunBuildContext().getPatchingPolicy(),
+                                VariantScope.TaskOutputType.MERGED_RES,
+                                project.files(processedAndroidResourcesFile),
+                                project.files(androidManifestFile),
+                                VariantScope.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
+                                variantScope.getOutputScope(),
+                                globalScope.getBuildCache(),
+                                TaskOutputHolder.TaskOutputType.APK));
 
-        if (transformTaskAndroidTask.isPresent()) {
-            packageApp.dependsOn(tasks, transformTaskAndroidTask.get());
-        }
+        transformTaskAndroidTask.ifPresent(
+                transformTaskAndroidTask1 ->
+                        packageApp.dependsOn(tasks, transformTaskAndroidTask1));
 
         variantScope.setPackageApplicationTask(packageApp);
-        packageApp.dependsOn(tasks, createAssetsDirectory);
 
-        for (TransformStream stream : transformManager.getStreams(StreamFilter.DEX)) {
-            packageApp.dependsOn(tasks, stream.getDependencies());
-        }
-
-        for (TransformStream stream : transformManager.getStreams(StreamFilter.RESOURCES)) {
-            packageApp.dependsOn(tasks, stream.getDependencies());
-        }
-        for (TransformStream stream : transformManager.getStreams(StreamFilter.NATIVE_LIBS)) {
-            packageApp.dependsOn(tasks, stream.getDependencies());
-        }
+        AndroidTask<BuildInfoWriterTask> buildInfoWriterTask = androidTasks.create(tasks,
+                new BuildInfoWriterTask.ConfigAction(variantScope, logger));
 
         // finally, generate the build-info.xml
-        AndroidTask<BuildInfoWriterTask>buildInfoWriterTask =
-                instantRunTaskManager.createBuildInfoWriterTask(packageApp);
+        instantRunTaskManager.configureBuildInfoWriterTask(buildInfoWriterTask, packageApp);
 
         externalBuildAnchorTask.dependsOn(tasks, packageApp);
         externalBuildAnchorTask.dependsOn(tasks, buildInfoWriterTask);
@@ -302,6 +315,42 @@ class ExternalBuildTaskManager {
         for (AndroidTask<? extends DefaultTask> task : variantScope.getColdSwapBuildTasks()) {
             task.dependsOn(tasks, preColdswapTask);
         }
+    }
+
+    private File createBuildOutputs(
+            File parentFolder,
+            ApkData apkData,
+            TaskOutputHolder.TaskOutputType outputType,
+            File file)
+            throws IOException {
+
+        File output = new File(parentFolder, outputType.name());
+        FileUtils.mkdirs(output);
+        BuildOutput buildOutput = new BuildOutput(outputType, apkData, file);
+        String buildOutputs =
+                BuildOutputs.persist(
+                        output.toPath(),
+                        ImmutableList.of(outputType),
+                        ImmutableSetMultimap.of(outputType, buildOutput));
+        Files.write(buildOutputs, BuildOutputs.getMetadataFile(output), Charsets.UTF_8);
+        return output;
+    }
+
+    private void createDexTasks(
+            @NonNull ExternalBuildContext externalBuildContext,
+            @NonNull TransformManager transformManager,
+            @NonNull ExternalBuildVariantScope variantScope) {
+        AndroidBuilder androidBuilder = externalBuildContext.getAndroidBuilder();
+        final DexingType dexingType = DexingType.NATIVE_MULTIDEX;
+
+        PreDexTransform preDexTransform =
+                new PreDexTransform(
+                        new DefaultDexOptions(),
+                        androidBuilder,
+                        variantScope.getGlobalScope().getBuildCache(),
+                        dexingType,
+                        1);
+        transformManager.addTransform(tasks, variantScope, preDexTransform);
     }
 
     private static SigningConfig createManifestSigningConfig(

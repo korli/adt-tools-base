@@ -25,13 +25,14 @@ import static org.mockito.Mockito.when;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.build.api.transform.DirectoryInput;
 import com.android.build.api.transform.Format;
-import com.android.build.api.transform.QualifiedContent.ContentType;
-import com.android.build.api.transform.QualifiedContent.Scope;
+import com.android.build.api.transform.Status;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformOutputProvider;
-import com.android.build.gradle.shrinker.parser.FilterSpecification;
+import com.android.build.gradle.shrinker.parser.BytecodeVersion;
+import com.android.build.gradle.shrinker.parser.ProguardFlags;
 import com.android.ide.common.internal.WaitableExecutor;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.testutils.TestUtils;
@@ -39,8 +40,18 @@ import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
 import com.google.common.io.Files;
-
+import java.io.File;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
@@ -54,72 +65,58 @@ import org.objectweb.asm.tree.InnerClassNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-/**
- * Common code for testing shrinker runs.
- */
+/** Common code for testing shrinker runs. */
 public abstract class AbstractShrinkerTest {
-
-    @Rule
-    public TemporaryFolder tmpDir = new TemporaryFolder();
-
+    @Rule public TemporaryFolder tmpDir = new TemporaryFolder();
     protected File mTestPackageDir;
-
+    protected File mAppClassesDir;
     protected File mOutDir;
-
     protected Collection<TransformInput> mInputs;
-
     protected File mIncrementalDir;
-
     protected TransformOutputProvider mOutput;
-
     protected DirectoryInput mDirectoryInput;
-
-    protected ShrinkerLogger mShrinkerLogger =
-            new ShrinkerLogger(
-                    Collections.<FilterSpecification>emptyList(),
-                    LoggerFactory.getLogger(getClass()));
-
-    protected int mExpectedWarnings;
-
     protected FullRunShrinker<String> mFullRunShrinker;
+    protected ShrinkerLogger mShrinkerLogger;
+    protected int mExpectedWarnings;
 
     @Before
     public void setUp() throws Exception {
+        mShrinkerLogger =
+                new ShrinkerLogger(Collections.emptyList(), LoggerFactory.getLogger(getClass()));
         mTestPackageDir = tmpDir.newFolder("app-classes", "test");
+        mAppClassesDir = mTestPackageDir.getParentFile();
         File classDir = new File(tmpDir.getRoot(), "app-classes");
         mOutDir = tmpDir.newFolder("out");
         mIncrementalDir = tmpDir.newFolder("incremental");
 
         mDirectoryInput = mock(DirectoryInput.class);
         when(mDirectoryInput.getFile()).thenReturn(classDir);
+        when(mDirectoryInput.getName()).thenReturn("randomName");
         TransformInput transformInput = mock(TransformInput.class);
         when(transformInput.getDirectoryInputs()).thenReturn(ImmutableList.of(mDirectoryInput));
         mOutput = mock(TransformOutputProvider.class);
         // we probably want a better mock that than so that we can return different dir depending
         // on inputs.
         when(mOutput.getContentLocation(
-                Mockito.anyString(),
-                Mockito.anySetOf(ContentType.class),
-                Mockito.anySetOf(Scope.class),
-                Mockito.any(Format.class))).thenReturn(mOutDir);
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(Format.class)))
+                .thenReturn(mOutDir);
 
         mInputs = ImmutableList.of(transformInput);
+        mFullRunShrinker = createFullRunShrinker(null);
+    }
 
-        mFullRunShrinker = new FullRunShrinker<>(
+    @NonNull
+    protected final FullRunShrinker<String> createFullRunShrinker(
+            @Nullable BytecodeVersion bytecodeVersion) {
+        return new FullRunShrinker<>(
                 WaitableExecutor.useGlobalSharedThreadPool(),
                 JavaSerializationShrinkerGraph.empty(mIncrementalDir),
                 getPlatformJars(),
-                mShrinkerLogger);
+                mShrinkerLogger,
+                bytecodeVersion);
     }
 
     @Before
@@ -141,11 +138,6 @@ public abstract class AbstractShrinkerTest {
     protected void assertImplements(String className, String interfaceName) throws IOException {
         File classFile = getOutputClassFile(className);
         assertThat(getInterfaceNames(classFile)).contains(interfaceName);
-    }
-
-    protected void assertDoesntImplement(String className, String interfaceName) throws IOException {
-        File classFile = getOutputClassFile(className);
-        assertThat(getInterfaceNames(classFile)).doesNotContain(interfaceName);
     }
 
     protected static Set<String> getInterfaceNames(File classFile) throws IOException {
@@ -182,16 +174,18 @@ public abstract class AbstractShrinkerTest {
         assertThat(innerClasses).isEmpty();
     }
 
-    protected void assertMembersLeft(String className, String... expectedMembers) throws IOException {
-        assertThat(getMembers(className)).containsExactlyElementsIn(Arrays.asList(expectedMembers));
+    protected void assertMembersLeft(String className, String... expectedMembers)
+            throws IOException {
+        assertThat(getMembers(className))
+                .named(className + " members")
+                .containsExactlyElementsIn(Arrays.asList(expectedMembers));
     }
 
     protected Set<String> getMembers(String className) throws IOException {
         File outFile = getOutputClassFile(className);
 
         assertTrue(
-                String.format("Class %s does not exist in output.", className),
-                outFile.exists());
+                String.format("Class %s does not exist in output.", className), outFile.exists());
 
         return getMembers(outFile);
     }
@@ -199,15 +193,14 @@ public abstract class AbstractShrinkerTest {
     @NonNull
     protected static Set<File> getPlatformJars() {
         File androidHome = TestUtils.getSdk();
-        File androidJar = FileUtils.join(
-                androidHome,
-                SdkConstants.FD_PLATFORMS,
-                "android-" + SdkVersionInfo.HIGHEST_KNOWN_STABLE_API,
-                "android.jar");
+        File androidJar =
+                FileUtils.join(
+                        androidHome,
+                        SdkConstants.FD_PLATFORMS,
+                        "android-" + SdkVersionInfo.HIGHEST_KNOWN_STABLE_API,
+                        "android.jar");
 
-        assertTrue(
-                androidJar.getAbsolutePath() + " does not exist.",
-                androidJar.exists());
+        assertTrue(androidJar.getAbsolutePath() + " does not exist.", androidJar.exists());
 
         return ImmutableSet.of(androidJar);
     }
@@ -217,15 +210,17 @@ public abstract class AbstractShrinkerTest {
 
         //noinspection unchecked - ASM API
         return Stream.concat(
-                ((List<MethodNode>) classNode.methods).stream()
-                        .map(methodNode -> methodNode.name + ":" + methodNode.desc),
-                ((List<FieldNode>) classNode.fields).stream()
-                        .map(fieldNode -> fieldNode.name + ":" + fieldNode.desc))
+                        ((List<MethodNode>) classNode.methods)
+                                .stream()
+                                .map(methodNode -> methodNode.name + ":" + methodNode.desc),
+                        ((List<FieldNode>) classNode.fields)
+                                .stream()
+                                .map(fieldNode -> fieldNode.name + ":" + fieldNode.desc))
                 .collect(Collectors.toSet());
     }
 
     @NonNull
-    private static ClassNode getClassNode(File classFile) throws IOException {
+    protected static ClassNode getClassNode(File classFile) throws IOException {
         ClassReader classReader = new ClassReader(Files.toByteArray(classFile));
         ClassNode classNode = new ClassNode(Opcodes.ASM5);
         classReader.accept(
@@ -235,24 +230,62 @@ public abstract class AbstractShrinkerTest {
     }
 
     @NonNull
-    protected File getOutputClassFile(String className) {
-        return FileUtils.join(mOutDir, "test", className + ".class");
+    protected File getOutputClassFile(@NonNull String className) {
+        return getOutputClassFile("test", className);
     }
 
     @NonNull
-    protected KeepRules parseKeepRules(String rules) throws IOException {
-        ProguardConfig config = new ProguardConfig();
-        config.parse(rules);
-        return new ProguardFlagsKeepRules(config.getFlags(), mShrinkerLogger);
+    protected File getOutputClassFile(@NonNull String packageName, @NonNull String className) {
+        return FileUtils.join(mOutDir, packageName, className + ".class");
     }
 
-    protected void run(KeepRules keepRules) throws IOException {
-        mFullRunShrinker.run(
+    @NonNull
+    protected static ProguardFlags parseKeepRules(String rules) {
+        ProguardConfig config = new ProguardConfig();
+        config.parse(rules);
+        return config.getFlags();
+    }
+
+    protected FullRunShrinker<String>.Result fullRun(ProguardFlags flags) throws IOException {
+        return fullRun(
+                ProguardParserKeepRules.keepRules(flags, mShrinkerLogger),
+                ProguardParserKeepRules.whyAreYouKeepingRules(flags, mShrinkerLogger));
+    }
+
+    @NonNull
+    private FullRunShrinker<String>.Result fullRun(
+            @NonNull KeepRules keepRules, @Nullable KeepRules whyAreYouKeepingRules)
+            throws IOException {
+        return mFullRunShrinker.run(
                 mInputs,
-                Collections.<TransformInput>emptyList(),
+                Collections.emptyList(),
                 mOutput,
-                ImmutableMap.of(
-                        AbstractShrinker.CounterSet.SHRINK, keepRules),
-                false);
+                ImmutableMap.of(AbstractShrinker.CounterSet.SHRINK, keepRules),
+                whyAreYouKeepingRules,
+                true);
+    }
+
+    protected FullRunShrinker<String>.Result fullRun(String className, String... methods)
+            throws IOException {
+        return fullRun(new TestKeepRules(className, methods), null);
+    }
+
+    protected void incrementalRun(Map<String, Status> changes) throws Exception {
+        IncrementalShrinker<String> incrementalShrinker =
+                new IncrementalShrinker<>(
+                        WaitableExecutor.useGlobalSharedThreadPool(),
+                        JavaSerializationShrinkerGraph.readFromDir(
+                                mIncrementalDir, this.getClass().getClassLoader()),
+                        mShrinkerLogger,
+                        null);
+
+        Map<File, Status> files = Maps.newHashMap();
+        for (Map.Entry<String, Status> entry : changes.entrySet()) {
+            files.put(new File(mTestPackageDir, entry.getKey() + ".class"), entry.getValue());
+        }
+
+        when(mDirectoryInput.getChangedFiles()).thenReturn(files);
+
+        incrementalShrinker.incrementalRun(mInputs, mOutput);
     }
 }

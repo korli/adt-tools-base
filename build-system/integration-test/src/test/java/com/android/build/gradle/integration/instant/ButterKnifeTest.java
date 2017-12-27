@@ -16,7 +16,6 @@
 
 package com.android.build.gradle.integration.instant;
 
-import static com.android.build.gradle.integration.common.truth.AbstractAndroidSubject.ClassFileScope.INSTANT_RUN;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.instant.InstantRunTestUtils.PORTS;
@@ -30,25 +29,24 @@ import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.utils.AndroidVersionMatcher;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunBuildMode;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
 import com.android.ddmlib.IDevice;
-import com.android.tools.fd.client.InstantRunArtifact;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.testutils.apk.SplitApks;
+import com.android.tools.ir.client.InstantRunArtifact;
 import com.google.common.collect.Iterables;
 import java.io.File;
-import java.io.IOException;
 import java.util.List;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 public class ButterKnifeTest {
-    private static final ColdswapMode COLDSWAP_MODE = ColdswapMode.MULTIDEX;
     private static final String ORIGINAL_MESSAGE = "original";
     private static final String ACTIVITY_DESC = "Lcom/example/bk/Activ;";
 
@@ -63,8 +61,7 @@ public class ButterKnifeTest {
     @Rule public final Adb adb = new Adb();
 
     @Before
-    public void setUp() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
+    public void setUp() throws Exception {
         mActiv = project.file("src/main/java/com/example/bk/Activ.java");
     }
 
@@ -76,11 +73,11 @@ public class ButterKnifeTest {
     @Test
     public void coldSwapBuild() throws Exception {
         new ColdSwapTester(project)
-                .testMultiDex(
+                .testMultiApk(
                         new ColdSwapTester.Steps() {
                             @Override
-                            public void checkApk(@NonNull File apk) throws Exception {
-                                assertThatApk(apk).hasClass(ACTIVITY_DESC, INSTANT_RUN);
+                            public void checkApks(@NonNull SplitApks apks) throws Exception {
+                                assertThat(apks).hasClass(ACTIVITY_DESC);
                             }
 
                             @Override
@@ -113,8 +110,8 @@ public class ButterKnifeTest {
                                     throws Exception {
                                 InstantRunBuildContext.Artifact artifact =
                                         Iterables.getOnlyElement(artifacts);
-                                assertThatDex(artifact.getLocation())
-                                        .containsClass(ACTIVITY_DESC)
+                                assertThatApk(new Apk(artifact.getLocation()))
+                                        .hasClass(ACTIVITY_DESC)
                                         .that()
                                         .hasMethod("getMessage");
                             }
@@ -123,12 +120,13 @@ public class ButterKnifeTest {
 
     @Test
     public void hotSwap() throws Exception {
-        InstantRun instantRunModel =
-                InstantRunTestUtils.doInitialBuild(project, 23, COLDSWAP_MODE);
+        AndroidVersion androidVersion = new AndroidVersion(23, null);
+
+        InstantRun instantRunModel = InstantRunTestUtils.doInitialBuild(project, androidVersion);
 
         makeHotSwapChange("CHANGE");
 
-        project.executor().withInstantRun(23, COLDSWAP_MODE).run("assembleDebug");
+        project.executor().withInstantRun(androidVersion).run("assembleDebug");
 
         InstantRunArtifact artifact = InstantRunTestUtils.getReloadDexArtifact(instantRunModel);
 

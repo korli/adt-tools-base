@@ -36,27 +36,25 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.io.Files;
 import com.google.gson.GsonBuilder;
-
-import org.gradle.api.GradleException;
-
 import java.io.File;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import org.gradle.api.GradleException;
 
 /**
  * ndk-build JSON generation logic. This is separated from the corresponding ndk-build task so that
  * JSON can be generated during configuration.
  */
 class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
-    @NonNull
-    final private File projectDir;
+    @NonNull private final File projectDir;
 
     NdkBuildExternalNativeJsonGenerator(
             @NonNull NdkHandler ndkHandler,
             int minSdkVersion,
             @NonNull String variantName,
-            @NonNull List<Abi> abis,
+            @NonNull Collection<Abi> abis,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull File projectDir,
             @NonNull File sdkFolder,
@@ -90,8 +88,9 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
     }
 
     @Override
-    void processBuildOutput(@NonNull String buildOutput, @NonNull String abi,
-            int abiPlatformVersion) throws IOException {
+    void processBuildOutput(
+            @NonNull String buildOutput, @NonNull String abi, int abiPlatformVersion)
+            throws IOException {
         // Discover Application.mk if one exists next to Android.mk
         // If there is an Application.mk file next to Android.mk then pick it up.
         File applicationMk = new File(getMakeFile().getParent(), "Application.mk");
@@ -118,15 +117,23 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         //
         // NOTE: CMake doesn't have the same issue because CMake JSON generation happens fully
         // within the Exec call which has 'project/app' as the current directory.
-        NativeBuildConfigValue buildConfig = new NativeBuildConfigValueBuilder(
-                    getMakeFile(),
-                    projectDir)
-                .addCommands(
-                        getBuildCommand(abi, abiPlatformVersion, applicationMk),
-                        variantName,
-                        buildOutput,
-                        isWindows())
-                .build();
+        NativeBuildConfigValue buildConfig =
+                new NativeBuildConfigValueBuilder(getMakeFile(), projectDir)
+                        .addCommands(
+                                getBuildCommand(
+                                        abi,
+                                        abiPlatformVersion,
+                                        applicationMk,
+                                        false /* removeJobsFlag */),
+                                getBuildCommand(
+                                                abi,
+                                                abiPlatformVersion,
+                                                applicationMk,
+                                                true /* removeJobsFlag */)
+                                        + " clean",
+                                variantName,
+                                buildOutput)
+                        .build();
 
         if (applicationMk.exists()) {
             diagnostic("found application make file %s", applicationMk.getAbsolutePath());
@@ -159,7 +166,9 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         File applicationMk = new File(getMakeFile().getParent(), "Application.mk");
         ProcessInfoBuilder builder = new ProcessInfoBuilder();
         builder.setExecutable(getNdkBuild())
-                .addArgs(getBaseArgs(abi, abiPlatformVersion, applicationMk))
+                .addArgs(
+                        getBaseArgs(
+                                abi, abiPlatformVersion, applicationMk, false /* removeJobsFlag */))
                 // Disable response files so we can parse the command line.
                 .addArgs("APP_SHORT_COMMANDS=false")
                 .addArgs("LOCAL_SHORT_COMMANDS=false")
@@ -168,13 +177,14 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         return builder;
     }
 
+    @NonNull
     @Override
-    String executeProcess(ProcessInfoBuilder processBuilder) throws ProcessException, IOException {
-        return ExternalNativeBuildTaskUtils
-                .executeBuildProcessAndLogError(
-                        androidBuilder,
-                        processBuilder,
-                        false /* logStdioToInfo */);
+    String executeProcess(@NonNull String abi, int abiPlatformVersion, @NonNull File outputJsonDir)
+            throws ProcessException, IOException {
+        return ExternalNativeBuildTaskUtils.executeBuildProcessAndLogError(
+                androidBuilder,
+                getProcessBuilder(abi, abiPlatformVersion, outputJsonDir),
+                false /* logStdioToInfo */);
     }
 
     @NonNull
@@ -189,15 +199,24 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         return Maps.newHashMap();
     }
 
-    /**
-     * Get the path of the ndk-build script.
-     */
+    /** Get the path of the ndk-build script. */
+    @NonNull
     private String getNdkBuild() {
         String tool = "ndk-build";
         if (isWindows()) {
             tool += ".cmd";
         }
-        return new File(getNdkFolder(), tool).getAbsolutePath();
+        File toolFile = new File(getNdkFolder(), tool);
+
+        try {
+            // Attempt to shorten ndkFolder which may have segments of "path\.."
+            // File#getAbsolutePath doesn't do this.
+            return toolFile.getCanonicalPath();
+        } catch (IOException e) {
+            warn("Attempted to get ndkFolder canonical path and failed: %s\n"
+                    + "Falling back to absolute path.", e);
+            return toolFile.getAbsolutePath();
+        }
     }
 
     /**
@@ -222,12 +241,13 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
         }
     }
 
-    /**
-     * Get the base list of arguments for invoking ndk-build.
-     */
+    /** Get the base list of arguments for invoking ndk-build. */
     @NonNull
-    private List<String> getBaseArgs(@NonNull String abi, int abiPlatformVersion,
-            @NonNull File applicationMk) {
+    private List<String> getBaseArgs(
+            @NonNull String abi,
+            int abiPlatformVersion,
+            @NonNull File applicationMk,
+            boolean removeJobsFlag) {
         List<String> result = Lists.newArrayList();
         result.add("NDK_PROJECT_PATH=null");
         result.add("APP_BUILD_SCRIPT=" + getMakeFile());
@@ -275,21 +295,49 @@ class NdkBuildExternalNativeJsonGenerator extends ExternalNativeJsonGenerator {
             result.add(String.format("APP_CPPFLAGS+=\"%s\"", flag));
         }
 
+        boolean skipNextArgument = false;
         for (String argument : getBuildArguments()) {
+            // Jobs flag is removed for clean command because Make has issues running
+            // cleans in parallel. See b.android.com/214558
+            if (removeJobsFlag && argument.equals("-j")) {
+                // This is the arguments "-j" "4" case. We need to skip the current argument
+                // which is "-j" as well as the next argument, "4".
+                skipNextArgument = true;
+                continue;
+            }
+            if (removeJobsFlag && argument.equals("--jobs")) {
+                // This is the arguments "--jobs" "4" case. We need to skip the current argument
+                // which is "--jobs" as well as the next argument, "4".
+                skipNextArgument = true;
+                continue;
+            }
+            if (skipNextArgument) {
+                // Skip the argument following "--jobs" or "-j"
+                skipNextArgument = false;
+                continue;
+            }
+            if (removeJobsFlag && (argument.startsWith("-j") || argument.startsWith("--jobs="))) {
+                // This is the "-j4" or "--jobs=4" case.
+                continue;
+            }
+
             result.add(argument);
         }
 
         return result;
     }
 
-    /**
-     * Get the build command
-     */
+    /** Get the build command */
     @NonNull
-    private String getBuildCommand(@NonNull String abi, int abiPlatformVersion,
-            @NonNull File applicationMk) {
-        return getNdkBuild() + " " + Joiner.on(" ").join(getBaseArgs(abi, abiPlatformVersion,
-                applicationMk));
+    private String getBuildCommand(
+            @NonNull String abi,
+            int abiPlatformVersion,
+            @NonNull File applicationMk,
+            boolean removeJobsFlag) {
+        return getNdkBuild()
+                + " "
+                + Joiner.on(" ")
+                        .join(getBaseArgs(abi, abiPlatformVersion, applicationMk, removeJobsFlag));
     }
 
     /**

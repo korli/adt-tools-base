@@ -18,6 +18,7 @@ package com.android.build.gradle.integration.library;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.GRADLE_PATH;
+import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.VARIANT;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.MODULE;
 
 import com.android.build.gradle.integration.common.category.DeviceTests;
@@ -25,7 +26,6 @@ import com.android.build.gradle.integration.common.fixture.GetAndroidModelAction
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.utils.LibraryGraphHelper;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
-import com.android.build.gradle.internal.DependencyManager;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.Variant;
@@ -51,7 +51,7 @@ public class FlavorlibTest {
     public static GetAndroidModelAction.ModelContainer<AndroidProject> modelContainer;
 
     @BeforeClass
-    public static void setUp() {
+    public static void setUp() throws Exception {
         modelContainer = project.executeAndReturnMultiModel("clean", "assembleDebug");
     }
 
@@ -62,20 +62,20 @@ public class FlavorlibTest {
     }
 
     @Test
-    public void lint() {
+    public void lint() throws Exception {
         project.execute("lint");
     }
 
     @Test
-    public void report() {
+    public void report() throws Exception {
         project.execute("androidDependencies", "signingReport");
     }
 
     @Test
-    public void checkExplodedAar() {
+    public void checkExplodedAar() throws Exception {
         File intermediates = FileUtils.join(project.getTestDir(), "app", "build", "intermediates");
         assertThat(intermediates).isDirectory();
-        assertThat(new File(intermediates, DependencyManager.EXPLODED_AAR)).doesNotExist();
+        assertThat(new File(intermediates, "exploded-aar")).doesNotExist();
     }
 
     @Test
@@ -92,32 +92,44 @@ public class FlavorlibTest {
         Collection<Variant> variants = appModel.getVariants();
         Collection<ProductFlavorContainer> productFlavors = appModel.getProductFlavors();
 
-        ProductFlavorContainer flavor1 = ModelHelper.getProductFlavor(productFlavors, "flavor1");
+        // query for presence check
+        ModelHelper.getProductFlavor(productFlavors, "flavor1");
 
-        Variant flavor1Debug = ModelHelper.getVariant(variants, "flavor1Debug");
-        assertThat(flavor1Debug).named("flavor1Debug variant").isNotNull();
+        validateVariant(variants, "flavor1Debug", ":lib1", "debug", helper);
+        validateVariant(variants, "flavor2Debug", ":lib2", "debug", helper);
 
-        DependencyGraphs flavor1Graph = flavor1Debug.getMainArtifact().getDependencyGraphs();
-        assertThat(flavor1Graph).named("flavor 1 graph").isNotNull();
-        assertThat(helper.on(flavor1Graph).withType(MODULE).mapTo(GRADLE_PATH))
-                .named("flavor 1 android lib deps")
-                .containsExactly(":lib1");
+        // query for presence check
+        ModelHelper.getProductFlavor(productFlavors, "flavor2");
 
-        ProductFlavorContainer flavor2 = ModelHelper.getProductFlavor(productFlavors, "flavor2");
-
-        Variant flavor2Debug = ModelHelper.getVariant(variants, "flavor2Debug");
-        assertThat(flavor2Debug).named("flavor2Debug variant").isNotNull();
-
-        DependencyGraphs flavor2Graph = flavor2Debug.getMainArtifact().getDependencyGraphs();
-        assertThat(flavor2Graph).named("flavor 2 graph").isNotNull();
-        assertThat(helper.on(flavor2Graph).withType(MODULE).mapTo(GRADLE_PATH))
-                .named("flavor 2 android lib deps")
-                .containsExactly(":lib2");
+        validateVariant(variants, "flavor1Release", ":lib1", "release", helper);
+        validateVariant(variants, "flavor2Release", ":lib2", "release", helper);
     }
+
+    private void validateVariant(
+            Collection<Variant> variants,
+            String variantName,
+            String depModuleName,
+            String depVariantName,
+            LibraryGraphHelper helper) {
+        Variant variant = ModelHelper.getVariant(variants, variantName);
+
+        DependencyGraphs dependencyGraphs = variant.getMainArtifact().getDependencyGraphs();
+        assertThat(dependencyGraphs).named(variantName + " dependency graph").isNotNull();
+
+        LibraryGraphHelper.Items subModules = helper.on(dependencyGraphs).withType(MODULE);
+
+        assertThat(subModules.mapTo(GRADLE_PATH))
+                .named(variantName + " sub-modules as gradle-path")
+                .containsExactly(depModuleName);
+        assertThat(subModules.mapTo(VARIANT))
+                .named(variantName + " sub-modules as variant name")
+                .containsExactly(depVariantName);
+    }
+
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

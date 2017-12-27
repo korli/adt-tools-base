@@ -21,7 +21,6 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.android.utils.SdkUtils;
 import com.android.utils.XmlUtils;
-
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -196,6 +195,7 @@ public enum ManifestSystemProperty implements ManifestMerger2.AutoAddingProperty
         to.getXml().setAttribute(manifestSystemProperty.toCamelCase(), value);
         XmlAttribute xmlAttribute = new XmlAttribute(to,
                 to.getXml().getAttributeNode(manifestSystemProperty.toCamelCase()), null);
+        actionRecorder.recordNodeAction(to, Actions.ActionType.INJECTED);
         actionRecorder.recordAttributeAction(xmlAttribute, new Actions.AttributeRecord(
                 Actions.ActionType.INJECTED,
                 new SourceFilePosition(to.getSourceFile(), SourcePosition.UNKNOWN),
@@ -220,6 +220,7 @@ public enum ManifestSystemProperty implements ManifestMerger2.AutoAddingProperty
                 manifestSystemProperty.toCamelCase());
 
         XmlAttribute xmlAttribute = new XmlAttribute(to, attr, null);
+        actionRecorder.recordNodeAction(to, Actions.ActionType.INJECTED);
         actionRecorder.recordAttributeAction(xmlAttribute,
                 new Actions.AttributeRecord(
                         Actions.ActionType.INJECTED,

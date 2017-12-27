@@ -16,8 +16,9 @@
 
 package com.android.manifmerger;
 
-import static com.android.testutils.truth.MoreTruth.assertThat;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -32,11 +33,19 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Files;
-
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Map;
+import java.util.logging.Logger;
+import javax.xml.parsers.ParserConfigurationException;
+import org.junit.Rule;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -45,21 +54,11 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Map;
-import java.util.logging.Logger;
-
-import javax.xml.parsers.ParserConfigurationException;
-
 /**
  * Tests for the {@link ManifestMergerTestUtil} class
  */
-@RunWith(MockitoJUnitRunner.class)
 public class ManifestMerger2SmallTest {
+    @Rule public MockitoRule rule = MockitoJUnit.rule();
 
     @Mock
     private ActionRecorder mActionRecorder;
@@ -186,6 +185,53 @@ public class ManifestMerger2SmallTest {
             assertTrue(applications.getLength() == 0);
         } finally {
             assertTrue(overlayFile.delete());
+            assertTrue(libFile.delete());
+        }
+    }
+
+    @Test
+    public void testToolsInLibrariesNotMain() throws Exception {
+        // Test that BLAME merged document still created when tools: annotations
+        // are used in library manifests but not in the main manifest.
+        MockLog mockLog = new MockLog();
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.app1\">\n"
+                        + "\n"
+                        + "    <application android:label=\"@string/lib_name\" />\n"
+                        + "\n"
+                        + "</manifest>";
+
+        File inputFile = inputAsFile("testToolsInLibrariesNotMain", xml);
+
+        String libraryInput =
+                ""
+                        + "<manifest\n"
+                        + "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    xmlns:tools=\"http://schemas.android.com/tools\"\n"
+                        + "    package=\"com.example.lib1\">\n"
+                        + "\n"
+                        + "    <application android:label=\"@string/lib_name\">\n"
+                        + "       <activity tools:node=\"removeAll\">\n"
+                        + "        </activity>\n"
+                        + "    </application>"
+                        + "\n"
+                        + "</manifest>";
+
+        File libFile = inputAsFile("testToolsInLibrariesNotMain", libraryInput);
+
+        try {
+            MergingReport mergingReport =
+                    ManifestMerger2.newMerger(
+                                    inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                            .withFeatures(ManifestMerger2.Invoker.Feature.REMOVE_TOOLS_DECLARATIONS)
+                            .addLibraryManifest(libFile)
+                            .merge();
+            assertNotNull(mergingReport.getMergedDocument(MergedManifestKind.BLAME));
+        } finally {
+            assertTrue(inputFile.delete());
             assertTrue(libFile.delete());
         }
     }
@@ -410,6 +456,15 @@ public class ManifestMerger2SmallTest {
             Optional<Element> activityOne = getElementByTypeAndKey(document, "activity",
                     "bar.activityOne");
             assertTrue(activityOne.isPresent());
+            assertArrayEquals(
+                    new Object[] {"activity#bar.activityOne", "manifest"},
+                    mergingReport
+                            .getActions()
+                            .getNodeKeys()
+                            .stream()
+                            .map(XmlNode.NodeKey::toString)
+                            .sorted()
+                            .toArray());
         } finally {
             //noinspection ResultOfMethodCallIgnored
             inputFile.delete();
@@ -439,6 +494,15 @@ public class ManifestMerger2SmallTest {
             Optional<Element> activityOne = getElementByTypeAndKey(document, "activity",
                     "foo.activityOne");
             assertTrue(activityOne.isPresent());
+            assertArrayEquals(
+                    new Object[] {"activity#foo.activityOne", "manifest"},
+                    mergingReport
+                            .getActions()
+                            .getNodeKeys()
+                            .stream()
+                            .map(XmlNode.NodeKey::toString)
+                            .sorted()
+                            .toArray());
         } finally {
             //noinspection ResultOfMethodCallIgnored
             inputFile.delete();
@@ -666,17 +730,14 @@ public class ManifestMerger2SmallTest {
 
         NodeList applications = xmlDocument.getElementsByTagName(SdkConstants.TAG_APPLICATION);
         assertEquals(1, applications.getLength());
-        Optional<Node> serviceNode = getChildByName(applications.item(0), SdkConstants.TAG_SERVICE);
+        Optional<Node> serviceNode = getChildByName(applications.item(0), SdkConstants.TAG_PROVIDER);
         assertTrue(serviceNode.isPresent());
         Node service = serviceNode.get();
         NamedNodeMap attributes = service.getAttributes();
-        assertEquals(2, attributes.getLength());
-        assertEquals(ManifestMerger2.BOOTSTRAP_INSTANT_RUN_SERVICE,
+        assertEquals(3, attributes.getLength());
+        assertEquals(ManifestMerger2.BOOTSTRAP_INSTANT_RUN_CONTENT_PROVIDER,
                 attributes.getNamedItemNS(
                         SdkConstants.ANDROID_URI, SdkConstants.ATTR_NAME).getNodeValue());
-        assertEquals("true",
-                attributes.getNamedItemNS(
-                        SdkConstants.ANDROID_URI, SdkConstants.ATTR_EXPORTED).getNodeValue());
     }
 
     @Test
@@ -710,70 +771,6 @@ public class ManifestMerger2SmallTest {
     }
     
     @Test
-    public void testInstantRunReplacementWithNoAppName() throws Exception {
-        String xml = ""
-                + "<manifest\n"
-                + "    package=\"com.foo.bar\""
-                + "    xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
-                + "    <activity android:name=\"activityOne\"/>\n"
-                + "    <application android:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
-                + "</manifest>";
-
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", xml);
-
-        MockLog mockLog = new MockLog();
-        MergingReport mergingReport = ManifestMerger2
-                .newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
-                .withFeatures(ManifestMerger2.Invoker.Feature.INSTANT_RUN_REPLACEMENT)
-                .merge();
-
-        assertTrue(mergingReport.getResult().isSuccess());
-        Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.INSTANT_RUN));
-
-        NodeList applications = xmlDocument.getElementsByTagName(SdkConstants.TAG_APPLICATION);
-        assertEquals(1, applications.getLength());
-        Optional<Node> serviceNode = getChildByName(applications.item(0), SdkConstants.TAG_SERVICE);
-        assertTrue(serviceNode.isPresent());
-        Node service = serviceNode.get();
-        NamedNodeMap attributes = service.getAttributes();
-        assertEquals(2, attributes.getLength());
-        assertEquals(ManifestMerger2.BOOTSTRAP_INSTANT_RUN_SERVICE,
-                attributes.getNamedItemNS(
-                        SdkConstants.ANDROID_URI, SdkConstants.ATTR_NAME).getNodeValue());
-        assertEquals("true",
-                attributes.getNamedItemNS(
-                        SdkConstants.ANDROID_URI, SdkConstants.ATTR_EXPORTED).getNodeValue());
-    }
-
-    @Test
-    public void testInstantRunReplacementWithExistingServices() throws Exception {
-        String xml = ""
-                + "<manifest\n"
-                + "    package=\"com.foo.bar\""
-                + "    xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
-                + "    <activity android:name=\"activityOne\"/>\n"
-                + "    <application android:backupAgent=\"com.foo.example.myBackupAgent\">\n"
-                + "        <service android:name=\".Foo\"/>"
-                + "    </application>"
-                + "</manifest>";
-
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", xml);
-
-        MockLog mockLog = new MockLog();
-        MergingReport mergingReport = ManifestMerger2
-                .newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
-                .withFeatures(ManifestMerger2.Invoker.Feature.INSTANT_RUN_REPLACEMENT)
-                .merge();
-
-        assertTrue(mergingReport.getResult().isSuccess());
-        Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.INSTANT_RUN));
-
-        Optional<Element> serviceElement = getElementByTypeAndKey(xmlDocument,
-                SdkConstants.TAG_SERVICE, ManifestMerger2.BOOTSTRAP_INSTANT_RUN_SERVICE);
-        assertTrue(serviceElement.isPresent());
-    }
-
-    @Test
     public void testAddingTestOnlyAttribute() throws Exception {
         String xml = ""
                 + "<manifest\n"
@@ -800,6 +797,263 @@ public class ManifestMerger2SmallTest {
                         .item(0).getAttributes()
                         .getNamedItemNS(SdkConstants.ANDROID_URI, SdkConstants.ATTR_TEST_ONLY)
                         .getNodeValue());
+    }
+
+    @Test
+    public void testAddingDebuggableAttribute() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"com.foo.bar\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <activity t:name=\"activityOne\"/>\n"
+                        + "    <application t:name=\".applicationOne\" "
+                        + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
+                        + "</manifest>";
+
+        File inputFile = inputAsFile("testAddingDebuggableAttribute", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(ManifestMerger2.Invoker.Feature.DEBUGGABLE)
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        String xmlText = mergingReport.getMergedDocument(MergedManifestKind.MERGED);
+        Document xmlDocument = parse(xmlText);
+        assertEquals(
+                "true",
+                xmlDocument
+                        .getElementsByTagName(SdkConstants.TAG_APPLICATION)
+                        .item(0)
+                        .getAttributes()
+                        .getNamedItemNS(SdkConstants.ANDROID_URI, SdkConstants.ATTR_DEBUGGABLE)
+                        .getNodeValue());
+    }
+
+    @Test
+    public void testInternetPermissionAdded() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"${applicationId}\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <activity t:name=\"activityOne\"/>\n"
+                        + "    <uses-permission t:name=\"android.permission.RECEIVE_SMS\"/>\n"
+                        + "    <application t:name=\".applicationOne\" "
+                        + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
+                        + "</manifest>";
+
+        File inputFile = inputAsFile("testInternetPermissionAdded", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(ManifestMerger2.Invoker.Feature.ADVANCED_PROFILING)
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.MERGED));
+        NodeList nodes = xmlDocument.getElementsByTagName("uses-permission");
+        assertEquals(2, nodes.getLength());
+        assertEquals(
+                "android.permission.RECEIVE_SMS",
+                nodes.item(0).getAttributes().getNamedItem("t:name").getNodeValue());
+        assertEquals(
+                "android.permission.INTERNET",
+                nodes.item(1).getAttributes().getNamedItem("t:name").getNodeValue());
+    }
+
+    @Test
+    public void testInternetPermissionNotDupped() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"${applicationId}\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <uses-permission t:name=\"android.permission.INTERNET\"/>\n"
+                        + "    <uses-permission t:name=\"android.permission.RECEIVE_SMS\"/>\n"
+                        + "    <activity t:name=\"activityOne\"/>\n"
+                        + "    <application t:name=\".applicationOne\" "
+                        + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
+                        + "</manifest>";
+
+        File inputFile = inputAsFile("testInternetPermissionNotDupped", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(ManifestMerger2.Invoker.Feature.ADVANCED_PROFILING)
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.MERGED));
+        NodeList nodes = xmlDocument.getElementsByTagName("uses-permission");
+        assertEquals(2, nodes.getLength());
+        assertEquals(
+                "android.permission.INTERNET",
+                nodes.item(0).getAttributes().getNamedItem("t:name").getNodeValue());
+        assertEquals(
+                "android.permission.RECEIVE_SMS",
+                nodes.item(1).getAttributes().getNamedItem("t:name").getNodeValue());
+    }
+
+    @Test
+    public void testFeatureSplitOption() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"com.foo.example\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <application t:name=\".applicationOne\">\n"
+                        + "        <activity t:name=\"activityOne\"/>\n"
+                        + "    </application>\n"
+                        + "</manifest>";
+
+        File inputFile = inputAsFile("testFeatureSplitOption", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(ManifestMerger2.Invoker.Feature.ADD_FEATURE_SPLIT_INFO)
+                        .setFeatureName("feature")
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.MERGED));
+        assertEquals(
+                "feature",
+                xmlDocument.getDocumentElement().getAttribute(SdkConstants.ATTR_FEATURE_SPLIT));
+
+        assertEquals(
+                "feature",
+                xmlDocument
+                        .getElementsByTagName(SdkConstants.TAG_ACTIVITY)
+                        .item(0)
+                        .getAttributes()
+                        .getNamedItemNS(SdkConstants.ANDROID_URI, SdkConstants.ATTR_SPLIT_NAME)
+                        .getNodeValue());
+    }
+
+    @Test
+    public void testFeatureSplitValidation() throws Exception {
+        File inputFile = inputAsFile("testFeatureSplitOption", "</manifest>\n");
+        MockLog mockLog = new MockLog();
+        ManifestMerger2.Invoker invoker =
+                ManifestMerger2.newMerger(
+                        inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION);
+        validateFeatureName(invoker, "_split12", false);
+        validateFeatureName(invoker, ":split12", false);
+        validateFeatureName(invoker, "split12", true);
+        validateFeatureName(invoker, "split-12", false);
+        validateFeatureName(invoker, "split_12", true);
+        validateFeatureName(invoker, "foosplit_12", true);
+        validateFeatureName(invoker, "SPLIT", true);
+        validateFeatureName(invoker, "_SPLIT", false);
+    }
+
+    @Test
+    public void testTargetSandboxVersionOption() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"com.foo.example\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <application t:name=\".applicationOne\">\n"
+                        + "        <activity t:name=\"activityOne\"/>\n"
+                        + "    </application>\n"
+                        + "</manifest>";
+
+        File inputFile = inputAsFile("testTargetSandboxVersionOption", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(ManifestMerger2.Invoker.Feature.TARGET_SANDBOX_VERSION)
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.MERGED));
+        assertEquals(
+                "2",
+                xmlDocument
+                        .getDocumentElement()
+                        .getAttributeNS(
+                                SdkConstants.NS_RESOURCES,
+                                SdkConstants.ATTR_TARGET_SANDBOX_VERSION));
+    }
+
+    @Test
+    public void testAutomaticallyHandlingAttributeConflicts() throws Exception {
+        MockLog mockLog = new MockLog();
+        String overlay =
+                ""
+                        + "<manifest\n"
+                        + "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    package=\"com.example.app1\">\n"
+                        + "\n"
+                        + "    <application android:label=\"@string/lib_name\">\n"
+                        + "        <meta-data\n"
+                        + "            android:name=\"com.google.android.wearable.standalone\"\n"
+                        + "            android:value=\"true\" />\n"
+                        + "    </application>"
+                        + "\n"
+                        + "</manifest>";
+
+        File overlayFile = inputAsFile("testAutomaticallyHandlingAttributeConflicts", overlay);
+        assertTrue(overlayFile.exists());
+
+        String libraryInput =
+                ""
+                        + "<manifest\n"
+                        + "xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "package=\"com.example.app1\">\n"
+                        + "\n"
+                        + "<application android:name=\"TheApp\" >\n"
+                        + "        <meta-data\n"
+                        + "            android:name=\"com.google.android.wearable.standalone\"\n"
+                        + "            android:value=\"false\" />\n"
+                        + "</application>\n"
+                        + "\n"
+                        + "</manifest>";
+        File libFile = inputAsFile("testAutomaticallyHandlingAttributeConflicts", libraryInput);
+
+        try {
+            MergingReport mergingReport =
+                    ManifestMerger2.newMerger(libFile, mockLog, ManifestMerger2.MergeType.LIBRARY)
+                            .withFeatures(
+                                    ManifestMerger2.Invoker.Feature
+                                            .HANDLE_VALUE_CONFLICTS_AUTOMATICALLY)
+                            .addFlavorAndBuildTypeManifest(overlayFile)
+                            .merge();
+            assertNotEquals(MergingReport.Result.ERROR, mergingReport.getResult());
+            Document xmlDocument =
+                    parse(mergingReport.getMergedDocument(MergedManifestKind.MERGED));
+            Element meta =
+                    (Element) xmlDocument.getElementsByTagName(SdkConstants.TAG_META_DATA).item(0);
+            String standalone = meta.getAttributeNS(SdkConstants.ANDROID_URI, "value");
+            assertEquals("true", standalone);
+        } finally {
+            assertTrue(overlayFile.delete());
+            assertTrue(libFile.delete());
+        }
+    }
+
+    public static void validateFeatureName(
+            ManifestMerger2.Invoker invoker, String featureName, boolean isValid) throws Exception {
+        try {
+            invoker.setFeatureName(featureName);
+        } catch (IllegalArgumentException e) {
+            if (isValid) {
+                fail("Unexpected exception throw " + e.getMessage());
+            }
+            assertTrue(e.getMessage().contains("FeatureName"));
+            return;
+        }
+        if (!isValid) {
+            fail("Expected Exception not thrown");
+        }
     }
 
     public static Optional<Node> getChildByName(@NonNull Node parent, @NonNull String localName) {

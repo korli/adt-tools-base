@@ -16,6 +16,7 @@
 package com.android.sdklib;
 
 import static com.android.sdklib.SdkVersionInfo.HIGHEST_KNOWN_API;
+import static com.android.sdklib.SdkVersionInfo.HIGHEST_KNOWN_STABLE_API;
 import static com.android.sdklib.SdkVersionInfo.camelCaseToUnderlines;
 import static com.android.sdklib.SdkVersionInfo.getApiByBuildCode;
 import static com.android.sdklib.SdkVersionInfo.getApiByPreviewName;
@@ -24,6 +25,7 @@ import static com.android.sdklib.SdkVersionInfo.getCodeName;
 import static com.android.sdklib.SdkVersionInfo.getVersion;
 import static com.android.sdklib.SdkVersionInfo.underlinesToCamelCase;
 
+import com.android.testutils.TestUtils;
 import junit.framework.TestCase;
 
 public class SdkVersionInfoTest extends TestCase {
@@ -45,6 +47,7 @@ public class SdkVersionInfoTest extends TestCase {
         assertEquals(18, getApiByPreviewName("JellyBeanMR2", false));
         assertEquals(21, getApiByPreviewName("Lollipop", false));
         assertEquals(21, getApiByPreviewName("L", false));
+        assertEquals(26, getApiByPreviewName("O", false));
         assertEquals(-1, getApiByPreviewName("UnknownName", false));
         assertEquals(HIGHEST_KNOWN_API + 1, getApiByPreviewName("UnknownName", true));
     }
@@ -53,6 +56,7 @@ public class SdkVersionInfoTest extends TestCase {
         assertEquals(7, getApiByBuildCode("ECLAIR_MR1", false));
         assertEquals(16, getApiByBuildCode("JELLY_BEAN", false));
         assertEquals(24, getApiByBuildCode("N", false));
+        assertEquals(26, getApiByBuildCode("O", false));
 
         for (int api = 1; api <= HIGHEST_KNOWN_API; api++) {
             assertEquals(api, getApiByBuildCode(getBuildCode(api), false));
@@ -69,6 +73,7 @@ public class SdkVersionInfoTest extends TestCase {
         assertEquals("KitKat", getCodeName(19));
         assertEquals("Lollipop", getCodeName(21));
         assertEquals("Nougat", getCodeName(24));
+        assertEquals("Oreo", getCodeName(26));
     }
 
     public void testCamelCaseToUnderlines() {
@@ -104,5 +109,9 @@ public class SdkVersionInfoTest extends TestCase {
         assertEquals("IceCreamSandwich", getVersion("IceCreamSandwich", null).getCodename());
         assertEquals(HIGHEST_KNOWN_API, getVersion("BackToTheFuture", null).getApiLevel());
         assertEquals("BackToTheFuture", getVersion("BackToTheFuture", null).getCodename());
+    }
+
+    public void testHighestStableApiInTestUtils() throws Exception {
+        assertEquals("android-" + HIGHEST_KNOWN_STABLE_API, TestUtils.getLatestAndroidPlatform());
     }
 }

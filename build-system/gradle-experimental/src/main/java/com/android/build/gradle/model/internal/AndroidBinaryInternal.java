@@ -21,10 +21,9 @@ import com.android.build.gradle.managed.BuildType;
 import com.android.build.gradle.managed.NdkConfig;
 import com.android.build.gradle.managed.ProductFlavor;
 import com.android.build.gradle.model.AndroidBinary;
-
-import org.gradle.nativeplatform.NativeLibraryBinarySpec;
-
+import java.util.Collection;
 import java.util.List;
+import org.gradle.nativeplatform.NativeLibraryBinarySpec;
 
 /**
  * Internal interface for {@link AndroidBinary}
@@ -37,9 +36,9 @@ public interface AndroidBinaryInternal extends AndroidBinary {
 
     NdkConfig getMergedNdkConfig();
 
-    BaseVariantData getVariantData();
+    Collection<BaseVariantData> getVariantData();
 
-    void setVariantData(BaseVariantData variantData);
+    void setVariantData(Collection<BaseVariantData> variantData);
 
     List<NativeLibraryBinarySpec> getNativeBinaries();
 

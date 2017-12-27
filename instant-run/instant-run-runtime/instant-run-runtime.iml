@@ -11,9 +11,9 @@
     <orderEntry type="module" module-name="instant-run-common" />
     <orderEntry type="module" module-name="android-annotations" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
-    <orderEntry type="library" scope="TEST" name="mockito" level="project" />
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
     <orderEntry type="module" module-name="instant-run-client" scope="TEST" />
     <orderEntry type="library" name="Guava" level="project" />
+    <orderEntry type="library" scope="TEST" name="mockito-2" level="project" />
   </component>
 </module>

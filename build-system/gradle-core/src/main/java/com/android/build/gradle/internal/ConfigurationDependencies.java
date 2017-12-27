@@ -17,22 +17,18 @@
 package com.android.build.gradle.internal;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.ide.JavaLibraryImpl;
 import com.android.builder.dependency.MavenCoordinatesImpl;
-import com.android.builder.model.AndroidAtom;
 import com.android.builder.model.AndroidLibrary;
 import com.android.builder.model.Dependencies;
 import com.android.builder.model.JavaLibrary;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
-
-import org.gradle.api.artifacts.Configuration;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
+import org.gradle.api.artifacts.Configuration;
 
 /**
  * Implementation of {@link com.android.builder.model.Dependencies} over a Gradle
@@ -48,12 +44,6 @@ public class ConfigurationDependencies implements Dependencies {
     public ConfigurationDependencies(@NonNull Configuration configuration) {
 
         this.configuration = configuration;
-    }
-
-    @NonNull
-    @Override
-    public Collection<AndroidAtom> getAtoms() {
-        return Collections.emptyList();
     }
 
     @NonNull
@@ -83,12 +73,6 @@ public class ConfigurationDependencies implements Dependencies {
                     false /*isProvided*/));
         }
         return javaLibraries;
-    }
-
-    @Nullable
-    @Override
-    public AndroidAtom getBaseAtom() {
-        return null;
     }
 
     @NonNull

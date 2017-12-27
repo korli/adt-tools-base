@@ -30,7 +30,7 @@ import java.util.List;
 public class BuiltinIssueRegistry extends IssueRegistry {
     private static final List<Issue> sIssues;
 
-    static final int INITIAL_CAPACITY = 293;
+    static final int INITIAL_CAPACITY = 313;
 
     static {
         List<Issue> issues = new ArrayList<>(INITIAL_CAPACITY);
@@ -65,10 +65,11 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(AppCompatCustomViewDetector.ISSUE);
         issues.add(AppCompatResourceDetector.ISSUE);
         issues.add(AppIndexingApiDetector.ISSUE_APP_INDEXING_API);
-        issues.add(AppIndexingApiDetector.ISSUE_URL_ERROR);
         issues.add(AppIndexingApiDetector.ISSUE_APP_INDEXING);
         issues.add(AppLinksAutoVerifyDetector.ISSUE_ERROR);
         issues.add(AppLinksAutoVerifyDetector.ISSUE_WARNING);
+        issues.add(AppLinksValidDetector.VALIDATION);
+        issues.add(AppLinksValidDetector.TEST_URL);
         issues.add(ArraySizeDetector.INCONSISTENT);
         issues.add(AssertDetector.ISSUE);
         issues.add(BadHostnameVerifierDetector.ISSUE);
@@ -108,18 +109,25 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(UnpackedNativeCodeDetector.ISSUE);
         issues.add(UnsafeNativeCodeDetector.LOAD);
         issues.add(UnsafeNativeCodeDetector.UNSAFE_NATIVE_CODE_LOCATION);
+        issues.add(EllipsizeMaxLinesDetector.ISSUE);
+        issues.add(ExifInterfaceDetector.ISSUE);
         issues.add(ExtraTextDetector.ISSUE);
         issues.add(FieldGetterDetector.ISSUE);
         issues.add(FirebaseAnalyticsDetector.INVALID_NAME);
         issues.add(FirebaseMessagingDetector.MISSING_TOKEN_REFRESH);
+        issues.add(FontDetector.FONT_VALIDATION_ERROR);
+        issues.add(FontDetector.FONT_VALIDATION_WARNING);
         issues.add(FullBackupContentDetector.ISSUE);
         issues.add(FragmentDetector.ISSUE);
+        issues.add(GetContentDescriptionOverrideDetector.ISSUE);
         issues.add(GetSignaturesDetector.ISSUE);
         issues.add(GradleDetector.ACCIDENTAL_OCTAL);
         issues.add(GradleDetector.BUNDLED_GMS);
         issues.add(GradleDetector.COMPATIBILITY);
         issues.add(GradleDetector.DEPENDENCY);
         issues.add(GradleDetector.DEPRECATED);
+        issues.add(GradleDetector.DEV_MODE_OBSOLETE);
+        issues.add(GradleDetector.DUPLICATE_CLASSES);
         issues.add(GradleDetector.GRADLE_GETTER);
         issues.add(GradleDetector.GRADLE_PLUGIN_COMPATIBILITY);
         issues.add(GradleDetector.HIGH_APP_VERSION_CODE);
@@ -129,6 +137,7 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(GradleDetector.NOT_INTERPOLATED);
         issues.add(GradleDetector.STRING_INTEGER);
         issues.add(GradleDetector.REMOTE_VERSION);
+        issues.add(GradleDetector.MIN_SDK_TOO_LOW);
         issues.add(GridLayoutDetector.ISSUE);
         issues.add(HandlerDetector.ISSUE);
         issues.add(HardcodedDebugModeDetector.ISSUE);
@@ -142,7 +151,6 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(IconDetector.ICON_DIP_SIZE);
         issues.add(IconDetector.ICON_EXPECTED_SIZE);
         issues.add(IconDetector.ICON_EXTENSION);
-        issues.add(IconDetector.ICON_LAUNCHER_FORMAT);
         issues.add(IconDetector.ICON_LAUNCHER_SHAPE);
         issues.add(IconDetector.ICON_LOCATION);
         issues.add(IconDetector.ICON_MISSING_FOLDER);
@@ -157,19 +165,24 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(InefficientWeightDetector.NESTED_WEIGHTS);
         issues.add(InefficientWeightDetector.ORIENTATION);
         issues.add(InefficientWeightDetector.WRONG_0DP);
+        issues.add(InstantAppDetector.ISSUE);
         issues.add(ItemDecoratorDetector.ISSUE);
         issues.add(TrustAllX509TrustManagerDetector.ISSUE);
+        issues.add(InvalidImeActionIdDetector.ISSUE);
         issues.add(InvalidPackageDetector.ISSUE);
         issues.add(JavaPerformanceDetector.PAINT_ALLOC);
         issues.add(JavaPerformanceDetector.USE_SPARSE_ARRAY);
         issues.add(JavaPerformanceDetector.USE_VALUE_OF);
         issues.add(JavaScriptInterfaceDetector.ISSUE);
+        issues.add(JobSchedulerDetector.ISSUE);
+        issues.add(KeyboardNavigationDetector.ISSUE);
         issues.add(LabelForDetector.ISSUE);
         issues.add(LayoutConsistencyDetector.INCONSISTENT_IDS);
         issues.add(LayoutInflationDetector.ISSUE);
         issues.add(LeakDetector.ISSUE);
         issues.add(LocaleDetector.STRING_LOCALE);
         issues.add(LocaleFolderDetector.DEPRECATED_CODE);
+        issues.add(LocaleFolderDetector.GET_LOCALES);
         issues.add(LocaleFolderDetector.INVALID_FOLDER);
         issues.add(LocaleFolderDetector.WRONG_REGION);
         issues.add(LocaleFolderDetector.USE_ALPHA_2);
@@ -199,6 +212,7 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(MathDetector.ISSUE);
         issues.add(MergeMarkerDetector.ISSUE);
         issues.add(MergeRootFrameLayoutDetector.ISSUE);
+        issues.add(MediaBrowserServiceCompatVersionDetector.ISSUE);
         issues.add(MissingClassDetector.INNERCLASS);
         issues.add(MissingClassDetector.INSTANTIATABLE);
         issues.add(MissingClassDetector.MISSING);
@@ -226,6 +240,7 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(PluralsDetector.MISSING);
         issues.add(PluralsDetector.IMPLIED_QUANTITY);
         issues.add(PreferenceActivityDetector.ISSUE);
+        issues.add(PrivateApiDetector.ISSUE);
         issues.add(PrivateKeyDetector.ISSUE);
         issues.add(PrivateResourceDetector.ISSUE);
         issues.add(ProguardDetector.SPLIT_CONFIG);
@@ -312,11 +327,17 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(Utf8Detector.ISSUE);
         issues.add(VectorDetector.ISSUE);
         issues.add(VectorDrawableCompatDetector.ISSUE);
+        issues.add(VectorPathDetector.PATH_LENGTH);
+        issues.add(VectorPathDetector.PATH_VALID);
         issues.add(ViewConstructorDetector.ISSUE);
         issues.add(ViewHolderDetector.ISSUE);
         issues.add(ViewTagDetector.ISSUE);
-        issues.add(ViewTypeDetector.ISSUE);
+        issues.add(ViewTypeDetector.WRONG_VIEW_CAST);
+        issues.add(ViewTypeDetector.ADD_CAST);
         issues.add(WakelockDetector.ISSUE);
+        issues.add(WakelockDetector.TIMEOUT);
+        issues.add(WearStandaloneAppDetector.INVALID_WEAR_FEATURE_ATTRIBUTE);
+        issues.add(WearStandaloneAppDetector.WEAR_STANDALONE_APP_ISSUE);
         issues.add(WebViewDetector.ISSUE);
         issues.add(WrongCallDetector.ISSUE);
         issues.add(WrongCaseDetector.WRONG_CASE);
@@ -326,6 +347,7 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         issues.add(WrongIdDetector.UNKNOWN_ID_LAYOUT);
         issues.add(WrongImportDetector.ISSUE);
         issues.add(WrongLocationDetector.ISSUE);
+        issues.add(WrongThreadInterproceduralDetector.Companion.getISSUE());
 
         sIssues = Collections.unmodifiableList(issues);
     }
@@ -349,19 +371,19 @@ public class BuiltinIssueRegistry extends IssueRegistry {
         } else {
             int initialSize = 12;
             if (scope.contains(Scope.RESOURCE_FILE)) {
-                initialSize += 91;
+                initialSize += 101;
             } else if (scope.contains(Scope.ALL_RESOURCE_FILES)) {
                 initialSize += 12;
             }
 
             if (scope.contains(Scope.JAVA_FILE)) {
-                initialSize += 90;
+                initialSize += 101;
             } else if (scope.contains(Scope.CLASS_FILE)) {
                 initialSize += 16;
             } else if (scope.contains(Scope.MANIFEST)) {
-                initialSize += 48;
+                initialSize += 52;
             } else if (scope.contains(Scope.GRADLE_FILE)) {
-                initialSize += 5;
+                initialSize += 15;
             }
             return initialSize;
         }

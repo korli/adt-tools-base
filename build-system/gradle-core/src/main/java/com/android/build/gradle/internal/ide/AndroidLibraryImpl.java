@@ -16,16 +16,30 @@
 
 package com.android.build.gradle.internal.ide;
 
+import static com.android.SdkConstants.FD_AIDL;
+import static com.android.SdkConstants.FD_ASSETS;
+import static com.android.SdkConstants.FD_JARS;
+import static com.android.SdkConstants.FD_JNI;
+import static com.android.SdkConstants.FD_RENDERSCRIPT;
+import static com.android.SdkConstants.FD_RES;
+import static com.android.SdkConstants.FN_ANDROID_MANIFEST_XML;
+import static com.android.SdkConstants.FN_ANNOTATIONS_ZIP;
+import static com.android.SdkConstants.FN_CLASSES_JAR;
+import static com.android.SdkConstants.FN_LINT_JAR;
+import static com.android.SdkConstants.FN_PROGUARD_TXT;
+import static com.android.SdkConstants.FN_PUBLIC_TXT;
+import static com.android.SdkConstants.FN_RESOURCE_TEXT;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.concurrency.Immutable;
-import com.android.builder.dependency.level2.AndroidDependency;
 import com.android.builder.model.AndroidLibrary;
 import com.android.builder.model.JavaLibrary;
+import com.android.builder.model.MavenCoordinates;
+import com.android.utils.FileUtils;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
-
 import java.io.File;
 import java.io.Serializable;
 import java.util.Collection;
@@ -40,34 +54,8 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
 
     @Nullable
     private final String variant;
-    @NonNull
-    private final File bundle;
-    @NonNull
-    private final File folder;
-    @NonNull
-    private final File manifest;
-    @NonNull
-    private final File jarFile;
-    @NonNull
-    private final File resFolder;
-    @NonNull
-    private final File assetsFolder;
-    @NonNull
-    private final File jniFolder;
-    @NonNull
-    private final File aidlFolder;
-    @NonNull
-    private final File renderscriptFolder;
-    @NonNull
-    private final File proguardRules;
-    @NonNull
-    private final File lintJar;
-    @NonNull
-    private final File annotations;
-    @NonNull
-    private final File publicResources;
-    @NonNull
-    private final File symbolFile;
+    @NonNull private final File bundle;
+    @NonNull private final File folder;
     @NonNull
     private final List<AndroidLibrary> androidLibraries;
     @NonNull
@@ -78,36 +66,23 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
     private final int hashcode;
 
     AndroidLibraryImpl(
-            @NonNull AndroidDependency clonedLibrary,
+            @NonNull MavenCoordinates coordinates,
+            @Nullable String projectPath,
+            @NonNull File bundle,
+            @NonNull File extractedFolder,
+            @Nullable String variant,
             boolean isProvided,
             boolean isSkipped,
             @NonNull List<AndroidLibrary> androidLibraries,
             @NonNull Collection<JavaLibrary> javaLibraries,
             @NonNull Collection<File> localJavaLibraries) {
-        super(
-                clonedLibrary.getProjectPath(),
-                null,
-                clonedLibrary.getCoordinates(),
-                isSkipped,
-                isProvided);
+        super(projectPath, null, coordinates, isSkipped, isProvided);
         this.androidLibraries = ImmutableList.copyOf(androidLibraries);
         this.javaLibraries = ImmutableList.copyOf(javaLibraries);
         this.localJars = ImmutableList.copyOf(localJavaLibraries);
-        variant = clonedLibrary.getVariant();
-        bundle = clonedLibrary.getArtifactFile();
-        folder = clonedLibrary.getExtractedFolder();
-        manifest = clonedLibrary.getManifest();
-        jarFile = clonedLibrary.getJarFile();
-        resFolder = clonedLibrary.getResFolder();
-        assetsFolder = clonedLibrary.getAssetsFolder();
-        jniFolder = clonedLibrary.getJniFolder();
-        aidlFolder = clonedLibrary.getAidlFolder();
-        renderscriptFolder = clonedLibrary.getRenderscriptFolder();
-        proguardRules = clonedLibrary.getProguardRules();
-        lintJar = clonedLibrary.getLintJar();
-        annotations = clonedLibrary.getExternalAnnotations();
-        publicResources = clonedLibrary.getPublicResources();
-        symbolFile = clonedLibrary.getSymbolFile();
+        this.variant = variant;
+        this.bundle = bundle;
+        this.folder = extractedFolder;
         hashcode = computeHashCode();
     }
 
@@ -150,68 +125,72 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
     @NonNull
     @Override
     public File getManifest() {
-        return manifest;
+        return new File(folder, FN_ANDROID_MANIFEST_XML);
     }
 
     @NonNull
     @Override
     public File getJarFile() {
-        return jarFile;
+        return FileUtils.join(folder, FD_JARS, FN_CLASSES_JAR);
     }
 
     @NonNull
     @Override
     public File getResFolder() {
-        return resFolder;
+        return new File(folder, FD_RES);
     }
 
     @NonNull
     @Override
     public File getAssetsFolder() {
-        return assetsFolder;
+        return new File(folder, FD_ASSETS);
     }
 
     @NonNull
     @Override
     public File getJniFolder() {
-        return jniFolder;
+        return new File(folder, FD_JNI);
     }
 
     @NonNull
     @Override
     public File getAidlFolder() {
-        return aidlFolder;
+        return new File(folder, FD_AIDL);
     }
+
 
     @NonNull
     @Override
     public File getRenderscriptFolder() {
-        return renderscriptFolder;
+        return new File(folder, FD_RENDERSCRIPT);
     }
 
     @NonNull
     @Override
     public File getProguardRules() {
-        return proguardRules;
+        return new File(folder, FN_PROGUARD_TXT);
     }
 
     @NonNull
     @Override
     public File getLintJar() {
-        return lintJar;
+        return new File(getJarFile().getParentFile(), FN_LINT_JAR);
     }
+
 
     @NonNull
     @Override
     public File getExternalAnnotations() {
-        return annotations;
+        return new File(folder, FN_ANNOTATIONS_ZIP);
     }
+
 
     @Override
     @NonNull
     public File getPublicResources() {
-        return publicResources;
+        return new File(folder, FN_PUBLIC_TXT);
     }
+
 
     @Override
     @Deprecated
@@ -222,8 +201,9 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
     @NonNull
     @Override
     public File getSymbolFile() {
-        return symbolFile;
+        return new File(folder, FN_RESOURCE_TEXT);
     }
+
 
     @Override
     public boolean equals(Object o) {
@@ -241,24 +221,12 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
             return false;
         }
 
-        return Objects.equal(variant, that.variant) &&
-                Objects.equal(bundle, that.bundle) &&
-                Objects.equal(folder, that.folder) &&
-                Objects.equal(manifest, that.manifest) &&
-                Objects.equal(jarFile, that.jarFile) &&
-                Objects.equal(resFolder, that.resFolder) &&
-                Objects.equal(assetsFolder, that.assetsFolder) &&
-                Objects.equal(jniFolder, that.jniFolder) &&
-                Objects.equal(aidlFolder, that.aidlFolder) &&
-                Objects.equal(renderscriptFolder, that.renderscriptFolder) &&
-                Objects.equal(proguardRules, that.proguardRules) &&
-                Objects.equal(lintJar, that.lintJar) &&
-                Objects.equal(annotations, that.annotations) &&
-                Objects.equal(publicResources, that.publicResources) &&
-                Objects.equal(symbolFile, that.symbolFile) &&
-                Objects.equal(androidLibraries, that.androidLibraries) &&
-                Objects.equal(javaLibraries, that.javaLibraries) &&
-                Objects.equal(localJars, that.localJars);
+        return Objects.equal(variant, that.variant)
+                && Objects.equal(bundle, that.bundle)
+                && Objects.equal(folder, that.folder)
+                && Objects.equal(androidLibraries, that.androidLibraries)
+                && Objects.equal(javaLibraries, that.javaLibraries)
+                && Objects.equal(localJars, that.localJars);
     }
 
     @Override
@@ -268,9 +236,12 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
 
     private int computeHashCode() {
         return Objects.hashCode(
-                super.hashCode(), variant, bundle, folder, manifest, jarFile, resFolder,
-                assetsFolder, jniFolder, aidlFolder, renderscriptFolder, proguardRules, lintJar,
-                annotations, publicResources, symbolFile, androidLibraries, javaLibraries,
+                super.hashCode(),
+                variant,
+                bundle,
+                folder,
+                androidLibraries,
+                javaLibraries,
                 localJars);
     }
 
@@ -282,18 +253,6 @@ final class AndroidLibraryImpl extends LibraryImpl implements AndroidLibrary, Se
                 .add("variant", variant)
                 .add("bundle", bundle)
                 .add("folder", folder)
-                .add("manifest", manifest)
-                .add("jarFile", jarFile)
-                .add("resFolder", resFolder)
-                .add("assetsFolder", assetsFolder)
-                .add("jniFolder", jniFolder)
-                .add("aidlFolder", aidlFolder)
-                .add("renderscriptFolder", renderscriptFolder)
-                .add("proguardRules", proguardRules)
-                .add("lintJar", lintJar)
-                .add("annotations", annotations)
-                .add("publicResources", publicResources)
-                .add("symbolFile", symbolFile)
                 .add("androidLibraries", androidLibraries)
                 .add("javaLibraries", javaLibraries)
                 .add("localJars", localJars)

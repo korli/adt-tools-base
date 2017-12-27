@@ -16,11 +16,10 @@
 
 package com.android.build.gradle.integration.ndk;
 
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
-
 import com.android.build.gradle.integration.common.category.DeviceTests;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
-import com.android.ide.common.process.ProcessException;
+import com.android.build.gradle.integration.common.fixture.GradleTestProject.ApkType;
+import com.android.build.gradle.integration.common.truth.TruthHelper;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -33,11 +32,10 @@ public class NdkJniLibTest {
     @ClassRule
     public static GradleTestProject project = GradleTestProject.builder()
             .fromTestProject("ndkJniLib")
-            .addGradleProperties("android.useDeprecatedNdk=true")
             .create();
 
     @BeforeClass
-    public static void setUp() {
+    public static void setUp() throws Exception {
         project.execute("clean", "assembleDebug");
     }
 
@@ -47,27 +45,35 @@ public class NdkJniLibTest {
     }
 
     @Test
-    public void lint() {
+    public void lint() throws Exception {
         project.execute("lint");
     }
 
     @Test
-    public void checkVersionCode() throws ProcessException {
+    public void checkVersionCode() throws Exception {
         GradleTestProject app = project.getSubproject("app");
-        
-        assertThatApk(app.getApk("gingerbread", "universal", "debug")).hasVersionCode(1000123);
-        assertThatApk(app.getApk("gingerbread", "armeabi-v7a", "debug")).hasVersionCode(1100123);
-        assertThatApk(app.getApk("gingerbread", "mips", "debug")).hasVersionCode(1200123);
-        assertThatApk(app.getApk("gingerbread", "x86", "debug")).hasVersionCode(1300123);
-        assertThatApk(app.getApk("icecreamSandwich", "universal", "debug")).hasVersionCode(2000123);
-        assertThatApk(app.getApk("icecreamSandwich", "armeabi-v7a", "debug")).hasVersionCode(2100123);
-        assertThatApk(app.getApk("icecreamSandwich", "mips", "debug")).hasVersionCode(2200123);
-        assertThatApk(app.getApk("icecreamSandwich", "x86", "debug")).hasVersionCode(2300123);
+
+        TruthHelper.assertThat(app.getApk("universal", ApkType.DEBUG, "gingerbread"))
+                .hasVersionCode(1000123);
+        TruthHelper.assertThat(app.getApk("armeabi-v7a", ApkType.DEBUG, "gingerbread"))
+                .hasVersionCode(1100123);
+        TruthHelper.assertThat(app.getApk("mips", ApkType.DEBUG, "gingerbread"))
+                .hasVersionCode(1200123);
+        TruthHelper.assertThat(app.getApk("x86", ApkType.DEBUG, "gingerbread"))
+                .hasVersionCode(1300123);
+        TruthHelper.assertThat(app.getApk("universal", ApkType.DEBUG, "icecreamSandwich"))
+                .hasVersionCode(2000123);
+        TruthHelper.assertThat(app.getApk("armeabi-v7a", ApkType.DEBUG, "icecreamSandwich"))
+                .hasVersionCode(2100123);
+        TruthHelper.assertThat(app.getApk("mips", ApkType.DEBUG, "icecreamSandwich"))
+                .hasVersionCode(2200123);
+        TruthHelper.assertThat(app.getApk("x86", ApkType.DEBUG, "icecreamSandwich"))
+                .hasVersionCode(2300123);
     }
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

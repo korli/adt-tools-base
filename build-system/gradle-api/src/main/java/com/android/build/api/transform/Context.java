@@ -16,11 +16,11 @@
 
 package com.android.build.api.transform;
 
-import com.google.common.annotations.Beta;
 
-import org.gradle.api.logging.LoggingManager;
-
+import com.android.annotations.NonNull;
 import java.io.File;
+import org.gradle.api.logging.LoggingManager;
+import org.gradle.workers.WorkerExecutor;
 
 /**
  * Context for the transform.
@@ -60,4 +60,20 @@ public interface Context {
      * @return the path of the task, which is equal to the path of the project plus the name of the task.
      */
     String getPath();
+
+    /**
+     * Returns the name of the variant.
+     *
+     * @return the name of the variant.
+     */
+    @NonNull
+    String getVariantName();
+
+    /**
+     * Returns the {@link org.gradle.workers.WorkerExecutor} to enlist runnable pieces of work.
+     *
+     * @return a task level shared instance.
+     */
+    @NonNull
+    WorkerExecutor getWorkerExecutor();
 }

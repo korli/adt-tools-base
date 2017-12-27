@@ -36,6 +36,7 @@ import com.android.tools.lint.client.api.Configuration;
 import com.android.tools.lint.client.api.IssueRegistry;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.client.api.LintDriver;
+import com.android.tools.lint.client.api.LintRequest;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Issue;
@@ -45,6 +46,7 @@ import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.TextFormat;
 import com.android.utils.SdkUtils;
+import com.android.utils.XmlUtils;
 import com.google.common.annotations.Beta;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -61,6 +63,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import javax.xml.parsers.ParserConfigurationException;
+import org.jetbrains.annotations.NotNull;
+import org.w3c.dom.Document;
+import org.xml.sax.SAXException;
 
 /**
  * Command line driver for the lint framework
@@ -90,10 +96,13 @@ public class Main {
     private static final String ARG_URL        = "--url";
     private static final String ARG_VERSION    = "--version";
     private static final String ARG_EXIT_CODE  = "--exitcode";
+    private static final String ARG_SDK_HOME   = "--sdk-home";
+    private static final String ARG_PROJECT    = "--project";
     private static final String ARG_CLASSES    = "--classpath";
     private static final String ARG_SOURCES    = "--sources";
     private static final String ARG_RESOURCES  = "--resources";
     private static final String ARG_LIBRARIES  = "--libraries";
+    private static final String ARG_BUILD_API  = "--compile-sdk-version";
     private static final String ARG_BASELINE   = "--baseline";
     private static final String ARG_REMOVE_FIXED = "--remove-fixed";
 
@@ -105,7 +114,8 @@ public class Main {
 
     private static final String PROP_WORK_DIR = "com.android.tools.lint.workdir";
     private final LintCliFlags flags = new LintCliFlags();
-    private IssueRegistry mGg;
+    private IssueRegistry globalIssueRegistry;
+    @Nullable private File sdkHome;
 
     /** Creates a CLI driver */
     public Main() {
@@ -122,6 +132,10 @@ public class Main {
         } catch (ExitException exitException) {
             System.exit(exitException.getStatus());
         }
+    }
+
+    /** Hook intended for tests */
+    protected void initializeDriver(@NonNull LintDriver driver) {
     }
 
     /**
@@ -142,19 +156,23 @@ public class Main {
         // runner won't know about.
         LintCliClient client = new LintCliClient(flags, LintClient.CLIENT_CLI) {
 
-            Pattern mAndroidAnnotationPattern;
+            private Pattern mAndroidAnnotationPattern;
+            private Project unexpectedGradleProject = null;
 
-            @NonNull
             @Override
-            protected Project createProject(@NonNull File dir, @NonNull File referenceDir) {
-                Project project = super.createProject(dir, referenceDir);
-                if (project.isGradleProject()) {
+            @NonNull
+            protected LintDriver createDriver(@NonNull IssueRegistry registry,
+                    @NonNull LintRequest request) {
+                LintDriver driver = super.createDriver(registry, request);
+
+                if (unexpectedGradleProject != null) {
+                    Project project = unexpectedGradleProject;
                     @SuppressWarnings("SpellCheckingInspection")
                     String message = String.format("\"`%1$s`\" is a Gradle project. To correctly "
-                            + "analyze Gradle projects, you should run \"`gradlew :lint`\" instead.",
-                            project.getName());
+                                    + "analyze Gradle projects, you should run \"`gradlew :lint`\" "
+                                    + "instead.", project.getName());
                     Location location = Location.create(project.getDir());
-                    Context context = new Context(driver, project, project, project.getDir());
+                    Context context = new Context(driver, project, project, project.getDir(), "");
                     if (context.isEnabled(IssueRegistry.LINT_ERROR) &&
                             !getConfiguration(project, null).isIgnored(context,
                                     IssueRegistry.LINT_ERROR, location, message)) {
@@ -162,9 +180,25 @@ public class Main {
                                 IssueRegistry.LINT_ERROR,
                                 project.getConfiguration(null).getSeverity(
                                         IssueRegistry.LINT_ERROR), location, message,
-                                TextFormat.RAW);
+                                TextFormat.RAW, null);
                     }
                 }
+
+                initializeDriver(driver);
+
+                return driver;
+            }
+
+            @NonNull
+            @Override
+            protected Project createProject(@NonNull File dir, @NonNull File referenceDir) {
+                Project project = super.createProject(dir, referenceDir);
+                if (project.isGradleProject()) {
+                    // Can't report error yet; stash it here so we can report it after the
+                    // driver has been created
+                    unexpectedGradleProject = project;
+                }
+
                 return project;
             }
 
@@ -176,7 +210,8 @@ public class Main {
                     // Don't report any issues when analyzing a Gradle project from the
                     // non-Gradle runner; they are likely to be false, and will hide the real
                     // problem reported above
-                   return new CliConfiguration(getConfiguration(), project, true) {
+                    //noinspection ReturnOfInnerClass
+                    return new CliConfiguration(getConfiguration(), project, true) {
                        @NonNull
                        @Override
                        public Severity getSeverity(@NonNull Issue issue) {
@@ -218,6 +253,97 @@ public class Main {
                 } else {
                     return contents;
                 }
+            }
+
+            private ProjectMetadata metadata;
+
+            /** Creates a lint request */
+            @Override
+            @NonNull
+            protected LintRequest createLintRequest(@NonNull List<File> files) {
+                LintRequest request = super.createLintRequest(files);
+                File descriptor = flags.getProjectDescriptorOverride();
+                if (descriptor != null) {
+                    metadata = ProjectInitializerKt.computeMetadata(this, descriptor);
+                    List<Project> projects = metadata.getProjects();
+                    if (!projects.isEmpty()) {
+                        request.setProjects(projects);
+
+                        if (metadata.getSdk() != null) {
+                            sdkHome = metadata.getSdk();
+                        }
+
+                        if (metadata.getBaseline() != null) {
+                            flags.setBaselineFile(metadata.getBaseline());
+                        }
+                    }
+                }
+
+                return request;
+            }
+
+            @NonNull
+            @Override
+            public List<File> findRuleJars(@NotNull Project project) {
+                if (metadata != null) {
+                    List<File> jars = metadata.getLintChecks().get(project);
+                    if (jars != null) {
+                        return jars;
+                    }
+                }
+
+                return super.findRuleJars(project);
+            }
+
+            @Nullable
+            @Override
+            public File getCacheDir(@Nullable String name, boolean create) {
+                if (metadata != null) {
+                    File dir = metadata.getCache();
+                    if (dir != null) {
+                        if (name != null) {
+                            dir = new File(dir, name);
+                        }
+
+                        if (create && !dir.exists()) {
+                            if (!dir.mkdirs()) {
+                                return null;
+                            }
+                        }
+                        return dir;
+                    }
+                }
+
+                return super.getCacheDir(name, create);
+            }
+
+            @Nullable
+            @Override
+            public Document getMergedManifest(@NonNull Project project) {
+                if (metadata != null) {
+                    File manifest = metadata.getMergedManifests().get(project);
+                    if (manifest != null && manifest.exists()) {
+                        try {
+                            // We can't call
+                            //   resolveMergeManifestSources(document, manifestReportFile)
+                            // here since we don't have the merging log.
+                            return XmlUtils.parseUtfXmlFile(manifest, true);
+                        } catch (IOException | SAXException | ParserConfigurationException e) {
+                            log(e, "Could not read/parse %1$s", manifest);
+                        }
+                    }
+                }
+
+                return super.getMergedManifest(project);
+            }
+
+            @Nullable
+            @Override
+            public File getSdkHome() {
+                if (Main.this.sdkHome != null) {
+                    return Main.this.sdkHome;
+                }
+                return super.getSdkHome();
             }
         };
 
@@ -622,6 +748,43 @@ public class Main {
                     }
                     libraries.add(input);
                 }
+            } else if (arg.equals(ARG_BUILD_API)) {
+                if (index == args.length - 1) {
+                    System.err.println("Missing compileSdkVersion");
+                    exit(ERRNO_INVALID_ARGS);
+                }
+                String version = args[++index];
+                flags.setCompileSdkVersionOverride(version);
+            } else if (arg.equals(ARG_PROJECT)) {
+                if (index == args.length - 1) {
+                    System.err.println("Missing project description file");
+                    exit(ERRNO_INVALID_ARGS);
+                }
+                String paths = args[++index];
+                for (String path : LintUtils.splitPath(paths)) {
+                    File input = getInArgumentPath(path);
+                    if (!input.exists()) {
+                        System.err.println("Project descriptor " + input + " does not exist.");
+                        exit(ERRNO_INVALID_ARGS);
+                    }
+                    File descriptor = flags.getProjectDescriptorOverride();
+                    //noinspection VariableNotUsedInsideIf
+                    if (descriptor != null) {
+                        System.err.println("Project descriptor should only be specified once");
+                        exit(ERRNO_INVALID_ARGS);
+                    }
+                    flags.setProjectDescriptorOverride(input);
+                }
+            } else if (arg.equals(ARG_SDK_HOME)) {
+                if (index == args.length - 1) {
+                    System.err.println("Missing SDK home directory");
+                    exit(ERRNO_INVALID_ARGS);
+                }
+                sdkHome = new File(args[++index]);
+                if (!sdkHome.isDirectory()) {
+                    System.err.println(sdkHome + " is not a directory");
+                    exit(ERRNO_INVALID_ARGS);
+                }
             } else if (arg.equals(ARG_BASELINE)) {
                 if (index == args.length - 1) {
                     System.err.println("Missing baseline file path");
@@ -629,10 +792,6 @@ public class Main {
                 }
                 String path = args[++index];
                 File input = getInArgumentPath(path);
-                if (!input.exists()) {
-                    System.err.println("Library " + input + " does not exist.");
-                    exit(ERRNO_INVALID_ARGS);
-                }
                 flags.setBaselineFile(input);
             } else if (arg.equals(ARG_REMOVE_FIXED)) {
                 flags.setRemovedFixedBaselineIssues(true);
@@ -652,7 +811,7 @@ public class Main {
             }
         }
 
-        if (files.isEmpty()) {
+        if (files.isEmpty() && flags.getProjectDescriptorOverride() == null) {
             System.err.println("No files to analyze.");
             exit(ERRNO_INVALID_ARGS);
         } else if (files.size() > 1
@@ -709,7 +868,7 @@ public class Main {
         }
 
         try {
-            // Not using mGg; LintClient will do its own registry merging
+            // Not using globalIssueRegistry; LintClient will do its own registry merging
             // also including project rules.
             int exitCode = client.run(new BuiltinIssueRegistry(), files);
             exit(exitCode);
@@ -720,11 +879,11 @@ public class Main {
     }
 
     private IssueRegistry getGlobalRegistry(LintCliClient client) {
-        if (mGg == null) {
-            mGg = client.addCustomLintRules(new BuiltinIssueRegistry());
+        if (globalIssueRegistry == null) {
+            globalIssueRegistry = client.addCustomLintRules(new BuiltinIssueRegistry());
         }
 
-        return mGg;
+        return globalIssueRegistry;
     }
 
     /**
@@ -864,6 +1023,11 @@ public class Main {
             "\n" +
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
             "<lint>\n" +
+            NBSP + "<!-- Ignore everything in the test source set -->\n" +
+            NBSP + "<issue id=\"all\">\n" +
+            NBSP + NBSP + "<ignore path=\"\\*/test/\\*\" />\n" +
+            NBSP + "</issue>\n" +
+            "\n" +
             NBSP + "<!-- Disable this given check in this project -->\n" +
             NBSP + "<issue id=\"IconMissingDensityFolder\" severity=\"ignore\" />\n" +
             "\n" +
@@ -871,6 +1035,7 @@ public class Main {
             NBSP + "<issue id=\"ObsoleteLayoutParam\">\n" +
             NBSP + NBSP + "<ignore path=\"res/layout/activation.xml\" />\n" +
             NBSP + NBSP + "<ignore path=\"res/layout-xlarge/activation.xml\" />\n" +
+            NBSP + NBSP + "<ignore regexp=\"(foo|bar)\\.java\" />\n" +
             NBSP + "</issue>\n" +
             "\n" +
             NBSP + "<!-- Ignore the UselessLeaf issue in the given file -->\n" +
@@ -1047,6 +1212,9 @@ public class Main {
             ARG_XML + " <filename>", "Create an XML report instead.",
 
             "", "\nProject Options:",
+            ARG_PROJECT + " <file>", "Use the given project layout descriptor file to describe " +
+                "the set of available sources, resources and libraries. Used to drive lint with " +
+                "build systems not natively integrated with lint.",
             ARG_RESOURCES + " <dir>", "Add the given folder (or path) as a resource directory " +
                 "for the project. Only valid when running lint on a single project.",
             ARG_SOURCES + " <dir>", "Add the given folder (or path) as a source directory for " +
@@ -1054,7 +1222,11 @@ public class Main {
             ARG_CLASSES + " <dir>", "Add the given folder (or jar file, or path) as a class " +
                 "directory for the project. Only valid when running lint on a single project.",
             ARG_LIBRARIES + " <dir>", "Add the given folder (or jar file, or path) as a class " +
-                    "library for the project. Only valid when running lint on a single project.",
+                "library for the project. Only valid when running lint on a single project.",
+            ARG_BUILD_API + " <version>", "Use the given compileSdkVersion to pick an SDK " +
+                "target to resolve Android API call to",
+            ARG_SDK_HOME + " <dir>", "Use the given SDK instead of attempting to find it " +
+                "relative to the lint installation or via $ANDROID_HOME",
 
             "", "\nExit Status:",
             "0",                                 "Success.",

@@ -112,27 +112,37 @@ public class ExtractJarsTransform extends Transform {
         }
 
         try {
-            WaitableExecutor<Void> executor = WaitableExecutor.useGlobalSharedThreadPool();
+            WaitableExecutor executor = WaitableExecutor.useGlobalSharedThreadPool();
 
             for (TransformInput input : transformInvocation.getInputs()) {
                 for (DirectoryInput dirInput : input.getDirectoryInputs()) {
-                    File dirOutput = outputProvider.getContentLocation(dirInput.getName()
-                            + "-" + dirInput.getFile().getAbsolutePath().hashCode(),
-                            dirInput.getContentTypes(),
-                            dirInput.getScopes(),
-                            Format.DIRECTORY);
-                    org.apache.commons.io.FileUtils.copyDirectory(dirInput.getFile(), dirOutput);
+                    File dirOutput =
+                            outputProvider.getContentLocation(
+                                    dirInput.getName(),
+                                    dirInput.getContentTypes(),
+                                    dirInput.getScopes(),
+                                    Format.DIRECTORY);
+                    // since we do a full copy, we have to delete the output first.
+                    // FIXME make this incremental!
+                    if (dirOutput.isDirectory()) {
+                        FileUtils.deleteDirectoryContents(dirOutput);
+                    }
+                    if (dirInput.getFile().exists()) {
+                        org.apache.commons.io.FileUtils.copyDirectory(
+                                dirInput.getFile(), dirOutput);
+                    }
                 }
 
                 for (JarInput jarInput : input.getJarInputs()) {
                     final File jarFile = jarInput.getFile();
 
                     // create an output folder for this jar, keeping its type and scopes.
-                    final File outJarFolder = outputProvider.getContentLocation(
-                            jarFile.getName() + "-" + jarFile.getPath().hashCode(),
-                            jarInput.getContentTypes(),
-                            jarInput.getScopes(),
-                            Format.DIRECTORY);
+                    final File outJarFolder =
+                            outputProvider.getContentLocation(
+                                    jarInput.getName(),
+                                    jarInput.getContentTypes(),
+                                    jarInput.getScopes(),
+                                    Format.DIRECTORY);
                     FileUtils.mkdirs(outJarFolder);
 
                     if (!isIncremental) {
@@ -161,6 +171,8 @@ public class ExtractJarsTransform extends Transform {
                                             FileUtils.cleanOutputDir(outJarFolder);
                                             return null;
                                         });
+                                break;
+                            case NOTCHANGED:
                                 break;
                         }
                     }

@@ -23,19 +23,20 @@ import com.android.utils.ILogger;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Represents a set of {@link DataItem}s.
@@ -73,11 +74,13 @@ abstract class DataSet<I extends DataItem<F>, F extends DataFile<I>> implements 
     private final List<File> mSourceFiles = Lists.newArrayList();
 
     /**
-     * The key is the {@link DataItem#getKey()}.
-     * This is a multimap to support moving a data item from one file to another (values file)
-     * during incremental update.
+     * The key is the {@link DataItem#getKey()}. This is a multimap to support moving a data item
+     * from one file to another (values file) during incremental update.
+     *
+     * <p>Use LinkedListMultimap to preserve original order of items for any display of resources
+     * that want to show them in order.
      */
-    private final ListMultimap<String, I> mItems = ArrayListMultimap.create();
+    private final ListMultimap<String, I> mItems = LinkedListMultimap.create();
 
     /**
      * Map of source files to DataFiles. This is a multimap because the key is the source
@@ -613,11 +616,13 @@ abstract class DataSet<I extends DataItem<F>, F extends DataFile<I>> implements 
             patterns = "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~";
         }
 
-        sIgnoredPatterns = Splitter.on(':').split(patterns);
+        setIgnoredPatterns(patterns);
     }
 
     public void setIgnoredPatterns(String aaptStylePattern) {
-        sIgnoredPatterns = Splitter.on(':').split(aaptStylePattern);
+        // don't keep the result of split and put it in a new list instead.
+        // This is because the custom iterable returned by Splitter does not implement equals.
+        sIgnoredPatterns = Lists.newArrayList(Splitter.on(':').split(aaptStylePattern));
     }
 
     /**
@@ -690,5 +695,32 @@ abstract class DataSet<I extends DataItem<F>, F extends DataFile<I>> implements 
 
     protected boolean getValidateEnabled() {
         return mValidateEnabled;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        DataSet<?, ?> dataSet = (DataSet<?, ?>) o;
+        return mValidateEnabled == dataSet.mValidateEnabled &&
+                Objects.equals(mConfigName, dataSet.mConfigName) &&
+                Objects.equals(mSourceFiles, dataSet.mSourceFiles) &&
+                Objects.equals(mItems, dataSet.mItems) &&
+                Objects.equals(mSourceFileToDataFilesMap, dataSet.mSourceFileToDataFilesMap)
+                &&
+                Objects.equals(mDataFileMap, dataSet.mDataFileMap) &&
+                Objects.equals(sIgnoredPatterns, dataSet.sIgnoredPatterns);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects
+                .hash(mConfigName, mValidateEnabled, mSourceFiles, mItems,
+                        mSourceFileToDataFilesMap,
+                        mDataFileMap, sIgnoredPatterns);
     }
 }

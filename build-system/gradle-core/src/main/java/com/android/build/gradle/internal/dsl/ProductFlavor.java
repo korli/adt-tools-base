@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,55 +17,47 @@
 package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.LoggingUtil;
-import com.android.builder.core.BuilderConstants;
-import com.android.builder.core.DefaultApiVersion;
-import com.android.builder.core.DefaultProductFlavor;
+import com.android.build.gradle.internal.VariantManager;
 import com.android.builder.core.ErrorReporter;
-import com.android.builder.internal.ClassFieldImpl;
-import com.android.builder.model.ApiVersion;
-import com.android.builder.model.ClassField;
-import com.android.builder.model.SyncIssue;
-import com.google.common.base.Strings;
-import com.google.common.collect.Iterables;
-import java.util.Collection;
-import java.util.Map;
-import java.util.Set;
-import org.gradle.api.Action;
+import com.android.builder.model.BaseConfig;
+import com.google.common.collect.ImmutableList;
+import java.util.List;
 import org.gradle.api.Project;
 import org.gradle.api.logging.Logger;
 import org.gradle.internal.reflect.Instantiator;
 
 /**
- * DSL object used to configure product flavors.
+ * Encapsulates all product flavors properties for this project.
+ *
+ * <p>Product flavors represent different versions of your project that you expect to co-exist on a
+ * single device, the Google Play store, or repository. For example, you can configure 'demo' and
+ * 'full' product flavors for your app, and each of those flavors can specify different features,
+ * device requirements, resources, and application ID's--while sharing common source code and
+ * resources. So, product flavors allow you to output different versions of your project by simply
+ * changing only the components and settings that are different between them.
+ *
+ * <p>Configuring product flavors is similar to <a
+ * href="https://developer.android.com/studio/build/build-variants.html#build-types">configuring
+ * build types</a>: add them to the <code>productFlavors</code> block of your module's <code>
+ * build.gradle</code> file and configure the settings you want. Product flavors support the same
+ * properties as the {@link com.android.build.gradle.BaseExtension#getDefaultConfig} block—this is
+ * because <code>defaultConfig</code> defines a {@link ProductFlavor} object that the plugin uses as
+ * the base configuration for all other flavors. Each flavor you configure can then override any of
+ * the default values in <code>defaultConfig</code>, such as the <a
+ * href="https://d.android.com/studio/build/application-id.html"><code>applicationId</code></a>.
+ *
+ * <p>When using Android plugin 3.0.0 and higher, <a
+ * href="com.android.build.gradle.internal.dsl.ProductFlavor.html#com.android.build.gradle.internal.dsl.ProductFlavor:dimension"><em>each
+ * flavor must belong to a <code>dimension</code></a></em>.
+ *
+ * <p>When you configure product flavors, the Android plugin automatically combines them with your
+ * {@link com.android.build.gradle.internal.dsl.BuildType} configurations to <a
+ * href="https://developer.android.com/studio/build/build-variants.html">create build variants</a>.
+ * If the plugin creates certain build variants that you don't want, you can <a
+ * href="https://developer.android.com/studio/build/build-variants.html#filter-variants">filter
+ * variants using <code>android.variantFilter</code></a>.
  */
-@SuppressWarnings({"WeakerAccess", "unused"}) // Exposed in the DSL.
-public class ProductFlavor extends DefaultProductFlavor implements CoreProductFlavor {
-
-    @NonNull
-    protected final Project project;
-
-    @NonNull
-    protected final Logger logger;
-
-    @NonNull
-    private final NdkOptions ndkConfig;
-
-    @NonNull
-    private final ExternalNativeBuildOptions externalNativeBuildOptions;
-
-    @NonNull
-    private final ErrorReporter errorReporter;
-
-    @NonNull
-    private final JackOptions jackOptions;
-
-    @NonNull
-    private final JavaCompileOptions javaCompileOptions;
-
-    @NonNull
-    private final ShaderOptions shaderOptions;
+public class ProductFlavor extends BaseFlavor {
 
     public ProductFlavor(
             @NonNull String name,
@@ -73,596 +65,109 @@ public class ProductFlavor extends DefaultProductFlavor implements CoreProductFl
             @NonNull Instantiator instantiator,
             @NonNull Logger logger,
             @NonNull ErrorReporter errorReporter) {
-        super(name, instantiator.newInstance(VectorDrawablesOptions.class));
-        this.project = project;
-        this.logger = logger;
-        this.errorReporter = errorReporter;
-        ndkConfig = instantiator.newInstance(NdkOptions.class);
-        externalNativeBuildOptions = instantiator.newInstance(ExternalNativeBuildOptions.class,
-                instantiator);
-        jackOptions = instantiator.newInstance(JackOptions.class);
-        javaCompileOptions = instantiator.newInstance(JavaCompileOptions.class, instantiator);
-        shaderOptions = instantiator.newInstance(ShaderOptions.class);
+        super(name, project, instantiator, logger, errorReporter);
+    }
+
+    private ImmutableList<String> matchingFallbacks;
+
+    public void setMatchingFallbacks(String... fallbacks) {
+        this.matchingFallbacks = ImmutableList.copyOf(fallbacks);
+    }
+
+    public void setMatchingFallbacks(String fallback) {
+        this.matchingFallbacks = ImmutableList.of(fallback);
+    }
+
+    public void setMatchingFallbacks(List<String> fallbacks) {
+        this.matchingFallbacks = ImmutableList.copyOf(fallbacks);
     }
 
     /**
-     * Encapsulates per-variant configurations for the NDK, such as ABI filters.
-     */
-    @Nullable
-    public NdkOptions getNdk() {
-        return ndkConfig;
-    }
-
-    @Override
-    @Nullable
-    public CoreNdkOptions getNdkConfig() {
-        return ndkConfig;
-    }
-
-    /**
-     * Encapsulates per-variant CMake and ndk-build configurations for your external native build.
-     * <p>To learn more, see <a href="http://developer.android.com/studio/projects/add-native-code.html#">
-     * Add C and C++ Code to Your Project</a>.
-     */
-    @Nullable
-    public ExternalNativeBuildOptions getExternalNativeBuild() {
-        return externalNativeBuildOptions;
-    }
-
-    @Nullable
-    @Override
-    public CoreExternalNativeBuildOptions getExternalNativeBuildOptions() {
-        return externalNativeBuildOptions;
-    }
-
-    public void setMinSdkVersion(int minSdkVersion) {
-        setMinSdkVersion(new DefaultApiVersion(minSdkVersion));
-    }
-
-    /**
-     * Sets minimum SDK version.
+     * Specifies a sorted list of product flavors that the plugin should try to use when a direct
+     * variant match with a local module dependency is not possible.
      *
-     * <p>See <a href="http://developer.android.com/guide/topics/manifest/uses-sdk-element.html">
-     * uses-sdk element documentation</a>.
-     */
-    public void minSdkVersion(int minSdkVersion) {
-        setMinSdkVersion(minSdkVersion);
-    }
-
-    public void setMinSdkVersion(@Nullable String minSdkVersion) {
-        setMinSdkVersion(getApiVersion(minSdkVersion));
-    }
-
-    /**
-     * Sets minimum SDK version.
+     * <p>Android plugin 3.0.0 and higher try to match each variant of your module with the same one
+     * from its dependencies. For example, when you build a "freeDebug" version of your app, the
+     * plugin tries to match it with "freeDebug" versions of the local library modules the app
+     * depends on.
      *
-     * <p>See <a href="http://developer.android.com/guide/topics/manifest/uses-sdk-element.html">
-     * uses-sdk element documentation</a>.
-     */
-    public void minSdkVersion(@Nullable String minSdkVersion) {
-        setMinSdkVersion(minSdkVersion);
-    }
-
-    @NonNull
-    public com.android.builder.model.ProductFlavor setTargetSdkVersion(int targetSdkVersion) {
-        setTargetSdkVersion(new DefaultApiVersion(targetSdkVersion));
-        return this;
-    }
-
-    /**
-     * Sets the target SDK version to the given value.
+     * <p>However, there may be situations in which, for a given flavor dimension that exists in
+     * both the app and its library dependencies, <b>your app includes flavors that a dependency
+     * does not</b>. For example, consider if both your app and its library dependencies include a
+     * "tier" flavor dimension. However, the "tier" dimension in the app includes "free" and "paid"
+     * flavors, but one of its dependencies includes only "demo" and "paid" flavors for the same
+     * dimension. When the plugin tries to build the "free" version of your app, it won't know which
+     * version of the dependency to use, and you'll see an error message similar to the following:
      *
-     * <p>See <a href="http://developer.android.com/guide/topics/manifest/uses-sdk-element.html">
-     * uses-sdk element documentation</a>.
-     */
-    public void targetSdkVersion(int targetSdkVersion) {
-        setTargetSdkVersion(targetSdkVersion);
-    }
-
-    public void setTargetSdkVersion(@Nullable String targetSdkVersion) {
-        setTargetSdkVersion(getApiVersion(targetSdkVersion));
-    }
-
-    /**
-     * Sets the target SDK version to the given value.
-     *
-     * <p>See <a href="http://developer.android.com/guide/topics/manifest/uses-sdk-element.html">
-     * uses-sdk element documentation</a>.
-     */
-    public void targetSdkVersion(@Nullable String targetSdkVersion) {
-        setTargetSdkVersion(targetSdkVersion);
-    }
-
-    /**
-     * Sets the maximum SDK version to the given value.
-     *
-     * <p>See <a href="http://developer.android.com/guide/topics/manifest/uses-sdk-element.html">
-     * uses-sdk element documentation</a>.
-     */
-    public void maxSdkVersion(int targetSdkVersion) {
-        setMaxSdkVersion(targetSdkVersion);
-    }
-
-    @Nullable
-    private static ApiVersion getApiVersion(@Nullable String value) {
-        if (!Strings.isNullOrEmpty(value)) {
-            if (Character.isDigit(value.charAt(0))) {
-                try {
-                    int apiLevel = Integer.valueOf(value);
-                    return new DefaultApiVersion(apiLevel);
-                } catch (NumberFormatException e) {
-                    throw new RuntimeException("'" + value + "' is not a valid API level. ", e);
-                }
-            }
-
-            return new DefaultApiVersion(value);
-        }
-
-        return null;
-    }
-
-    /**
-     * Adds a custom argument to the test instrumentation runner, e.g:
-     *
-     * <p><pre>testInstrumentationRunnerArgument "size", "medium"</pre>
-     *
-     * <p>Test runner arguments can also be specified from the command line:
-     *
-     * <p><pre>
-     * ./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.size=medium
-     * ./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.foo=bar
+     * <pre>
+     * Error:Failed to resolve: Could not resolve project :mylibrary.
+     * Required by:
+     *     project :app
      * </pre>
-     */
-    public void testInstrumentationRunnerArgument(@NonNull String key, @NonNull String value) {
-        getTestInstrumentationRunnerArguments().put(key, value);
-    }
-
-    /**
-     * Adds custom arguments to the test instrumentation runner, e.g:
      *
-     * <p><pre>testInstrumentationRunnerArguments(size: "medium", foo: "bar")</pre>
+     * <p>In this situation, you should use <code>matchingFallbacks</code> to specify alternative
+     * matches for the app's "free" product flavor, as shown below:
      *
-     * <p>Test runner arguments can also be specified from the command line:
-     *
-     * <p><pre>
-     * ./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.size=medium
-     * ./gradlew connectedAndroidTest -Pandroid.testInstrumentationRunnerArguments.foo=bar
+     * <pre>
+     * // In the app's build.gradle file.
+     * android {
+     *     flavorDimensions 'tier'
+     *     productFlavors {
+     *         paid {
+     *             dimension 'tier'
+     *             // Because the dependency already includes a "paid" flavor in its
+     *             // "tier" dimension, you don't need to provide a list of fallbacks
+     *             // for the "paid" flavor.
+     *         }
+     *         free {
+     *             dimension 'tier'
+     *             // Specifies a sorted list of fallback flavors that the plugin
+     *             // should try to use when a dependency's matching dimension does
+     *             // not include a "free" flavor. You may specify as many
+     *             // fallbacks as you like, and the plugin selects the first flavor
+     *             // that's available in the dependency's "tier" dimension.
+     *             matchingFallbacks = ['demo', 'trial']
+     *         }
+     *     }
+     * }
      * </pre>
-     */
-    public void testInstrumentationRunnerArguments(@NonNull Map<String, String> args) {
-        getTestInstrumentationRunnerArguments().putAll(args);
-    }
-
-    /**
-     * Signing config used by this product flavor.
-     */
-    @Override
-    @Nullable
-    public SigningConfig getSigningConfig() {
-        return (SigningConfig) super.getSigningConfig();
-    }
-
-// -- DSL Methods. TODO remove once the instantiator does what I expect it to do.
-
-    /**
-     * Adds a new field to the generated BuildConfig class.
      *
-     * <p>The field is generated as: {@code <type> <name> = <value>;}
+     * <p>Note that, for a given flavor dimension that exists in both the app and its library
+     * dependencies, there is no issue when a library includes a product flavor that your app does
+     * not. That's because the plugin simply never requests that flavor from the dependency.
      *
-     * <p>This means each of these must have valid Java content. If the type is a String, then the
-     * value should include quotes.
+     * <p>If instead you are trying to resolve an issue in which <b>a library dependency includes a
+     * flavor dimension that your app does not</b>, use <a
+     * href="com.android.build.gradle.internal.dsl.DefaultConfig.html#com.android.build.gradle.internal.dsl.DefaultConfig:missingDimensionStrategy(java.lang.String,
+     * java.lang.String)"> <code>missingDimensionStrategy</code></a>.
      *
-     * @param type the type of the field
-     * @param name the name of the field
-     * @param value the value of the field
+     * @return the names of product flavors to use, in descending priority order
      */
-    public void buildConfigField(
-            @NonNull String type,
-            @NonNull String name,
-            @NonNull String value) {
-        ClassField alreadyPresent = getBuildConfigFields().get(name);
-        if (alreadyPresent != null) {
-            String flavorName = getName();
-            if (BuilderConstants.MAIN.equals(flavorName)) {
-                logger.info(
-                        "DefaultConfig: buildConfigField '{}' value is being replaced: {} -> {}",
-                        name, alreadyPresent.getValue(), value);
-            } else {
-                logger.info(
-                        "ProductFlavor({}): buildConfigField '{}' "
-                                + "value is being replaced: {} -> {}",
-                        flavorName, name, alreadyPresent.getValue(), value);
-            }
+    public List<String> getMatchingFallbacks() {
+        if (matchingFallbacks == null) {
+            return ImmutableList.of();
         }
-        addBuildConfigField(new ClassFieldImpl(type, name, value));
+        return matchingFallbacks;
     }
 
-    /**
-     * Adds a new generated resource.
-     *
-     * <p>This is equivalent to specifying a resource in res/values.
-     *
-     * <p>See <a href="http://developer.android.com/guide/topics/resources/available-resources.html">Resource Types</a>.
-     *
-     * @param type the type of the resource
-     * @param name the name of the resource
-     * @param value the value of the resource
-     */
-    public void resValue(
-            @NonNull String type,
-            @NonNull String name,
-            @NonNull String value) {
-        ClassField alreadyPresent = getResValues().get(name);
-        if (alreadyPresent != null) {
-            String flavorName = getName();
-            if (BuilderConstants.MAIN.equals(flavorName)) {
-                logger.info(
-                        "DefaultConfig: resValue '{}' value is being replaced: {} -> {}",
-                        name, alreadyPresent.getValue(), value);
-            } else {
-                logger.info(
-                        "ProductFlavor({}): resValue '{}' value is being replaced: {} -> {}",
-                        flavorName, name, alreadyPresent.getValue(), value);
-            }
-        }
-        addResValue(new ClassFieldImpl(type, name, value));
-    }
-
-    /**
-     * Adds a new ProGuard configuration file.
-     *
-     * <p><code>proguardFile getDefaultProguardFile('proguard-android.txt')</code></p>
-     *
-     * <p>There are 2 default rules files
-     * <ul>
-     *     <li>proguard-android.txt
-     *     <li>proguard-android-optimize.txt
-     * </ul>
-     * <p>They are located in the SDK. Using <code>getDefaultProguardFile(String filename)</code> will return the
-     * full path to the files. They are identical except for enabling optimizations.
-     */
-    public void proguardFile(@NonNull Object proguardFile) {
-        getProguardFiles().add(project.file(proguardFile));
-    }
-
-    /**
-     * Adds new ProGuard configuration files.
-     *
-     * <p>There are 2 default rules files
-     * <ul>
-     *     <li>proguard-android.txt
-     *     <li>proguard-android-optimize.txt
-     * </ul>
-     * <p>They are located in the SDK. Using <code>getDefaultProguardFile(String filename)</code> will return the
-     * full path to the files. They are identical except for enabling optimizations.
-     */
-    public void proguardFiles(@NonNull Object... files) {
-        for (Object file : files) {
-            proguardFile(file);
-        }
-    }
-
-    /**
-     * Sets the ProGuard configuration files.
-     *
-     * <p>There are 2 default rules files
-     * <ul>
-     *     <li>proguard-android.txt
-     *     <li>proguard-android-optimize.txt
-     * </ul>
-     * <p>They are located in the SDK. Using <code>getDefaultProguardFile(String filename)</code> will return the
-     * full path to the files. They are identical except for enabling optimizations.
-     */
-    public void setProguardFiles(@NonNull Iterable<?> proguardFileIterable) {
-        getProguardFiles().clear();
-        proguardFiles(Iterables.toArray(proguardFileIterable, Object.class));
-    }
-
-    /**
-     * Adds a proguard rule file to be used when processing test code.
-     *
-     * <p>Test code needs to be processed to apply the same obfuscation as was done to main code.
-     */
-    public void testProguardFile(@NonNull Object proguardFile) {
-        getTestProguardFiles().add(project.file(proguardFile));
-    }
-
-    /**
-     * Adds proguard rule files to be used when processing test code.
-     *
-     * <p>Test code needs to be processed to apply the same obfuscation as was done to main code.
-     */
-    public void testProguardFiles(@NonNull Object... proguardFiles) {
-        for (Object proguardFile : proguardFiles) {
-            testProguardFile(proguardFile);
-        }
-    }
-
-    /**
-     * Specifies proguard rule files to be used when processing test code.
-     *
-     * <p>Test code needs to be processed to apply the same obfuscation as was done to main code.
-     */
-    public void setTestProguardFiles(@NonNull Iterable<?> files) {
-        getTestProguardFiles().clear();
-        testProguardFiles(Iterables.toArray(files, Object.class));
-    }
-
-    /**
-     * Adds a proguard rule file to be included in the published AAR.
-     *
-     * <p>This proguard rule file will then be used by any application project that consume the AAR
-     * (if proguard is enabled).
-     *
-     * <p>This allows AAR to specify shrinking or obfuscation exclude rules.
-     *
-     * <p>This is only valid for Library project. This is ignored in Application project.
-     */
-    public void consumerProguardFile(@NonNull Object proguardFile) {
-        getConsumerProguardFiles().add(project.file(proguardFile));
-    }
-
-    /**
-     * Adds proguard rule files to be included in the published AAR.
-     *
-     * <p>This proguard rule file will then be used by any application project that consume the AAR
-     * (if proguard is enabled).
-     *
-     * <p>This allows AAR to specify shrinking or obfuscation exclude rules.
-     *
-     * <p>This is only valid for Library project. This is ignored in Application project.
-     */
-    public void consumerProguardFiles(@NonNull Object... proguardFiles) {
-        for (Object proguardFile : proguardFiles) {
-            consumerProguardFile(proguardFile);
-        }
-    }
-
-    /**
-     * Specifies a proguard rule file to be included in the published AAR.
-     *
-     * <p>This proguard rule file will then be used by any application project that consume the AAR
-     * (if proguard is enabled).
-     *
-     * <p>This allows AAR to specify shrinking or obfuscation exclude rules.
-     *
-     * <p>This is only valid for Library project. This is ignored in Application project.
-     */
-    public void setConsumerProguardFiles(@NonNull Iterable<?> proguardFileIterable) {
-        getConsumerProguardFiles().clear();
-        consumerProguardFiles(Iterables.toArray(proguardFileIterable, Object.class));
-    }
-
-    /**
-    * Encapsulates per-variant configurations for the NDK, such as ABI filters.
-    */
-    public void ndk(Action<NdkOptions> action) {
-        action.execute(ndkConfig);
-    }
-
-    /**
-    * Encapsulates per-variant CMake and ndk-build configurations for your external native build.
-    * <p>To learn more, see <a href="http://developer.android.com/studio/projects/add-native-code.html#">
-    * Add C and C++ Code to Your Project</a>.
-    */
-    public void externalNativeBuild(@NonNull Action<ExternalNativeBuildOptions> action) {
-        action.execute(externalNativeBuildOptions);
-    }
-
-    /**
-     * Adds a resource configuration filter.
-     *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
-     * type but of different value will be ignored from the final packaging of the APK.
-     *
-     * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
-     *
-     * <p>To package only the localization languages your app includes as string resources, specify
-     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
-     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
-     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
-     * package 'values-ja' resources in the final APK.
-     */
-    public void resConfig(@NonNull String config) {
-        addResourceConfiguration(config);
-    }
-
-    /**
-     * Adds several resource configuration filters.
-     *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
-     * type but of different value will be ignored from the final packaging of the APK.
-     *
-     * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
-     *
-     * <p>To package only the localization languages your app includes as string resources, specify
-     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
-     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
-     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
-     * package 'values-ja' resources in the final APK.
-     */
-    public void resConfigs(@NonNull String... config) {
-        addResourceConfigurations(config);
-    }
-
-    /**
-     * Adds several resource configuration filters.
-     *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
-     * type but of different value will be ignored from the final packaging of the APK.
-     *
-     * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
-     *
-     * <p>To package only the localization languages your app includes as string resources, specify
-     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
-     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
-     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
-     * package 'values-ja' resources in the final APK.
-     */
-    public void resConfigs(@NonNull Collection<String> config) {
-        addResourceConfigurations(config);
-    }
-
-    /**
-     * Options for configuring jack.
-     *
-     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
-     */
     @Override
     @NonNull
-    public JackOptions getJackOptions() {
-        return jackOptions;
+    protected DimensionRequest computeRequestedAndFallBacks(@NonNull List<String> requestedValues) {
+        // in order to have different fallbacks per variant for missing dimensions, we are
+        // going to actually have the flavor request itself (in the other dimension), with
+        // a modified name (in order to not have collision in case 2 dimensions have the same
+        // flavor names). So we will always fail to find the actual request and try for
+        // the fallbacks.
+        return new DimensionRequest(
+                VariantManager.getModifiedName(getName()), ImmutableList.copyOf(requestedValues));
     }
 
-    /**
-     * Configure Jack options for this product flavor.
-     *
-     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
-     */
-    public void jackOptions(@NonNull Action<JackOptions> action) {
-        action.execute(jackOptions);
-    }
-
-    /**
-     * Replaced by the {@code jackOptions.enabled} property.
-     *
-     * @deprecated use {@code getJackOptions().isEnabled()} instead.
-     */
-    @Deprecated
-    @Nullable
-    public Boolean getUseJack() {
-        LoggingUtil.displayDeprecationWarning(
-                logger, project, "useJack is deprecated.  Use jackOptions.enabled instead.");
-        return jackOptions.isEnabled();
-    }
-
-    /**
-     * Whether the experimental Jack toolchain should be used.
-     *
-     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
-     *
-     * @deprecated use getJack.setEnabled instead.
-     */
-    @Deprecated
-    public void setUseJack(Boolean useJack) {
-        LoggingUtil.displayDeprecationWarning(
-                logger, project, "useJack is deprecated.  Use jackOptions.enabled instead.");
-        jackOptions.setEnabled(useJack);
-    }
-
-    /**
-     * Whether the experimental Jack toolchain should be used.
-     *
-     * <p>See <a href="https://developer.android.com/studio/build/jack.html">Jack and Jill</a>
-     *
-     * @deprecated use getJack.setEnabled instead.
-     */
-    @Deprecated
-    public void useJack(Boolean useJack) {
-        LoggingUtil.displayDeprecationWarning(
-                logger, project, "useJack is deprecated.  Use jackOptions.enabled instead.");
-        jackOptions.setEnabled(useJack);
-    }
-
-    /**
-     * Options for configuration Java compilation.
-     */
     @Override
-    @NonNull
-    public JavaCompileOptions getJavaCompileOptions() {
-        return javaCompileOptions;
-    }
+    protected void _initWith(@NonNull BaseConfig that) {
+        super._initWith(that);
 
-    public void javaCompileOptions(@NonNull Action<JavaCompileOptions> action) {
-        action.execute(javaCompileOptions);
-    }
-
-    /**
-     * Options for configuring the shader compiler.
-     */
-    @NonNull
-    @Override
-    public CoreShaderOptions getShaders() {
-        return shaderOptions;
-    }
-
-    /**
-     * Configure the shader compiler options for this product flavor.
-     */
-    public void shaders(@NonNull Action<ShaderOptions> action) {
-        action.execute(shaderOptions);
-    }
-
-    @Deprecated
-    public void setFlavorDimension(String dimension) {
-        errorReporter.handleSyncWarning(null, SyncIssue.TYPE_GENERIC,
-                "'flavorDimension' will be removed in a future version of Android Gradle Plugin, " +
-                        "it has been replaced by 'dimension'.");
-        setDimension(dimension);
-    }
-
-    /**
-     * Name of the dimension this product flavor belongs to. Has been replaced by
-     * <code>dimension</code>.
-     */
-    @Deprecated
-    public String getFlavorDimension() {
-        errorReporter.handleSyncWarning(null, SyncIssue.TYPE_GENERIC,
-                "'flavorDimension' will be removed in a future version of Android Gradle Plugin, " +
-                        "it has been replaced by 'dimension'.");
-        return getDimension();
-    }
-
-    public void jarJarRuleFile(Object file) {
-        getJarJarRuleFiles().add(project.file(file));
-    }
-
-    public void jarJarRuleFiles(Object ...files) {
-        getJarJarRuleFiles().clear();
-        for (Object file : files) {
-            getJarJarRuleFiles().add(project.file(file));
+        if (that instanceof ProductFlavor) {
+            matchingFallbacks = ((ProductFlavor) that).matchingFallbacks;
         }
-    }
-
-    /**
-     * Deprecated equivalent of {@code vectorDrawablesOptions.generatedDensities}.
-     *
-     * @deprecated
-     */
-    @Deprecated
-    @Nullable
-    public Set<String> getGeneratedDensities() {
-        return getVectorDrawables().getGeneratedDensities();
-    }
-
-    @Deprecated
-    public void setGeneratedDensities(@Nullable Iterable<String> densities) {
-        getVectorDrawables().setGeneratedDensities(densities);
-    }
-
-    /**
-     * Configures {@link VectorDrawablesOptions}.
-     */
-    public void vectorDrawables(Action<VectorDrawablesOptions> action) {
-        action.execute(getVectorDrawables());
-    }
-
-    /**
-     * Options to configure the build-time support for {@code vector} drawables.
-     */
-    @NonNull
-    @Override
-    public VectorDrawablesOptions getVectorDrawables() {
-        return (VectorDrawablesOptions) super.getVectorDrawables();
-    }
-
-    /**
-     * Sets whether to enable unbundling mode for embedded wear app.
-     *
-     * If true, this enables the app to transition from an embedded wear app to one
-     * distributed by the play store directly.
-     */
-    public void wearAppUnbundled(@Nullable Boolean wearAppUnbundled) {
-        setWearAppUnbundled(wearAppUnbundled);
     }
 }

@@ -22,6 +22,7 @@ import static com.android.build.gradle.integration.common.truth.TruthHelper.asse
 import com.android.build.gradle.integration.common.category.DeviceTests;
 import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.BuildScriptGenerator;
+import com.android.build.gradle.integration.common.fixture.GradleBuildResult;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.AndroidTestApp;
 import com.android.build.gradle.integration.common.fixture.app.AnnotationProcessorLib;
@@ -31,17 +32,16 @@ import com.android.build.gradle.integration.common.fixture.app.TestSourceFile;
 import com.android.build.gradle.integration.common.runner.FilterableParameterized;
 import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
+import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidProject;
-import com.android.builder.model.SyncIssue;
-import com.android.utils.FileUtils;
+import com.android.builder.model.JavaArtifact;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -54,19 +54,15 @@ import org.junit.runners.Parameterized;
  */
 @RunWith(FilterableParameterized.class)
 public class AnnotationProcessorTest {
-    @Parameterized.Parameters(name = "forJack={0}, forComponentPlugin={1}")
+    @Parameterized.Parameters(name = "forComponentPlugin={0}")
     public static Collection<Object[]> data() {
-        return Arrays.asList(new Object[][] {
-                // forJack       forComponentPlugin
-                {true,           false},
-                {false,          false},
-                {true,           true},
-                {false,          true},
-        });
+        return Arrays.asList(
+                new Object[][] {
+                    {false}, {true},
+                });
     }
 
 
-    private final boolean forJack;
     private final boolean forComponentPlugin;
 
     @Rule
@@ -75,77 +71,97 @@ public class AnnotationProcessorTest {
     @Rule
     public Adb adb = new Adb();
 
-    public AnnotationProcessorTest(boolean forJack, boolean forComponentPlugin) {
-        this.forJack = forJack;
+    public AnnotationProcessorTest(boolean forComponentPlugin) {
         this.forComponentPlugin = forComponentPlugin;
 
-        project = GradleTestProject.builder()
-                .fromTestApp(new MultiModuleTestProject(
-                        ImmutableMap.of(
-                                ":app", sApp,
-                                ":lib", AnnotationProcessorLib.createLibrary(),
-                                ":lib-compiler", AnnotationProcessorLib.createCompiler()
-                                )))
-                .useExperimentalGradleVersion(forComponentPlugin)
-                .create();
+        project =
+                GradleTestProject.builder()
+                        .fromTestApp(
+                                new MultiModuleTestProject(
+                                        ImmutableMap.of(
+                                                ":app", sApp,
+                                                ":lib",
+                                                        AnnotationProcessorLib.Companion
+                                                                .createLibrary(),
+                                                ":lib-compiler",
+                                                        AnnotationProcessorLib.Companion
+                                                                .createCompiler())))
+                        .create();
     }
     private static AndroidTestApp sApp = HelloWorldApp.noBuildFile();
     static {
         sApp.removeFile(sApp.getFile("HelloWorld.java"));
-        sApp.addFile(new TestSourceFile(
-        "src/main/java/com/example/helloworld", "HelloWorld.java",
-                "package com.example.helloworld;\n"
-                        + "\n"
-                        + "import android.app.Activity;\n"
-                        + "import android.widget.TextView;\n"
-                        + "import android.os.Bundle;\n"
-                        + "import com.example.annotation.ProvideString;\n"
-                        + "\n"
-                        + "@ProvideString\n"
-                        + "public class HelloWorld extends Activity {\n"
-                        + "    /** Called when the activity is first created. */\n"
-                        + "    @Override\n"
-                        + "    public void onCreate(Bundle savedInstanceState) {\n"
-                        + "        super.onCreate(savedInstanceState);\n"
-                        + "        TextView tv = new TextView(this);\n"
-                        + "        tv.setText(getString());\n"
-                        + "        setContentView(tv);\n"
-                        + "    }\n"
-                        + "\n"
-                        + "    public static String getString() {\n"
-                        + "        return new com.example.annotation.HelloWorldStringValue().value;\n"
-                        + "    }\n"
-                        + "\n"
-                        + "    public static String getProcessor() {\n"
-                        + "        return new com.example.annotation.HelloWorldStringValue().processor;\n"
-                        + "    }\n"
-                        + "}\n"));
-
+        sApp.addFile(
+                new TestSourceFile(
+                        "src/main/java/com/example/helloworld",
+                        "HelloWorld.java",
+                        "package com.example.helloworld;\n"
+                                + "\n"
+                                + "import android.app.Activity;\n"
+                                + "import android.widget.TextView;\n"
+                                + "import android.os.Bundle;\n"
+                                + "import com.example.annotation.ProvideString;\n"
+                                + "\n"
+                                + "@ProvideString\n"
+                                + "public class HelloWorld extends Activity {\n"
+                                + "    /** Called when the activity is first created. */\n"
+                                + "    @Override\n"
+                                + "    public void onCreate(Bundle savedInstanceState) {\n"
+                                + "        super.onCreate(savedInstanceState);\n"
+                                + "        TextView tv = new TextView(this);\n"
+                                + "        tv.setText(getString());\n"
+                                + "        setContentView(tv);\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public static String getString() {\n"
+                                + "        return new com.example.helloworld.HelloWorldStringValue().value;\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public static String getProcessor() {\n"
+                                + "        return new com.example.helloworld.HelloWorldStringValue().processor;\n"
+                                + "    }\n"
+                                + "}\n"));
 
         sApp.removeFile(sApp.getFile("HelloWorldTest.java"));
-        sApp.addFile(new TestSourceFile(
-                "src/androidTest/java/com/example/hellojni", "HelloWorldTest.java",
-                "package com.example.helloworld;\n" +
-                        "\n" +
-                        "import android.test.ActivityInstrumentationTestCase;\n" +
-                        "\n" +
-                        "public class HelloWorldTest extends ActivityInstrumentationTestCase<HelloWorld> {\n" +
-                        "\n" +
-                        "    public HelloWorldTest() {\n" +
-                        "        super(\"com.example.helloworld\", HelloWorld.class);\n" +
-                        "    }\n" +
-                        "\n" +
-                        "    public void testStringValue() {\n" +
-                        "        assertTrue(\"Hello\".equals(HelloWorld.getString()));\n" +
-                        "    }\n" +
-                        "    public void testProcessor() {\n" +
-                        "        assertTrue(\"Processor\".equals(HelloWorld.getProcessor()));\n" +
-                        "    }\n" +
-                        "}\n"));
+
+        sApp.addFile(
+                new TestSourceFile(
+                        "src/test/java/com/example/helloworld",
+                        "HelloWorldTest.java",
+                        "package com.example.helloworld;\n"
+                                + "import com.example.annotation.ProvideString;\n"
+                                + "\n"
+                                + "@ProvideString\n"
+                                + "public class HelloWorldTest {\n"
+                                + "}\n"));
+
+        sApp.addFile(
+                new TestSourceFile(
+                        "src/androidTest/java/com/example/hellojni",
+                        "HelloWorldAndroidTest.java",
+                        "package com.example.helloworld;\n"
+                                + "\n"
+                                + "import android.test.ActivityInstrumentationTestCase;\n"
+                                + "import com.example.annotation.ProvideString;\n"
+                                + "\n"
+                                + "@ProvideString\n"
+                                + "public class HelloWorldAndroidTest extends ActivityInstrumentationTestCase<HelloWorld> {\n"
+                                + "\n"
+                                + "    public HelloWorldAndroidTest() {\n"
+                                + "        super(\"com.example.helloworld\", HelloWorld.class);\n"
+                                + "    }\n"
+                                + "\n"
+                                + "    public void testStringValue() {\n"
+                                + "        assertTrue(\"Hello\".equals(HelloWorld.getString()));\n"
+                                + "    }\n"
+                                + "    public void testProcessor() {\n"
+                                + "        assertTrue(\"Processor\".equals(HelloWorld.getProcessor()));\n"
+                                + "    }\n"
+                                + "}\n"));
     }
 
     @Before
-    public void setUp() throws IOException {
+    public void setUp() throws Exception {
         String buildScript = new BuildScriptGenerator(
                 "\n"
                         + "apply from: \"../../commonHeader.gradle\"\n"
@@ -159,9 +175,6 @@ public class AnnotationProcessorTest {
                         + "    compileSdkVersion " + GradleTestProject.DEFAULT_COMPILE_SDK_VERSION + "\n"
                         + "    buildToolsVersion '" + GradleTestProject.DEFAULT_BUILD_TOOL_VERSION + "'\n"
                         + "    defaultConfig {\n"
-                        + "        jackOptions {\n"
-                        + "            enabled " + forJack + "\n"
-                        + "        }\n"
                         + "        javaCompileOptions {\n"
                         + "            annotationProcessorOptions {\n"
                         + "                ${argument}\n"
@@ -169,11 +182,7 @@ public class AnnotationProcessorTest {
                         + "        }\n"
                         + "    }\n"
                         + "}\n"
-                        + "${model_end}\n"
-                        + "dependencies {\n"
-                        + "    annotationProcessor project(':lib-compiler')\n"
-                        + "    compile project(':lib')\n"
-                        + "}\n")
+                        + "${model_end}\n")
                 .addPattern(
                         "argument",
                         "argument \"value\", \"Hello\"",
@@ -184,14 +193,101 @@ public class AnnotationProcessorTest {
 
     @Test
     public void normalBuild() throws Exception {
-        project.execute("assembleDebug");
+        TestFileUtils.appendToFile(
+                project.getSubproject(":app").getBuildFile(),
+                "dependencies {\n"
+                        + "    compile project(':lib')\n"
+                        + "    annotationProcessor project(':lib-compiler')\n"
+                        + "}\n");
+
+        project.executor().run("assembleDebug");
         File aptOutputFolder = project.getSubproject(":app").file("build/generated/source/apt/debug");
-        assertThat(new File(aptOutputFolder, "HelloWorldStringValue.java")).exists();
+        assertThat(new File(aptOutputFolder, "com/example/helloworld/HelloWorldStringValue.java"))
+                .exists();
 
         AndroidProject model = project.model().getMulti().getModelMap().get(":app");
         assertThat(ModelHelper.getDebugArtifact(model).getGeneratedSourceFolders())
                 .contains(aptOutputFolder);
+
+        // Ensure that test sources also have their generated sources files sent to the IDE. This
+        // specifically tests for the issue described in
+        // https://issuetracker.google.com/37121918.
+        File testAptOutputFolder =
+                project.getSubproject(":app").file("build/generated/source/apt/test/debug");
+        JavaArtifact testArtifact =
+                Iterables.getOnlyElement(ModelHelper.getExtraJavaArtifacts(model));
+        assertThat(testArtifact.getGeneratedSourceFolders()).contains(testAptOutputFolder);
+
+        // Ensure that test projects also have their generated sources files sent to the IDE. This
+        // specifically tests for the issue described in
+        // https://issuetracker.google.com/37121918.
+        File androidTestAptOutputFolder =
+                project.getSubproject(":app").file("build/generated/source/apt/androidTest/debug");
+        AndroidArtifact androidTest =
+                ModelHelper.getAndroidArtifact(
+                        ModelHelper.getDebugVariant(model).getExtraAndroidArtifacts(),
+                        AndroidProject.ARTIFACT_ANDROID_TEST);
+        assertThat(androidTest.getGeneratedSourceFolders()).contains(androidTestAptOutputFolder);
+
+        // check incrementality.
+        GradleBuildResult result = project.executor().run("assembleDebug");
+        assertThat(result.getUpToDateTasks()).contains(":app:javaPreCompileDebug");
     }
+
+    @Test
+    public void testBuild() throws Exception {
+        if (forComponentPlugin) {
+            Files.append(
+                    "\n"
+                            + "configurations {\n"
+                            + "    testAnnotationProcessor\n"
+                            + "    androidTestAnnotationProcessor\n"
+                            + "}\n",
+                    project.getSubproject(":app").getBuildFile(),
+                    Charsets.UTF_8);
+        }
+        Files.append(
+                "\n"
+                        + "dependencies {\n"
+                        + "    annotationProcessor project(':lib-compiler')\n"
+                        + "    testAnnotationProcessor project(':lib-compiler')\n"
+                        + "    androidTestAnnotationProcessor project(':lib-compiler')\n"
+                        + "    compile project(':lib')\n"
+                        + "}\n",
+                project.getSubproject(":app").getBuildFile(),
+                Charsets.UTF_8);
+
+        project.executor().run("assembleDebugAndroidTest", "testDebug");
+        File aptOutputFolder = project.getSubproject(":app").file("build/generated/source/apt");
+        assertThat(
+                        new File(
+                                aptOutputFolder,
+                                "androidTest/debug/com/example/helloworld/HelloWorldAndroidTestStringValue.java"))
+                .exists();
+        assertThat(
+                        new File(
+                                aptOutputFolder,
+                                "test/debug/com/example/helloworld/HelloWorldTestStringValue.java"))
+                .exists();
+    }
+
+    @Test
+    public void precompileCheck() throws Exception {
+        Files.append(
+                "\n"
+                        + "dependencies {\n"
+                        + "    compile project(':lib-compiler')\n"
+                        + "    compile project(':lib')\n"
+                        + "}\n",
+                project.getSubproject(":app").getBuildFile(),
+                Charsets.UTF_8);
+
+        GradleBuildResult result = project.executor().expectFailure().run("assembleDebug");
+        String message = result.getFailureMessage();
+        assertThat(message).contains("Annotation processors must be explicitly declared now");
+        assertThat(message).contains("- lib-compiler.jar (project :lib-compiler)");
+    }
+
 
     /**
      * Test compile classpath is being added to processor path.
@@ -201,74 +297,47 @@ public class AnnotationProcessorTest {
         File emptyJar = project.getSubproject("app").file("empty.jar");
         assertThat(emptyJar.createNewFile()).isTrue();
 
-        project.execute("assembleDebug");
+        TestFileUtils.appendToFile(
+                project.getSubproject(":app").getBuildFile(),
+                new BuildScriptGenerator(
+                                "${model_start}\n"
+                                        + "    android {\n"
+                                        + "        defaultConfig {\n"
+                                        + "            javaCompileOptions {\n"
+                                        + "                annotationProcessorOptions {\n"
+                                        + "                    includeCompileClasspath = true\n"
+                                        + "                }\n"
+                                        + "            }\n"
+                                        + "        }\n"
+                                        + "    }\n"
+                                        + "${model_end}\n"
+                                        + "dependencies {\n"
+                                        + "    compile project(':lib-compiler')\n"
+                                        + "    annotationProcessor files('empty.jar')\n"
+                                        + "}\n")
+                        .build(forComponentPlugin));
+
+        project.executor().run("assembleDebug");
+    }
+
+    @Test
+    public void androidAptPluginFail() throws Exception {
+        TestFileUtils.appendToFile(
+                project.getSubproject(":app").getBuildFile(),
+                "apply plugin: 'com.neenbedankt.android-apt'\n");
+
+        project.executor().expectFailure().run("assembleDebug");
     }
 
     @Test
     @Category(DeviceTests.class)
     public void connectedCheck() throws Exception {
+        TestFileUtils.appendToFile(
+                project.getSubproject(":app").getBuildFile(),
+                "dependencies {\n"
+                        + "    compile project(':lib')\n"
+                        + "    annotationProcessor project(':lib-compiler')\n"
+                        + "}\n");
         project.executeConnectedCheck();
-    }
-
-    @Test
-    public void checkBuildscriptDependencyNotUsedForJackAP() throws Exception {
-        // check for jack and non-component plugin
-        Assume.assumeTrue(forJack && !forComponentPlugin);
-
-        GradleTestProject proc = project.getSubproject("lib-compiler");
-        TestFileUtils.appendToFile(
-                proc.getBuildFile(),
-                "repositories {\n"
-                        + "    maven { url System.env.CUSTOM_REPO }\n"
-                        + "}\n"
-                        + "dependencies {\n"
-                        + "    compile 'com.google.dagger:dagger:2.6'\n"
-                        + "}\n");
-
-        // update the annotation processor the reference enum that exists in 2.6 but not in 1.2.2
-        TestFileUtils.searchAndReplace(
-                FileUtils.join(
-                        proc.getMainSrcDir(), "com", "example", "annotation", "Processor.java"),
-                "\n}\\s*$",
-                "String s = dagger.Provides.Type.MAP.toString();" + "\n\n}");
-
-
-        // add older dagger to the buildscript classpath
-        TestFileUtils.appendToFile(
-                project.getBuildFile(),
-                "buildscript {\n"
-                        + "    dependencies {\n"
-                        + "        classpath 'com.squareup.dagger:dagger:1.2.2'\n"
-                        + "    }\n"
-                        + "}\n");
-
-        // make sure we resolve used class to the 2.6 version
-        project.execute("assembleDebug");
-    }
-
-    @Test
-    public void checkWarningWhenAptAndAnnotationProcessor() throws IOException {
-        // this warning is shown only for the javac toolchain and non-component plugin
-        Assume.assumeTrue(!forJack && !forComponentPlugin);
-        TestFileUtils.appendToFile(
-                project.getSubproject("app").getBuildFile(),
-                "\n "
-                        + "buildscript {\n"
-                        + "    dependencies {\n"
-                        + "        classpath 'com.neenbedankt.gradle.plugins:android-apt:1.8'\n"
-                        + "    }\n"
-                        + "}\n"
-                        + "apply plugin: 'com.neenbedankt.android-apt'\n"
-                        + "dependencies {\n"
-                        + "    annotationProcessor 'com.google.dagger:dagger-compiler:2.6'\n"
-                        + "}");
-        AndroidProject model = project.model().ignoreSyncIssues().getMulti().getModelMap().get(":app");
-        assertThat(model)
-                .hasSingleIssue(
-                        SyncIssue.SEVERITY_WARNING,
-                        SyncIssue.TYPE_GENERIC,
-                        null,
-                        "Using incompatible plugins for the annotation processing: "
-                                + "android-apt. This may result in an unexpected behavior.");
     }
 }

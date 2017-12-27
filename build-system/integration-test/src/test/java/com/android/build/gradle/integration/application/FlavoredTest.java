@@ -34,7 +34,7 @@ public class FlavoredTest {
             .create();
 
     @BeforeClass
-    public static void setUp() {
+    public static void setUp() throws Exception {
         project.execute("clean", "assembleDebug");
     }
 
@@ -44,13 +44,8 @@ public class FlavoredTest {
     }
 
     @Test
-    public void testBuild() {
-        // need a test so that non connected tests do run this build.
-    }
-
-    @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

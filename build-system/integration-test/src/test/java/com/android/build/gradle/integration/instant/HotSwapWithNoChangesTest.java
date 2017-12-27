@@ -18,26 +18,21 @@ package com.android.build.gradle.integration.instant;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
-import com.android.apkzlib.utils.IOExceptionRunnable;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
-import com.android.build.gradle.integration.common.truth.ApkSubject;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
 import com.android.builder.model.OptionalCompilationStep;
-import com.android.tools.fd.client.InstantRunArtifact;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.SplitApks;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import com.google.common.truth.Expect;
 import java.io.File;
 import java.io.IOException;
-import java.util.List;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -48,12 +43,12 @@ import org.junit.Test;
  */
 public class HotSwapWithNoChangesTest {
 
-    private static final ColdswapMode COLDSWAP_MODE = ColdswapMode.MULTIDEX;
-
     private static final String LOG_TAG = "NoCodeChangeAfterCompatibleChangeTest";
 
     public static final String ACTIVITY_PATH =
             "src/main/java/com/example/helloworld/HelloWorld.java";
+
+    private static final AndroidVersion VERSION_UNDER_TEST = new AndroidVersion(23, null);
 
     @Rule
     public GradleTestProject project =
@@ -68,80 +63,81 @@ public class HotSwapWithNoChangesTest {
     public Expect expect = Expect.createAndEnableStackTrace();
 
     @Before
-    public void activityClass() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
+    public void activityClass() throws Exception {
         createActivityClass("Original");
     }
 
     @Test
     @Ignore // cold swap mode is now only MULTI APK, this test needs to be updated appropriately
     public void testRestartOnly() throws Exception {
-        doTestArtifacts(() -> {
-            // Force cold swap.
-            project.executor()
-                    .withInstantRun(23, COLDSWAP_MODE, OptionalCompilationStep.RESTART_ONLY)
-                    .run("assembleDebug");
-        });
+        doTestArtifacts(
+                () -> {
+                    // Force cold swap.
+                    project.executor()
+                            .withInstantRun(
+                                    VERSION_UNDER_TEST, OptionalCompilationStep.RESTART_ONLY)
+                            .run("assembleDebug");
+                });
     }
 
     @Test
     @Ignore // cold swap mode is now only MULTI APK, this test needs to be updated appropriately
     public void testIncompatibleChange() throws Exception {
-        doTestArtifacts(() -> {
-            String newPath = ACTIVITY_PATH.replace("HelloWorld", "HelloWorldCopy");
-            File newFile = project.file(newPath);
-            Files.copy(project.file(ACTIVITY_PATH), newFile);
-            TestFileUtils.searchAndReplace(newFile, "class HelloWorld", "class HelloWorldCopy");
+        doTestArtifacts(
+                () -> {
+                    String newPath = ACTIVITY_PATH.replace("HelloWorld", "HelloWorldCopy");
+                    File newFile = project.file(newPath);
+                    Files.copy(project.file(ACTIVITY_PATH), newFile);
+                    TestFileUtils.searchAndReplace(
+                            newFile, "class HelloWorld", "class HelloWorldCopy");
 
-            // Adding a new class will force a cold swap.
-            project.executor()
-                    .withInstantRun(23, COLDSWAP_MODE)
-                    .run("assembleDebug");
-        });
+                    // Adding a new class will force a cold swap.
+                    project.executor().withInstantRun(VERSION_UNDER_TEST).run("assembleDebug");
+                });
     }
 
-    private void doTestArtifacts(IOExceptionRunnable runColdSwapBuild) throws Exception {
+    private void doTestArtifacts(BuildRunnable runColdSwapBuild) throws Exception {
         InstantRun instantRunModel =
                 InstantRunTestUtils.getInstantRunModel(project.model().getSingle().getOnlyModel());
 
         project.executor()
-                .withInstantRun(23, COLDSWAP_MODE, OptionalCompilationStep.FULL_APK)
+                .withInstantRun(VERSION_UNDER_TEST, OptionalCompilationStep.FULL_APK)
                 .run("assembleDebug");
 
-        ApkSubject apkFile = expect.about(ApkSubject.FACTORY)
-                .that(project.getApk("debug"));
-        apkFile.hasClass("Lcom/example/helloworld/HelloWorld;",
-                AbstractAndroidSubject.ClassFileScope.INSTANT_RUN)
-                .that().hasMethod("onCreate");
-        apkFile.hasClass("Lcom/android/tools/fd/runtime/BootstrapApplication;",
-                AbstractAndroidSubject.ClassFileScope.MAIN_AND_SECONDARY);
+
+        SplitApks allApks = InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel);
+
+        assertThat(allApks)
+                .hasClass("Lcom/example/helloworld/HelloWorld;")
+                .that()
+                .hasMethod("onCreate");
+
+        assertThat(allApks).hasClass("Lcom/android/tools/ir/server/Server;");
 
         makeHotSwapChange();
         runColdSwapBuild.run();
 
-        List<InstantRunArtifact> dexFiles =
-                InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel, COLDSWAP_MODE);
-        assertThat(dexFiles).hasSize(1);
+        SplitApks splitApks = InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel);
+        // one split and main APK since we are < N.
+        assertThat(splitApks).hasSize(2);
+
 
         // now run again the incremental build.
-        project.executor()
-                .withInstantRun(23, COLDSWAP_MODE)
-                .run("assembleDebug");
+        project.executor().withInstantRun(VERSION_UNDER_TEST).run("assembleDebug");
 
-        InstantRunBuildContext instantRunBuildContext =
-                InstantRunTestUtils.loadBuildContext(23, instantRunModel);
+        InstantRunBuildContext buildContext =
+                InstantRunTestUtils.loadBuildContext(VERSION_UNDER_TEST, instantRunModel);
 
-        assertThat(instantRunBuildContext.getLastBuild().getArtifacts()).hasSize(0);
-        assertThat(instantRunBuildContext.getLastBuild().getVerifierStatus())
+        assertThat(buildContext.getLastBuild().getArtifacts()).hasSize(0);
+        assertThat(buildContext.getLastBuild().getVerifierStatus())
                 .isEqualTo(InstantRunVerifierStatus.NO_CHANGES);
     }
 
-    private void makeHotSwapChange() throws IOException {
+    private void makeHotSwapChange() throws Exception {
         createActivityClass("HOT SWAP!");
     }
 
-    private void createActivityClass(String message)
-            throws IOException {
+    private void createActivityClass(String message) throws Exception {
         String javaCompile = "package com.example.helloworld;\n"
                 + "import android.app.Activity;\n"
                 + "import android.os.Bundle;\n"
@@ -162,4 +158,8 @@ public class HotSwapWithNoChangesTest {
                 Charsets.UTF_8);
     }
 
+    @FunctionalInterface
+    private interface BuildRunnable {
+        void run() throws IOException, InterruptedException;
+    }
 }

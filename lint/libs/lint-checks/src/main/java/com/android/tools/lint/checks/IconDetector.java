@@ -46,21 +46,21 @@ import static com.android.tools.lint.detector.api.LintUtils.endsWith;
 import static com.android.utils.SdkUtils.endsWithIgnoreCase;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.ProductFlavorContainer;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.resources.Density;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
-import com.android.tools.lint.client.api.JavaParser;
+import com.android.resources.ResourceUrl;
 import com.android.tools.lint.client.api.LintClient;
+import com.android.tools.lint.client.api.UElementHandler;
+import com.android.tools.lint.client.api.UastParser;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -72,24 +72,14 @@ import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.google.common.base.Joiner;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Sets;
-import com.intellij.psi.JavaElementVisitor;
-import com.intellij.psi.JavaRecursiveElementVisitor;
-import com.intellij.psi.PsiAnonymousClass;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiExpressionList;
-import com.intellij.psi.PsiJavaCodeReferenceElement;
-import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
-import com.intellij.psi.PsiNewExpression;
-import com.intellij.psi.PsiReferenceExpression;
-import com.intellij.psi.util.PsiTreeUtil;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.image.BufferedImage;
@@ -117,13 +107,26 @@ import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import org.jetbrains.uast.UAnonymousClass;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UClass;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UMethod;
+import org.jetbrains.uast.UReferenceExpression;
+import org.jetbrains.uast.USimpleNameReferenceExpression;
+import org.jetbrains.uast.UastUtils;
+import org.jetbrains.uast.util.UastExpressionUtils;
+import org.jetbrains.uast.visitor.AbstractUastVisitor;
 import org.w3c.dom.Element;
 
 /**
  * Checks for common icon problems, such as wrong icon sizes, placing icons in the
  * density independent drawable folder, etc.
  */
-public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner {
+public class IconDetector extends ResourceXmlDetector implements UastScanner {
+
+    // TODO: Use the new merged manifest model
 
     private static final boolean INCLUDE_LDPI;
     static {
@@ -211,7 +214,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             "The res/drawable folder is intended for density-independent graphics such as " +
             "shapes defined in XML. For bitmaps, move it to `drawable-mdpi` and consider " +
             "providing higher and lower resolution versions in `drawable-ldpi`, `drawable-hdpi` " +
-            "and `drawable-xhdpi`. If the icon *really* is density independent (for example " +
+            "and `drawable-xhdpi`. If the icon **really** is density independent (for example " +
             "a solid color) you can place it in `drawable-nodpi`.",
             Category.ICONS,
             5,
@@ -301,7 +304,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             "IconNoDpi",
             "Icon appears in both `-nodpi` and dpi folders",
             "Bitmaps that appear in `drawable-nodpi` folders will not be scaled by the " +
-            "Android framework. If a drawable resource of the same name appears *both* in " +
+            "Android framework. If a drawable resource of the same name appears **both** in " +
             "a `-nodpi` folder as well as a dpi folder such as `drawable-hdpi`, then " +
             "the behavior is ambiguous and probably not intentional. Delete one or the " +
             "other, or use different names for the icons.",
@@ -384,19 +387,6 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             Severity.WARNING,
             IMPLEMENTATION_JAVA).addMoreInfo(
                 "http://developer.android.com/design/style/iconography.html");
-
-    /** Launcher icon using wrong format */
-    public static final Issue ICON_LAUNCHER_FORMAT = Issue.create(
-            "IconLauncherFormat",
-            "Wrong launcher icon format",
-
-            "Launcher icons should be in the PNG format. This requirement is enforced by the " +
-            "The Google Play Developer Console.",
-            Category.ICONS,
-            6,
-            Severity.ERROR,
-            IMPLEMENTATION_JAVA).addMoreInfo(
-            "https://developer.android.com/guide/practices/ui_guidelines/icon_design_launcher.html#size");
 
     /** Switch to webp? */
     public static final Issue WEBP_ELIGIBLE = Issue.create(
@@ -958,12 +948,16 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                     squareWidthSum += (size.width - meanWidth) * (size.width - meanWidth);
                     squareHeightSum += (size.height - meanHeight) * (size.height - meanHeight);
                 }
-                double widthStdDev = Math.sqrt(squareWidthSum / count);
-                double heightStdDev = Math.sqrt(squareHeightSum / count);
+                double widthStdDev = Math.sqrt(squareWidthSum / (double) count);
+                double heightStdDev = Math.sqrt(squareHeightSum / (double) count);
 
                 if (widthStdDev > meanWidth / 10 || heightStdDev > meanHeight) {
-                    Location location = null;
                     StringBuilder sb = new StringBuilder(100);
+                    sb.append("The image `").append(name).append("` varies significantly in its " +
+                            "density-independent (dip) size across the various density " +
+                            "versions: ");
+
+                    Location location = null;
 
                     // Sort entries by decreasing dip size
                     List<Map.Entry<File, Dimension>> entries = new ArrayList<>();
@@ -979,10 +973,9 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
 
                         return d2.height - d1.height;
                     });
+
+                    List<String> examples = Lists.newArrayList();
                     for (Map.Entry<File, Dimension> entry2 : entries) {
-                        if (sb.length() > 0) {
-                            sb.append(", ");
-                        }
                         File file = entry2.getKey();
 
                         // Chain locations together
@@ -991,18 +984,16 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                         location.setSecondary(linkedLocation);
                         Dimension dip = entry2.getValue();
                         Dimension px = pixelSizes.get(file);
-                        //noinspection ConstantConditions
-                        String fileName = file.getParentFile().getName() + File.separator
-                                + file.getName();
-                        sb.append(String.format("%1$s: %2$dx%3$d dp (%4$dx%5$d px)",
-                                fileName, dip.width, dip.height, px.width, px.height));
+                        String example =
+                                LintUtils.getFileNameWithParent(context.getClient(), file) +
+                                        ": " + String.format("%1$dx%2$d dp (%3$dx%4$d px)",
+                                        dip.width, dip.height, px.width, px.height);
+                        examples.add(example);
                     }
-                    String message = String.format(
-                        "The image `%1$s` varies significantly in its density-independent (dip) " +
-                        "size across the various density versions: %2$s",
-                            name, sb.toString());
                     if (location != null) {
-                        context.report(ICON_DIP_SIZE, location, message);
+                        Collections.sort(examples);
+                        sb.append(Joiner.on(", ").join(examples));
+                        context.report(ICON_DIP_SIZE, location, sb.toString());
                     }
                 }
             }
@@ -1043,6 +1034,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
 
             if (!missing.isEmpty() && foundSome) {
+                Collections.sort(missing);
                 context.report(
                     ICON_MISSING_FOLDER,
                     Location.create(res),
@@ -1156,6 +1148,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                             }
                         }
 
+                        Collections.sort(fileNames);
                         context.report(ICON_XML_AND_PNG, location,
                             String.format(
                                 "The following images appear both as density independent `.xml` files and as bitmap files: %1$s",
@@ -1199,6 +1192,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                             }
                         }
                         if (!defined.isEmpty()) {
+                            Collections.sort(defined);
                             foundIn = String.format(" (found in %1$s)",
                                     LintUtils.formatList(defined,
                                             context.getDriver().isAbbreviating() ? 5 : -1));
@@ -1439,19 +1433,12 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
         }
 
-        boolean checkLauncherShape = context.isEnabled(ICON_LAUNCHER_SHAPE);
-        boolean checkLauncherFormat = context.isEnabled(ICON_LAUNCHER_FORMAT);
-        if (checkLauncherShape || checkLauncherFormat) {
+        if (context.isEnabled(ICON_LAUNCHER_SHAPE)) {
             for (File file : files) {
                 String name = file.getName();
                 if (isLauncherIcon(folderName, getBaseName(name))) {
-                    if (checkLauncherShape
-                            && !endsWith(name, DOT_XML)
-                            && !endsWith(name, DOT_9PNG)) {
+                    if (!endsWith(name, DOT_XML) && !endsWith(name, DOT_9PNG)) {
                         checkLauncherShape(context, folderName, file);
-                    }
-                    if (checkLauncherFormat) {
-                        checkLauncherIconFormat(context, file);
                     }
                 }
             }
@@ -1526,19 +1513,6 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 }
             }
         }
-    }
-
-    /**
-     * Check that launcher icons are PNG or JPEG
-     */
-    private static void checkLauncherIconFormat(Context context, File file) {
-        String path = file.getPath();
-        if (endsWithIgnoreCase(path, DOT_PNG) || endsWithIgnoreCase(path, DOT_JPEG)) {
-            return;
-        }
-        Location location = Location.create(file);
-        String message = "Launcher icons must be in PNG format";
-        context.report(ICON_LAUNCHER_FORMAT, location, message);
     }
 
     /**
@@ -1733,12 +1707,12 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                                     Location location = Location.create(file);
 
                                     String name = getBaseName(file.getName());
-                                    PsiElement usage = notificationIcons != null ?
+                                    UElement usage = notificationIcons != null ?
                                             notificationIcons.get(name) : null;
                                     if (usage != null) {
                                         LintClient client = context.getClient();
                                         Project project = context.getProject();
-                                        JavaParser parser = client.getJavaParser(project);
+                                        UastParser parser = client.getUastParser(project);
                                         if (parser != null) {
                                             Location secondary = parser.createLocation(usage);
                                             secondary.setMessage("Icon used in notification here");
@@ -2092,19 +2066,22 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             if (exactMatch && (size.width != width || size.height != height)) {
                 context.report(
                         ICON_EXPECTED_SIZE,
-                    Location.create(file),
-                    String.format(
-                        "Incorrect icon size for `%1$s`: expected %2$dx%3$d, but was %4$dx%5$d",
-                        folderName + File.separator + file.getName(),
-                        width, height, size.width, size.height));
+                        Location.create(file),
+                        "Incorrect icon size for `"
+                                + LintUtils.getFileNameWithParent(context.getClient(), file)
+                                + "`: "
+                                + String.format("expected %1$dx%2$d, but was %3$dx%4$d",
+                                width, height, size.width, size.height));
             } else if (!exactMatch && (size.width > width || size.height > height)) {
                 context.report(
                         ICON_EXPECTED_SIZE,
-                    Location.create(file),
-                    String.format(
-                        "Incorrect icon size for `%1$s`: icon size should be at most %2$dx%3$d, but was %4$dx%5$d",
-                        folderName + File.separator + file.getName(),
-                        width, height, size.width, size.height));
+                        Location.create(file),
+                        "Incorrect icon size for `"
+                                + LintUtils.getFileNameWithParent(context.getClient(), file)
+                                + "`: "
+                                + String.format("icon size should be at most %1$dx%2$d, but " +
+                                        "was %3$dx%4$d",
+                                width, height, size.width, size.height));
             }
         }
     }
@@ -2298,7 +2275,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
     }
 
-    private Map<String,PsiElement> notificationIcons;
+    private Map<String,UElement> notificationIcons;
     /**
      * Set of names of @drawable resources that represent action bar icons, <b>or</b>,
      * if the icons is a @mipmap icon, the resource url (@mipmap/name).
@@ -2460,7 +2437,9 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             }
             String menu = getBaseName(context.file.getName());
             menuToIcons.put(menu, icon);
-        } else {
+        } else if (tagName.equals(TAG_ACTIVITY)
+                || tagName.equals(TAG_ACTIVITY_ALIAS)
+                || tagName.equals(TAG_APPLICATION)) {
             // Manifest tags: launcher icons
             if (launcherIcons == null) {
                 launcherIcons = Sets.newHashSet();
@@ -2471,32 +2450,37 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         return icon;
     }
 
-    // ---- Implements JavaScanner ----
+    // ---- Implements UastScanner ----
 
-    private static final String NOTIFICATION_CLASS = "Notification";
-    private static final String NOTIFICATION_BUILDER_CLASS = "Notification.Builder";
-    private static final String NOTIFICATION_COMPAT_BUILDER_CLASS = "NotificationCompat.Builder";
+    private static final String NOTIFICATION_CLASS = "android.app.Notification";
+    private static final String NOTIFICATION_BUILDER_CLASS = "android.app.Notification.Builder";
+    private static final String NOTIFICATION_COMPAT_BUILDER_CLASS = "android.support.v4.app.NotificationCompat.Builder";
     private static final String SET_SMALL_ICON = "setSmallIcon";
     private static final String ON_CREATE_OPTIONS_MENU = "onCreateOptionsMenu";
 
     @Override
-    public List<Class<? extends PsiElement>> getApplicablePsiTypes() {
-        List<Class<? extends PsiElement>> types = new ArrayList<>(2);
-        types.add(PsiNewExpression.class);
-        types.add(PsiMethod.class);
+    public List<Class<? extends UElement>> getApplicableUastTypes() {
+        List<Class<? extends UElement>> types = new ArrayList<>(2);
+        types.add(UCallExpression.class);
+        types.add(UMethod.class);
         return types;
     }
 
     @Nullable
     @Override
-    public JavaElementVisitor createPsiVisitor(@NonNull JavaContext context) {
-        return new NotificationFinder();
+    public UElementHandler createUastHandler(@NonNull JavaContext context) {
+        return new NotificationFinder(context);
     }
 
-    private final class NotificationFinder extends JavaElementVisitor {
+    private final class NotificationFinder extends UElementHandler {
+        private final JavaContext context;
+
+        private NotificationFinder(JavaContext context) {
+            this.context = context;
+        }
 
         @Override
-        public void visitMethod(PsiMethod method) {
+        public void visitMethod(@NonNull UMethod method) {
             if (ON_CREATE_OPTIONS_MENU.equals(method.getName())) {
                 // Gather any R.menu references found in this method
                 method.accept(new MenuFinder());
@@ -2504,8 +2488,14 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
 
         @Override
-        public void visitNewExpression(PsiNewExpression node) {
-            PsiJavaCodeReferenceElement classReference = node.getClassReference();
+        public void visitCallExpression(@NonNull UCallExpression node) {
+            if (UastExpressionUtils.isConstructorCall(node)) {
+                visitConstructorCall(node);
+            }
+        }
+
+        private void visitConstructorCall(@NonNull UCallExpression node) {
+            UReferenceExpression classReference = node.getClassReference();
             if (classReference == null) {
                 return;
             }
@@ -2513,17 +2503,16 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
             if (!(resolved instanceof PsiClass)) {
                 return;
             }
-            String typeName = ((PsiClass)resolved).getName();
+            String typeName = ((PsiClass) resolved).getQualifiedName();
             if (NOTIFICATION_CLASS.equals(typeName)) {
-                PsiExpressionList argumentList = node.getArgumentList();
-                PsiExpression[] args = argumentList != null
-                        ? argumentList.getExpressions() : PsiExpression.EMPTY_ARRAY;
-                if (args.length == 3) {
-                    if (args[0] instanceof PsiReferenceExpression && handleSelect(args[0])) {
+                List<UExpression> args = node.getValueArguments();
+                if (args.size() == 3) {
+                    if (args.get(0) instanceof UReferenceExpression && handleSelect(args.get(0))) {
                         return;
                     }
 
-                    ResourceUrl url = ResourceEvaluator.getResource(null, args[0]);
+                    ResourceUrl url = ResourceEvaluator.getResource(context.getEvaluator(),
+                            args.get(0));
                     if (url != null
                             && (url.type == ResourceType.DRAWABLE
                             || url.type == ResourceType.COLOR
@@ -2536,7 +2525,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                 }
             } else if (NOTIFICATION_BUILDER_CLASS.equals(typeName)
                     || NOTIFICATION_COMPAT_BUILDER_CLASS.equals(typeName)) {
-                PsiMethod method = PsiTreeUtil.getParentOfType(node, PsiMethod.class, true);
+                UMethod method = UastUtils.getParentOfType(node, UMethod.class, true);
                 if (method != null) {
                     SetIconFinder finder = new SetIconFinder();
                     method.accept(finder);
@@ -2545,7 +2534,7 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         }
     }
 
-    private boolean handleSelect(PsiElement select) {
+    private boolean handleSelect(UElement select) {
         ResourceUrl url = ResourceEvaluator.getResourceConstant(select);
         if (url != null && url.type == ResourceType.DRAWABLE && !url.framework) {
             if (notificationIcons == null) {
@@ -2559,28 +2548,30 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
         return false;
     }
 
-    private final class SetIconFinder extends JavaRecursiveElementVisitor {
+    private final class SetIconFinder extends AbstractUastVisitor {
         @Override
-        public void visitMethodCallExpression(PsiMethodCallExpression expression) {
-            super.visitMethodCallExpression(expression);
-            if (SET_SMALL_ICON.equals(expression.getMethodExpression().getReferenceName())) {
-                PsiExpression[] arguments = expression.getArgumentList().getExpressions();
-                if (arguments.length == 1 && arguments[0] instanceof PsiReferenceExpression) {
-                    handleSelect(arguments[0]);
+        public boolean visitCallExpression(@NonNull UCallExpression expression) {
+            if (UastExpressionUtils.isMethodCall(expression)) {
+                if (SET_SMALL_ICON.equals(expression.getMethodName())) {
+                    List<UExpression> arguments = expression.getValueArguments();
+                    if (arguments.size() == 1 && arguments.get(0) instanceof UReferenceExpression) {
+                        handleSelect(arguments.get(0));
+                    }
                 }
             }
+            return super.visitCallExpression(expression);
         }
 
         @Override
-        public void visitAnonymousClass(PsiAnonymousClass aClass) {
+        public boolean visitClass(UClass node) {
+            // Skip anonymous inner classes
+            return node instanceof UAnonymousClass || super.visitClass(node);
         }
     }
 
-    private final class MenuFinder extends JavaRecursiveElementVisitor {
+    private final class MenuFinder extends AbstractUastVisitor {
         @Override
-        public void visitReferenceExpression(PsiReferenceExpression node) {
-            super.visitReferenceExpression(node);
-
+        public boolean visitSimpleNameReferenceExpression(USimpleNameReferenceExpression node) {
             ResourceUrl url = ResourceEvaluator.getResourceConstant(node);
             if (url != null && url.type == ResourceType.MENU && !url.framework) {
                 // Reclassify icons in the given menu as action bar icons
@@ -2594,10 +2585,14 @@ public class IconDetector extends ResourceXmlDetector implements JavaPsiScanner 
                     }
                 }
             }
+
+            return super.visitSimpleNameReferenceExpression(node);
         }
 
         @Override
-        public void visitAnonymousClass(PsiAnonymousClass aClass) {
+        public boolean visitClass(UClass node) {
+            // Skip anonymous inner classes
+            return node instanceof UAnonymousClass || super.visitClass(node);
         }
     }
 }

@@ -23,12 +23,11 @@ import com.android.ide.common.rendering.api.ResourceValue;
 import com.android.ide.common.res2.ResourceRepository;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.google.common.collect.Lists;
-
-import junit.framework.TestCase;
-
 import java.util.List;
 import java.util.Map;
+import junit.framework.TestCase;
 
 public class ResourceItemResolverTest extends TestCase {
     @SuppressWarnings("ConstantConditions")
@@ -69,88 +68,101 @@ public class ResourceItemResolverTest extends TestCase {
                         + "</resources>\n",
                 });
 
-        final ResourceRepository appResources = TestResourceRepository.createRes2(false,
-                new Object[]{
-                        "layout/layout1.xml", "<!--contents doesn't matter-->",
-
-                        "layout/layout2.xml", "<!--contents doesn't matter-->",
-
-                        "layout-land/layout1.xml", "<!--contents doesn't matter-->",
-
-                        "layout-land/only_land.xml", "<!--contents doesn't matter-->",
-
-                        "drawable/graphic.9.png", new byte[0],
-
-                        "values/styles.xml", ""
-                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<resources>\n"
-                        + "    <style name=\"MyTheme\" parent=\"android:Theme.Light\">\n"
-                        + "        <item name=\"android:textColor\">#999999</item>\n"
-                        + "        <item name=\"foo\">?android:colorForeground</item>\n"
-                        + "    </style>\n"
-                        + "    <style name=\"MyTheme.Dotted1\" parent=\"\">\n"
-                        + "    </style>"
-                        + "    <style name=\"MyTheme.Dotted2\">\n"
-                        + "    </style>"
-                        + "    <style name=\"RandomStyle\">\n"
-                        + "    </style>"
-                        + "    <style name=\"RandomStyle2\" parent=\"RandomStyle\">\n"
-                        + "    </style>"
-                        + "</resources>\n",
-
-                        "values/strings.xml", ""
-                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<resources xmlns:xliff=\"urn:oasis:names:tc:xliff:document:1.2\">\n"
-                        + "    <item type=\"id\" name=\"action_bar_refresh\" />\n"
-                        + "    <item type=\"dimen\" name=\"dialog_min_width_major\">45%</item>\n"
-                        + "    <string name=\"home_title\">Home Sample</string>\n"
-                        + "    <string name=\"show_all_apps\">All</string>\n"
-                        + "    <string name=\"menu_wallpaper\">Wallpaper</string>\n"
-                        + "    <string name=\"menu_search\">Search</string>\n"
-                        + "    <string name=\"menu_settings\">Settings</string>\n"
-                        + "    <string name=\"dummy\" translatable=\"false\">Ignore Me</string>\n"
-                        + "    <string name=\"wallpaper_instructions\">Tap picture to set portrait wallpaper</string>\n"
-                        + "    <string name=\"xliff_string\">First: <xliff:g id=\"firstName\">%1$s</xliff:g> Last: <xliff:g id=\"lastName\">%2$s</xliff:g></string>\n"
-                        + "    <array name=\"my_array\">\"\n"
-                        + "        <item>@string/home_title</item>\n"
-                        + "        <item>value2\n</item>\n"
-                        + "        <item>value3</item>\n"
-                        + "    </array>\n"
-                        + "</resources>\n",
-
-                        "values-es/strings.xml", ""
-                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<resources>\n"
-                        + "    <string name=\"show_all_apps\">Todo</string>\n"
-                        + "</resources>\n",
-                });
+        final ResourceRepository appResources =
+                TestResourceRepository.createRes2(
+                        new Object[] {
+                            "layout/layout1.xml",
+                            "<!--contents doesn't matter-->",
+                            "layout/layout2.xml",
+                            "<!--contents doesn't matter-->",
+                            "layout-land/layout1.xml",
+                            "<!--contents doesn't matter-->",
+                            "layout-land/only_land.xml",
+                            "<!--contents doesn't matter-->",
+                            "drawable/graphic.9.png",
+                            new byte[0],
+                            "values/styles.xml",
+                            ""
+                                    + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                    + "<resources>\n"
+                                    + "    <style name=\"MyTheme\" parent=\"android:Theme.Light\">\n"
+                                    + "        <item name=\"android:textColor\">#999999</item>\n"
+                                    + "        <item name=\"foo\">?android:colorForeground</item>\n"
+                                    + "    </style>\n"
+                                    + "    <style name=\"MyTheme.Dotted1\" parent=\"\">\n"
+                                    + "    </style>"
+                                    + "    <style name=\"MyTheme.Dotted2\">\n"
+                                    + "    </style>"
+                                    + "    <style name=\"RandomStyle\">\n"
+                                    + "    </style>"
+                                    + "    <style name=\"RandomStyle2\" parent=\"RandomStyle\">\n"
+                                    + "    </style>"
+                                    + "</resources>\n",
+                            "values/strings.xml",
+                            ""
+                                    + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                    + "<resources xmlns:xliff=\"urn:oasis:names:tc:xliff:document:1.2\">\n"
+                                    + "    <item type=\"id\" name=\"action_bar_refresh\" />\n"
+                                    + "    <item type=\"dimen\" name=\"dialog_min_width_major\">45%</item>\n"
+                                    + "    <string name=\"home_title\">Home Sample</string>\n"
+                                    + "    <string name=\"show_all_apps\">All</string>\n"
+                                    + "    <string name=\"menu_wallpaper\">Wallpaper</string>\n"
+                                    + "    <string name=\"menu_search\">Search</string>\n"
+                                    + "    <string name=\"menu_settings\">Settings</string>\n"
+                                    + "    <string name=\"dummy\" translatable=\"false\">Ignore Me</string>\n"
+                                    + "    <string name=\"wallpaper_instructions\">Tap picture to set portrait wallpaper</string>\n"
+                                    + "    <string name=\"xliff_string\">First: <xliff:g id=\"firstName\">%1$s</xliff:g> Last: <xliff:g id=\"lastName\">%2$s</xliff:g></string>\n"
+                                    + "    <array name=\"my_array\">\"\n"
+                                    + "        <item>@string/home_title</item>\n"
+                                    + "        <item>value2\n</item>\n"
+                                    + "        <item>value3</item>\n"
+                                    + "    </array>\n"
+                                    + "</resources>\n",
+                            "values-es/strings.xml",
+                            ""
+                                    + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                                    + "<resources>\n"
+                                    + "    <string name=\"show_all_apps\">Todo</string>\n"
+                                    + "</resources>\n",
+                        });
 
         final FolderConfiguration config = FolderConfiguration.getConfigForFolder("values-es-land");
         assertFalse(appResources.isFramework());
         assertNotNull(config);
 
-        final LayoutLog logger = new LayoutLog() {
-            @Override
-            public void warning(String tag, String message, Object data) {
-                fail(message);
-            }
+        final LayoutLog logger =
+                new LayoutLog() {
+                    @Override
+                    public void warning(
+                            String tag, String message, Object viewCookie, Object data) {
+                        fail(message);
+                    }
 
-            @Override
-            public void fidelityWarning(String tag, String message, Throwable throwable,
-                    Object data) {
-                fail(message);
-            }
+                    @Override
+                    public void fidelityWarning(
+                            String tag,
+                            String message,
+                            Throwable throwable,
+                            Object viewCookie,
+                            Object data) {
+                        fail(message);
+                    }
 
-            @Override
-            public void error(String tag, String message, Object data) {
-                fail(message);
-            }
+                    @Override
+                    public void error(String tag, String message, Object viewCookie, Object data) {
+                        fail(message);
+                    }
 
-            @Override
-            public void error(String tag, String message, Throwable throwable, Object data) {
-                fail(message);
-            }
-        };
+                    @Override
+                    public void error(
+                            String tag,
+                            String message,
+                            Throwable throwable,
+                            Object viewCookie,
+                            Object data) {
+                        fail(message);
+                    }
+                };
 
         ResourceItemResolver.ResourceProvider provider = new ResourceItemResolver.ResourceProvider() {
             private ResourceResolver mResolver;
@@ -269,11 +281,12 @@ public class ResourceItemResolverTest extends TestCase {
         resolver = new ResourceItemResolver(config, provider, logger);
         resolver.setLookupChainList(chain);
         chain.clear();
-        ResourceValue target = new ResourceValue(ResourceType.STRING, "dummy", false);
-        target.setValue("?foo");
+        ResourceValue target =
+                new ResourceValue(ResourceUrl.create(null, ResourceType.STRING, "dummy"), "?foo");
         assertEquals("#ff000000", resolver.resolveResValue(target).getValue());
-        assertEquals("?foo => ?android:colorForeground => @color/bright_foreground_light => " 
-                + "@android:color/background_dark => #ff000000",
+        assertEquals(
+                "?foo => ?android:colorForeground => @color/bright_foreground_light => "
+                        + "@android:color/background_dark => #ff000000",
                 ResourceItemResolver.getDisplayString("?foo", chain));
 
         // Test array values.

@@ -17,14 +17,13 @@
 package com.android.build.gradle.integration.packaging;
 
 import static com.android.build.gradle.integration.common.fixture.TemporaryProjectModification.doTest;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
+import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.ide.common.process.ProcessException;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
@@ -54,12 +53,12 @@ public class ResPackagingTest {
     private GradleTestProject libProject2;
     private GradleTestProject testProject;
 
-    private void execute(String... tasks) {
+    private void execute(String... tasks) throws IOException, InterruptedException {
         project.executor().run(tasks);
     }
 
     @Before
-    public void setUp() throws IOException {
+    public void setUp() throws Exception {
         appProject = project.getSubproject("app");
         libProject = project.getSubproject("library");
         libProject2 = project.getSubproject("library2");
@@ -125,14 +124,15 @@ public class ResPackagingTest {
             @NonNull File projectFolder,
             @NonNull String dimension,
             @NonNull String filename,
-            @NonNull String content) throws IOException {
+            @NonNull String content)
+            throws Exception {
         File assetFolder = FileUtils.join(projectFolder, "src", dimension, "res", "raw");
         FileUtils.mkdirs(assetFolder);
         Files.write(content, new File(assetFolder, filename), Charsets.UTF_8);
     }
 
     @Test
-    public void testNonIncrementalPackaging() throws IOException, ProcessException {
+    public void testNonIncrementalPackaging() throws Exception {
         execute("clean", "assembleDebug", "assembleAndroidTest");
 
         // chek the files are there. Start from the bottom of the dependency graph
@@ -284,7 +284,7 @@ public class ResPackagingTest {
     }
 
     @Test
-    public void testAppResourcesAreFilteredByMinSdkFull() throws IOException {
+    public void testAppResourcesAreFilteredByMinSdkFull() throws Exception {
         // Here are which files go into where:
         //  (none)  v14     v16
         //  f1
@@ -366,49 +366,70 @@ public class ResPackagingTest {
         Files.write(newBuild, appGradleFile, Charset.defaultCharset());
         execute("clean", ":app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f1", f1NoneC);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f2", f2NoneC);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f3", f3NoneC);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f2", f2v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f3", f3v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f4", f4v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f3", f3v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f4", f4v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f5", f5v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f1", f1NoneC);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f2", f2NoneC);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f3", f3NoneC);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f2", f2v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f3", f3v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f4", f4v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f3", f3v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f4", f4v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f5", f5v16C);
 
         // Set min SDK version 14 and generate the APK.
         newBuild = appGradleFileContents.replaceAll("minSdkVersion 8", "minSdkVersion 14");
         Files.write(newBuild, appGradleFile, Charset.defaultCharset());
         execute("clean", ":app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f1", f1NoneC);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f2");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f3");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f2", f2v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f3", f3v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f4", f4v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f3", f3v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f4", f4v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f5", f5v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f1", f1NoneC);
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f2");
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f3");
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f2", f2v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f3", f3v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f4", f4v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f3", f3v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f4", f4v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f5", f5v16C);
 
         // Set min SDK version 16 and generate the APK.
         newBuild = appGradleFileContents.replaceAll("minSdkVersion 8", "minSdkVersion 16");
         Files.write(newBuild, appGradleFile, Charset.defaultCharset());
         execute("clean", ":app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f1", f1NoneC);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f2");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f3");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f2", f2v14C);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw-v14/f3");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw-v14/f4");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f3", f3v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f4", f4v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f5", f5v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f1", f1NoneC);
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f2");
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f3");
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f2", f2v14C);
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw-v14/f3");
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw-v14/f4");
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f3", f3v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f4", f4v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f5", f5v16C);
     }
 
     @Test
-    public void testAppResourcesAreFilteredByMinSdkIncremental() throws IOException {
+    public void testAppResourcesAreFilteredByMinSdkIncremental() throws Exception {
         // Note: this test is very similar to the previous one but, instead of trying all 3
         // versions independently, we start with min SDK 14, then change to no min SDK and set
         // min SDK to 16. The outputs should be the same as in the previous test.
@@ -468,45 +489,66 @@ public class ResPackagingTest {
         Files.write(newBuild, appGradleFile, Charset.defaultCharset());
         execute("clean", ":app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f1", f1NoneC);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f2");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f3");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f2", f2v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f3", f3v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f4", f4v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f3", f3v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f4", f4v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f5", f5v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f1", f1NoneC);
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f2");
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f3");
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f2", f2v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f3", f3v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f4", f4v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f3", f3v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f4", f4v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f5", f5v16C);
 
         // Set no min SDK version and generate the APK. Incremental update!
         newBuild = appGradleFileContents.replaceAll("minSdkVersion 8", "");
         Files.write(newBuild, appGradleFile, Charset.defaultCharset());
         execute(":app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f1", f1NoneC);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f2", f2NoneC);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f3", f3NoneC);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f2", f2v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f3", f3v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f4", f4v14C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f3", f3v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f4", f4v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f5", f5v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f1", f1NoneC);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f2", f2NoneC);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f3", f3NoneC);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f2", f2v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f3", f3v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f4", f4v14C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f3", f3v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f4", f4v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f5", f5v16C);
 
         // Set min SDK version 16 and generate the APK. Incremental update!
         newBuild = appGradleFileContents.replaceAll("minSdkVersion 8", "minSdkVersion 16");
         Files.write(newBuild, appGradleFile, Charset.defaultCharset());
         execute(":app:assembleDebug");
 
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw/f1", f1NoneC);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f2");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw/f3");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v14/f2", f2v14C);
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw-v14/f3");
-        assertThatApk(appProject.getApk("debug")).doesNotContain("res/raw-v14/f4");
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f3", f3v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f4", f4v16C);
-        assertThatApk(appProject.getApk("debug")).containsFileWithContent("res/raw-v16/f5", f5v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw/f1", f1NoneC);
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f2");
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw/f3");
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v14/f2", f2v14C);
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw-v14/f3");
+        assertThat(appProject.getApk("debug")).doesNotContain("res/raw-v14/f4");
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f3", f3v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f4", f4v16C);
+        assertThat(appProject.getApk("debug"))
+                .containsFileWithContent("res/raw-v16/f5", f5v16C);
     }
 
     // ---- APP TEST ---
@@ -715,7 +757,7 @@ public class ResPackagingTest {
     /**
      * check an apk has (or not) the given res file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
@@ -723,33 +765,31 @@ public class ResPackagingTest {
      * @param content the content
      */
     private static void checkApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
-        check(assertThatApk(project.getApk("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(assertThat(project.getApk("debug")), filename, content);
     }
 
     /**
      * check a test apk has (or not) the given res file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
      * @param filename the filename
      * @param content the content
      */
-    private void checkTestApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
-        check(assertThatApk(project.getTestApk("debug")), filename, content);
+    private static void checkTestApk(
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(assertThat(project.getTestApk()), filename, content);
     }
 
     /**
      * check an aat has (or not) the given res file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
@@ -757,16 +797,16 @@ public class ResPackagingTest {
      * @param content the content
      */
     private static void checkAar(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
-        check(assertThatApk(project.getAar("debug")), filename, content);
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        check(assertThat(project.getAar("debug")), filename, content);
     }
 
     private static void check(
             @NonNull AbstractAndroidSubject subject,
             @NonNull String filename,
-            @Nullable String content) throws IOException, ProcessException {
+            @Nullable String content)
+            throws Exception {
         if (content != null) {
             subject.containsFileWithContent("res/raw/" + filename, content);
         } else {

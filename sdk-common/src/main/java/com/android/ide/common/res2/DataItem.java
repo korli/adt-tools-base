@@ -20,29 +20,29 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
-
+import com.google.common.base.Preconditions;
+import java.io.File;
+import java.io.Serializable;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
-import java.io.File;
-
 /**
  * A data item is the most elementary merge unit in the data merging process. Data items will
- * generally belong to a {@link DataFile} although, temporarily during the merge process data
- * items may not be associated to any data file. This will happen when data items are moved from
- * one file to another.
+ * generally belong to a {@link DataFile} although, temporarily during the merge process data items
+ * may not be associated to any data file. This will happen when data items are moved from one file
+ * to another.
  *
  * <p>Data items can represent entire files, <em>e.g.</em>, a PNG file, or they can represent
- * individual entries in a file, <em>e.g.</em>, a string in a strings file.</p>
+ * individual entries in a file, <em>e.g.</em>, a string in a strings file.
  *
- * <p>Data items have three markers that represent its "state": touched, removed and written.
- * A touched data is a data item that needs to be examined in the merge process. A removed data
- * item is a data item that has been removed from its file. A written data item is a data item
- * that has been changed or added.</p>
+ * <p>Data items have three markers that represent its "state": touched, removed and written. A
+ * touched data is a data item that needs to be examined in the merge process. A removed data item
+ * is a data item that has been removed from its file. A written data item is a data item that has
+ * been changed or added.
  *
  * @param <F> the type of data file the item belongs to
  */
-abstract class DataItem<F extends DataFile> {
+abstract class DataItem<F extends DataFile> implements Serializable {
     /** Bit flag marking {@link #mStatus} as touched. */
     private static final int MASK_TOUCHED = 0x01;
 
@@ -70,7 +70,7 @@ abstract class DataItem<F extends DataFile> {
      * @param name the name of the item
      */
     DataItem(@NonNull String name) {
-        mName = name;
+        mName = Preconditions.checkNotNull(name);
     }
 
     /**
@@ -91,10 +91,11 @@ abstract class DataItem<F extends DataFile> {
 
     /**
      * Sets the DataFile. The item must not belong to a data file.
+     *
      * @param sourceFile the data file, if null then the item is marked as being removed from the
-     *                   data file
+     *     data file
      */
-    public void setSource(@NonNull F sourceFile) {
+    public void setSource(@Nullable F sourceFile) {
         mSource = sourceFile;
     }
 

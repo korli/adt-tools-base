@@ -9,11 +9,12 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="library" name="jsr-305" level="project" />
+    <orderEntry type="library" name="jsr305" level="project" />
     <orderEntry type="library" name="guava-tools" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
     <orderEntry type="library" scope="TEST" name="mockito" level="project" />
     <orderEntry type="library" name="bouncy-castle" level="project" />
-    <orderEntry type="module" module-name="testutils" />
+    <orderEntry type="module" module-name="testutils" scope="TEST" />
+    <orderEntry type="module" module-name="apksig" />
   </component>
 </module>

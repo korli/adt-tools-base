@@ -22,8 +22,7 @@ import org.junit.Test;
 
 import java.util.concurrent.CountDownLatch;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static com.google.common.truth.Truth.assertThat;
 
 /**
  */
@@ -62,11 +61,12 @@ public class CreatingCacheTest {
         CreatingCache<String, String> cache = new CreatingCache<String, String>(new FakeFactory());
 
         String value1 = cache.get("key");
-        assertEquals("key", value1);
+        assertThat(value1).isEqualTo("key");
         String value2 = cache.get("key");
-        assertEquals("key", value2);
-        //noinspection StringEquality
-        assertTrue("repetitive calls give same instance", value1 == value2);
+        assertThat(value2).isEqualTo("key");
+
+        // also check the value returned from the cache is the same for the 2 queries.
+        assertThat(value1).isSameAs(value2);
     }
 
     private static class CacheRunnable implements Runnable {
@@ -77,7 +77,7 @@ public class CreatingCacheTest {
         private final CountDownLatch mLatch;
 
         private String mResult;
-        private InterruptedException mException;
+        private Exception mExceptionResult;
 
         CacheRunnable(@NonNull CreatingCache<String, String> cache) {
             this(cache, null);
@@ -98,15 +98,14 @@ public class CreatingCacheTest {
 
         @Override
         public void run() {
-            if (mLatch != null) {
-                mResult = mCache.get("foo", new CreatingCache.QueryListener() {
-                    @Override
-                    public void onQueryState(@NonNull CreatingCache.State state) {
-                        mLatch.countDown();
-                    }
-                });
-            } else {
-                mResult = mCache.get("foo");
+            try {
+                if (mLatch != null) {
+                    mResult = mCache.get("foo", state -> mLatch.countDown());
+                } else {
+                    mResult = mCache.get("foo");
+                }
+            } catch (Exception e) {
+                mExceptionResult = e;
             }
         }
 
@@ -114,8 +113,8 @@ public class CreatingCacheTest {
             return mResult;
         }
 
-        public InterruptedException getException() {
-            return mException;
+        public Exception getException() {
+            return mExceptionResult;
         }
     }
 
@@ -153,10 +152,81 @@ public class CreatingCacheTest {
         t1.join();
         t2.join();
 
-        assertEquals("foo", runnable1.getResult());
-        assertEquals("foo", runnable2.getResult());
-        //noinspection StringEquality
-        assertTrue("repetitive calls give same instance", runnable1.getResult() == runnable2.getResult());
+        assertThat(runnable1.getResult()).isEqualTo("foo");
+        assertThat(runnable2.getResult()).isEqualTo("foo");
+        assertThat(runnable1.getResult()).isSameAs(runnable2.getResult());
+    }
+
+    @Test
+    public void testExceptionInFactory() throws Exception {
+        CreatingCache<String, String> cache =
+                new CreatingCache<String, String>(
+                        key -> {
+                            throw new RuntimeException("boo!");
+                        });
+
+        // get a key, and swallow the exception (to allow the test to continue
+        try {
+            cache.get("key1");
+        } catch (RuntimeException e) {
+            if (!e.getMessage().equals("boo!")) {
+                throw e;
+            }
+        }
+
+        // attempt to clear the cache, to ensure the cache is in a good state.
+        cache.clear();
+    }
+
+    @Test
+    public void testExceptionInFactoryWithConcurrentSecondQuery() throws Exception {
+        // the latch that controls whether the factory will "create" an item.
+        CountDownLatch factoryLatch = new CountDownLatch(1);
+
+        CreatingCache<String, String> cache =
+                new CreatingCache<String, String>(
+                        key -> {
+                            try {
+                                factoryLatch.await();
+                            } catch (InterruptedException ignored) {
+                            }
+                            throw new RuntimeException("boo!");
+                        });
+
+        // the latch that will be released when the runnable1 is pending its query.
+        CountDownLatch latch1 = new CountDownLatch(1);
+
+        CacheRunnable runnable1 = new CacheRunnable(cache, latch1);
+        Thread t1 = new Thread(runnable1);
+        t1.start();
+
+        // wait on thread1 being waiting on the query, before creating thread2
+        latch1.await();
+
+        // the latch that will be released when the runnable1 is pending its query.
+        CountDownLatch latch2 = new CountDownLatch(1);
+
+        CacheRunnable runnable2 = new CacheRunnable(cache, latch2);
+        Thread t2 = new Thread(runnable2);
+        t2.start();
+
+        // wait on thread2 being waiting on the query, before releasing the factory
+        latch2.await();
+
+        factoryLatch.countDown();
+
+        // wait on threads being done.
+        t1.join();
+        t2.join();
+
+        assertThat(runnable1.getResult()).isNull();
+        assertThat(runnable1.getException()).isInstanceOf(RuntimeException.class);
+
+        assertThat(runnable2.getResult()).isNull();
+        assertThat(runnable2.getException()).isInstanceOf(RuntimeException.class);
+
+        // attempt to clear the cache, to ensure the cache is in a good state.
+        cache.clear();
     }
 
     @Test(expected = IllegalStateException.class)

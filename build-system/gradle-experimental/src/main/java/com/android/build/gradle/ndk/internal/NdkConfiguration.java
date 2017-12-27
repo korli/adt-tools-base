@@ -32,12 +32,15 @@ import com.android.build.gradle.managed.NdkConfig;
 import com.android.build.gradle.model.NativeSourceSet;
 import com.android.build.gradle.tasks.MergeNativeLibrariesConfigAction;
 import com.android.utils.StringHelper;
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
-
+import java.io.File;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.file.FileCollection;
@@ -61,11 +64,6 @@ import org.gradle.nativeplatform.StaticLibraryBinarySpec;
 import org.gradle.nativeplatform.internal.resolve.DefaultNativeDependencySet;
 import org.gradle.platform.base.BinarySpec;
 import org.gradle.platform.base.internal.BinarySpecInternal;
-
-import java.io.File;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Configure settings used by the native binaries.
@@ -178,7 +176,7 @@ public class NdkConfiguration {
             final NdkConfig ndkConfig,
             final NdkHandler ndkHandler) {
         Abi abi = Abi.getByName(binary.getTargetPlatform().getName());
-        String sysroot = ndkHandler.getSysroot(abi);
+        String sysroot = ndkHandler.getCompilerSysroot(abi, null);
 
         if (ndkConfig.getRenderscriptNdkMode()) {
             binary.getcCompiler().args("-I" + sysroot + "/usr/include/rs");
@@ -201,7 +199,7 @@ public class NdkConfiguration {
                 NativeToolSpecificationFactory.create(
                         ndkHandler,
                         binary.getTargetPlatform(),
-                        Objects.firstNonNull(ndkConfig.getDebuggable(), false)),
+                        MoreObjects.firstNonNull(ndkConfig.getDebuggable(), false)),
                 binary);
 
         // Add flags defined in NdkConfig

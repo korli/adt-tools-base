@@ -15,28 +15,34 @@
  */
 package com.android.ide.common.repository;
 
-import com.android.builder.model.*;
+import static com.android.SdkConstants.FN_PUBLIC_TXT;
+import static com.android.SdkConstants.FN_RESOURCE_TEXT;
+import static org.easymock.EasyMock.createNiceMock;
+import static org.easymock.EasyMock.expect;
+import static org.easymock.EasyMock.replay;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.android.builder.model.AndroidArtifact;
+import com.android.builder.model.AndroidLibrary;
+import com.android.builder.model.AndroidProject;
+import com.android.builder.model.Dependencies;
+import com.android.builder.model.MavenCoordinates;
+import com.android.builder.model.Variant;
 import com.android.ide.common.repository.ResourceVisibilityLookup.SymbolProvider;
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
 import com.android.testutils.TestUtils;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Multimap;
 import com.google.common.io.Files;
-import junit.framework.TestCase;
-import org.mockito.stubbing.OngoingStubbing;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-
-import static com.android.SdkConstants.FN_PUBLIC_TXT;
-import static com.android.SdkConstants.FN_RESOURCE_TEXT;
-import static org.easymock.EasyMock.*;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import junit.framework.TestCase;
+import org.mockito.stubbing.OngoingStubbing;
 
 public class ResourceVisibilityLookupTest extends TestCase {
     public void test() throws IOException {
@@ -164,13 +170,17 @@ public class ResourceVisibilityLookupTest extends TestCase {
                         + "int string action_settings 0x7f040000\n"
                         + "int string app_name 0x7f040001\n"
                         + "int string hello_world 0x7f040002",
-                ""
+                "string hello_world"
         );
         AndroidLibrary library2 = createMockLibrary(
                 "com.android.tools:test-library2:1.0.0",
                 ""
                         + "int layout foo 0x7f030001\n"
-                        + "int layout bar 0x7f060000\n",
+                        + "int layout bar 0x7f060000\n"
+                        // Used public, but not explicitly declared: should remain public
+                        // even though from the perspective of this library it looks private
+                        // since this is a usage/override, not a declaration
+                        + "int string hello_world 0x7f040003",
                 ""
                         + "layout foo\n"
         );
@@ -184,6 +194,7 @@ public class ResourceVisibilityLookupTest extends TestCase {
         assertTrue(visibility.isPrivate(ResourceType.DIMEN, "activity_vertical_margin"));
         assertFalse(visibility.isPrivate(ResourceType.LAYOUT, "foo"));
         assertTrue(visibility.isPrivate(ResourceType.LAYOUT, "bar"));
+        assertFalse(visibility.isPrivate(ResourceType.STRING, "hello_world"));
 
         assertFalse(visibility.isPrivate(ResourceType.DIMEN, "unknown")); // not in this library
     }

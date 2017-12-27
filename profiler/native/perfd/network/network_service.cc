@@ -15,8 +15,8 @@
  */
 #include "network_service.h"
 
-#include "utils/trace.h"
 #include "utils/log.h"
+#include "utils/trace.h"
 
 namespace profiler {
 
@@ -28,29 +28,14 @@ using profiler::proto::HttpDetailsResponse;
 using profiler::proto::HttpRangeRequest;
 using profiler::proto::HttpRangeResponse;
 using profiler::proto::NetworkDataRequest;
-using profiler::proto::NetworkPayloadRequest;
-using profiler::proto::NetworkPayloadResponse;
 using profiler::Log;
 using std::string;
-
-namespace {
-// Network collector for device data uses dumpsys command, while network
-// collector for an app reads from system file. Sampling rates are chosen
-// based on how heavyweight each collector is expected to be.
-static const int32_t kDeviceSampleRateMs = 400;
-static const int32_t kAppSampleRateMs = 200;
-}
-
-NetworkServiceImpl::NetworkServiceImpl(NetworkCache *network_cache)
-    : network_cache_(*network_cache) {
-  StartDeviceCollector();
-}
 
 grpc::Status NetworkServiceImpl::GetData(
     grpc::ServerContext *context, const proto::NetworkDataRequest *request,
     proto::NetworkDataResponse *response) {
   Trace trace("NET:GetData");
-  int pid = request->app_id();
+  int pid = request->process_id();
   NetworkProfilerBuffer *app_buffer = nullptr;
   for (const auto &buffer : app_buffers_) {
     if (pid == buffer->pid()) {
@@ -67,21 +52,14 @@ grpc::Status NetworkServiceImpl::GetData(
   auto type = request->type();
   int64_t start_time = request->start_timestamp();
   int64_t end_time = request->end_timestamp();
-
-  for (auto &value : device_buffer_->GetValues(start_time, end_time)) {
-    if (type == NetworkDataRequest::ALL ||
-        (type == NetworkDataRequest::CONNECTIVITY &&
-         value.has_connectivity_data())) {
-      response->add_data()->Swap(&value);
-    }
-  }
-
-  for (auto &value : app_buffer->GetValues(start_time, end_time)) {
+  for (const auto &value : app_buffer->GetValues(start_time, end_time)) {
     if (type == NetworkDataRequest::ALL ||
         (type == NetworkDataRequest::SPEED && value.has_speed_data()) ||
         (type == NetworkDataRequest::CONNECTIONS &&
-         value.has_connection_data())) {
-      response->add_data()->Swap(&value);
+            value.has_connection_data()) ||
+        (type == NetworkDataRequest::CONNECTIVITY &&
+            value.has_connectivity_data())) {
+      *(response->add_data()) = value;
     }
   }
   return Status::OK;
@@ -90,24 +68,22 @@ grpc::Status NetworkServiceImpl::GetData(
 grpc::Status NetworkServiceImpl::StartMonitoringApp(
     grpc::ServerContext *context, const proto::NetworkStartRequest *request,
     proto::NetworkStartResponse *response) {
-  StartAppCollector(request->app_id());
+  int32_t pid = request->process_id();
+  auto *buffer = new NetworkProfilerBuffer(kBufferCapacity, pid);
+  app_buffers_.emplace_back(buffer);
+  collector_.Start(pid, buffer);
   return Status::OK;
 }
 
 grpc::Status NetworkServiceImpl::StopMonitoringApp(
     grpc::ServerContext *context, const proto::NetworkStopRequest *request,
     proto::NetworkStopResponse *response) {
-  int pid = request->app_id();
+  int pid = request->process_id();
+  collector_.Stop(pid);
   for (auto it = app_buffers_.begin(); it != app_buffers_.end(); it++) {
     if (pid == (*it)->pid()) {
+      it->reset();
       app_buffers_.erase(it);
-      break;
-    }
-  }
-  for (auto it = collectors_.begin(); it != collectors_.end(); it++) {
-    if (pid == (*it)->pid()) {
-      (*it)->Stop();
-      collectors_.erase(it);
       break;
     }
   }
@@ -118,7 +94,7 @@ grpc::Status NetworkServiceImpl::GetHttpRange(grpc::ServerContext *context,
                                               const HttpRangeRequest *httpRange,
                                               HttpRangeResponse *response) {
   auto range =
-      network_cache_.GetRange(httpRange->app_id(), httpRange->start_timestamp(),
+      network_cache_.GetRange(httpRange->process_id(), httpRange->start_timestamp(),
                               httpRange->end_timestamp());
 
   for (const auto &conn : range) {
@@ -167,6 +143,17 @@ grpc::Status NetworkServiceImpl::GetHttpDetails(
         }
       } break;
 
+      case HttpDetailsRequest::ACCESSING_THREADS: {
+        if (conn->response.payload_id != "") {
+          auto accessing_threads = response->mutable_accessing_threads();
+          for (auto thread: conn->threads) {
+            auto t = accessing_threads->add_thread();
+            t->set_id(thread.id);
+            t->set_name(thread.name);
+          }
+        }
+      } break;
+
       default:
         Log::V("Unhandled details type (%d)", type);
         break;
@@ -174,35 +161,6 @@ grpc::Status NetworkServiceImpl::GetHttpDetails(
   }
 
   return Status::OK;
-}
-
-grpc::Status NetworkServiceImpl::GetPayload(
-    grpc::ServerContext *context, const NetworkPayloadRequest *request,
-    NetworkPayloadResponse *response) {
-  auto payload_file = network_cache_.GetPayloadFile(request->payload_id());
-  response->set_contents(payload_file->Contents());
-
-  return Status::OK;
-}
-
-void NetworkServiceImpl::StartDeviceCollector() {
-  auto *buffer = new NetworkProfilerBuffer(kBufferCapacity,
-                                           proto::NetworkDataRequest::ANY_APP);
-  device_buffer_.reset(buffer);
-  StartCollectorFor(buffer, kDeviceSampleRateMs);
-}
-
-void NetworkServiceImpl::StartAppCollector(int pid) {
-  auto *buffer = new NetworkProfilerBuffer(kBufferCapacity, pid);
-  app_buffers_.emplace_back(buffer);
-  StartCollectorFor(buffer, kAppSampleRateMs);
-}
-
-void NetworkServiceImpl::StartCollectorFor(NetworkProfilerBuffer *buffer,
-                                           int32_t sample_rate_ms) {
-  auto *collector = new NetworkCollector(buffer->pid(), sample_rate_ms, buffer);
-  collectors_.emplace_back(collector);
-  collector->Start();
 }
 
 }  // namespace profiler

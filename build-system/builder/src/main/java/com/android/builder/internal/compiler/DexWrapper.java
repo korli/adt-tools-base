@@ -26,9 +26,9 @@ import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessOutput;
 import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.process.ProcessResult;
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.Iterables;
-
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 
@@ -46,18 +46,17 @@ public class DexWrapper {
             @NonNull DexProcessBuilder processBuilder,
             @NonNull DexOptions dexOptions,
             @NonNull ProcessOutputHandler outputHandler) throws IOException, ProcessException {
-        ProcessOutput output = outputHandler.createOutput();
-        int res;
-        try {
+        ProcessOutput output = null;
+        try (Closeable ignored = output = outputHandler.createOutput()) {
             DxContext dxContext = new DxContext(output.getStandardOutput(), output.getErrorOutput());
             Main.Arguments args = buildArguments(processBuilder, dexOptions, dxContext);
-            res = new Main(dxContext).run(args);
-        } finally {
-            output.close();
-        }
 
-        outputHandler.handleOutput(output);
-        return new DexProcessResult(res);
+            return new DexProcessResult(new Main(dxContext).runDx(args));
+        } finally {
+            if (output != null) {
+                outputHandler.handleOutput(output);
+            }
+        }
     }
 
     @NonNull
@@ -66,7 +65,7 @@ public class DexWrapper {
             @NonNull DexOptions dexOptions,
             @NonNull DxContext dxContext)
             throws ProcessException {
-        Main.Arguments args = new Main.Arguments();
+        Main.Arguments args = new Main.Arguments(dxContext);
 
         // Inputs:
         args.fileNames = Iterables.toArray(processBuilder.getFilesToAdd(), String.class);
@@ -91,11 +90,12 @@ public class DexWrapper {
         args.verbose = processBuilder.isVerbose();
         // due to b.android.com/82031
         args.optimize = true;
-        args.numThreads = Objects.firstNonNull(dexOptions.getThreadCount(), 4);
+        args.numThreads = MoreObjects.firstNonNull(dexOptions.getThreadCount(), 4);
         args.forceJumbo = dexOptions.getJumboMode();
+        args.minSdkVersion = processBuilder.getMinSdkVersion();
 
         args.parseFlags(Iterables.toArray(dexOptions.getAdditionalParameters(), String.class));
-        args.makeOptionsObjects(dxContext);
+        args.makeOptionsObjects();
 
         return args;
     }

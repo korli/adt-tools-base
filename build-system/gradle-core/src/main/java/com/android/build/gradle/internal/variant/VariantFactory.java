@@ -16,25 +16,32 @@
 
 package com.android.build.gradle.internal.variant;
 
+
 import com.android.annotations.NonNull;
-import com.android.build.gradle.api.BaseVariant;
+import com.android.annotations.Nullable;
+import com.android.build.VariantOutput;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.VariantModel;
+import com.android.build.gradle.internal.api.BaseVariantImpl;
 import com.android.build.gradle.internal.api.ReadOnlyObjectProvider;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
+import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.VariantType;
 import com.android.builder.profile.Recorder;
+import java.util.Collection;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
+import org.gradle.api.model.ObjectFactory;
+import org.gradle.internal.reflect.Instantiator;
 
 /**
  * Interface for Variant Factory.
  *
- * While VariantManager is the general variant management, implementation of this interface
- * provides variant type (app, lib, atom) specific implementation.
+ * <p>While VariantManager is the general variant management, implementation of this interface
+ * provides variant type (app, lib) specific implementation.
  */
 public interface VariantFactory {
 
@@ -44,13 +51,39 @@ public interface VariantFactory {
             @NonNull TaskManager taskManager,
             @NonNull Recorder recorder);
 
-    @NonNull
-    BaseVariant createVariantApi(
-            @NonNull BaseVariantData<? extends BaseVariantOutputData> variantData,
-            @NonNull ReadOnlyObjectProvider readOnlyObjectProvider);
+    //FIXME: Restore these to @NonNull when the instantApp plugin is simplified.
+    @Nullable
+    Class<? extends BaseVariantImpl> getVariantImplementationClass(
+            @NonNull BaseVariantData variantData);
+
+    @Nullable
+    default BaseVariantImpl createVariantApi(
+            @NonNull Instantiator instantiator,
+            @NonNull ObjectFactory objectFactory,
+            @NonNull AndroidBuilder androidBuilder,
+            @NonNull BaseVariantData variantData,
+            @NonNull ReadOnlyObjectProvider readOnlyObjectProvider) {
+        Class<? extends BaseVariantImpl> implementationClass =
+                getVariantImplementationClass(variantData);
+        if (implementationClass == null) {
+            return null;
+        }
+
+        return instantiator.newInstance(
+                implementationClass,
+                variantData,
+                objectFactory,
+                androidBuilder,
+                readOnlyObjectProvider,
+                variantData
+                        .getScope()
+                        .getGlobalScope()
+                        .getProject()
+                        .container(VariantOutput.class));
+    }
 
     @NonNull
-    VariantType getVariantConfigurationType();
+    Collection<VariantType> getVariantConfigurationTypes();
 
     boolean hasTestScope();
 

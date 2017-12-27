@@ -18,17 +18,12 @@ package com.android.tools.bazel;
 
 import com.android.tools.bazel.model.BazelRule;
 import java.util.List;
-import java.util.Map;
 
 interface Configuration {
     String nameRule(String pkg, String rel, String name);
 
-    String mapImportJar(String jar);
-
     List<String> getAdditionalImports();
 
     boolean shouldSuppress(BazelRule rule);
-
-    Map<String, String> getCopySpec();
 }
 

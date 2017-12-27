@@ -19,6 +19,7 @@ package com.android.build.gradle.internal.incremental;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.COMPATIBLE;
 import static org.junit.Assert.assertEquals;
 
+import Lpackage.AnyClassWithMethodInvocation;
 import com.android.build.gradle.internal.incremental.fixture.VerifierHarness;
 import com.google.common.collect.Lists;
 import com.verifier.tests.AddClassAnnotation;
@@ -29,6 +30,7 @@ import com.verifier.tests.AddNotRuntimeClassAnnotation;
 import com.verifier.tests.ChangeFieldType;
 import com.verifier.tests.ChangeInstanceFieldToStatic;
 import com.verifier.tests.ChangeInstanceFieldVisibility;
+import com.verifier.tests.ChangeKotlinMetadataAnnotation;
 import com.verifier.tests.ChangeStaticFieldToInstance;
 import com.verifier.tests.ChangeStaticFieldVisibility;
 import com.verifier.tests.ChangeSuperClass;
@@ -47,17 +49,15 @@ import com.verifier.tests.RemoveClassAnnotation;
 import com.verifier.tests.RemoveInterfaceImplementation;
 import com.verifier.tests.RemoveMethodAnnotation;
 import com.verifier.tests.RemoveNotRuntimeClassAnnotation;
+import com.verifier.tests.StaticInitializerAdded;
+import com.verifier.tests.StaticInitializerRemoved;
 import com.verifier.tests.UnchangedClass;
 import com.verifier.tests.UnchangedClassInitializer1;
-
+import java.io.IOException;
 import org.junit.Test;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
-
-import java.io.IOException;
-
-import Lpackage.AnyClassWithMethodInvocation;
 
 /** Tests for the {@link InstantRunVerifier} */
 public class InstantRunVerifierTest {
@@ -100,6 +100,14 @@ public class InstantRunVerifierTest {
         assertEquals(COMPATIBLE, harness.verify(RemoveClassAnnotation.class, null));
         InstantRunVerifierStatus changes = harness.verify(RemoveClassAnnotation.class, "verifier");
         assertEquals(InstantRunVerifierStatus.CLASS_ANNOTATION_CHANGE, changes);
+    }
+
+    @Test
+    public void testKotlinMetadataAnnotationChanged() throws IOException {
+        // having the annotation should be fine.
+        assertEquals(COMPATIBLE, harness.verify(ChangeKotlinMetadataAnnotation.class, null));
+        // and changing its value should be fine.
+        assertEquals(COMPATIBLE, harness.verify(ChangeKotlinMetadataAnnotation.class, "verifier"));
     }
 
     @Test
@@ -455,5 +463,23 @@ public class InstantRunVerifierTest {
     public void testClassWithObjectTypePrefix() throws IOException {
         InstantRunVerifierStatus changes = harness.verify(AnyClassWithMethodInvocation.class, null);
         assertEquals(COMPATIBLE, changes);
+    }
+
+    @Test
+    public void testStaticInitializerRemoved() throws IOException {
+        // not changing a field type should be ok.
+        assertEquals(COMPATIBLE, harness.verify(StaticInitializerRemoved.class, null));
+        assertEquals(
+                InstantRunVerifierStatus.METHOD_DELETED,
+                harness.verify(StaticInitializerRemoved.class, "verifier"));
+    }
+
+    @Test
+    public void testStaticInitializerAdded() throws IOException {
+        // not changing a field type should be ok.
+        assertEquals(COMPATIBLE, harness.verify(StaticInitializerAdded.class, null));
+        assertEquals(
+                InstantRunVerifierStatus.METHOD_ADDED,
+                harness.verify(StaticInitializerAdded.class, "verifier"));
     }
 }

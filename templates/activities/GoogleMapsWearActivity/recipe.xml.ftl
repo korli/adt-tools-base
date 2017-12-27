@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
+<#import "root://activities/common/kotlin_macros.ftl" as kt>
 <recipe>
-
+    <@kt.addAllKotlinDependencies />
     <dependency mavenUrl="com.google.android.gms:play-services-wearable:+" />
     <dependency mavenUrl="com.google.android.gms:play-services-maps:+" />
     <dependency mavenUrl="com.google.android.support:wearable:+" />
@@ -15,6 +16,9 @@
              to="${escapeXmlAttribute(appManifestOut)}/AndroidManifest.xml" />
 </#if>
 
+    <merge from="root/build.gradle.ftl"
+             to="${escapeXmlAttribute(projectOut)}/build.gradle" />
+
     <instantiate from="root/res/layout/activity_map.xml.ftl"
                    to="${escapeXmlAttribute(resOut)}/layout/${layoutName}.xml" />
 
@@ -24,10 +28,15 @@
     <instantiate from="root/res/layout/activity_map.xml.ftl"
             to="${escapeXmlAttribute(resOut)}/layout/${layoutName}.xml" />
 
+<#if generateKotlin>
+    <instantiate from="root/src/app_package/MapActivity.kt.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${activityClass}.kt" />
+    <open file="${escapeXmlAttribute(srcOut)}/${activityClass}.kt" />
+<#else>
     <instantiate from="root/src/app_package/MapActivity.java.ftl"
                    to="${escapeXmlAttribute(srcOut)}/${activityClass}.java" />
-
     <open file="${escapeXmlAttribute(srcOut)}/${activityClass}.java" />
+</#if>
 
     <merge from="root/debugRes/values/google_maps_api.xml.ftl"
              to="${escapeXmlAttribute(debugResOut)}/values/google_maps_api.xml" />

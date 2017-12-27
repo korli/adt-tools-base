@@ -17,11 +17,12 @@
 package com.android.build.gradle.internal.scope;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.model.OptionalCompilationStep;
-
-import org.gradle.api.Project;
-
+import com.android.builder.utils.FileCache;
 import java.io.File;
+import org.gradle.api.Project;
 
 /**
  * Global scope for TransformManager and Transform implementations.
@@ -48,4 +49,15 @@ public interface TransformGlobalScope {
      * @return true if the step was specified in the command line arguments, false otherwise,
      */
     boolean isActive(OptionalCompilationStep step);
+
+    /** Get the options specified as project properties. */
+    @NonNull
+    ProjectOptions getProjectOptions();
+
+    /**
+     * Returns a {@link FileCache} instance representing the build cache if the build cache is
+     * enabled, or null if it is disabled.
+     */
+    @Nullable
+    FileCache getBuildCache();
 }

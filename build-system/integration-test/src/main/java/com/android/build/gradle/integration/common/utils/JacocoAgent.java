@@ -16,12 +16,11 @@
 
 package com.android.build.gradle.integration.common.utils;
 
-import static org.junit.Assert.fail;
-
-import org.jacoco.agent.AgentJar;
-
+import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import org.jacoco.agent.AgentJar;
 
 /**
  * Utility to setup for Jacoco agent.
@@ -33,15 +32,13 @@ public class JacocoAgent {
     }
 
     public static String getJvmArg() {
-        String buildDir = System.getenv("PROJECT_BUILD_DIR");
-        buildDir = (buildDir == null) ? "build" : buildDir;
-
+        File buildDir = GradleTestProject.BUILD_DIR;
         File jacocoAgent = new File(buildDir, "jacoco/agent.jar");
         if (!jacocoAgent.isFile()) {
             try {
                 AgentJar.extractTo(jacocoAgent);
-            } catch (IOException ignored) {
-                fail("Error extracting jacoco agent");
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
             }
         }
 

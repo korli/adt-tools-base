@@ -19,16 +19,14 @@ package com.android.build.gradle.internal.scope;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.TaskFactory;
-
+import com.google.common.base.Preconditions;
+import groovy.lang.Closure;
+import java.util.HashMap;
+import java.util.Map;
 import org.gradle.api.Action;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Task;
 import org.gradle.api.internal.ClosureBackedAction;
-
-import java.util.HashMap;
-import java.util.Map;
-
-import groovy.lang.Closure;
 
 /**
  * Registry for creating and storing AndroidTask.
@@ -90,7 +88,17 @@ public class AndroidTaskRegistry {
     }
 
     @Nullable
-    public AndroidTask<?> get(String name) {
-        return tasks.get(name);
+    public <T extends Task> AndroidTask<T> get(String name) {
+        // noinspection unchecked
+        return (AndroidTask<T>) tasks.get(name);
+    }
+
+    public <T extends Task> void configure(
+            @NonNull TaskFactory tasks, @NonNull TaskConfigAction<T> configAction) {
+        Preconditions.checkNotNull(
+                        this.<T>get(configAction.getName()),
+                        "Cannot configure task %s, as not created yet.",
+                        configAction.getName())
+                .configure(tasks, configAction);
     }
 }

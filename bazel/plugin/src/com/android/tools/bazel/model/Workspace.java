@@ -18,11 +18,10 @@ package com.android.tools.bazel.model;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.util.Map;
+import org.jetbrains.annotations.NotNull;
 
 public class Workspace {
     private final File directory;
@@ -33,9 +32,9 @@ public class Workspace {
         this.directory = directory;
     }
 
-    public void generate(PrintWriter progress) throws IOException {
+    public void generate(GenerationListener listener) throws IOException {
         for (Package pkg : packages.values()) {
-            pkg.generate(progress);
+            pkg.generate(listener);
         }
     }
 
@@ -52,9 +51,12 @@ public class Workspace {
     }
 
     public Package findPackage(String rel) {
+        if (rel.startsWith("bazel-genfiles")) {
+            rel = rel.substring("bazel-genfiles".length() + 1);
+        }
+
         File pkg = findBuildDirectory(new File(directory, rel));
         if (pkg == null) {
-            System.err.println("Invalid package directory " + rel);
             return null;
         }
         String label = directory.toPath().relativize(pkg.toPath()).normalize().toString();
@@ -68,12 +70,15 @@ public class Workspace {
     }
 
 
-    private File findBuildDirectory(File child) {
-        File file = child == null ? null : new File(child, "BUILD");
-        while (file != null && !(file.exists() && !file.isDirectory())) {
-            child = child.getParentFile();
-            file = child == null ? null : new File(child, "BUILD");
+    private File findBuildDirectory(@NotNull File dir) {
+        if (new File(dir, "BUILD.bazel").isFile() || new File(dir, "BUILD").isFile()) {
+            return dir;
         }
-        return child;
+        File parent = dir.getParentFile();
+        return (parent == null) ? null : findBuildDirectory(parent);
+    }
+
+    public interface GenerationListener {
+        void packageUpdated(String packageName);
     }
 }

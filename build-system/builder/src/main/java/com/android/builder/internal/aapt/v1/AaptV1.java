@@ -22,16 +22,16 @@ import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.builder.core.VariantType;
 import com.android.builder.internal.aapt.AaptException;
+import com.android.builder.internal.aapt.AaptOptions;
 import com.android.builder.internal.aapt.AaptPackageConfig;
 import com.android.builder.internal.aapt.AaptUtils;
 import com.android.builder.internal.aapt.AbstractProcessExecutionAapt;
-import com.android.builder.model.AaptOptions;
 import com.android.builder.png.QueuedCruncher;
-import com.android.ide.common.internal.PngException;
+import com.android.ide.common.internal.ResourceCompilationException;
 import com.android.ide.common.process.ProcessExecutor;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.ide.common.process.ProcessOutputHandler;
-import com.android.ide.common.res2.QueueableResourceCompiler;
+import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.repository.Revision;
 import com.android.resources.ResourceFolderType;
 import com.android.sdklib.BuildToolInfo;
@@ -61,7 +61,7 @@ import java.util.concurrent.TimeUnit;
  * Implementation of an interface to the original {@code aapt}. This implementation relies on
  * process execution of {@code aapt}.
  */
-public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableResourceCompiler {
+public class AaptV1 extends AbstractProcessExecutionAapt {
 
     /**
      * What mode should PNG be processed?
@@ -108,30 +108,22 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
     @VisibleForTesting
     public static final Revision VERSION_FOR_SERVER_AAPT = new Revision(22, 0, 1);
 
-    /**
-     * Build tools.
-     */
-    @NonNull
-    private final BuildToolInfo mBuildToolInfo;
+    /** Build tools. */
+    @NonNull private final BuildToolInfo buildToolInfo;
+
+    /** Queued cruncher, if available. */
+    @Nullable private final QueuedCruncher cruncher;
 
     /**
-     * Queued cruncher, if available.
+     * Request handlers we wait for. Everytime a request is made to the {@link #cruncher}, we add an
+     * entry here to wait for it to end.
      */
-    @Nullable
-    private final QueuedCruncher mCruncher;
+    @NonNull private final Executor waitExecutor;
 
-    /**
-     * Request handlers we wait for. Everytime a request is made to the {@link #mCruncher},
-     * we add an entry here to wait for it to end.
-     */
-    @NonNull
-    private final Executor mWaitExecutor;
+    /** The process mode to run {@code aapt} on. */
+    @NonNull private final PngProcessMode processMode;
 
-    /**
-     * The process mode to run {@code aapt} on.
-     */
-    @NonNull
-    private final PngProcessMode mProcessMode;
+    @Nullable private final Integer cruncherKey;
 
     /**
      * Creates a new entry point to the original {@code aapt}.
@@ -153,20 +145,28 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
             int cruncherProcesses) {
         super(processExecutor, processOutputHandler);
 
-        mBuildToolInfo = buildToolInfo;
-        mWaitExecutor = new ThreadPoolExecutor(
-                0, // Core threads
-                1, // Maximum threads
-                AUTO_THREAD_SHUTDOWN_MS,
-                TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>());
-        mProcessMode = processMode;
+        this.buildToolInfo = buildToolInfo;
+        this.waitExecutor =
+                new ThreadPoolExecutor(
+                        0, // Core threads
+                        1, // Maximum threads
+                        AUTO_THREAD_SHUTDOWN_MS,
+                        TimeUnit.MILLISECONDS,
+                        new LinkedBlockingQueue<>());
+        this.processMode = processMode;
 
-        mCruncher =
-                QueuedCruncher.Builder.INSTANCE.newCruncher(
-                        getAaptExecutablePath(),
-                        logger,
-                        cruncherProcesses);
+        this.cruncher =
+                QueuedCruncher.builder()
+                        .executablePath(getAaptExecutablePath())
+                        .logger(logger)
+                        .numberOfProcesses(cruncherProcesses)
+                        .build();
+
+        if (cruncher != null) {
+            cruncherKey = cruncher.start();
+        } else {
+            cruncherKey = null;
+        }
     }
 
     @Override
@@ -235,11 +235,6 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
         }
 
         // options controlled by build variants
-
-        if (config.isDebuggable()) {
-            builder.addArgs("--debug-mode");
-        }
-
         ILogger logger = config.getLogger();
         Preconditions.checkNotNull(logger);
         if (config.getVariantType() != VariantType.ANDROID_TEST
@@ -256,20 +251,13 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
         boolean generateFinalIds = true;
         if (config.getVariantType() == VariantType.LIBRARY) {
             generateFinalIds = false;
-        } else if (config.getVariantType() == VariantType.ATOM && config.getBaseFeature() != null) {
-            generateFinalIds = false;
         }
         if (!generateFinalIds) {
             builder.addArgs("--non-constant-id");
         }
 
-        // AAPT options
         AaptOptions options = config.getOptions();
         Preconditions.checkNotNull(options);
-        String ignoreAssets = options.getIgnoreAssets();
-        if (ignoreAssets != null) {
-            builder.addArgs("--ignore-assets", ignoreAssets);
-        }
 
         if (config.getOptions().getFailOnMissingConfigEntry()) {
             builder.addArgs("--error-on-missing-config-entry");
@@ -336,8 +324,9 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
             builder.addArgs("--preferred-density", preferredDensity);
         }
 
-        if (config.getSymbolOutputDir() != null && (config.getVariantType() == VariantType.LIBRARY
-                || !config.getLibraries().isEmpty())) {
+        if (config.getSymbolOutputDir() != null
+                && (config.getVariantType() == VariantType.LIBRARY
+                        || !config.getLibrarySymbolTableFiles().isEmpty())) {
             builder.addArgs(
                     "--output-text-symbols",
                     FileUtils.toExportableSystemDependentPath(config.getSymbolOutputDir()));
@@ -347,168 +336,165 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
         // intentionally, for the support library to consume. Leave them alone.
         builder.addArgs("--no-version-vectors");
 
-        // Add the feature-split configuration if needed.
-        if (config.getBaseFeature() != null) {
-            builder.addArgs("--feature-of", config.getBaseFeature().getAbsolutePath());
-            // --feature-after requires --feature-of to be set so these are only parsed if base
-            // feature was set.
-            for (File previousFeature : config.getPreviousFeatures()) {
-                builder.addArgs("--feature-after", previousFeature.getAbsolutePath());
-            }
-        }
-
         return builder;
     }
 
-    int key;
+
 
     @Override
-    public void start() {
-        if (mCruncher != null) {
-            key = mCruncher.start();
-        }
-    }
-
-    @Override
-    public void end() throws InterruptedException {
-        if (mCruncher != null && key != -1) {
-            mCruncher.end(key);
+    public void close() throws IOException {
+        if (cruncher != null && cruncherKey != null) {
+            try {
+                cruncher.end(cruncherKey);
+            } catch (InterruptedException e) {
+                throw new IOException(e);
+            }
         }
     }
 
     @NonNull
     @Override
-    public ListenableFuture<File> compile(@NonNull File file, @NonNull File output)
+    public ListenableFuture<File> compile(@NonNull CompileResourceRequest request)
             throws AaptException {
         /*
          * Do not compile raw resources.
          */
-        if (ResourceFolderType.getFolderType(file.getParentFile().getName()) ==
-                ResourceFolderType.RAW) {
-            return Futures.immediateFuture(null);
+        if (ResourceFolderType.getFolderType(request.getInput().getParentFile().getName())
+                == ResourceFolderType.RAW) {
+            return copyFile(request);
         }
 
-        if (mCruncher == null) {
+        if (cruncher == null || cruncherKey == null) {
             /*
              * Revert to old-style crunching.
              */
-            return super.compile(file, output);
+            return super.compile(request);
         }
-        Preconditions.checkArgument(file.isFile(), "!file.isFile()");
-        Preconditions.checkArgument(output.isDirectory(), "!output.isDirectory()");
+
+        // TODO (imorlowska): move verification to CompileResourceRequest.
+        Preconditions.checkArgument(
+                request.getInput().isFile(),
+                "Input file needs to be a normal file.\nInput file: %s",
+                request.getInput().getAbsolutePath());
+        Preconditions.checkArgument(
+                request.getOutput().isDirectory(),
+                "Output for resource compilation needs to be a directory.\nOutput: %s",
+                request.getOutput().getAbsolutePath());
 
         SettableFuture<File> actualResult = SettableFuture.create();
 
-        if (!mProcessMode.shouldProcess(file)) {
-            actualResult.set(null);
-            return actualResult;
-        }
-        File outputFile = compileOutputFor(file, output);
-
-        try {
-            Files.createParentDirs(outputFile);
-        } catch (IOException e) {
-            throw new AaptException(e, String.format(
-                    "Failed to create parent directories for file '%s'",
-                    output.getAbsolutePath()));
+        if (!processMode.shouldProcess(request.getInput())) {
+            return copyFile(request);
         }
 
         ListenableFuture<File> futureResult;
         try {
-            futureResult = mCruncher.crunchPng(key, file, outputFile);
-        } catch (PngException e) {
-            throw new AaptException(e, String.format(
-                    "Failed to crunch file '%s' into '%s'",
-                    file.getAbsolutePath(),
-                    outputFile.getAbsolutePath()));
+            futureResult = cruncher.compile(cruncherKey, request, null);
+        } catch (ResourceCompilationException e) {
+            throw new AaptException(
+                    e,
+                    String.format(
+                            "Failed to crunch file '%s' into '%s'",
+                            request.getInput().getAbsolutePath(),
+                            compileOutputFor(request).getAbsolutePath()));
         }
-        futureResult.addListener(() -> {
+        futureResult.addListener(
+                () -> {
+                    File result;
+                    try {
+                        result = futureResult.get();
+                    } catch (InterruptedException e) {
+                        Thread.interrupted();
+                        actualResult.setException(e);
+                        return;
+                    } catch (ExecutionException e) {
+                        actualResult.setException(e);
+                        return;
+                    }
 
-            File result;
-            try {
-                result = futureResult.get();
-            } catch (InterruptedException e) {
-                Thread.interrupted();
-                actualResult.setException(e);
-                return;
-            } catch (ExecutionException e) {
-                actualResult.setException(e);
-                return;
-            }
+                    /*
+                     * When the compilationFuture is complete, check if the generated file is not bigger than
+                     * the original file. If the original file is smaller, copy the original file over the
+                     * generated file.
+                     *
+                     * However, this doesn't work with 9-patch because those need to be processed.
+                     *
+                     * Return a new future after this verification is done.
+                     */
+                    if (request.getInput().getName().endsWith(SdkConstants.DOT_9PNG)) {
+                        actualResult.set(result);
+                        return;
+                    }
 
-            /*
-             * When the compilationFuture is complete, check if the generated file is not bigger than
-             * the original file. If the original file is smaller, copy the original file over the
-             * generated file.
-             *
-             * However, this doesn't work with 9-patch because those need to be processed.
-             *
-             * Return a new future after this verification is done.
-             */
-            if (file.getName().endsWith(SdkConstants.DOT_9PNG)) {
-                actualResult.set(result);
-                return;
-            }
+                    if (result != null && request.getInput().length() < result.length()) {
+                        try {
+                            Files.copy(request.getInput(), result);
+                        } catch (IOException e) {
+                            actualResult.setException(e);
+                            return;
+                        }
+                    }
 
-            if (result != null && file.length() < result.length()) {
-                try {
-                    Files.copy(file, result);
-                } catch (IOException e) {
-                    actualResult.setException(e);
-                    return;
-                }
-            }
-
-            actualResult.set(result);
-
-        }, mWaitExecutor);
+                    actualResult.set(result);
+                },
+                waitExecutor);
         return actualResult;
+    }
+
+    private ListenableFuture<File> copyFile(@NonNull CompileResourceRequest request)
+            throws AaptException {
+        Preconditions.checkArgument(request.getInput().isFile(), "!file.isFile()");
+        Preconditions.checkArgument(request.getOutput().isDirectory(), "!output.isDirectory()");
+
+        File outFile = compileOutputFor(request);
+        try {
+            FileUtils.copyFile(request.getInput(), outFile);
+        } catch (IOException e) {
+            throw new AaptException("Could not copy file", e);
+        }
+        return Futures.immediateFuture(outFile);
     }
 
     @Nullable
     @Override
-    protected CompileInvocation makeCompileProcessBuilder(@NonNull File file, @NonNull File output)
+    protected CompileInvocation makeCompileProcessBuilder(@NonNull CompileResourceRequest request)
             throws AaptException {
-        Preconditions.checkArgument(file.isFile(), "!file.isFile()");
-        Preconditions.checkArgument(output.isDirectory(), "!directory.isDirectory()");
+        Preconditions.checkArgument(request.getInput().isFile(), "!file.isFile()");
+        Preconditions.checkArgument(request.getOutput().isDirectory(), "!directory.isDirectory()");
 
-        if (!file.getName().endsWith(SdkConstants.DOT_PNG)) {
+        if (!request.getInput().getName().endsWith(SdkConstants.DOT_PNG)) {
             return null;
         }
 
-        if (!mProcessMode.shouldProcess(file)) {
+        if (!processMode.shouldProcess(request.getInput())) {
             return null;
         }
 
-        File outputFile = compileOutputFor(file, output);
+        File outputFile = compileOutputFor(request);
 
         ProcessInfoBuilder builder = new ProcessInfoBuilder();
         builder.setExecutable(getAaptExecutablePath());
         builder.addArgs("singleCrunch");
-        builder.addArgs("-i", file.getAbsolutePath());
+        builder.addArgs("-i", request.getInput().getAbsolutePath());
         builder.addArgs("-o", outputFile.getAbsolutePath());
         return new CompileInvocation(builder, outputFile);
     }
 
     /**
-     * Obtains the file that will receive the compilation output of a given file. This method
-     * will return a unique file in the output directory for each input file.
+     * Obtains the file that will receive the compilation output of a given file. This method will
+     * return a unique file in the output directory for each input file.
      *
      * <p>This method will also create any parent directories needed to hold the output file.
      *
-     * @param file the file
-     * @param output the output directory
      * @return the output file
      */
     @NonNull
-    private static File compileOutputFor(@NonNull File file, @NonNull File output) {
-        Preconditions.checkArgument(file.isFile(), "!file.isFile()");
-        Preconditions.checkArgument(output.isDirectory(), "!output.isDirectory()");
-
-        File parentDir = new File(output, file.getParentFile().getName());
+    @Override
+    public File compileOutputFor(@NonNull CompileResourceRequest request) {
+        File parentDir = new File(request.getOutput(), request.getFolderName());
         FileUtils.mkdirs(parentDir);
 
-        return new File(parentDir, file.getName());
+        return new File(parentDir, request.getInput().getName());
     }
 
     /**
@@ -518,7 +504,7 @@ public class AaptV1 extends AbstractProcessExecutionAapt implements QueueableRes
      */
     @NonNull
     private String getAaptExecutablePath() {
-        String aapt = mBuildToolInfo.getPath(BuildToolInfo.PathId.AAPT);
+        String aapt = buildToolInfo.getPath(BuildToolInfo.PathId.AAPT);
         if (aapt == null || !new File(aapt).isFile()) {
             throw new IllegalStateException("aapt is missing on '" + aapt + "'");
         }

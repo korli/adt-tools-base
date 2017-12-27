@@ -19,13 +19,13 @@ package com.android.build.gradle.integration.application;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
 import static com.android.builder.model.AndroidProject.FD_INTERMEDIATES;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
-import com.android.builder.model.AndroidProject;
+import com.android.build.gradle.options.IntegerOption;
+import com.android.build.gradle.options.OptionalBooleanOption;
 import java.io.File;
-import java.io.IOException;
+import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -53,21 +53,33 @@ public class ManifestMergingTest {
             .create();
 
     @Test
-    public void simpleManifestMerger() {
+    public void simpleManifestMerger() throws Exception {
         simpleManifestMergingTask.execute("clean", "manifestMerger");
     }
 
     @Test
-    public void checkManifestMergingForLibraries() {
+    public void checkManifestMergingForLibraries() throws Exception {
         libsTest.execute("clean", "build");
-        File fileOutput = libsTest.
-                file("libapp/build/" + FD_INTERMEDIATES + "/bundles/default/AndroidManifest.xml");
+        File fileOutput =
+                libsTest.file(
+                        "libapp/build/"
+                                + FD_INTERMEDIATES
+                                + "/manifests/full/debug/AndroidManifest.xml");
 
-        assertTrue(fileOutput.exists());
+        assertThat(fileOutput).isFile();
+
+        fileOutput =
+                libsTest.file(
+                        "libapp/build/"
+                                + FD_INTERMEDIATES
+                                + "/manifests/full/release/AndroidManifest.xml");
+
+        assertThat(fileOutput).isFile();
+
     }
 
     @Test
-    public void checkManifestMergerReport() {
+    public void checkManifestMergerReport() throws Exception {
         flavors.execute("clean", "assemble");
 
         File logs = new File(flavors.getOutputFile("apk").getParentFile(), "logs");
@@ -76,7 +88,9 @@ public class ManifestMergingTest {
     }
 
     @Test
-    public void checkTestOnlyAttribute() {
+    public void checkTestOnlyAttribute() throws Exception {
+        // do not run if compile sdk is a preview
+        Assume.assumeFalse(GradleTestProject.getCompileSdkHash().startsWith("android-"));
         flavors.executor()
                 .run("clean", "assembleF1FaDebug");
 
@@ -84,59 +98,73 @@ public class ManifestMergingTest {
                 .doesNotContain("android:testOnly=\"true\"");
 
         flavors.executor()
-                .withProperty(AndroidProject.PROPERTY_TEST_ONLY, "true")
+                .with(OptionalBooleanOption.IDE_TEST_ONLY, true)
                 .run("clean", "assembleF1FaDebug");
 
         assertThat(flavors.file("build/intermediates/manifests/full/f1Fa/debug/AndroidManifest.xml"))
                 .contains("android:testOnly=\"true\"");
     }
 
-    /**
-     * Check that setting targetSdkVersion to a preview version updates the minSdkVersion in
-     * the manifest.
-     */
+    /** Check that setting targetSdkVersion to a preview version mark the manifest with testOnly. */
     @Test
-    public void checkPreviewTargetSdkVersion() throws IOException {
+    public void checkPreviewTargetSdkVersion() throws Exception {
         GradleTestProject appProject = libsTest.getSubproject("app");
         TestFileUtils.appendToFile(
                 appProject.getBuildFile(),
                 "android{\n"
-                        + "    compileSdkVersion 23\n"
+                        + "    compileSdkVersion 24\n"
                         + "    defaultConfig{\n"
                         + "        minSdkVersion 15\n"
                         + "        targetSdkVersion 'N'\n"
                         + "    }\n"
                         + "}");
         libsTest.execute("clean", ":app:build");
-        assertThat(
-                appProject.file("build/intermediates/manifests/full/debug/AndroidManifest.xml"))
+        assertThat(appProject.file("build/intermediates/manifests/full/debug/AndroidManifest.xml"))
                 .containsAllOf(
+                        "android:minSdkVersion=\"15\"",
                         "android:targetSdkVersion=\"N\"",
-                        "android:minSdkVersion=\"N\"");
+                        "android:testOnly=\"true\"");
     }
 
-    /**
-     * Check that setting minSdkVersion to a preview version updates the targetSdkVersion in
-     * the manifest.
-     */
+    /** Check that setting minSdkVersion to a preview version mark the manifest with testOnly */
     @Test
-    public void checkPreviewMinSdkVersion() throws IOException {
+    public void checkPreviewMinSdkVersion() throws Exception {
         GradleTestProject appProject = libsTest.getSubproject("app");
         TestFileUtils.appendToFile(
                 appProject.getBuildFile(),
                 "android{\n"
-                        + "    compileSdkVersion 23\n"
+                        + "    compileSdkVersion 24\n"
                         + "    defaultConfig{\n"
                         + "        minSdkVersion 'N'\n"
                         + "        targetSdkVersion 15\n"
                         + "    }\n"
                         + "}");
         libsTest.execute("clean", ":app:assembleDebug");
-        assertThat(
-                appProject.file("build/intermediates/manifests/full/debug/AndroidManifest.xml"))
+        assertThat(appProject.file("build/intermediates/manifests/full/debug/AndroidManifest.xml"))
                 .containsAllOf(
-                        "android:targetSdkVersion=\"N\"",
-                        "android:minSdkVersion=\"N\"");
+                        "android:minSdkVersion=\"N\"",
+                        "android:targetSdkVersion=\"15\"",
+                        "android:testOnly=\"true\"");
     }
 
+    @Test
+    public void checkMinAndTargetSdkVersion_WithTargetDeviceApi() throws Exception {
+        // Regression test for https://issuetracker.google.com/issues/37133933
+        TestFileUtils.appendToFile(
+                flavors.getBuildFile(),
+                "android {\n"
+                        + "    compileSdkVersion 24\n"
+                        + "    defaultConfig {\n"
+                        + "        minSdkVersion 15\n"
+                        + "        targetSdkVersion 24\n"
+                        + "    }\n"
+                        + "}");
+        flavors.executor()
+                .with(IntegerOption.IDE_TARGET_DEVICE_API, 22)
+                .run("clean", "assembleF1FaDebug");
+        File manifestFile =
+                flavors.file("build/intermediates/manifests/full/f1Fa/debug/AndroidManifest.xml");
+        assertThat(manifestFile)
+                .containsAllOf("android:minSdkVersion=\"15\"", "android:targetSdkVersion=\"24\"");
+    }
 }

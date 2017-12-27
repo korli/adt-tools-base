@@ -29,18 +29,20 @@ public class SdkVersionInfo {
      * release. This number is used as a baseline and any more recent platforms
      * found can be used to increase the highest known number.
      */
-    public static final int HIGHEST_KNOWN_API = 25;
+    public static final int HIGHEST_KNOWN_API = 26;
 
     /**
-     * Like {@link #HIGHEST_KNOWN_API} but does not include preview platforms
+     * Like {@link #HIGHEST_KNOWN_API} but does not include preview platforms.
+     *
+     * <p>Make sure to keep this in sync with the value in TestUtils.
      */
-    public static final int HIGHEST_KNOWN_STABLE_API = 25;
+    public static final int HIGHEST_KNOWN_STABLE_API = 26;
 
     /**
      * The lowest active API level in the ecosystem. This number will change over time
      * as the distribution of older platforms decreases.
      */
-    public static final int LOWEST_ACTIVE_API = 9;
+    public static final int LOWEST_ACTIVE_API = 14;
 
     /**
      * The highest known API level for Wearables. Note the tools at the
@@ -124,6 +126,8 @@ public class SdkVersionInfo {
             case 23: return "6.0";
             case 24: return "7.0";
             case 25: return "7.1.1";
+            case 26:
+                return "8.0";
             // If you add more versions here, also update #getBuildCodes and
             // #HIGHEST_KNOWN_API
 
@@ -173,6 +177,8 @@ public class SdkVersionInfo {
             case 24:
             case 25:
                 return "Nougat";
+            case 26:
+                return "Oreo";
 
             // If you add more versions here, also update #getBuildCodes and
             // #HIGHEST_KNOWN_API
@@ -219,6 +225,7 @@ public class SdkVersionInfo {
             case 23: return "M"; //$NON-NLS-1$
             case 24: return "N"; //$NON-NLS-1$
             case 25: return "N_MR1"; //$NON-NLS-1$
+            case 26: return "O"; //$NON-NLS-1$
             // If you add more versions here, also update #getAndroidName and
             // #HIGHEST_KNOWN_API
         }

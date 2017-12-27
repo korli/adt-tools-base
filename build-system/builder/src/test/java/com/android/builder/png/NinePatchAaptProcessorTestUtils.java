@@ -21,8 +21,9 @@ import static org.junit.Assert.assertTrue;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.builder.internal.aapt.v1.AaptV1;
-import com.android.ide.common.internal.PngCruncher;
-import com.android.ide.common.internal.PngException;
+import com.android.ide.common.internal.ResourceCompilationException;
+import com.android.ide.common.internal.ResourceProcessor;
+import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.repository.Revision;
 import com.android.repository.testframework.FakeProgressIndicator;
 import com.android.sdklib.BuildToolInfo;
@@ -47,8 +48,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.DataFormatException;
 import javax.imageio.ImageIO;
-import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Assert;
 
 /**
@@ -82,7 +81,7 @@ public class NinePatchAaptProcessorTestUtils {
     public static void tearDownAndCheck(
             int cruncherKey,
             @NonNull Map<File, File> sourceAndCrunchedFiles,
-            @NonNull PngCruncher cruncher,
+            @NonNull ResourceProcessor cruncher,
             @NonNull AtomicLong classStartTime,
             @NonNull TestVerb expect)
             throws IOException, DataFormatException, InterruptedException {
@@ -95,11 +94,11 @@ public class NinePatchAaptProcessorTestUtils {
         System.out.println(
                 "waiting for requests completion : " + (System.currentTimeMillis() - startTime));
         System.out.println("total time : " + (System.currentTimeMillis() - classStartTime.get()));
-        System.out.println("Comparing crunched files");
-        long comparisonStartTime = System.currentTimeMillis();
         TestUtils.waitForFileSystemTick();
+        long comparisonStartTime = System.currentTimeMillis();
+        System.out.print("Comparing crunched files");
         for (Map.Entry<File, File> sourceAndCrunched : sourceAndCrunchedFiles.entrySet()) {
-            System.out.println(sourceAndCrunched.getKey().getName());
+            System.out.print('.');
             File crunched = new File(sourceAndCrunched.getKey().getParent(),
                     sourceAndCrunched.getKey().getName() + getControlFileSuffix());
 
@@ -112,8 +111,10 @@ public class NinePatchAaptProcessorTestUtils {
                 throw new RuntimeException("Failed with " + testedChunks.get("IHDR"), e);
             }
         }
-        System.out.println("Done comparing crunched files " + (System.currentTimeMillis()
-                - comparisonStartTime));
+        System.out.println();
+        System.out.format(
+                "Done comparing %1$d crunched files in %2$dms%n",
+                sourceAndCrunchedFiles.size(), (System.currentTimeMillis() - comparisonStartTime));
     }
 
     /**
@@ -132,17 +133,19 @@ public class NinePatchAaptProcessorTestUtils {
 
 
     @NonNull
-    static File crunchFile(int crunchKey, @NonNull File file, PngCruncher aaptCruncher)
-            throws PngException, IOException {
+    static File crunchFile(int crunchKey, @NonNull File file, ResourceProcessor aaptCruncher)
+            throws ResourceCompilationException, IOException {
         File outFile = File.createTempFile("pngWriterTest", ".png");
         outFile.deleteOnExit();
         try {
-            aaptCruncher.crunchPng(crunchKey, file, outFile);
-        } catch (PngException e) {
+            CompileResourceRequest request =
+                    new CompileResourceRequest(file, outFile, "test", false, true);
+            aaptCruncher.compile(crunchKey, request, null);
+        } catch (ResourceCompilationException e) {
             e.printStackTrace();
             throw e;
         }
-        System.out.println("crunch " + file.getPath());
+        //System.out.println("crunch " + file.getPath());
         return outFile;
     }
 

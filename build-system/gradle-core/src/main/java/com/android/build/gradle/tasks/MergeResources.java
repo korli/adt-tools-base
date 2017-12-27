@@ -15,20 +15,37 @@
  */
 package com.android.build.gradle.tasks;
 
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactScope.ALL;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactType.ANDROID_RES;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.RUNTIME_CLASSPATH;
+
+import android.databinding.tool.LayoutXmlProcessor;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.AndroidConfig;
-import com.android.build.gradle.AndroidGradleOptions;
+import com.android.build.gradle.internal.CombinedInput;
+import com.android.build.gradle.internal.LoggerWrapper;
+import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.aapt.AaptGradleFactory;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.IncrementalTask;
+import com.android.build.gradle.internal.tasks.TaskInputHelper;
 import com.android.build.gradle.internal.variant.BaseVariantData;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.builder.core.AndroidBuilder;
+import com.android.builder.core.BuilderConstants;
 import com.android.builder.internal.aapt.Aapt;
+import com.android.builder.model.SourceProvider;
 import com.android.builder.model.VectorDrawablesOptions;
 import com.android.builder.png.VectorDrawableRenderer;
+import com.android.builder.utils.FileCache;
+import com.android.ide.common.blame.MergingLog;
+import com.android.ide.common.blame.MergingLogRewriter;
+import com.android.ide.common.blame.ParsingProcessOutputHandler;
+import com.android.ide.common.blame.parser.ToolOutputParser;
+import com.android.ide.common.blame.parser.aapt.Aapt2OutputParser;
+import com.android.ide.common.blame.parser.aapt.AaptOutputParser;
+import com.android.ide.common.process.LoggedProcessOutputHandler;
 import com.android.ide.common.res2.FileStatus;
 import com.android.ide.common.res2.FileValidity;
 import com.android.ide.common.res2.GeneratedResourceSet;
@@ -36,22 +53,18 @@ import com.android.ide.common.res2.MergedResourceWriter;
 import com.android.ide.common.res2.MergingException;
 import com.android.ide.common.res2.NoOpResourcePreprocessor;
 import com.android.ide.common.res2.QueueableResourceCompiler;
-import com.android.ide.common.res2.ResourceCompiler;
 import com.android.ide.common.res2.ResourceMerger;
 import com.android.ide.common.res2.ResourcePreprocessor;
 import com.android.ide.common.res2.ResourceSet;
+import com.android.ide.common.res2.SingleFileProcessor;
+import com.android.ide.common.vectordrawable.ResourcesNotSupportedException;
+import com.android.ide.common.workers.WorkerExecutorFacade;
 import com.android.resources.Density;
 import com.android.utils.FileUtils;
-import com.google.common.base.Objects;
+import com.android.utils.ILogger;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.Lists;
-
-import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.InputFiles;
-import org.gradle.api.tasks.Optional;
-import org.gradle.api.tasks.OutputDirectory;
-import org.gradle.api.tasks.OutputFile;
-import org.gradle.api.tasks.ParallelizableTask;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
@@ -59,12 +72,28 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import javax.inject.Inject;
+import javax.xml.bind.JAXBException;
+import org.gradle.api.GradleException;
+import org.gradle.api.Project;
+import org.gradle.api.artifacts.ArtifactCollection;
+import org.gradle.api.artifacts.result.ResolvedArtifactResult;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.tasks.CacheableTask;
+import org.gradle.api.tasks.Input;
+import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Optional;
+import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.OutputFile;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.workers.WorkerExecutor;
 
-@ParallelizableTask
+@CacheableTask
 public class MergeResources extends IncrementalTask {
-
 
     // ----- PUBLIC TASK API -----
 
@@ -89,8 +118,21 @@ public class MergeResources extends IncrementalTask {
     private boolean validateEnabled;
 
     private File blameLogFolder;
-    // actual inputs
-    private List<ResourceSet> inputResourceSets;
+
+    @Nullable private FileCache fileCache;
+
+    // file inputs as raw files, lazy behind a memoized/bypassed supplier
+    private Supplier<Collection<File>> sourceFolderInputs;
+    private Supplier<List<ResourceSet>> resSetSupplier;
+
+    private List<ResourceSet> processedInputs;
+
+    private ArtifactCollection libraries;
+
+    private FileCollection renderscriptResOutputDir;
+    private FileCollection generatedResOutputDir;
+    private FileCollection microApkResDirectory;
+    private FileCollection extraGeneratedResFolders;
 
     private final FileValidity<ResourceSet> fileValidity = new FileValidity<>();
 
@@ -102,10 +144,44 @@ public class MergeResources extends IncrementalTask {
 
     private VariantScope variantScope;
 
-    @InputFiles
-    @SuppressWarnings("unused") // Fake input to detect changes. Not actually used by the task.
-    public Iterable<File> getRawInputFolders() {
-        return flattenSourceSets(getInputResourceSets());
+    private AaptGeneration aaptGeneration;
+
+    @Nullable private SingleFileProcessor dataBindingLayoutProcessor;
+
+    /** Where data binding exports its outputs after parsing layout files. */
+    @Nullable private File dataBindingLayoutInfoOutFolder;
+
+    @Nullable private File mergedNotCompiledResourcesOutputDirectory;
+
+    private boolean pseudoLocalesEnabled;
+
+    @NonNull
+    private static Aapt makeAapt(
+            @NonNull AaptGeneration aaptGeneration,
+            @NonNull AndroidBuilder builder,
+            @Nullable FileCache fileCache,
+            boolean crunchPng,
+            @NonNull VariantScope scope,
+            @NonNull File intermediateDir,
+            @Nullable MergingLog blameLog)
+            throws IOException {
+        return AaptGradleFactory.make(
+                aaptGeneration,
+                builder,
+                blameLog != null
+                        ? new ParsingProcessOutputHandler(
+                                new ToolOutputParser(
+                                        aaptGeneration == AaptGeneration.AAPT_V1
+                                                ? new AaptOutputParser()
+                                                : new Aapt2OutputParser(),
+                                        builder.getLogger()),
+                                new MergingLogRewriter(blameLog::find, builder.getErrorReporter()))
+                        : new LoggedProcessOutputHandler(
+                                new AaptGradleFactory.FilteringLogger(builder.getLogger())),
+                fileCache,
+                crunchPng,
+                intermediateDir,
+                scope.getGlobalScope().getExtension().getAaptOptions().getCruncherProcesses());
     }
 
     @Input
@@ -118,8 +194,23 @@ public class MergeResources extends IncrementalTask {
         return true;
     }
 
+    @OutputDirectory
+    @Optional
+    public File getDataBindingLayoutInfoOutFolder() {
+        return dataBindingLayoutInfoOutFolder;
+    }
+
+    private final WorkerExecutorFacade<MergedResourceWriter.FileGenerationParameters>
+            workerExecutorFacade;
+
+    @Inject
+    public MergeResources(WorkerExecutor workerExecutor) {
+        this.workerExecutorFacade =
+                new WorkerExecutorAdapter<>(workerExecutor, FileGenerationWorkAction.class);
+    }
+
     @Override
-    protected void doFullTaskAction() throws IOException {
+    protected void doFullTaskAction() throws IOException, ExecutionException, JAXBException {
         ResourcePreprocessor preprocessor = getPreprocessor();
 
         // this is full run, clean the previous output
@@ -130,33 +221,45 @@ public class MergeResources extends IncrementalTask {
 
         // create a new merger and populate it with the sets.
         ResourceMerger merger = new ResourceMerger(minSdk);
+        MergingLog mergingLog =
+                getBlameLogFolder() != null ? new MergingLog(getBlameLogFolder()) : null;
 
-        try {
+        try (QueueableResourceCompiler resourceCompiler =
+                processResources
+                        ? makeAapt(
+                                aaptGeneration,
+                                getBuilder(),
+                                fileCache,
+                                crunchPng,
+                                variantScope,
+                                getAaptTempDir(),
+                                mergingLog)
+                        : QueueableResourceCompiler.NONE) {
+
             for (ResourceSet resourceSet : resourceSets) {
                 resourceSet.loadFromFiles(getILogger());
                 merger.addDataSet(resourceSet);
             }
 
-            // get the merged set and write it down.
-            QueueableResourceCompiler resourceCompiler;
-            if (getProcessResources()) {
-                resourceCompiler = AaptGradleFactory.make(
-                        getBuilder(),
-                        getCrunchPng(),
-                        variantScope,
-                        getAaptTempDir());
-            } else {
-                resourceCompiler = QueueableResourceCompiler.NONE;
-            }
-            MergedResourceWriter writer = new MergedResourceWriter(
-                    destinationDir,
-                    getPublicFile(),
-                    getBlameLogFolder(),
-                    preprocessor,
-                    resourceCompiler,
-                    getIncrementalFolder());
+            MergedResourceWriter writer =
+                    new MergedResourceWriter(
+                            workerExecutorFacade,
+                            destinationDir,
+                            getPublicFile(),
+                            mergingLog,
+                            preprocessor,
+                            resourceCompiler,
+                            getIncrementalFolder(),
+                            dataBindingLayoutProcessor,
+                            mergedNotCompiledResourcesOutputDirectory,
+                            pseudoLocalesEnabled,
+                            getCrunchPng());
 
             merger.mergeData(writer, false /*doCleanUp*/);
+
+            if (dataBindingLayoutProcessor != null) {
+                dataBindingLayoutProcessor.end();
+            }
 
             // No exception? Write the known state.
             merger.writeBlobTo(getIncrementalFolder(), writer, false);
@@ -164,11 +267,14 @@ public class MergeResources extends IncrementalTask {
             System.out.println(e.getMessage());
             merger.cleanBlob(getIncrementalFolder());
             throw new ResourceException(e.getMessage(), e);
+        } finally {
+            cleanup();
         }
     }
 
     @Override
-    protected void doIncrementalTaskAction(Map<File, FileStatus> changedInputs) throws IOException {
+    protected void doIncrementalTaskAction(Map<File, FileStatus> changedInputs)
+            throws IOException, ExecutionException, JAXBException {
         ResourcePreprocessor preprocessor = getPreprocessor();
 
         // create a merger and load the known state.
@@ -217,34 +323,92 @@ public class MergeResources extends IncrementalTask {
                 }
             }
 
+            MergingLog mergingLog =
+                    getBlameLogFolder() != null ? new MergingLog(getBlameLogFolder()) : null;
 
-            QueueableResourceCompiler resourceCompiler;
-            if (getProcessResources()) {
-                resourceCompiler = AaptGradleFactory.make(
-                        getBuilder(),
-                        getCrunchPng(),
-                        variantScope,
-                        getAaptTempDir());
-            } else {
-                resourceCompiler = QueueableResourceCompiler.NONE;
+            try (QueueableResourceCompiler resourceCompiler =
+                    processResources
+                            ? makeAapt(
+                                    aaptGeneration,
+                                    getBuilder(),
+                                    fileCache,
+                                    crunchPng,
+                                    variantScope,
+                                    getAaptTempDir(),
+                                    mergingLog)
+                            : QueueableResourceCompiler.NONE) {
+
+                MergedResourceWriter writer =
+                        new MergedResourceWriter(
+                                workerExecutorFacade,
+                                getOutputDir(),
+                                getPublicFile(),
+                                mergingLog,
+                                preprocessor,
+                                resourceCompiler,
+                                getIncrementalFolder(),
+                                dataBindingLayoutProcessor,
+                                mergedNotCompiledResourcesOutputDirectory,
+                                pseudoLocalesEnabled,
+                                getCrunchPng());
+
+                merger.mergeData(writer, false /*doCleanUp*/);
+
+                if (dataBindingLayoutProcessor != null) {
+                    dataBindingLayoutProcessor.end();
+                }
+
+                // No exception? Write the known state.
+                merger.writeBlobTo(getIncrementalFolder(), writer, false);
             }
-
-            MergedResourceWriter writer = new MergedResourceWriter(
-                    getOutputDir(),
-                    getPublicFile(),
-                    getBlameLogFolder(),
-                    preprocessor,
-                    resourceCompiler,
-                    getIncrementalFolder());
-            merger.mergeData(writer, false /*doCleanUp*/);
-            // No exception? Write the known state.
-            merger.writeBlobTo(getIncrementalFolder(), writer, false);
         } catch (MergingException e) {
             merger.cleanBlob(getIncrementalFolder());
             throw new ResourceException(e.getMessage(), e);
         } finally {
-            // some clean up after the task to help multi variant/module builds.
-            fileValidity.clear();
+            cleanup();
+        }
+    }
+
+    public static class FileGenerationWorkAction implements Runnable {
+
+        private final MergedResourceWriter.FileGenerationWorkAction workAction;
+
+        @Inject
+        public FileGenerationWorkAction(MergedResourceWriter.FileGenerationParameters workItem) {
+            this.workAction = new MergedResourceWriter.FileGenerationWorkAction(workItem);
+        }
+
+        @Override
+        public void run() {
+            workAction.run();
+        }
+    }
+
+    private static class MergeResourcesVectorDrawableRenderer extends VectorDrawableRenderer {
+
+        public MergeResourcesVectorDrawableRenderer(
+                int minSdk,
+                File outputDir,
+                Collection<Density> densities,
+                Supplier<ILogger> loggerSupplier) {
+            super(minSdk, outputDir, densities, loggerSupplier);
+        }
+
+        @Override
+        public void generateFile(File toBeGenerated, File original) throws IOException {
+            try {
+                super.generateFile(toBeGenerated, original);
+            } catch (ResourcesNotSupportedException e) {
+                // Add gradle-specific error message.
+                throw new GradleException(
+                        String.format(
+                                "Can't process attribute %1$s=\"%2$s\": "
+                                        + "references to other resources are not supported by "
+                                        + "build-time PNG generation. "
+                                        + "See http://developer.android.com/tools/help/vector-asset-studio.html "
+                                        + "for details.",
+                                e.getName(), e.getValue()));
+            }
         }
     }
 
@@ -254,44 +418,131 @@ public class MergeResources extends IncrementalTask {
 
         if (isDisableVectorDrawables()) {
             // If the user doesn't want any PNGs, leave the XML file alone as well.
-            return new NoOpResourcePreprocessor();
+            return NoOpResourcePreprocessor.INSTANCE;
         }
 
         Collection<Density> densities =
                 getGeneratedDensities().stream().map(Density::getEnum).collect(Collectors.toList());
 
-        return new VectorDrawableRenderer(
+        return new MergeResourcesVectorDrawableRenderer(
                 getMinSdk(),
                 getGeneratedPngsOutputDir(),
                 densities,
-                getILogger());
+                LoggerWrapper.supplierFor(MergeResources.class));
     }
 
     @NonNull
     private List<ResourceSet> getConfiguredResourceSets(ResourcePreprocessor preprocessor) {
-        List<ResourceSet> resourceSets = Lists.newArrayList(getInputResourceSets());
-        List<ResourceSet> generatedSets = Lists.newArrayListWithCapacity(resourceSets.size());
+        // it is possible that this get called twice in case the incremental run fails and reverts
+        // back to full task run. Because the cached ResourceList is modified we don't want
+        // to recompute this twice (plus, why recompute it twice anyway?)
+        if (processedInputs == null) {
+            processedInputs = computeResourceSetList();
+            List<ResourceSet> generatedSets = Lists.newArrayListWithCapacity(processedInputs.size());
 
-        for (ResourceSet resourceSet : resourceSets) {
-            resourceSet.setPreprocessor(preprocessor);
-            ResourceSet generatedSet = new GeneratedResourceSet(resourceSet);
-            resourceSet.setGeneratedSet(generatedSet);
-            generatedSets.add(generatedSet);
+            for (ResourceSet resourceSet : processedInputs) {
+                resourceSet.setPreprocessor(preprocessor);
+                ResourceSet generatedSet = new GeneratedResourceSet(resourceSet);
+                resourceSet.setGeneratedSet(generatedSet);
+                generatedSets.add(generatedSet);
+            }
+
+            // We want to keep the order of the inputs. Given inputs:
+            // (A, B, C, D)
+            // We want to get:
+            // (A-generated, A, B-generated, B, C-generated, C, D-generated, D).
+            // Therefore, when later in {@link DataMerger} we look for sources going through the
+            // list backwards, B-generated will take priority over A (but not B).
+            // A real life use-case would be if an app module generated resource overrode a library
+            // module generated resource (existing not in generated but bundled dir at this stage):
+            // (lib, app debug, app main)
+            // We will get:
+            // (lib generated, lib, app debug generated, app debug, app main generated, app main)
+            for (int i = 0; i < generatedSets.size(); ++i) {
+                processedInputs.add(2 * i, generatedSets.get(i));
+            }
         }
 
-        // Put all generated sets at the start of the list.
-        resourceSets.addAll(0, generatedSets);
-        return resourceSets;
+        return processedInputs;
     }
 
-    public List<ResourceSet> getInputResourceSets() {
-        return inputResourceSets;
+    /**
+     * Release resource sets not needed any more, otherwise they will waste heap space for the
+     * duration of the build.
+     *
+     * <p>This might be called twice when an incremental build falls back to a full one.
+     */
+    private void cleanup() {
+        fileValidity.clear();
+        processedInputs = null;
     }
 
-    @SuppressWarnings("unused") // Property set with convention mapping.
-    public void setInputResourceSets(
-            List<ResourceSet> inputResourceSets) {
-        this.inputResourceSets = inputResourceSets;
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public FileCollection getRenderscriptResOutputDir() {
+        return renderscriptResOutputDir;
+    }
+
+    @VisibleForTesting
+    void setRenderscriptResOutputDir(@NonNull FileCollection renderscriptResOutputDir) {
+        this.renderscriptResOutputDir = renderscriptResOutputDir;
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public FileCollection getGeneratedResOutputDir() {
+        return generatedResOutputDir;
+    }
+
+    @VisibleForTesting
+    void setGeneratedResOutputDir(@NonNull FileCollection generatedResOutputDir) {
+        this.generatedResOutputDir = generatedResOutputDir;
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    @Optional
+    public FileCollection getMicroApkResDirectory() {
+        return microApkResDirectory;
+    }
+
+    @VisibleForTesting
+    void setMicroApkResDirectory(@NonNull FileCollection microApkResDirectory) {
+        this.microApkResDirectory = microApkResDirectory;
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    @Optional
+    public FileCollection getExtraGeneratedResFolders() {
+        return extraGeneratedResFolders;
+    }
+
+    @VisibleForTesting
+    void setExtraGeneratedResFolders(@NonNull FileCollection extraGeneratedResFolders) {
+        this.extraGeneratedResFolders = extraGeneratedResFolders;
+    }
+
+    @Optional
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public FileCollection getLibraries() {
+        if (libraries != null) {
+            return libraries.getArtifactFiles();
+        }
+
+        return null;
+    }
+
+    @VisibleForTesting
+    void setLibraries(ArtifactCollection libraries) {
+        this.libraries = libraries;
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public Collection<File> getSourceFolderInputs() {
+        return sourceFolderInputs.get();
     }
 
     @OutputDirectory
@@ -303,20 +554,14 @@ public class MergeResources extends IncrementalTask {
         this.outputDir = outputDir;
     }
 
+    @Input
     public boolean getCrunchPng() {
         return crunchPng;
     }
 
-    public void setCrunchPng(boolean crunchPng) {
-        this.crunchPng = crunchPng;
-    }
-
+    @Input
     public boolean getProcessResources() {
         return processResources;
-    }
-
-    public void setProcessResources(boolean processResources) {
-        this.processResources = processResources;
     }
 
     @Optional
@@ -330,7 +575,6 @@ public class MergeResources extends IncrementalTask {
     }
 
     // Synthetic input: the validation flag is set on the resource sets in ConfigAction.execute.
-    @SuppressWarnings("unused")
     @Input
     public boolean isValidateEnabled() {
         return validateEnabled;
@@ -350,6 +594,7 @@ public class MergeResources extends IncrementalTask {
         this.blameLogFolder = blameLogFolder;
     }
 
+    @OutputDirectory
     public File getGeneratedPngsOutputDir() {
         return generatedPngsOutputDir;
     }
@@ -385,6 +630,88 @@ public class MergeResources extends IncrementalTask {
         this.disableVectorDrawables = disableVectorDrawables;
     }
 
+    @Input
+    public String getAaptGeneration() {
+        return aaptGeneration.name();
+    }
+
+    @Nullable
+    @OutputDirectory
+    @Optional
+    public File getMergedNotCompiledResourcesOutputDirectory() {
+        return mergedNotCompiledResourcesOutputDirectory;
+    }
+
+    @Input
+    public boolean isPseudoLocalesEnabled() {
+        return pseudoLocalesEnabled;
+    }
+
+    @VisibleForTesting
+    void setResSetSupplier(@NonNull Supplier<List<ResourceSet>> resSetSupplier) {
+        this.resSetSupplier = resSetSupplier;
+    }
+
+    /**
+     * Compute the list of resource set to be used during execution based all the inputs.
+     */
+    @VisibleForTesting
+    @NonNull
+    List<ResourceSet> computeResourceSetList() {
+        List<ResourceSet> sourceFolderSets = resSetSupplier.get();
+        int size = sourceFolderSets.size() + 4;
+        if (libraries != null) {
+            size += libraries.getArtifacts().size();
+        }
+
+        List<ResourceSet> resourceSetList = Lists.newArrayListWithExpectedSize(size);
+
+        // add at the beginning since the libraries are less important than the folder based
+        // resource sets.
+        // get the dependencies first
+        if (libraries != null) {
+            Set<ResolvedArtifactResult> libArtifacts = libraries.getArtifacts();
+            // the order of the artifact is descending order, so we need to reverse it.
+            for (ResolvedArtifactResult artifact : libArtifacts) {
+                ResourceSet resourceSet =
+                        new ResourceSet(
+                                MergeManifests.getArtifactName(artifact),
+                                null,
+                                null,
+                                validateEnabled);
+                resourceSet.setFromDependency(true);
+                resourceSet.addSource(artifact.getFile());
+
+                // add to 0 always, since we need to reverse the order.
+                resourceSetList.add(0,resourceSet);
+            }
+        }
+
+        // add the folder based next
+        resourceSetList.addAll(sourceFolderSets);
+
+        // We add the generated folders to the main set
+        List<File> generatedResFolders = Lists.newArrayList();
+
+        generatedResFolders.addAll(renderscriptResOutputDir.getFiles());
+        generatedResFolders.addAll(generatedResOutputDir.getFiles());
+
+        FileCollection extraFolders = getExtraGeneratedResFolders();
+        if (extraFolders != null) {
+            generatedResFolders.addAll(extraFolders.getFiles());
+        }
+        if (microApkResDirectory != null) {
+            generatedResFolders.addAll(microApkResDirectory.getFiles());
+        }
+
+        // add the generated files to the main set.
+        final ResourceSet mainResourceSet = sourceFolderSets.get(0);
+        assert mainResourceSet.getConfigName().equals(BuilderConstants.MAIN);
+        mainResourceSet.addSources(generatedResFolders);
+
+        return resourceSetList;
+    }
+
     /**
      * Obtains the temporary directory for {@code aapt} to use.
      *
@@ -399,26 +726,25 @@ public class MergeResources extends IncrementalTask {
 
         @NonNull
         private final VariantScope scope;
-
         @NonNull
         private final String taskNamePrefix;
-
         @Nullable
         private final File outputLocation;
-
+        @Nullable private final File mergedNotCompiledOutputDirectory;
         private final boolean includeDependencies;
-
         private final boolean processResources;
 
         public ConfigAction(
                 @NonNull VariantScope scope,
                 @NonNull String taskNamePrefix,
                 @Nullable File outputLocation,
+                @Nullable File mergedNotCompiledOutputDirectory,
                 boolean includeDependencies,
                 boolean processResources) {
             this.scope = scope;
             this.taskNamePrefix = taskNamePrefix;
             this.outputLocation = outputLocation;
+            this.mergedNotCompiledOutputDirectory = mergedNotCompiledOutputDirectory;
             this.includeDependencies = includeDependencies;
             this.processResources = processResources;
         }
@@ -437,28 +763,26 @@ public class MergeResources extends IncrementalTask {
 
         @Override
         public void execute(@NonNull MergeResources mergeResourcesTask) {
-            final BaseVariantData<? extends BaseVariantOutputData> variantData =
-                    scope.getVariantData();
-            final AndroidConfig extension = scope.getGlobalScope().getExtension();
+            final BaseVariantData variantData = scope.getVariantData();
+            final Project project = scope.getGlobalScope().getProject();
 
             mergeResourcesTask.setMinSdk(
-                    variantData
-                            .getVariantConfiguration()
-                            .getResourcesMinSdkVersion()
-                            .getApiLevel());
+                    variantData.getVariantConfiguration().getMinSdkVersion().getApiLevel());
 
+            mergeResourcesTask.aaptGeneration =
+                    AaptGeneration.fromProjectOptions(scope.getGlobalScope().getProjectOptions());
             mergeResourcesTask.setAndroidBuilder(scope.getGlobalScope().getAndroidBuilder());
+            mergeResourcesTask.fileCache = scope.getGlobalScope().getBuildCache();
             mergeResourcesTask.setVariantName(scope.getVariantConfiguration().getFullName());
             mergeResourcesTask.setIncrementalFolder(scope.getIncrementalDir(getName()));
             mergeResourcesTask.variantScope = scope;
-
             // Libraries use this task twice, once for compilation (with dependencies),
             // where blame is useful, and once for packaging where it is not.
             if (includeDependencies) {
                 mergeResourcesTask.setBlameLogFolder(scope.getResourceBlameLogDir());
             }
-            mergeResourcesTask.setProcessResources(processResources);
-            mergeResourcesTask.setCrunchPng(extension.getAaptOptions().getCruncherEnabled());
+            mergeResourcesTask.processResources = processResources;
+            mergeResourcesTask.crunchPng = scope.isCrunchPngs();
 
             VectorDrawablesOptions vectorDrawablesOptions = variantData
                     .getVariantConfiguration()
@@ -467,49 +791,100 @@ public class MergeResources extends IncrementalTask {
 
             Set<String> generatedDensities = vectorDrawablesOptions.getGeneratedDensities();
 
+            // Collections.<String>emptySet() is used intentionally instead of Collections.emptySet()
+            // to keep compatibility with javac 1.8.0_45 used by ab/
             mergeResourcesTask.setGeneratedDensities(
-                    Objects.firstNonNull(generatedDensities, Collections.<String>emptySet()));
+                    MoreObjects.firstNonNull(generatedDensities, Collections.<String>emptySet()));
 
             mergeResourcesTask.setDisableVectorDrawables(
-                    vectorDrawablesOptions.getUseSupportLibrary()
+                    (vectorDrawablesOptions.getUseSupportLibrary() != null
+                                    && vectorDrawablesOptions.getUseSupportLibrary())
                             || mergeResourcesTask.getGeneratedDensities().isEmpty());
 
-            final boolean validateEnabled = AndroidGradleOptions.isResourceValidationEnabled(
-                    scope.getGlobalScope().getProject());
+            final boolean validateEnabled =
+                    !scope.getGlobalScope()
+                            .getProjectOptions()
+                            .get(BooleanOption.DISABLE_RESOURCE_VALIDATION);
 
             mergeResourcesTask.setValidateEnabled(validateEnabled);
 
-            ConventionMappingHelper.map(mergeResourcesTask, "inputResourceSets",
-                    new Callable<List<ResourceSet>>() {
-                        @Override
-                        public List<ResourceSet> call() throws Exception {
-                            List<File> generatedResFolders = Lists.newArrayList(
-                                    scope.getRenderscriptResOutputDir(),
-                                    scope.getGeneratedResOutputDir());
-                            if (variantData.getExtraGeneratedResFolders() != null) {
-                                generatedResFolders.addAll(
-                                        variantData.getExtraGeneratedResFolders());
-                            }
-                            if (scope.getMicroApkTask() != null &&
-                                    variantData.getVariantConfiguration().getBuildType()
-                                            .isEmbedMicroApp()) {
-                                generatedResFolders.add(scope.getMicroApkResDirectory());
-                            }
+            if (includeDependencies) {
+                mergeResourcesTask.libraries = scope.getArtifactCollection(
+                        RUNTIME_CLASSPATH, ALL, ANDROID_RES);
+            }
 
-                            return variantData.getVariantConfiguration().getResourceSets(
-                                    generatedResFolders, includeDependencies, validateEnabled);
-                        }
-                    });
+            mergeResourcesTask.resSetSupplier =
+                    () -> variantData.getVariantConfiguration().getResourceSets(validateEnabled);
+            mergeResourcesTask.sourceFolderInputs =
+                    TaskInputHelper.bypassFileSupplier(
+                            () ->
+                                    variantData
+                                            .getVariantConfiguration()
+                                            .getSourceFiles(SourceProvider::getResDirectories));
+            mergeResourcesTask.extraGeneratedResFolders = variantData.getExtraGeneratedResFolders();
+            mergeResourcesTask.renderscriptResOutputDir = project.files(scope.getRenderscriptResOutputDir());
+            mergeResourcesTask.generatedResOutputDir = project.files(scope.getGeneratedResOutputDir());
+            if (scope.getMicroApkTask() != null &&
+                    variantData.getVariantConfiguration().getBuildType().isEmbedMicroApp()) {
+                mergeResourcesTask.microApkResDirectory = project.files(scope.getMicroApkResDirectory());
+            }
 
-            mergeResourcesTask.setOutputDir(
-                    outputLocation != null
-                            ? outputLocation
-                            : scope.getDefaultMergeResourcesOutputDir());
-
+            mergeResourcesTask.setOutputDir(outputLocation);
             mergeResourcesTask.setGeneratedPngsOutputDir(scope.getGeneratedPngsOutputDir());
 
             variantData.mergeResourcesTask = mergeResourcesTask;
+
+            if (scope.getGlobalScope().getExtension().getDataBinding().isEnabled()) {
+                // Keep as an output.
+                mergeResourcesTask.dataBindingLayoutInfoOutFolder =
+                        scope.getLayoutInfoOutputForDataBinding();
+
+                mergeResourcesTask.dataBindingLayoutProcessor =
+                        new SingleFileProcessor() {
+                            final LayoutXmlProcessor processor =
+                                    variantData.getLayoutXmlProcessor();
+
+                            @Override
+                            public boolean processSingleFile(File file, File out) throws Exception {
+                                return processor.processSingleFile(file, out);
+                            }
+
+                            @Override
+                            public void processRemovedFile(File file) {
+                                processor.processRemovedFile(file);
+                            }
+
+                            @Override
+                            public void end() throws JAXBException {
+                                processor.writeLayoutInfoFiles(
+                                        mergeResourcesTask.dataBindingLayoutInfoOutFolder);
+                            }
+                        };
+            }
+
+            mergeResourcesTask.mergedNotCompiledResourcesOutputDirectory =
+                    mergedNotCompiledOutputDirectory;
+
+            mergeResourcesTask.pseudoLocalesEnabled =
+                    scope.getVariantData()
+                            .getVariantConfiguration()
+                            .getBuildType()
+                            .isPseudoLocalesEnabled();
         }
     }
 
+    // Workaround for https://issuetracker.google.com/67418335
+    @Override
+    @Input
+    @NonNull
+    public String getCombinedInput() {
+        return new CombinedInput(super.getCombinedInput())
+                .add("dataBindingLayoutInfoOutFolder", getDataBindingLayoutInfoOutFolder())
+                .add("publicFile", getPublicFile())
+                .add("blameLogFolder", getBlameLogFolder())
+                .add(
+                        "mergedNotCompiledResourcesOutputDirectory",
+                        getMergedNotCompiledResourcesOutputDirectory())
+                .toString();
+    }
 }

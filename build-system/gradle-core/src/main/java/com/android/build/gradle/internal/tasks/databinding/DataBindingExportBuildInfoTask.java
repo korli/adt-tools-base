@@ -16,20 +16,24 @@
 
 package com.android.build.gradle.internal.tasks.databinding;
 
-import com.android.SdkConstants;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactScope.ALL;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ArtifactType.CLASSES;
+import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.COMPILE_CLASSPATH;
+
+import android.databinding.tool.LayoutXmlProcessor;
+import android.databinding.tool.processing.Scope;
 import com.android.annotations.NonNull;
-import com.android.build.gradle.internal.scope.ConventionMappingHelper;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
-import com.google.common.base.CharMatcher;
-import com.google.common.collect.Iterables;
-
-import org.gradle.api.Action;
+import java.io.File;
+import java.util.Collection;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.file.ConfigurableFileTree;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.tasks.Classpath;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputDirectory;
 import org.gradle.api.tasks.InputFiles;
@@ -37,15 +41,6 @@ import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
-import org.gradle.api.tasks.incremental.InputFileDetails;
-
-import android.databinding.tool.LayoutXmlProcessor;
-import android.databinding.tool.processing.Scope;
-
-import java.io.File;
-import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 /**
  * This task creates a class which includes the build environment information, which is needed for
@@ -63,6 +58,9 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
 
     private File dataBindingClassOutput;
 
+    private Supplier<FileCollection> compilerClasspath;
+    private Supplier<Collection<ConfigurableFileTree>> compilerSources;
+
     @TaskAction
     public void exportInfo(IncrementalTaskInputs inputs) {
         xmlProcessor.writeEmptyInfoClass();
@@ -77,14 +75,14 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
         this.xmlProcessor = xmlProcessor;
     }
 
-    @InputFiles
+    @Classpath
     public FileCollection getCompilerClasspath() {
-        return null;
+        return compilerClasspath.get();
     }
 
     @InputFiles
     public Iterable<ConfigurableFileTree> getCompilerSources() {
-        return null;
+        return compilerSources.get();
     }
 
     @Input
@@ -146,19 +144,23 @@ public class DataBindingExportBuildInfoTask extends DefaultTask {
 
         @Override
         public void execute(@NonNull DataBindingExportBuildInfoTask task) {
-            final BaseVariantData<? extends BaseVariantOutputData> variantData = variantScope
-                    .getVariantData();
+            final BaseVariantData variantData = variantScope.getVariantData();
             task.setXmlProcessor(variantData.getLayoutXmlProcessor());
             task.setSdkDir(variantScope.getGlobalScope().getSdkHandler().getSdkFolder());
             task.setXmlOutFolder(variantScope.getLayoutInfoOutputForDataBinding());
 
-            ConventionMappingHelper.map(task, "compilerClasspath", variantScope::getJavaClasspath);
-            ConventionMappingHelper.map(task, "compilerSources",
+            // we need the external classpath, so we don't want to use scope.getClassPath as that
+            // includes internal (to the module) classpath in case there's registered bytecode
+            // generator (kotlin) which can trigger a cyclic dependencies.
+            task.compilerClasspath =
+                    () -> variantScope.getArtifactFileCollection(COMPILE_CLASSPATH, ALL, CLASSES);
+
+            task.compilerSources =
                     () -> variantData.getJavaSources().stream()
                                     .filter(
                                             input -> !variantScope.getClassOutputForDataBinding()
                                                     .equals(input.getDir()))
-                                    .collect(Collectors.toList()));
+                                    .collect(Collectors.toList());
 
             task.setExportClassListTo(variantData.getType().isExportDataBindingClassList() ?
                     variantScope.getGeneratedClassListOutputFileForDataBinding() : null);

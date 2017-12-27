@@ -1,5 +1,6 @@
 load("//tools/base/bazel:bazel.bzl", "fileset")
 load("//tools/base/bazel:maven.bzl", "maven_java_library", "maven_pom")
+load("//tools/base/bazel:kotlin.bzl", "kotlin_library", "kotlin_test")
 
 fileset(
     name = "resources",
@@ -10,9 +11,9 @@ fileset(
     },
 )
 
-maven_java_library(
+kotlin_library(
     name = "gradle",
-    srcs = glob(["src/main/java/**/*.java"]),
+    srcs = ["src/main/java"],
     pom = ":pom",
     resource_strip_prefix = "tools/base/build-system/gradle",
     resources = [":resources"],
@@ -32,6 +33,7 @@ maven_java_library(
         "//tools/base/sdk-common:tools.sdk-common",
         "//tools/base/sdklib:tools.sdklib",
         "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.codehaus.groovy_groovy-all",
         "//tools/data-binding:tools.compilerCommon",
     ],
 )
@@ -43,13 +45,17 @@ maven_pom(
     source = "//tools/buildSrc/base:build_version",
 )
 
-java_test(
+kotlin_test(
     name = "tests",
-    srcs = glob(["src/test/java/**/*.java"]),
+    srcs = ["src/test/java"],
     data = [
         "//prebuilts/studio/sdk:add-ons/addon-google_apis-google-latest",
         "//prebuilts/studio/sdk:build-tools/25.0.0",
+        "//prebuilts/studio/sdk:build-tools/26.0.0",
+        "//prebuilts/studio/sdk:build-tools/26.0.2",
+        "//prebuilts/studio/sdk:platform-tools",
         "//prebuilts/studio/sdk:platforms/android-24",
+        "//prebuilts/studio/sdk:platforms/latest",
     ],
     jvm_flags = [
         "-Dtest.suite.jar=tests.jar",
@@ -58,6 +64,10 @@ java_test(
     ],
     resources = glob(["src/test/resources/**"]),
     test_class = "com.android.testutils.JarTestSuite",
+    # Make sure we're running against JUnit 4.12. See https://github.com/bazelbuild/bazel/issues/2146.
+    runtime_deps = [
+        "//tools/base/third_party:junit_junit",
+    ],
     deps = [
         ":gradle",
         "//tools/base/annotations",

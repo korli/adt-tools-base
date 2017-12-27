@@ -53,19 +53,11 @@ public class AssumeUtil {
                         .compareTo(revision) > 0);
     }
 
-    public static void assumeNotUsingJack() {
-        Assume.assumeFalse(GradleTestProject.USE_JACK);
-    }
-
     public static void assumeNotWindows() {
         Assume.assumeFalse(SdkConstants.currentPlatform() == SdkConstants.PLATFORM_WINDOWS);
     }
 
     public static void assumeIsLinux() {
         Assume.assumeTrue(SdkConstants.currentPlatform() == SdkConstants.PLATFORM_LINUX);
-    }
-
-    public static void assumeResolveDependencyOnConfiguration() {
-        Assume.assumeFalse(GradleTestProject.IMPROVED_DEPENDENCY_RESOLUTION);
     }
 }

@@ -31,8 +31,13 @@ import com.android.resources.Navigation;
 import com.android.resources.TouchScreen;
 import com.android.utils.XmlUtils;
 import com.android.xml.AndroidManifest;
-import com.google.common.io.Closeables;
-
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Locale;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
 import org.xml.sax.Attributes;
 import org.xml.sax.ErrorHandler;
 import org.xml.sax.InputSource;
@@ -41,15 +46,10 @@ import org.xml.sax.SAXException;
 import org.xml.sax.SAXParseException;
 import org.xml.sax.helpers.DefaultHandler;
 
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Locale;
-
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
-
+/**
+ * Full Manifest parser that parses the manifest in details, including activities, instrumentations,
+ * support-screens, and uses-configuration.
+ */
 public class AndroidManifestParser {
 
     private static final int LEVEL_TOP = 0;
@@ -159,28 +159,19 @@ public class AndroidManifestParser {
                             break;
                         case LEVEL_INSIDE_MANIFEST:
                             if (AndroidManifest.NODE_APPLICATION.equals(localName)) {
-                                value = getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_PROCESS,
-                                        true /* hasNamespace */);
-                                if (value != null) {
-                                    mManifestData.addProcessName(value);
-                                }
-
-                                value = getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_DEBUGGABLE,
-                                        true /* hasNamespace*/);
-                                if (value != null) {
-                                    mManifestData.mDebuggable = Boolean.parseBoolean(value);
-                                }
-
+                                processApplicationNode(attributes);
                                 mValidLevel++;
                             } else if (AndroidManifest.NODE_USES_SDK.equals(localName)) {
-                                mManifestData.setMinSdkVersionString(getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_MIN_SDK_VERSION,
-                                        true /* hasNamespace */));
-                                mManifestData.setTargetSdkVersionString(getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_TARGET_SDK_VERSION,
-                                        true /* hasNamespace */));
+                                mManifestData.setMinSdkVersionString(
+                                        getAttributeValue(
+                                                attributes,
+                                                AndroidManifest.ATTRIBUTE_MIN_SDK_VERSION,
+                                                true /* hasNamespace */));
+                                mManifestData.setTargetSdkVersionString(
+                                        getAttributeValue(
+                                                attributes,
+                                                AndroidManifest.ATTRIBUTE_TARGET_SDK_VERSION,
+                                                true /* hasNamespace */));
                             } else if (AndroidManifest.NODE_INSTRUMENTATION.equals(localName)) {
                                 processInstrumentationNode(attributes);
 
@@ -194,17 +185,21 @@ public class AndroidManifestParser {
                                 UsesFeature feature = new UsesFeature();
 
                                 // get the name
-                                value = getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_NAME,
-                                        true /* hasNamespace */);
+                                value =
+                                        getAttributeValue(
+                                                attributes,
+                                                AndroidManifest.ATTRIBUTE_NAME,
+                                                true /* hasNamespace */);
                                 if (value != null) {
                                     feature.mName = value;
                                 }
 
                                 // read the required attribute
-                                value = getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_REQUIRED,
-                                        true /*hasNamespace*/);
+                                value =
+                                        getAttributeValue(
+                                                attributes,
+                                                AndroidManifest.ATTRIBUTE_REQUIRED,
+                                                true /*hasNamespace*/);
                                 if (value != null) {
                                     Boolean b = Boolean.valueOf(value);
                                     if (b != null) {
@@ -213,9 +208,11 @@ public class AndroidManifestParser {
                                 }
 
                                 // read the gl es attribute
-                                value = getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_GLESVERSION,
-                                        true /*hasNamespace*/);
+                                value =
+                                        getAttributeValue(
+                                                attributes,
+                                                AndroidManifest.ATTRIBUTE_GLESVERSION,
+                                                true /*hasNamespace*/);
                                 if (value != null) {
                                     try {
                                         int version = Integer.decode(value);
@@ -223,7 +220,6 @@ public class AndroidManifestParser {
                                     } catch (NumberFormatException e) {
                                         // ignore
                                     }
-
                                 }
 
                                 mManifestData.mFeatures.add(feature);
@@ -235,26 +231,34 @@ public class AndroidManifestParser {
                                 processActivityNode(attributes);
                                 mValidLevel++;
                             } else if (AndroidManifest.NODE_SERVICE.equals(localName)) {
-                                processNode(attributes, SdkConstants.CLASS_SERVICE);
+                                processNode(attributes, SdkConstants.CLASS_SERVICE, localName);
                                 mValidLevel++;
                             } else if (AndroidManifest.NODE_RECEIVER.equals(localName)) {
-                                processNode(attributes, SdkConstants.CLASS_BROADCASTRECEIVER);
+                                processNode(
+                                        attributes,
+                                        SdkConstants.CLASS_BROADCASTRECEIVER,
+                                        localName);
                                 mValidLevel++;
                             } else if (AndroidManifest.NODE_PROVIDER.equals(localName)) {
-                                processNode(attributes, SdkConstants.CLASS_CONTENTPROVIDER);
+                                processNode(
+                                        attributes, SdkConstants.CLASS_CONTENTPROVIDER, localName);
                                 mValidLevel++;
                             } else if (AndroidManifest.NODE_USES_LIBRARY.equals(localName)) {
-                                value = getAttributeValue(attributes,
-                                        AndroidManifest.ATTRIBUTE_NAME,
-                                        true /* hasNamespace */);
+                                value =
+                                        getAttributeValue(
+                                                attributes,
+                                                AndroidManifest.ATTRIBUTE_NAME,
+                                                true /* hasNamespace */);
                                 if (value != null) {
                                     UsesLibrary library = new UsesLibrary();
                                     library.mName = value;
 
                                     // read the required attribute
-                                    value = getAttributeValue(attributes,
-                                            AndroidManifest.ATTRIBUTE_REQUIRED,
-                                            true /*hasNamespace*/);
+                                    value =
+                                            getAttributeValue(
+                                                    attributes,
+                                                    AndroidManifest.ATTRIBUTE_REQUIRED,
+                                                    true /*hasNamespace*/);
                                     if (value != null) {
                                         Boolean b = Boolean.valueOf(value);
                                         if (b != null) {
@@ -383,7 +387,60 @@ public class AndroidManifestParser {
         }
 
         /**
+         * Processes the application node.
+         *
+         * @param attributes the attributes for the application node.
+         */
+        private void processApplicationNode(Attributes attributes) {
+            String value =
+                    getAttributeValue(
+                            attributes, AndroidManifest.ATTRIBUTE_PROCESS, true /* hasNamespace */);
+            if (value != null) {
+                mManifestData.addProcessName(value);
+                mManifestData.mDefaultProcess = value;
+            }
+
+            value =
+                    getAttributeValue(
+                            attributes,
+                            AndroidManifest.ATTRIBUTE_DEBUGGABLE,
+                            true /* hasNamespace*/);
+            if (value != null) {
+                mManifestData.mDebuggable = Boolean.parseBoolean(value);
+            }
+
+            value =
+                    getAttributeValue(
+                            attributes, AndroidManifest.ATTRIBUTE_NAME, true /* hasNamespace*/);
+
+            if (value != null) {
+                mManifestData.mKeepClasses.add(
+                        new ManifestData.KeepClass(
+                                AndroidManifest.combinePackageAndClassName(
+                                        mManifestData.mPackage, value),
+                                null,
+                                AndroidManifest.NODE_APPLICATION));
+            }
+
+            value =
+                    getAttributeValue(
+                            attributes,
+                            AndroidManifest.ATTRIBUTE_BACKUP_AGENT,
+                            true /* hasNamespace*/);
+
+            if (value != null) {
+                mManifestData.mKeepClasses.add(
+                        new ManifestData.KeepClass(
+                                AndroidManifest.combinePackageAndClassName(
+                                        mManifestData.mPackage, value),
+                                null,
+                                AndroidManifest.ATTRIBUTE_BACKUP_AGENT));
+            }
+        }
+
+        /**
          * Processes the activity node.
+         *
          * @param attributes the attributes for the activity node.
          */
         private void processActivityNode(Attributes attributes) {
@@ -417,15 +474,26 @@ public class AndroidManifestParser {
             if (processName != null) {
                 mManifestData.addProcessName(processName);
             }
+
+            if (processName == null || processName.isEmpty()) {
+                processName = mManifestData.getDefaultProcess();
+            }
+
+            if (activityName != null) {
+                mManifestData.mKeepClasses.add(
+                        new ManifestData.KeepClass(
+                                activityName, processName, AndroidManifest.NODE_ACTIVITY));
+            }
         }
 
         /**
          * Processes the service/receiver/provider nodes.
+         *
          * @param attributes the attributes for the activity node.
          * @param superClassName the fully qualified name of the super class that this
-         * node is representing
+         * @param localName the tag of the node node is representing
          */
-        private void processNode(Attributes attributes, String superClassName) {
+        private void processNode(Attributes attributes, String superClassName, String localName) {
             // lets get the class name, and check it if required.
             String serviceName = getAttributeValue(attributes, AndroidManifest.ATTRIBUTE_NAME,
                     true /* hasNamespace */);
@@ -443,6 +511,15 @@ public class AndroidManifestParser {
                     true /* hasNamespace */);
             if (processName != null) {
                 mManifestData.addProcessName(processName);
+            }
+
+            if (processName == null || processName.isEmpty()) {
+                processName = mManifestData.getDefaultProcess();
+            }
+
+            if (serviceName != null) {
+                mManifestData.mKeepClasses.add(
+                        new ManifestData.KeepClass(serviceName, processName, localName));
             }
         }
 
@@ -463,6 +540,9 @@ public class AndroidManifestParser {
                         true /* hasNamespace */);
                 mManifestData.mInstrumentations.add(
                         new Instrumentation(instrClassName, targetPackage));
+                mManifestData.mKeepClasses.add(
+                        new ManifestData.KeepClass(
+                                instrClassName, null, AndroidManifest.NODE_INSTRUMENTATION));
                 if (mErrorHandler != null) {
                     mErrorHandler.checkClass(mLocator, instrClassName,
                             SdkConstants.CLASS_INSTRUMENTATION, true /* testVisibility */);
@@ -579,44 +659,39 @@ public class AndroidManifestParser {
     }
 
     /**
-     * Parses the Android Manifest, and returns a {@link ManifestData} object containing the
-     * result of the parsing.
+     * Parses the Android Manifest, and returns a {@link ManifestData} object containing the result
+     * of the parsing.
      *
      * @param manifestFile the {@link IAbstractFile} representing the manifest file.
      * @param gatherData indicates whether the parsing will extract data from the manifest. If false
-     * the method will always return null.
+     *     the method will always return null.
      * @param errorHandler an optional errorHandler.
      * @return A class containing the manifest info obtained during the parsing, or null on error.
-     *
-     * @throws StreamException
-     * @throws IOException
-     * @throws SAXException
-     * @throws ParserConfigurationException
+     * @throws IOException If there was a problem parsing the file
+     * @throws SAXException If any SAX errors occurred during processing.
      */
     public static ManifestData parse(
-            IAbstractFile manifestFile,
-            boolean gatherData,
-            ManifestErrorHandler errorHandler)
-                throws SAXException, IOException, StreamException, ParserConfigurationException {
+            IAbstractFile manifestFile, boolean gatherData, ManifestErrorHandler errorHandler)
+            throws IOException, SAXException {
         if (manifestFile != null) {
-            SAXParser parser = XmlUtils.createSaxParser(sParserFactory);
+            SAXParser parser;
+            try {
+                parser = XmlUtils.createSaxParser(sParserFactory);
+            } catch (ParserConfigurationException | SAXException e) {
+                throw new RuntimeException(e);
+            }
 
             ManifestData data = null;
             if (gatherData) {
                 data = new ManifestData();
             }
 
-            ManifestHandler manifestHandler = new ManifestHandler(manifestFile,
-                    data, errorHandler);
-            InputStream is = manifestFile.getContents();
-            try {
+            ManifestHandler manifestHandler = new ManifestHandler(manifestFile, data, errorHandler);
+
+            try (InputStream is = manifestFile.getContents()) {
                 parser.parse(new InputSource(is), manifestHandler);
-            } finally {
-                try {
-                    Closeables.close(is, true /* swallowIOException */);
-                } catch (IOException e) {
-                    // cannot happen
-                }
+            } catch (StreamException e) {
+                throw new IOException(e);
             }
 
             return data;
@@ -628,23 +703,18 @@ public class AndroidManifestParser {
     /**
      * Parses the Android Manifest, and returns an object containing the result of the parsing.
      *
-     * <p>
-     * This is the equivalent of calling <pre>parse(manifestFile, true, null)</pre>
+     * <p>This is the equivalent of calling {@code parse(manifestFile, true, null)}.
      *
      * @param manifestFile the manifest file to parse.
-     *
-     * @throws ParserConfigurationException
-     * @throws StreamException
      * @throws IOException
      * @throws SAXException
      */
-    public static ManifestData parse(IAbstractFile manifestFile)
-            throws SAXException, IOException, StreamException, ParserConfigurationException {
+    public static ManifestData parse(IAbstractFile manifestFile) throws IOException, SAXException {
         return parse(manifestFile, true, null);
     }
 
     public static ManifestData parse(IAbstractFolder projectFolder)
-            throws SAXException, IOException, StreamException, ParserConfigurationException {
+            throws IOException, SAXException {
         IAbstractFile manifestFile = AndroidManifest.getManifest(projectFolder);
         if (manifestFile == null) {
             throw new FileNotFoundException();
@@ -659,14 +729,12 @@ public class AndroidManifestParser {
      *
      * @param manifestFileStream the {@link InputStream} representing the manifest file.
      * @return A class containing the manifest info obtained during the parsing or null on error.
-     *
-     * @throws StreamException
      * @throws IOException
      * @throws SAXException
      * @throws ParserConfigurationException
      */
     public static ManifestData parse(InputStream manifestFileStream)
-            throws SAXException, IOException, StreamException, ParserConfigurationException {
+            throws ParserConfigurationException, SAXException, IOException {
         if (manifestFileStream != null) {
             SAXParser parser = XmlUtils.createSaxParser(sParserFactory);
 

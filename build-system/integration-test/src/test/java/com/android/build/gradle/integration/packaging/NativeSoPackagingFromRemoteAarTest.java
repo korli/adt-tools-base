@@ -17,14 +17,13 @@
 package com.android.build.gradle.integration.packaging;
 
 import static com.android.build.gradle.integration.common.fixture.TemporaryProjectModification.doTest;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAar;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
+import com.android.build.gradle.integration.common.truth.TruthHelper;
 import com.android.build.gradle.integration.common.utils.TestFileUtils;
+import com.android.testutils.apk.Apk;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
@@ -33,9 +32,7 @@ import java.io.IOException;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-/**
- * test for packaging of asset files.
- */
+
 public class NativeSoPackagingFromRemoteAarTest {
 
     @Rule
@@ -46,12 +43,12 @@ public class NativeSoPackagingFromRemoteAarTest {
     private GradleTestProject appProject;
     private GradleTestProject libProject;
 
-    private void execute(String... tasks) {
+    private void execute(String... tasks) throws IOException, InterruptedException {
         project.executor().run(tasks);
     }
 
     @Before
-    public void setUp() throws IOException {
+    public void setUp() throws Exception {
         appProject = project.getSubproject("app");
         libProject = project.getSubproject("library");
 
@@ -66,7 +63,7 @@ public class NativeSoPackagingFromRemoteAarTest {
                 + "    maven { url '../testrepo' }\n"
                 + "}\n"
                 + "dependencies {\n"
-                + "    compile 'com.example.android.nativepackaging:library:1.0-SNAPSHOT'\n"
+                + "    compile 'com.example.android.nativepackaging:library:1.0-SNAPSHOT@aar'\n"
                 + "}\n");
 
         TestFileUtils.appendToFile(libProject.getBuildFile(),
@@ -102,14 +99,15 @@ public class NativeSoPackagingFromRemoteAarTest {
             @NonNull File projectFolder,
             @NonNull String dimension,
             @NonNull String filename,
-            @NonNull String content) throws IOException {
+            @NonNull String content)
+            throws Exception {
         File assetFolder = FileUtils.join(projectFolder, "src", dimension, "jniLibs", "x86");
         FileUtils.mkdirs(assetFolder);
         Files.write(content, new File(assetFolder, filename), Charsets.UTF_8);
     }
 
     @Test
-    public void testNonIncrementalPackaging() throws IOException, InterruptedException {
+    public void testNonIncrementalPackaging() throws Exception {
         checkApk(appProject, "liblibrary.so",      "library:abcd");
         checkApk(appProject, "liblibrary2.so",     "library2:abcdef");
     }
@@ -159,7 +157,7 @@ public class NativeSoPackagingFromRemoteAarTest {
     /**
      * check an apk has (or not) the given asset file name.
      *
-     * If the content is non-null the file is expected to be there with the same content. If the
+     * <p>If the content is non-null the file is expected to be there with the same content. If the
      * content is null the file is not expected to be there.
      *
      * @param project the project
@@ -167,40 +165,15 @@ public class NativeSoPackagingFromRemoteAarTest {
      * @param content the content
      */
     private static void checkApk(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException, InterruptedException {
-        File apk = project.getApk("debug");
-        check(assertThatApk(apk), "lib", filename, content);
-        PackagingTests.checkZipAlign(apk);
-    }
-
-    /**
-     * check an aat has (or not) the given asset file name.
-     *
-     * If the content is non-null the file is expected to be there with the same content. If the
-     * content is null the file is not expected to be there.
-     *
-     * @param project the project
-     * @param filename the filename
-     * @param content the content
-     */
-    private static void checkAar(
-            @NonNull GradleTestProject project,
-            @NonNull String filename,
-            @Nullable String content) throws IOException {
-        check(assertThatAar(project.getAar("debug")), "jni", filename, content);
-    }
-
-    private static void check(
-            @NonNull AbstractAndroidSubject subject,
-            @NonNull String folderName,
-            @NonNull String filename,
-            @Nullable String content) throws IOException {
+            @NonNull GradleTestProject project, @NonNull String filename, @Nullable String content)
+            throws Exception {
+        Apk apk = project.getApk("debug");
         if (content != null) {
-            subject.containsFileWithContent(folderName + "/x86/" + filename, content);
+            TruthHelper.assertThat(apk).containsFileWithContent("lib/x86/" + filename, content);
         } else {
-            subject.doesNotContain(folderName + "/x86/" + filename);
+            TruthHelper.assertThat(apk).doesNotContain("lib/x86/" + filename);
         }
+        PackagingTests.checkZipAlign(apk.getFile().toFile());
     }
+
 }

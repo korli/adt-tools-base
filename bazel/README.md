@@ -17,10 +17,14 @@ want to link it like this (assuming `~/bin` is in `$PATH`)
 ln -s <workspace>/tools/base/bazel ~/bin/bazel
 ```
 
-Then no matter where you are in the workspace, bazel will find the right,
-platform specific, binary and run it.
+Then no matter where you are in the workspace, bazel will find the right
+platform-specific binary and run it.
 
 ## Running all the tests
+
+*** note
+Warning: On a Mac, append `--genrule_strategy=standalone --spawn_strategy=standalone`
+***
 
 The command to run all the bazel tests run by the PSQ is:
 
@@ -39,7 +43,7 @@ bazel test //tools/base/...
 To run all the tests in the IntelliJ Android plugin:
 
 ```
-bazel test //tools/adt/idea/android-tests/...
+bazel test //tools/adt/idea/android/...
 ```
 
 > Note: The file `tools/base/bazel/targets` contains the up-to-date list of test targets.
@@ -53,13 +57,13 @@ bazel build //tools/adt/idea/...
 To run a single test:
 
 ```
-bazel test //tools/adt/idea:android_tests --test_filter=AndroidLayoutDomTest
+bazel test //tools/adt/idea/android/... --test_filter=AndroidLayoutDomTest
 ```
 
 To debug a single test, which will open remote debugging:
 
 ```
-bazel test //tools/adt/idea:android_tests --test_filter=AndroidLayoutDomTest --java_debug
+bazel test //tools/adt/idea/android/... --test_filter=AndroidLayoutDomTest --java_debug
 ```
 
 ## Useful Bazel options
@@ -147,12 +151,14 @@ Invoked by running:
 bazel run //tools/base/bazel:third_party_build_generator
 ```
 
-The dependencies we need are specified in the BUILD file in this package.
+The tool looks for names and versions of libraries in `//tools/buildSrc/base/dependencies.properties`.
+The same file is read by our Gradle scripts, to keep the set of dependencies consistent between the
+two.
 
 ### add\_dependency
 
-Can be used to download one or more Maven artifacts into prebuilts, including
-all transitive dependencies.
+Can be used to download one or more Maven artifacts (JARs, AARs or APKs) into
+prebuilts, including all transitive dependencies.
 
 Invoked by running:
 
@@ -164,6 +170,14 @@ You can also use it to download protoc binaries, like this:
 
 ```
 bazel run //tools/base/bazel:add_dependency com.google.protobuf:protoc:exe:linux-x86_64:3.0.0
+```
+
+The tool by default uses Maven Central, JCenter and the Google Maven
+repository. You can add more (like a staging repository for libraries to be
+pushed to maven.google.com) using a flag:
+
+```
+bazel run //tools/base/bazel:add_dependency -- --repo=https://example.com/m2 com.example:foo:1.0
 ```
 
 ### java\_import\_generator

@@ -45,13 +45,12 @@ import org.junit.experimental.categories.Category;
 public class NdkSanAngelesTest {
     @ClassRule public static GradleTestProject project = GradleTestProject.builder()
             .fromTestProject("ndkSanAngeles")
-            .addGradleProperties("android.useDeprecatedNdk=true")
             .create();
 
     public static AndroidProject model;
 
     @BeforeClass
-    public static void setUp() {
+    public static void setUp() throws Exception {
         model = project.executeAndReturnModel("clean", "assembleDebug").getOnlyModel();
     }
 
@@ -62,12 +61,12 @@ public class NdkSanAngelesTest {
     }
 
     @Test
-    public void lint() {
+    public void lint() throws Exception {
         project.execute("lint");
     }
 
     @Test
-    public void checkVersionCodeInModel() {
+    public void checkVersionCodeInModel() throws Exception {
         Collection<Variant> variants = model.getVariants();
         assertEquals("Variant Count", 2, variants.size());
 
@@ -89,9 +88,7 @@ public class NdkSanAngelesTest {
 
         assertEquals(3, debugOutputs.size());
         for (AndroidArtifactOutput output : debugOutputs) {
-            Collection<? extends OutputFile> outputFiles = output.getOutputs();
-            assertEquals(1, outputFiles.size());
-            for (FilterData filterData : outputFiles.iterator().next().getFilters()) {
+            for (FilterData filterData : output.getFilters()) {
                 if (filterData.getFilterType().equals(OutputFile.ABI)) {
                     String abiFilter = filterData.getIdentifier();
                     Integer value = expected.get(abiFilter);
@@ -110,7 +107,7 @@ public class NdkSanAngelesTest {
 
     @Test
     @Category(DeviceTests.class)
-    public void connectedCheck() {
+    public void connectedCheck() throws Exception {
         project.executeConnectedCheck();
     }
 }

@@ -18,16 +18,18 @@ package com.android.ddmlib;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.annotations.VisibleForTesting;
 import com.android.annotations.concurrency.GuardedBy;
 import com.android.ddmlib.Log.LogLevel;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.io.Closeables;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -51,7 +53,6 @@ import java.util.concurrent.TimeUnit;
  * <p><b>{@link #init(boolean)} must be called before anything is done.</b>
  */
 public final class AndroidDebugBridge {
-
     /*
      * Minimum and maximum version of adb supported. This correspond to
      * ADB_SERVER_VERSION found in //device/tools/adb/adb.h
@@ -66,6 +67,10 @@ public final class AndroidDebugBridge {
     static final String DEFAULT_ADB_HOST = "127.0.0.1"; //$NON-NLS-1$
     static final int DEFAULT_ADB_PORT = 5037;
 
+    // Only set when in unit testing mode. This is a hack until we move to devicelib.
+    // http://b.android.com/221925
+    private static boolean sUnitTestMode;
+
     /** Port where adb server will be started **/
     private static int sAdbServerPort = 0;
 
@@ -75,6 +80,8 @@ public final class AndroidDebugBridge {
     private static AndroidDebugBridge sThis;
     private static boolean sInitialized = false;
     private static boolean sClientSupport;
+    private static boolean sUseLibusb;
+    private static Map<String, String> sEnv; // env vars to set while launching adb
 
     /** Full path to adb. */
     private String mAdbOsLocation = null;
@@ -98,8 +105,8 @@ public final class AndroidDebugBridge {
             Sets.newCopyOnWriteArraySet();
 
     /**
-     * Classes which implement this interface provide a method that deals
-     * with {@link AndroidDebugBridge} changes.
+     * Classes which implement this interface provide a method that deals with {@link
+     * AndroidDebugBridge} changes (including restarts).
      */
     public interface IDebugBridgeChangeListener {
         /**
@@ -110,6 +117,22 @@ public final class AndroidDebugBridge {
          *               initializing the bridge
          */
         void bridgeChanged(@Nullable AndroidDebugBridge bridge);
+
+        /**
+         * Sent before trigger a restart.
+         *
+         * <p>Note: Callback is inside a synchronized block so handler should be fast.
+         */
+        default void restartInitiated() {}
+
+        /**
+         * Sent when a restarted is finished.
+         *
+         * <p>Note: Callback is inside a synchronized block so handler should be fast.
+         *
+         * @param isSuccessful if the bridge is successfully restarted.
+         */
+        default void restartCompleted(boolean isSuccessful) {};
     }
 
     /**
@@ -206,11 +229,17 @@ public final class AndroidDebugBridge {
      * @see DdmPreferences
      */
     public static synchronized void init(boolean clientSupport) {
-        if (sInitialized) {
-            throw new IllegalStateException("AndroidDebugBridge.init() has already been called.");
-        }
+        init(clientSupport, false, ImmutableMap.of());
+    }
+
+    public static synchronized void init(
+            boolean clientSupport, boolean useLibusb, @NonNull Map<String, String> env) {
+        Preconditions.checkState(
+                !sInitialized, "AndroidDebugBridge.init() has already been called.");
         sInitialized = true;
         sClientSupport = clientSupport;
+        sUseLibusb = useLibusb;
+        sEnv = env;
 
         // Determine port and instantiate socket address.
         initAdbSocketAddr();
@@ -227,6 +256,26 @@ public final class AndroidDebugBridge {
         HandleProfiling.register(monitorThread);
         HandleNativeHeap.register(monitorThread);
         HandleViewDebug.register(monitorThread);
+    }
+
+    @VisibleForTesting
+    public static void enableFakeAdbServerMode(int port) {
+        Preconditions.checkState(
+                !sInitialized,
+                "AndroidDebugBridge.init() has already been called or "
+                        + "terminate() has not been called yet.");
+        sUnitTestMode = true;
+        sAdbServerPort = port;
+    }
+
+    @VisibleForTesting
+    public static void disableFakeAdbServerMode() {
+        Preconditions.checkState(
+                !sInitialized,
+                "AndroidDebugBridge.init() has already been called or "
+                        + "terminate() has not been called yet.");
+        sUnitTestMode = false;
+        sAdbServerPort = 0;
     }
 
     /**
@@ -312,13 +361,16 @@ public final class AndroidDebugBridge {
     public static AndroidDebugBridge createBridge(@NonNull String osLocation,
                                                   boolean forceNewBridge) {
         synchronized (sLock) {
-            if (sThis != null) {
-                if (sThis.mAdbOsLocation != null && sThis.mAdbOsLocation.equals(osLocation) &&
-                        !forceNewBridge) {
-                    return sThis;
-                } else {
-                    // stop the current server
-                    sThis.stop();
+            if (!sUnitTestMode) {
+                if (sThis != null) {
+                    if (sThis.mAdbOsLocation != null
+                            && sThis.mAdbOsLocation.equals(osLocation)
+                            && !forceNewBridge) {
+                        return sThis;
+                    } else {
+                        // stop the current server
+                        sThis.stop();
+                    }
                 }
             }
 
@@ -570,7 +622,7 @@ public final class AndroidDebugBridge {
         ListenableFuture<AdbVersion> future = getAdbVersion(adb);
         AdbVersion version;
         try {
-            version = future.get(5, TimeUnit.SECONDS);
+            version = future.get(DdmPreferences.getTimeOut(), TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             return;
         } catch (java.util.concurrent.TimeoutException e) {
@@ -704,18 +756,31 @@ public final class AndroidDebugBridge {
                     "Attempting to restart adb, but version check failed!"); //$NON-NLS-1$
             return false;
         }
+
+        synchronized (sLock) {
+            for (IDebugBridgeChangeListener listener : sBridgeListeners) {
+                listener.restartInitiated();
+            }
+        }
+        boolean restart;
         synchronized (this) {
             stopAdb();
 
-            boolean restart = startAdb();
+            restart = startAdb();
 
             if (restart && mDeviceMonitor == null) {
                 mDeviceMonitor = new DeviceMonitor(this);
                 mDeviceMonitor.start();
             }
-
-            return restart;
         }
+
+        synchronized (sLock) {
+            for (IDebugBridgeChangeListener listener : sBridgeListeners) {
+                listener.restartCompleted(restart);
+            }
+        }
+
+        return restart;
     }
 
     /**
@@ -832,6 +897,11 @@ public final class AndroidDebugBridge {
      * @return true if success
      */
     synchronized boolean startAdb() {
+        if (sUnitTestMode) {
+            // in this case, we assume the FakeAdbServer was already setup by the test code
+            return true;
+        }
+
         if (mAdbOsLocation == null) {
             Log.e(ADB,
                 "Cannot start adb when AndroidDebugBridge is created without the location of adb."); //$NON-NLS-1$
@@ -851,11 +921,13 @@ public final class AndroidDebugBridge {
         try {
             Log.d(DDMS, String.format("Launching '%1$s' to ensure ADB is running.", commandString));
             ProcessBuilder processBuilder = new ProcessBuilder(command);
+            Map<String, String> env = processBuilder.environment();
+            env.put("ADB_LIBUSB", sUseLibusb ? "1" : "0");
+            sEnv.forEach(env::put);
             if (DdmPreferences.getUseAdbHost()) {
                 String adbHostValue = DdmPreferences.getAdbHostValue();
                 if (adbHostValue != null && !adbHostValue.isEmpty()) {
                     //TODO : check that the String is a valid IP address
-                    Map<String, String> env = processBuilder.environment();
                     env.put("ADBHOST", adbHostValue);
                 }
             }
@@ -1039,7 +1111,10 @@ public final class AndroidDebugBridge {
      */
     private static void initAdbSocketAddr() {
         try {
-            sAdbServerPort = getAdbServerPort();
+            // If we're in unit test mode, we already manually set sAdbServerPort.
+            if (!sUnitTestMode) {
+                sAdbServerPort = getAdbServerPort();
+            }
             sHostAddr = InetAddress.getByName(DEFAULT_ADB_HOST);
             sSocketAddr = new InetSocketAddress(sHostAddr, sAdbServerPort);
         } catch (UnknownHostException e) {
@@ -1122,5 +1197,4 @@ public final class AndroidDebugBridge {
             throw new IllegalArgumentException("Not a valid port number");
         }
     }
-
 }

@@ -288,37 +288,23 @@ public class UselessViewDetectorTest extends AbstractCheckTest {
                         + "</LinearLayout>")));
     }
 
-    public void testUselessParentWithStyleAttribute() throws Exception {
-        assertEquals("No warnings.",
-                lintProject(xml("res/layout/my_layout.xml", ""
+    public void testDataBinding() {
+        // Regression test for 37140356
+        lint().files(
+                xml("res/layout/layout.xml", ""
                         + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                        + "<LinearLayout\n"
+                        + "<FrameLayout \n"
                         + "    xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                        + "    xmlns:tools=\"http://schemas.android.com/tools\"\n"
-                        + "    android:orientation=\"vertical\"\n"
-                        + "    android:layout_width=\"match_parent\"\n"
-                        + "    android:layout_height=\"match_parent\"\n"
-                        + "    android:background=\"@color/header\">\n"
-                        + "  <!-- The FrameLayout acts as grey header border around the searchbox -->\n"
-                        + "  <FrameLayout style=\"@style/Header.SearchBox\">\n"
-                        + "    <!-- This is an editable form of @layout/search_field_unedittable -->\n"
-                        + "    <LinearLayout\n"
-                        + "        android:orientation=\"horizontal\"\n"
-                        + "        android:layout_width=\"match_parent\"\n"
-                        + "        android:layout_height=\"wrap_content\"\n"
-                        + "        style=\"@style/SearchBox\">\n"
-                        + "      <TextView\n"
-                        + "          android:id=\"@+id/search_prefix\"\n"
-                        + "          style=\"@style/SearchBoxText.Prefix\"\n"
-                        + "          tools:text=\"From:\"/>\n"
-                        + "      <EditText\n"
-                        + "          android:id=\"@+id/search_query\"\n"
-                        + "          android:layout_width=\"match_parent\"\n"
-                        + "          android:layout_height=\"wrap_content\"\n"
-                        + "          android:singleLine=\"true\"\n"
-                        + "          style=\"@style/SearchBoxText\"/>\n"
-                        + "    </LinearLayout>\n"
-                        + "  </FrameLayout>\n"
-                        + "</LinearLayout>")));
+                        + "    xmlns:app=\"http://schemas.android.com/apk/res/foo.bar.baz\"\n"
+                        + "             android:layout_width=\"match_parent\"\n"
+                        + "             android:layout_height=\"wrap_content\">\n"
+                        + "        <LinearLayout\n"
+                        + "            android:layout_width=\"match_parent\" \n"
+                        + "            android:layout_height=\"wrap_content\" \n"
+                        + "            android:orientation=\"vertical\" \n"
+                        + "            app:viewModel=\"@{viewModel}\" /> "
+                        + "</FrameLayout>\n"))
+                .run()
+                .expectClean();
     }
 }

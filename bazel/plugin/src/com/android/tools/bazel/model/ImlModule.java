@@ -19,18 +19,25 @@ package com.android.tools.bazel.model;
 import com.android.tools.bazel.parser.ast.CallExpression;
 import com.android.tools.bazel.parser.ast.CallStatement;
 import com.google.common.collect.ImmutableList;
-
 import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class ImlModule extends BazelRule {
+
+    public enum Tag {
+        MODULE,
+        TEST,
+    }
 
     private List<String> sources = new LinkedList<>();
     private List<String> testSources = new LinkedList<>();
     private List<String> testResources = new LinkedList<>();
     private List<String> resources = new LinkedList<>();
     private List<String> exclude = new LinkedList<>();
-    private Map<BazelRule, List<String>> dependencyTags = new HashMap<>();
+    private List<String> imlFiles = new LinkedList<>();
+    private Map<String, String> prefixes = new LinkedHashMap<>();
+    private Map<BazelRule, List<Tag>> dependencyTags = new HashMap<>();
 
     public ImlModule(Package pkg, String name) {
         super(pkg, name);
@@ -51,6 +58,9 @@ public class ImlModule extends BazelRule {
         call.setArgument("test_resources", testResources);
         call.setArgument("deps", tagDependencies(dependencies));
         call.setArgument("exports", exported);
+        call.setArgument("iml_files", imlFiles);
+        call.setArgument("package_prefixes", prefixes);
+
         if (!statement.isFromFile()) {
             call.setArgument("visibility", ImmutableList.of("//visibility:public"));
         }
@@ -66,19 +76,35 @@ public class ImlModule extends BazelRule {
     private List<String> tagDependencies(Set<BazelRule> dependencies) {
         List<String> deps = new LinkedList<>();
         for (BazelRule dependency : dependencies) {
-            List<String> tags = dependencyTags.get(dependency);
+            List<Tag> tags = dependencyTags.get(dependency);
             String suffix = "";
             if (tags != null && tags.size() > 0) {
-                suffix = "[" + String.join(", ", tags) + "]";
+                suffix =
+                        tags.stream()
+                                .map(tag -> tag.name().toLowerCase())
+                                .collect(Collectors.joining(", ", "[", "]"));
             }
             deps.add(dependency.getLabel() + suffix);
         }
         return deps;
     }
 
-    public void addDependency(BazelRule rule, boolean isExported, List<String> tags) {
+    public void addDependency(BazelRule rule, boolean isExported, List<Tag> tags) {
         super.addDependency(rule, isExported);
+        List<Tag> oldTags = dependencyTags.get(rule);
+        // Don't override with test if the dependency was not test already.
+        if (oldTags != null && !oldTags.contains(Tag.TEST) && tags.contains(Tag.TEST)) {
+            tags.remove(Tag.TEST);
+        }
         dependencyTags.put(rule, tags);
+    }
+
+    public void addPackagePrefix(String src, String prefix) {
+        prefixes.put(src, prefix);
+    }
+
+    public void addModuleFile(String name) {
+        imlFiles.add(name);
     }
 
     public void addSource(String source) {

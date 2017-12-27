@@ -21,25 +21,24 @@ import static com.android.build.gradle.integration.common.truth.TruthHelper.asse
 
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.app.HelloWorldApp;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.InstantRun;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -54,11 +53,15 @@ public class JavaResourcesTest {
 
     @Parameterized.Parameters(name="{0}")
     public static Collection<Object[]> getParameters() {
-        return Arrays.asList(new Object[][]{{19}, {21}, {24}});
+        return Arrays.asList(
+                new Object[][] {
+                    {new AndroidVersion(19, null)},
+                    {new AndroidVersion(21, null)},
+                    {new AndroidVersion(24, null)}
+                });
     }
 
-    @Parameterized.Parameter(0)
-    public int apiLevel;
+    @Parameterized.Parameter() public AndroidVersion androidVersion;
 
     @Rule
     public GradleTestProject project = GradleTestProject.builder()
@@ -68,8 +71,7 @@ public class JavaResourcesTest {
     private File resource;
 
     @Before
-    public void setUp() throws IOException {
-        Assume.assumeFalse("Disabled until instant run supports Jack", GradleTestProject.USE_JACK);
+    public void setUp() throws Exception {
         resource = project.file("src/main/resources/foo.txt");
         FileUtils.createFile(resource, "foo");
     }
@@ -78,9 +80,7 @@ public class JavaResourcesTest {
     public void testChangingJavaResources() throws Exception {
         AndroidProject model = project.model().getSingle().getOnlyModel();
         InstantRun instantRunModel = InstantRunTestUtils.getInstantRunModel(model);
-        project.executor()
-                .withInstantRun(apiLevel, ColdswapMode.DEFAULT)
-                .run("assembleDebug");
+        project.executor().withInstantRun(androidVersion).run("assembleDebug");
 
         InstantRunBuildInfo context = InstantRunTestUtils.loadContext(instantRunModel);
         assertThat(context.getVerifierStatus()).isEqualTo(
@@ -88,7 +88,7 @@ public class JavaResourcesTest {
 
         List<InstantRunArtifact> mainArtifacts;
 
-        if (apiLevel < 24) {
+        if (androidVersion.getFeatureLevel() < 21) {
             mainArtifacts = context.getArtifacts();
         } else {
             mainArtifacts = context.getArtifacts().stream()
@@ -96,21 +96,20 @@ public class JavaResourcesTest {
                     .collect(Collectors.toList());
         }
         assertThat(mainArtifacts).hasSize(1);
-        assertThatApk(Iterables.getOnlyElement(mainArtifacts).file)
+        assertThatApk(new Apk(Iterables.getOnlyElement(mainArtifacts).file))
                 .containsFileWithContent("foo.txt", "foo");
         Files.write("bar", resource, Charsets.UTF_8);
 
-        project.executor()
-                .withInstantRun(apiLevel, ColdswapMode.DEFAULT)
-                .run("assembleDebug");
+        project.executor().withInstantRun(androidVersion).run("assembleDebug");
 
         //TODO: switch back to loadContext when it no longer adds more artifacts.
-        InstantRunBuildContext context2 = InstantRunTestUtils.loadBuildContext(apiLevel, instantRunModel);
+        InstantRunBuildContext context2 =
+                InstantRunTestUtils.loadBuildContext(androidVersion, instantRunModel);
         assertThat(context2.getLastBuild().getVerifierStatus()).isEqualTo(
                 InstantRunVerifierStatus.JAVA_RESOURCES_CHANGED);
         assertThat(context2.getLastBuild().getArtifacts()).hasSize(1);
 
-        assertThatApk(context2.getLastBuild().getArtifacts().get(0).getLocation())
+        assertThatApk(new Apk(context2.getLastBuild().getArtifacts().get(0).getLocation()))
                 .containsFileWithContent("foo.txt", "bar");
     }
 }

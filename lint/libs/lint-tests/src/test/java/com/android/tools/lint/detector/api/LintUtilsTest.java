@@ -16,6 +16,8 @@
 
 package com.android.tools.lint.detector.api;
 
+import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.ATTR_NAME;
 import static com.android.SdkConstants.DOT_JAVA;
 import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN;
 import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN_WRAPPER;
@@ -35,13 +37,32 @@ import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT;
 import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
 import static com.android.tools.lint.detector.api.LintUtils.computeResourceName;
 import static com.android.tools.lint.detector.api.LintUtils.convertVersion;
+import static com.android.tools.lint.detector.api.LintUtils.describeCounts;
+import static com.android.tools.lint.detector.api.LintUtils.editDistance;
+import static com.android.tools.lint.detector.api.LintUtils.endsWith;
 import static com.android.tools.lint.detector.api.LintUtils.findSubstring;
+import static com.android.tools.lint.detector.api.LintUtils.formatList;
 import static com.android.tools.lint.detector.api.LintUtils.getAutoBoxedType;
+import static com.android.tools.lint.detector.api.LintUtils.getBaseName;
+import static com.android.tools.lint.detector.api.LintUtils.getChildren;
+import static com.android.tools.lint.detector.api.LintUtils.getCommonParent;
+import static com.android.tools.lint.detector.api.LintUtils.getEncodedString;
+import static com.android.tools.lint.detector.api.LintUtils.getFileNameWithParent;
 import static com.android.tools.lint.detector.api.LintUtils.getFormattedParameters;
+import static com.android.tools.lint.detector.api.LintUtils.getLocale;
 import static com.android.tools.lint.detector.api.LintUtils.getLocaleAndRegion;
 import static com.android.tools.lint.detector.api.LintUtils.getPrimitiveType;
+import static com.android.tools.lint.detector.api.LintUtils.idReferencesMatch;
+import static com.android.tools.lint.detector.api.LintUtils.isDataBindingExpression;
+import static com.android.tools.lint.detector.api.LintUtils.isEditableTo;
 import static com.android.tools.lint.detector.api.LintUtils.isImported;
+import static com.android.tools.lint.detector.api.LintUtils.isJavaKeyword;
+import static com.android.tools.lint.detector.api.LintUtils.isModelOlderThan;
+import static com.android.tools.lint.detector.api.LintUtils.isXmlFile;
+import static com.android.tools.lint.detector.api.LintUtils.resolveManifestName;
 import static com.android.tools.lint.detector.api.LintUtils.splitPath;
+import static com.android.tools.lint.detector.api.LintUtils.startsWith;
+import static com.android.tools.lint.detector.api.LintUtils.stripIdPrefix;
 import static com.android.utils.SdkUtils.escapePropertyValue;
 import static com.google.common.truth.Truth.assertThat;
 import static java.io.File.separatorChar;
@@ -57,14 +78,26 @@ import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
 import com.android.testutils.TestUtils;
 import com.android.tools.lint.LintCliClient;
-import com.android.tools.lint.checks.BuiltinIssueRegistry;
+import com.android.tools.lint.checks.infrastructure.LintDetectorTest;
+import com.android.tools.lint.checks.infrastructure.TestFiles;
+import com.android.tools.lint.checks.infrastructure.TestIssueRegistry;
+import com.android.tools.lint.checks.infrastructure.TestLintClient;
 import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.client.api.LintDriver;
+import com.android.tools.lint.client.api.LintRequest;
+import com.android.tools.lint.client.api.UastParser;
+import com.android.tools.lint.client.api.XmlParser;
+import com.android.utils.Pair;
+import com.android.utils.XmlUtils;
+import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
+import com.google.common.io.Files;
+import com.intellij.openapi.Disposable;
 import com.intellij.psi.PsiJavaFile;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.util.Arrays;
 import java.util.Collections;
@@ -74,93 +107,108 @@ import java.util.regex.Pattern;
 import junit.framework.TestCase;
 import lombok.ast.Node;
 import org.intellij.lang.annotations.Language;
+import org.jetbrains.uast.UFile;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 @SuppressWarnings("javadoc")
 public class LintUtilsTest extends TestCase {
     public void testPrintList() throws Exception {
+        assertEquals("bar, baz, foo",
+                formatList(Arrays.asList("foo", "bar", "baz"), 3));
         assertEquals("foo, bar, baz",
-                LintUtils.formatList(Arrays.asList("foo", "bar", "baz"), 3));
+                formatList(Arrays.asList("foo", "bar", "baz"), 3, false));
         assertEquals("foo, bar, baz",
-                LintUtils.formatList(Arrays.asList("foo", "bar", "baz"), 5));
+                formatList(Arrays.asList("foo", "bar", "baz"), 5, false));
 
         assertEquals("foo, bar, baz... (3 more)",
-                LintUtils.formatList(
-                        Arrays.asList("foo", "bar", "baz", "4", "5", "6"), 3));
+                formatList(
+                        Arrays.asList("foo", "bar", "baz", "4", "5", "6"), 3, false));
         assertEquals("foo... (5 more)",
-                LintUtils.formatList(
-                        Arrays.asList("foo", "bar", "baz", "4", "5", "6"), 1));
+                formatList(
+                        Arrays.asList("foo", "bar", "baz", "4", "5", "6"), 1, false));
         assertEquals("foo, bar, baz",
-                LintUtils.formatList(Arrays.asList("foo", "bar", "baz"), 0));
+                formatList(Arrays.asList("foo", "bar", "baz"), 0, false));
+    }
+
+    public void testIsDataBindingExpression() {
+        assertTrue(isDataBindingExpression("@{foo}"));
+        assertTrue(isDataBindingExpression("@={foo}"));
+        assertFalse(isDataBindingExpression("@string/foo"));
+        assertFalse(isDataBindingExpression("?string/foo"));
+        assertFalse(isDataBindingExpression(""));
+        assertFalse(isDataBindingExpression("foo"));
     }
 
     public void testDescribeCounts() throws Exception {
-        assertThat(LintUtils.describeCounts(0, 0, true)).isEqualTo("No errors or warnings");
-        assertThat(LintUtils.describeCounts(0, 1, true)).isEqualTo("1 warning");
-        assertThat(LintUtils.describeCounts(1, 0, true)).isEqualTo("1 error");
-        assertThat(LintUtils.describeCounts(0, 2, true)).isEqualTo("2 warnings");
-        assertThat(LintUtils.describeCounts(2, 0, true)).isEqualTo("2 errors");
-        assertThat(LintUtils.describeCounts(2, 1, false)).isEqualTo("2 errors and 1 warning");
-        assertThat(LintUtils.describeCounts(1, 2, false)).isEqualTo("1 error and 2 warnings");
-        assertThat(LintUtils.describeCounts(5, 4, false)).isEqualTo("5 errors and 4 warnings");
-        assertThat(LintUtils.describeCounts(2, 1, true)).isEqualTo("2 errors, 1 warning");
-        assertThat(LintUtils.describeCounts(1, 2, true)).isEqualTo("1 error, 2 warnings");
-        assertThat(LintUtils.describeCounts(5, 4, true)).isEqualTo("5 errors, 4 warnings");
+        assertThat(describeCounts(0, 0, true, true)).isEqualTo("No errors or warnings");
+        assertThat(describeCounts(0, 0, true, false)).isEqualTo("no errors or warnings");
+        assertThat(describeCounts(0, 1, true, true)).isEqualTo("1 warning");
+        assertThat(describeCounts(1, 0, true, true)).isEqualTo("1 error");
+        assertThat(describeCounts(0, 2, true, true)).isEqualTo("2 warnings");
+        assertThat(describeCounts(2, 0, true, true)).isEqualTo("2 errors");
+        assertThat(describeCounts(2, 1, false, true)).isEqualTo("2 errors and 1 warning");
+        assertThat(describeCounts(1, 2, false, true)).isEqualTo("1 error and 2 warnings");
+        assertThat(describeCounts(5, 4, false, true)).isEqualTo("5 errors and 4 warnings");
+        assertThat(describeCounts(2, 1, true, true)).isEqualTo("2 errors, 1 warning");
+        assertThat(describeCounts(1, 2, true, true)).isEqualTo("1 error, 2 warnings");
+        assertThat(describeCounts(5, 4, true, true)).isEqualTo("5 errors, 4 warnings");
     }
 
     public void testEndsWith() throws Exception {
-        assertTrue(LintUtils.endsWith("Foo", ""));
-        assertTrue(LintUtils.endsWith("Foo", "o"));
-        assertTrue(LintUtils.endsWith("Foo", "oo"));
-        assertTrue(LintUtils.endsWith("Foo", "Foo"));
-        assertTrue(LintUtils.endsWith("Foo", "FOO"));
-        assertTrue(LintUtils.endsWith("Foo", "fOO"));
+        assertTrue(endsWith("Foo", ""));
+        assertTrue(endsWith("Foo", "o"));
+        assertTrue(endsWith("Foo", "oo"));
+        assertTrue(endsWith("Foo", "Foo"));
+        assertTrue(endsWith("Foo", "FOO"));
+        assertTrue(endsWith("Foo", "fOO"));
 
-        assertFalse(LintUtils.endsWith("Foo", "f"));
+        assertFalse(endsWith("Foo", "f"));
     }
 
     public void testStartsWith() throws Exception {
-        assertTrue(LintUtils.startsWith("FooBar", "Bar", 3));
-        assertTrue(LintUtils.startsWith("FooBar", "BAR", 3));
-        assertTrue(LintUtils.startsWith("FooBar", "Foo", 0));
-        assertFalse(LintUtils.startsWith("FooBar", "Foo", 2));
+        assertTrue(startsWith("FooBar", "Bar", 3));
+        assertTrue(startsWith("FooBar", "BAR", 3));
+        assertTrue(startsWith("FooBar", "Foo", 0));
+        assertFalse(startsWith("FooBar", "Foo", 2));
     }
 
     public void testIsXmlFile() throws Exception {
-        assertTrue(LintUtils.isXmlFile(new File("foo.xml")));
-        assertTrue(LintUtils.isXmlFile(new File("foo.Xml")));
-        assertTrue(LintUtils.isXmlFile(new File("foo.XML")));
+        assertTrue(isXmlFile(new File("foo.xml")));
+        assertTrue(isXmlFile(new File("foo.Xml")));
+        assertTrue(isXmlFile(new File("foo.XML")));
 
-        assertFalse(LintUtils.isXmlFile(new File("foo.png")));
-        assertFalse(LintUtils.isXmlFile(new File("xml")));
-        assertFalse(LintUtils.isXmlFile(new File("xml.png")));
+        assertFalse(isXmlFile(new File("foo.png")));
+        assertFalse(isXmlFile(new File("xml")));
+        assertFalse(isXmlFile(new File("xml.png")));
     }
 
     public void testGetBasename() throws Exception {
-        assertEquals("foo", LintUtils.getBaseName("foo.png"));
-        assertEquals("foo", LintUtils.getBaseName("foo.9.png"));
-        assertEquals(".foo", LintUtils.getBaseName(".foo"));
+        assertEquals("foo", getBaseName("foo.png"));
+        assertEquals("foo", getBaseName("foo.9.png"));
+        assertEquals(".foo", getBaseName(".foo"));
     }
 
     public void testEditDistance() {
-        assertEquals(0, LintUtils.editDistance("kitten", "kitten"));
+        assertEquals(0, editDistance("kitten", "kitten"));
 
         // editing kitten to sitting has edit distance 3:
         //   replace k with s
         //   replace e with i
         //   append g
-        assertEquals(3, LintUtils.editDistance("kitten", "sitting"));
+        assertEquals(3, editDistance("kitten", "sitting"));
 
-        assertEquals(3, LintUtils.editDistance("saturday", "sunday"));
-        assertEquals(1, LintUtils.editDistance("button", "bitton"));
-        assertEquals(6, LintUtils.editDistance("radiobutton", "bitton"));
+        assertEquals(3, editDistance("saturday", "sunday"));
+        assertEquals(1, editDistance("button", "bitton"));
+        assertEquals(6, editDistance("radiobutton", "bitton"));
 
-        assertEquals(6, LintUtils.editDistance("radiobutton", "bitton", 10));
-        assertEquals(6, LintUtils.editDistance("radiobutton", "bitton", 6));
-        assertEquals(Integer.MAX_VALUE, LintUtils.editDistance("radiobutton", "bitton", 3));
+        assertEquals(6, editDistance("radiobutton", "bitton", 10));
+        assertEquals(6, editDistance("radiobutton", "bitton", 6));
+        assertEquals(Integer.MAX_VALUE, editDistance("radiobutton", "bitton", 3));
 
-        assertTrue(LintUtils.isEditableTo("radiobutton", "bitton", 10));
-        assertTrue(LintUtils.isEditableTo("radiobutton", "bitton", 6));
-        assertFalse(LintUtils.isEditableTo("radiobutton", "bitton", 3));
+        assertTrue(isEditableTo("radiobutton", "bitton", 10));
+        assertTrue(isEditableTo("radiobutton", "bitton", 6));
+        assertFalse(isEditableTo("radiobutton", "bitton", 3));
     }
 
     public void testSplitPath() throws Exception {
@@ -189,80 +237,80 @@ public class LintUtilsTest extends TestCase {
     }
 
     public void testCommonParen1() {
-        assertEquals(new File("/a"), (LintUtils.getCommonParent(
+        assertEquals(new File("/a"), (getCommonParent(
                 new File("/a/b/c/d/e"), new File("/a/c"))));
-        assertEquals(new File("/a"), (LintUtils.getCommonParent(
+        assertEquals(new File("/a"), (getCommonParent(
                 new File("/a/c"), new File("/a/b/c/d/e"))));
 
-        assertEquals(new File("/"), LintUtils.getCommonParent(
+        assertEquals(new File("/"), getCommonParent(
                 new File("/foo/bar"), new File("/bar/baz")));
-        assertEquals(new File("/"), LintUtils.getCommonParent(
+        assertEquals(new File("/"), getCommonParent(
                 new File("/foo/bar"), new File("/")));
-        assertNull(LintUtils.getCommonParent(
+        assertNull(getCommonParent(
                new File("C:\\Program Files"), new File("F:\\")));
-        assertNull(LintUtils.getCommonParent(
+        assertNull(getCommonParent(
                 new File("C:/Program Files"), new File("F:/")));
 
-        assertEquals(new File("/foo/bar/baz"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo/bar/baz"), getCommonParent(
                 new File("/foo/bar/baz"), new File("/foo/bar/baz")));
-        assertEquals(new File("/foo/bar"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo/bar"), getCommonParent(
                 new File("/foo/bar/baz"), new File("/foo/bar")));
-        assertEquals(new File("/foo/bar"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo/bar"), getCommonParent(
                 new File("/foo/bar/baz"), new File("/foo/bar/foo")));
-        assertEquals(new File("/foo"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo"), getCommonParent(
                 new File("/foo/bar"), new File("/foo/baz")));
-        assertEquals(new File("/foo"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo"), getCommonParent(
                 new File("/foo/bar"), new File("/foo/baz")));
-        assertEquals(new File("/foo/bar"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo/bar"), getCommonParent(
                 new File("/foo/bar"), new File("/foo/bar/baz")));
     }
 
     public void testCommonParent2() {
-        assertEquals(new File("/"), LintUtils.getCommonParent(
+        assertEquals(new File("/"), getCommonParent(
                 Arrays.asList(new File("/foo/bar"), new File("/bar/baz"))));
-        assertEquals(new File("/"), LintUtils.getCommonParent(
+        assertEquals(new File("/"), getCommonParent(
                 Arrays.asList(new File("/foo/bar"), new File("/"))));
-        assertNull(LintUtils.getCommonParent(
+        assertNull(getCommonParent(
                 Arrays.asList(new File("C:\\Program Files"), new File("F:\\"))));
-        assertNull(LintUtils.getCommonParent(
+        assertNull(getCommonParent(
                 Arrays.asList(new File("C:/Program Files"), new File("F:/"))));
 
-        assertEquals(new File("/foo"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo"), getCommonParent(
                 Arrays.asList(new File("/foo/bar"), new File("/foo/baz"))));
-        assertEquals(new File("/foo"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo"), getCommonParent(
                 Arrays.asList(new File("/foo/bar"), new File("/foo/baz"),
                         new File("/foo/baz/f"))));
-        assertEquals(new File("/foo/bar"), LintUtils.getCommonParent(
+        assertEquals(new File("/foo/bar"), getCommonParent(
                 Arrays.asList(new File("/foo/bar"), new File("/foo/bar/baz"),
                         new File("/foo/bar/foo2/foo3"))));
     }
 
     public void testStripIdPrefix() throws Exception {
-        assertEquals("foo", LintUtils.stripIdPrefix("@+id/foo"));
-        assertEquals("foo", LintUtils.stripIdPrefix("@id/foo"));
-        assertEquals("foo", LintUtils.stripIdPrefix("foo"));
+        assertEquals("foo", stripIdPrefix("@+id/foo"));
+        assertEquals("foo", stripIdPrefix("@id/foo"));
+        assertEquals("foo", stripIdPrefix("foo"));
     }
 
     public void testIdReferencesMatch() throws Exception {
-        assertTrue(LintUtils.idReferencesMatch("@+id/foo", "@+id/foo"));
-        assertTrue(LintUtils.idReferencesMatch("@id/foo", "@id/foo"));
-        assertTrue(LintUtils.idReferencesMatch("@id/foo", "@+id/foo"));
-        assertTrue(LintUtils.idReferencesMatch("@+id/foo", "@id/foo"));
+        assertTrue(idReferencesMatch("@+id/foo", "@+id/foo"));
+        assertTrue(idReferencesMatch("@id/foo", "@id/foo"));
+        assertTrue(idReferencesMatch("@id/foo", "@+id/foo"));
+        assertTrue(idReferencesMatch("@+id/foo", "@id/foo"));
 
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo", "@+id/bar"));
-        assertFalse(LintUtils.idReferencesMatch("@id/foo", "@+id/bar"));
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo", "@id/bar"));
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo", "@+id/bar"));
+        assertFalse(idReferencesMatch("@+id/foo", "@+id/bar"));
+        assertFalse(idReferencesMatch("@id/foo", "@+id/bar"));
+        assertFalse(idReferencesMatch("@+id/foo", "@id/bar"));
+        assertFalse(idReferencesMatch("@+id/foo", "@+id/bar"));
 
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo", "@+id/foo1"));
-        assertFalse(LintUtils.idReferencesMatch("@id/foo", "@id/foo1"));
-        assertFalse(LintUtils.idReferencesMatch("@id/foo", "@+id/foo1"));
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo", "@id/foo1"));
+        assertFalse(idReferencesMatch("@+id/foo", "@+id/foo1"));
+        assertFalse(idReferencesMatch("@id/foo", "@id/foo1"));
+        assertFalse(idReferencesMatch("@id/foo", "@+id/foo1"));
+        assertFalse(idReferencesMatch("@+id/foo", "@id/foo1"));
 
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo1", "@+id/foo"));
-        assertFalse(LintUtils.idReferencesMatch("@id/foo1", "@id/foo"));
-        assertFalse(LintUtils.idReferencesMatch("@id/foo1", "@+id/foo"));
-        assertFalse(LintUtils.idReferencesMatch("@+id/foo1", "@id/foo"));
+        assertFalse(idReferencesMatch("@+id/foo1", "@+id/foo"));
+        assertFalse(idReferencesMatch("@id/foo1", "@id/foo"));
+        assertFalse(idReferencesMatch("@id/foo1", "@+id/foo"));
+        assertFalse(idReferencesMatch("@+id/foo1", "@id/foo"));
     }
 
     private static void checkEncoding(String encoding, boolean writeBom, String lineEnding)
@@ -309,10 +357,10 @@ public class LintUtilsTest extends TestCase {
         writer.write(sb.toString());
         writer.close();
 
-        String s = LintUtils.getEncodedString(new LintCliClient(), file, true).toString();
+        String s = getEncodedString(new LintCliClient(), file, true).toString();
         assertEquals(expected, s);
 
-        CharSequence seq = LintUtils.getEncodedString(new LintCliClient(), file, false);
+        CharSequence seq = getEncodedString(new LintCliClient(), file, false);
         if (encoding.equalsIgnoreCase("utf-8")) {
             assertFalse(seq instanceof String);
         }
@@ -350,6 +398,47 @@ public class LintUtilsTest extends TestCase {
         checkEncoding("UTF_32LE", true /*bom*/, "\r\n");
     }
 
+    public void testGetLocale() throws Exception {
+        assertNull(getLocale(""));
+        assertNull(getLocale("values"));
+        assertNull(getLocale("values-xlarge-port"));
+        assertEquals("en", getLocale("values-en").getLanguage());
+        assertEquals("pt", getLocale("values-pt-rPT-nokeys").getLanguage());
+        assertEquals("pt", getLocale("values-b+pt+PT-nokeys").getLanguage());
+        assertEquals("zh", getLocale("values-zh-rCN-keyshidden").getLanguage());
+    }
+
+
+    public void testGetLocale2() throws Exception {
+        LintDetectorTest.TestFile xml;
+        XmlContext context;
+
+        xml = TestFiles.xml("res/values/strings.xml", ""
+                + "<resources>\n"
+                + "</resources>\n");
+        context = createXmlContext(xml.getContents(), new File(xml.getTargetPath()));
+        assertNull(getLocale(context));
+
+        xml = TestFiles.xml("res/values-no/strings.xml", ""
+                + "<resources>\n"
+                + "</resources>\n");
+        context = createXmlContext(xml.getContents(), new File(xml.getTargetPath()));
+        assertEquals("no", getLocale(context).getLanguage());
+
+        xml = TestFiles.xml("res/values/strings.xml", ""
+                + "<resources tools:locale=\"nb\" xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "</resources>\n");
+        context = createXmlContext(xml.getContents(), new File(xml.getTargetPath()));
+        assertEquals("nb", getLocale(context).getLanguage());
+
+        // tools:locale wins over folder location
+        xml = TestFiles.xml("res/values-fr/strings.xml", ""
+                + "<resources tools:locale=\"nb\" xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                + "</resources>\n");
+        context = createXmlContext(xml.getContents(), new File(xml.getTargetPath()));
+        assertEquals("nb", getLocale(context).getLanguage());
+    }
+
     public void testGetLocaleAndRegion() throws Exception {
         assertNull(getLocaleAndRegion(""));
         assertNull(getLocaleAndRegion("values"));
@@ -361,6 +450,7 @@ public class LintUtilsTest extends TestCase {
         assertEquals("ms", getLocaleAndRegion("values-ms-keyshidden"));
     }
 
+    @SuppressWarnings("all") // sample code
     public void testIsImported() throws Exception {
         assertFalse(isImported(getCompilationUnit(
                 "package foo.bar;\n" +
@@ -427,7 +517,7 @@ public class LintUtilsTest extends TestCase {
     private static final Pattern CLASS_PATTERN = Pattern
             .compile("class\\s*(\\S+)\\s*(extends.*)?(implements.*)?\\{");
 
-    public static JavaContext parsePsi(@Language("JAVA") String javaSource) {
+    public static Pair<JavaContext,Disposable> parsePsi(@Language("JAVA") String javaSource) {
         // Figure out the "to" path: the package plus class name + java in the src/ folder
         Matcher matcher = PACKAGE_PATTERN.matcher(javaSource);
         String pkg = "";
@@ -445,6 +535,9 @@ public class LintUtilsTest extends TestCase {
         return parsePsi(javaSource, new File(path.replace('/', separatorChar)));
     }
 
+    /** @deprecated Use {@link #parseUast(String, File)} or {@link #parsePsi(String, File)}
+     * instead */
+    @Deprecated
     public static JavaContext parse(@Language("JAVA") String javaSource) {
         // Figure out the "to" path: the package plus class name + java in the src/ folder
         Matcher matcher = PACKAGE_PATTERN.matcher(javaSource);
@@ -459,26 +552,41 @@ public class LintUtilsTest extends TestCase {
         return parse(javaSource, new File(path.replace('/', separatorChar)));
     }
 
+    /** @deprecated Use {@link #parseUast(String, File)} or {@link #parsePsi(String, File)}
+     * instead */
+    @Deprecated
     public static JavaContext parse(@Language("JAVA") final String javaSource,
             final File relativePath) {
-        return parse(javaSource, relativePath, true, false);
+        Pair<JavaContext, Disposable> parse =
+                parse(javaSource, relativePath, true, false, false);
+        // Disposal not necessary for lombok
+        return parse.getFirst();
     }
 
-    public static JavaContext parsePsi(@Language("JAVA") final String javaSource,
+    public static Pair<JavaContext,Disposable> parsePsi(@Language("JAVA") final String javaSource,
             final File relativePath) {
-        return parse(javaSource, relativePath, false, true);
+        return parse(javaSource, relativePath, false, true, false);
     }
 
-    public static JavaContext parse(@Language("JAVA") final String javaSource,
-            final File relativePath, boolean lombok, boolean psi) {
-        File dir = new File("projectDir");
+    public static Pair<JavaContext,Disposable> parseUast(@Language("JAVA") final String javaSource,
+            final File relativePath) {
+        return parse(javaSource, relativePath, false, true, true);
+    }
+
+    private static Project createTestProjectForFile(File dir, File relativePath, String source) {
         final File fullPath = new File(dir, relativePath.getPath());
+        fullPath.getParentFile().mkdirs();
+        try {
+            Files.write(source, fullPath, Charsets.UTF_8);
+        } catch (IOException e) {
+            fail(e.getMessage());
+        }
         LintCliClient client = new LintCliClient() {
             @NonNull
             @Override
             public CharSequence readFile(@NonNull File file) {
                 if (file.getPath().equals(fullPath.getPath())) {
-                    return javaSource;
+                    return source;
                 }
                 return super.readFile(file);
             }
@@ -497,20 +605,61 @@ public class LintUtilsTest extends TestCase {
                 return super.getCompileTarget(project);
             }
 
-            @Nullable
+            @NonNull
             @Override
             public File getSdkHome() {
                 return TestUtils.getSdk();
             }
         };
         Project project = client.getProject(dir, dir);
+        client.initializeProjects(Collections.singletonList(project));
+        return project;
+    }
 
-        LintDriver driver = new LintDriver(new BuiltinIssueRegistry(),
-                new LintCliClient());
+    public static XmlContext createXmlContext(@Language("XML") String xml, File relativePath) {
+        File dir = new File(System.getProperty("java.io.tmpdir"));
+        final File fullPath = new File(dir, relativePath.getPath());
+        Project project = createTestProjectForFile(dir, relativePath, xml);
+        LintCliClient client = (LintCliClient) project.getClient();
+
+        LintRequest request = new LintRequest(client, Collections.singletonList(fullPath));
+        LintDriver driver = new LintDriver(new TestIssueRegistry(),
+                new LintCliClient(), request);
         driver.setScope(Scope.JAVA_FILE_SCOPE);
-        TestContext context = new TestContext(driver, client, project, javaSource, fullPath);
-        JavaParser parser = context.getParser();
-        parser.prepareJavaParse(Collections.<JavaContext>singletonList(context));
+        ResourceFolderType folderType = ResourceFolderType.getFolderType(
+                relativePath.getParentFile().getName());
+
+        XmlParser parser = client.getXmlParser();
+        Document document = parser.parseXml(xml, fullPath);
+        return new XmlTestContext(driver, project, xml, fullPath, folderType, parser, document);
+    }
+
+    public static Pair<JavaContext,Disposable>  parse(@Language("JAVA") final String javaSource,
+            final File relativePath, boolean lombok, boolean psi, boolean uast) {
+        // TODO: Clean up -- but where?
+        File dir = Files.createTempDir();
+        final File fullPath = new File(dir, relativePath.getPath());
+        fullPath.getParentFile().mkdirs();
+        try {
+            Files.write(javaSource, fullPath, Charsets.UTF_8);
+        } catch (IOException e) {
+            fail(e.getMessage());
+        }
+        Project project = createTestProjectForFile(dir, relativePath, javaSource);
+        LintCliClient client = (LintCliClient) project.getClient();
+        LintRequest request = new LintRequest(client, Collections.singletonList(fullPath));
+
+        LintDriver driver = new LintDriver(new TestIssueRegistry(),
+                new LintCliClient(), request);
+        driver.setScope(Scope.JAVA_FILE_SCOPE);
+        JavaTestContext context = new JavaTestContext(driver, client, project, javaSource, fullPath);
+        JavaParser parser = null;
+        if (lombok || psi) {
+            parser = client.getJavaParser(project);
+            context.setParser(parser);
+            assertNotNull(parser);
+            parser.prepareJavaParse(Collections.singletonList(context));
+        }
         if (lombok) {
             Node compilationUnit = parser.parseJava(context);
             assertNotNull(javaSource, compilationUnit);
@@ -521,7 +670,16 @@ public class LintUtilsTest extends TestCase {
             assertNotNull("Couldn't parse source", javaFile);
             context.setJavaFile(javaFile);
         }
-        return context;
+        if (uast) {
+            UastParser uastParser = client.getUastParser(project);
+            assertNotNull(uastParser);
+            context.setUastParser(uastParser);
+            uastParser.prepare(Collections.singletonList(context));
+            UFile uFile = uastParser.parse(context);
+            context.setUastFile(uFile);
+        }
+        Disposable disposable = () -> client.disposeProjects(Collections.singletonList(project));
+        return Pair.of(context, disposable);
     }
 
     public void testConvertVersion() {
@@ -539,30 +697,34 @@ public class LintUtilsTest extends TestCase {
         Project project = mock(Project.class);
         when(project.getGradleModelVersion()).thenReturn(GradleVersion.parse("0.10.4"));
 
-        assertTrue(LintUtils.isModelOlderThan(project, 0, 10, 5));
-        assertTrue(LintUtils.isModelOlderThan(project, 0, 11, 0));
-        assertTrue(LintUtils.isModelOlderThan(project, 0, 11, 4));
-        assertTrue(LintUtils.isModelOlderThan(project, 1, 0, 0));
+        assertTrue(isModelOlderThan(project, 0, 10, 5));
+        assertTrue(isModelOlderThan(project, 0, 11, 0));
+        assertTrue(isModelOlderThan(project, 0, 11, 4));
+        assertTrue(isModelOlderThan(project, 1, 0, 0));
 
         project = mock(Project.class);
         when(project.getGradleModelVersion()).thenReturn(GradleVersion.parse("0.11.0"));
 
-        assertTrue(LintUtils.isModelOlderThan(project, 1, 0, 0));
-        assertFalse(LintUtils.isModelOlderThan(project, 0, 11, 0));
-        assertFalse(LintUtils.isModelOlderThan(project, 0, 10, 4));
+        assertTrue(isModelOlderThan(project, 1, 0, 0));
+        assertFalse(isModelOlderThan(project, 0, 11, 0));
+        assertFalse(isModelOlderThan(project, 0, 10, 4));
 
         project = mock(Project.class);
         when(project.getGradleModelVersion()).thenReturn(GradleVersion.parse("0.11.5"));
 
-        assertTrue(LintUtils.isModelOlderThan(project, 1, 0, 0));
-        assertFalse(LintUtils.isModelOlderThan(project, 0, 11, 0));
+        assertTrue(isModelOlderThan(project, 1, 0, 0));
+        assertFalse(isModelOlderThan(project, 0, 11, 0));
 
         project = mock(Project.class);
         when(project.getGradleModelVersion()).thenReturn(GradleVersion.parse("1.0.0"));
 
-        assertTrue(LintUtils.isModelOlderThan(project, 1, 0, 1));
-        assertFalse(LintUtils.isModelOlderThan(project, 1, 0, 0));
-        assertFalse(LintUtils.isModelOlderThan(project, 0, 11, 0));
+        assertTrue(isModelOlderThan(project, 1, 0, 1));
+        assertFalse(isModelOlderThan(project, 1, 0, 0));
+        assertFalse(isModelOlderThan(project, 0, 11, 0));
+
+        project = mock(Project.class);
+        assertTrue(isModelOlderThan(project, 0, 0, 0, true));
+        assertFalse(isModelOlderThan(project, 0, 0, 0, false));
     }
 
     private static final class DefaultApiVersion implements ApiVersion {
@@ -647,13 +809,88 @@ public class LintUtilsTest extends TestCase {
         }
     }
 
-    private static class TestContext extends JavaContext {
+    @NonNull
+    private static Element getElementWithNameValue(
+            @NonNull @Language("XML") String xml,
+            @NonNull String activityName) {
+        Document document = XmlUtils.parseDocumentSilently(xml, true);
+        assertNotNull(document);
+        Element root = document.getDocumentElement();
+        assertNotNull(root);
+        for (Element application : getChildren(root)) {
+            for (Element element : getChildren(application)) {
+                String name = element.getAttributeNS(ANDROID_URI, ATTR_NAME);
+                if (activityName.equals(name)) {
+                    return element;
+                }
+            }
+        }
+
+        fail("Didn't find " + activityName);
+        throw new AssertionError("Didn't find " + activityName);
+    }
+
+    public void testResolveManifestName() throws Exception {
+        assertEquals("test.pkg.TestActivity", resolveManifestName(getElementWithNameValue(""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    package=\"test.pkg\">\n"
+                + "    <application>\n"
+                + "        <activity android:name=\".TestActivity\" />\n"
+                + "    </application>\n"
+                + "</manifest>\n", ".TestActivity")));
+
+
+        assertEquals("test.pkg.TestActivity", resolveManifestName(getElementWithNameValue(""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    package=\"test.pkg\">\n"
+                + "    <application>\n"
+                + "        <activity android:name=\"TestActivity\" />\n"
+                + "    </application>\n"
+                + "</manifest>\n", "TestActivity")));
+
+        assertEquals("test.pkg.TestActivity", resolveManifestName(getElementWithNameValue(""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    package=\"test.pkg\">\n"
+                + "    <application>\n"
+                + "        <activity android:name=\"test.pkg.TestActivity\" />\n"
+                + "    </application>\n"
+                + "</manifest>\n", "test.pkg.TestActivity")));
+
+        assertEquals("test.pkg.TestActivity.Bar", resolveManifestName(getElementWithNameValue(""
+                + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                + "    package=\"test.pkg\">\n"
+                + "    <application>\n"
+                + "        <activity android:name=\"test.pkg.TestActivity$Bar\" />\n"
+                + "    </application>\n"
+                + "</manifest>\n", "test.pkg.TestActivity$Bar")));
+    }
+
+    public void testGetFileNameWithParent() {
+        assertThat(getFileNameWithParent(new TestLintClient(), new File("tmp" +
+            File.separator + "foo" + File.separator + "bar.baz"))).isEqualTo("foo/bar.baz");
+        assertThat(getFileNameWithParent(new LintCliClient(), new File("tmp" +
+                File.separator + "foo" + File.separator + "bar.baz"))).isEqualTo(
+                        File.separatorChar == '/' ? "foo/bar.baz" : "foo\\\\bar.baz");
+    }
+
+    public void testJavaKeyword() {
+        assertThat(isJavaKeyword("")).isFalse();
+        assertThat(isJavaKeyword("iff")).isFalse();
+        assertThat(isJavaKeyword("if")).isTrue();
+        assertThat(isJavaKeyword("true")).isTrue();
+        assertThat(isJavaKeyword("false")).isTrue();
+    }
+
+    private static class JavaTestContext extends JavaContext {
         private final String mJavaSource;
-        public TestContext(LintDriver driver, LintCliClient client, Project project,
+        public JavaTestContext(LintDriver driver, LintCliClient client, Project project,
                 String javaSource, File file) {
             //noinspection ConstantConditions
-            super(driver, project,
-                    null, file, client.getJavaParser(project));
+            super(driver, project, null, file);
 
             mJavaSource = javaSource;
         }
@@ -664,4 +901,22 @@ public class LintUtilsTest extends TestCase {
             return mJavaSource;
         }
     }
+
+    private static class XmlTestContext extends XmlContext {
+        private final String xmlSource;
+        public XmlTestContext(LintDriver driver, Project project,
+                String xmlSource, File file, ResourceFolderType type, XmlParser parser,
+                Document document) {
+            //noinspection ConstantConditions
+            super(driver, project, null, file, type, parser, xmlSource, document);
+            this.xmlSource = xmlSource;
+        }
+
+        @Override
+        @Nullable
+        public String getContents() {
+            return xmlSource;
+        }
+    }
+
 }

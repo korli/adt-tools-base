@@ -22,44 +22,35 @@ import com.android.annotations.concurrency.Immutable;
 import com.android.builder.model.BaseArtifact;
 import com.android.builder.model.Dependencies;
 import com.android.builder.model.SourceProvider;
-
 import com.android.builder.model.level2.DependencyGraphs;
 import java.io.File;
 import java.io.Serializable;
 import java.util.Collection;
 import java.util.Objects;
+import java.util.Set;
 
-/**
- * Implementation of BaseArtifact that is serializable
- */
+/** Implementation of BaseArtifact that is serializable. */
 @Immutable
 abstract class BaseArtifactImpl implements BaseArtifact, Serializable {
 
-    @NonNull
-    protected final Collection<File> generatedSourceFolders;
+    @NonNull private final Collection<File> generatedSourceFolders;
+    @NonNull private final String name;
+    @NonNull private final String assembleTaskName;
+    @NonNull private final String compileTaskName;
+    @NonNull private final File classesFolder;
+    @NonNull private final File javaResourcesFolder;
+    @NonNull private final Dependencies compileDependencies;
+    @NonNull private final DependencyGraphs dependencyGraphs;
+    @NonNull private final Set<File> additionalClassesFolders;
+    @Nullable private final SourceProvider variantSourceProvider;
+    @Nullable private final SourceProvider multiFlavorSourceProviders;
 
-    private final String name;
-    @NonNull
-    private final String assembleTaskName;
-    @NonNull
-    private final String compileTaskName;
-    @NonNull
-    private final File classesFolder;
-    @NonNull
-    private final File javaResourcesFolder;
-    @NonNull
-    private final Dependencies compileDependencies;
-    @NonNull
-    private final DependencyGraphs dependencyGraphs;
-    @Nullable
-    private final SourceProvider variantSourceProvider;
-    @Nullable
-    private final SourceProvider multiFlavorSourceProviders;
-
-    BaseArtifactImpl(@NonNull String name,
+    BaseArtifactImpl(
+            @NonNull String name,
             @NonNull String assembleTaskName,
             @NonNull String compileTaskName,
             @NonNull File classesFolder,
+            @NonNull Set<File> additionalClassesFolders,
             @NonNull File javaResourcesFolder,
             @NonNull Dependencies compileDependencies,
             @NonNull DependencyGraphs dependencyGraphs,
@@ -70,6 +61,7 @@ abstract class BaseArtifactImpl implements BaseArtifact, Serializable {
         this.assembleTaskName = assembleTaskName;
         this.compileTaskName = compileTaskName;
         this.classesFolder = classesFolder;
+        this.additionalClassesFolders = additionalClassesFolders;
         this.javaResourcesFolder = javaResourcesFolder;
         this.compileDependencies = compileDependencies;
         this.dependencyGraphs = dependencyGraphs;
@@ -144,6 +136,12 @@ abstract class BaseArtifactImpl implements BaseArtifact, Serializable {
         return generatedSourceFolders;
     }
 
+    @NonNull
+    @Override
+    public Set<File> getAdditionalClassesFolders() {
+        return additionalClassesFolders;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -153,24 +151,32 @@ abstract class BaseArtifactImpl implements BaseArtifact, Serializable {
             return false;
         }
         BaseArtifactImpl that = (BaseArtifactImpl) o;
-        return Objects.equals(generatedSourceFolders, that.generatedSourceFolders) &&
-                Objects.equals(name, that.name) &&
-                Objects.equals(assembleTaskName, that.assembleTaskName) &&
-                Objects.equals(compileTaskName, that.compileTaskName) &&
-                Objects.equals(classesFolder, that.classesFolder) &&
-                Objects.equals(javaResourcesFolder, that.javaResourcesFolder) &&
-                Objects.equals(compileDependencies, that.compileDependencies) &&
-                Objects.equals(dependencyGraphs, that.dependencyGraphs) &&
-                Objects.equals(variantSourceProvider, that.variantSourceProvider) &&
-                Objects.equals(multiFlavorSourceProviders, that.multiFlavorSourceProviders);
+        return Objects.equals(generatedSourceFolders, that.generatedSourceFolders)
+                && Objects.equals(name, that.name)
+                && Objects.equals(assembleTaskName, that.assembleTaskName)
+                && Objects.equals(compileTaskName, that.compileTaskName)
+                && Objects.equals(classesFolder, that.classesFolder)
+                && Objects.equals(additionalClassesFolders, that.additionalClassesFolders)
+                && Objects.equals(javaResourcesFolder, that.javaResourcesFolder)
+                && Objects.equals(compileDependencies, that.compileDependencies)
+                && Objects.equals(dependencyGraphs, that.dependencyGraphs)
+                && Objects.equals(variantSourceProvider, that.variantSourceProvider)
+                && Objects.equals(multiFlavorSourceProviders, that.multiFlavorSourceProviders);
     }
 
     @Override
     public int hashCode() {
-        return Objects
-                .hash(generatedSourceFolders, name, assembleTaskName, compileTaskName,
-                        classesFolder,
-                        javaResourcesFolder, compileDependencies, dependencyGraphs,
-                        variantSourceProvider, multiFlavorSourceProviders);
+        return Objects.hash(
+                generatedSourceFolders,
+                name,
+                assembleTaskName,
+                compileTaskName,
+                classesFolder,
+                additionalClassesFolders,
+                javaResourcesFolder,
+                compileDependencies,
+                dependencyGraphs,
+                variantSourceProvider,
+                multiFlavorSourceProviders);
     }
 }

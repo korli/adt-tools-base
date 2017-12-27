@@ -59,7 +59,7 @@ public class PositionXmlParser {
      */
     @NonNull
     public static Document parse(@NonNull InputStream input, boolean namespaceAware)
-            throws ParserConfigurationException, SAXException, IOException {
+      throws ParserConfigurationException, SAXException, IOException {
         // Read in all the data
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] buf = new byte[1024];
@@ -630,7 +630,9 @@ public class PositionXmlParser {
         private int mCurrentLine = 0;
         private int mCurrentOffset;
         private int mCurrentColumn;
-        private final List<Element> mStack = new ArrayList<Element>();
+        private final List<Element> mStack = new ArrayList<>();
+        private boolean mCdata;
+        @SuppressWarnings("StringBufferField")
         private final StringBuilder mPendingText = new StringBuilder();
 
         private DomBuilder(String xml) throws ParserConfigurationException {
@@ -815,14 +817,31 @@ public class PositionXmlParser {
         }
 
         @Override
-        public void characters(char c[], int start, int length) throws SAXException {
+        public void startCDATA() throws SAXException {
+            flushText();
+            mCdata = true;
+        }
+
+        @Override
+        public void endCDATA() throws SAXException {
+            flushText();
+            mCdata = false;
+        }
+
+        @Override
+        public void characters(char[] c, int start, int length) throws SAXException {
             mPendingText.append(c, start, length);
         }
 
         private void flushText() {
-            if (mPendingText.length() > 0 && !mStack.isEmpty()) {
+            if ((mPendingText.length() > 0 || mCdata) && !mStack.isEmpty()) {
                 Element element = mStack.get(mStack.size() - 1);
-                Node textNode = mDocument.createTextNode(mPendingText.toString());
+                Node textNode;
+                if (mCdata) {
+                    textNode = mDocument.createCDATASection(mPendingText.toString());
+                } else {
+                    textNode = mDocument.createTextNode(mPendingText.toString());
+                }
                 element.appendChild(textNode);
                 mPendingText.setLength(0);
             }

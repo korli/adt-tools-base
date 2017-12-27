@@ -42,13 +42,13 @@ import org.gradle.api.tasks.Input;
  *
  * <ol>
  *   <li>If any of the first-pick patterns match the path and that path has not been included in the
- *       APK, add it to the APK.
+ *       FULL_APK, add it to the FULL_APK.
  *   <li>If any of the first-pick patterns match the path and that path has already been included in
- *       the APK, do not include the path in the APK.
+ *       the FULL_APK, do not include the path in the FULL_APK.
  *   <li>If any of the merge patterns match the path and that path has not been included in the APK,
  *       add it to the APK.
  *   <li>If any of the merge patterns match the path and that path has already been included in the
- *       APK, concatenate the contents of the file to the ones already in the APK.
+ *       FULL_APK, concatenate the contents of the file to the ones already in the FULL_APK.
  *   <li>If any of the exclude patterns match the path, do not include it in the APK.
  *   <li>If none of the patterns above match the path and the path has not been included in the APK,
  *       add it to the APK.
@@ -74,14 +74,20 @@ import org.gradle.api.tasks.Input;
  *   <li>Merge: <code>/META-INF/services/&#042;&#042;</code>
  *   <li>Exclude:
  *       <ul>
- *         <li>{@code /META-INF/LICENCE}
- *         <li>{@code /META-INF/LICENCE.txt}
+ *         <li>{@code /META-INF/LICENSE}
+ *         <li>{@code /META-INF/LICENSE.txt}
  *         <li>{@code /META-INF/NOTICE}
  *         <li>{@code /META-INF/NOTICE.txt}
- *         <li>{@code /LICENCE}
- *         <li>{@code /LICENCE.txt}
+ *         <li>{@code /LICENSE}
+ *         <li>{@code /LICENSE.txt}
  *         <li>{@code /NOTICE}
  *         <li>{@code /NOTICE.txt}
+ *         <li><code>/META-INF/&#042;.DSA</code> (all DSA signature files)
+ *         <li><code>/META-INF/&#042;.EC</code> (all EC signature files)
+ *         <li><code>/META-INF/&#042;.SF</code> (all signature files)
+ *         <li><code>/META-INF/&#042;.RSA</code> (all RSA signature files)
+ *         <li><code>/META-INF/maven/&#042;&#042;</code> (all files in the {@code maven} meta inf
+ *             directory)
  *         <li><code>&#042;&#042;/.svn/&#042;&#042;</code> (all {@code .svn} directory contents)
  *         <li><code>&#042;&#042;/CVS/&#042;&#042;</code> (all {@code CVS} directory contents)
  *         <li><code>&#042;&#042;/SCCS/&#042;&#042;</code> (all {@code SCCS} directory contents)
@@ -97,7 +103,6 @@ import org.gradle.api.tasks.Input;
  *         <li><code>&#042;&#042;/_&#042;</code>
  *         <li><code>&#042;&#042;/_&#042;/&#042;&#042;</code>
  *       </ul>
- *
  * </ul>
  *
  * <p>Example that adds the first {@code anyFileWillDo} file found and ignores all the others and
@@ -120,12 +125,12 @@ import org.gradle.api.tasks.Input;
  * }
  * </pre>
  *
- * <p>Example that merges all {@code LICENCE.txt} files in the root.
+ * <p>Example that merges all {@code LICENSE.txt} files in the root.
  *
  * <pre>
  * packagingOptions {
- *     merge "/LICENCE.txt" // Same as: merges += ["/LICENSE.txt"]
- *     excludes -= ["/LICENCE.txt"] // Not really needed because merges take precedence over excludes.
+ *     merge "/LICENSE.txt" // Same as: merges += ["/LICENSE.txt"]
+ *     excludes -= ["/LICENSE.txt"] // Not really needed because merges take precedence over excludes.
  * }
  * </pre>
  */
@@ -133,10 +138,16 @@ public class PackagingOptions implements com.android.builder.model.PackagingOpti
 
     public PackagingOptions() {
         // ATTENTION - keep this in sync with JavaDoc above.
-        exclude("/META-INF/LICENCE");
+        exclude("/META-INF/LICENSE");
         exclude("/META-INF/LICENSE.txt");
+        exclude("/META-INF/MANIFEST.MF");
         exclude("/META-INF/NOTICE");
         exclude("/META-INF/NOTICE.txt");
+        exclude("/META-INF/*.DSA");
+        exclude("/META-INF/*.EC");
+        exclude("/META-INF/*.SF");
+        exclude("/META-INF/*.RSA");
+        exclude("/META-INF/maven/**");
         exclude("/NOTICE");
         exclude("/NOTICE.txt");
         exclude("/LICENSE.txt");
@@ -257,6 +268,7 @@ public class PackagingOptions implements com.android.builder.model.PackagingOpti
      */
     @Override
     @NonNull
+    @Input
     public Set<String> getDoNotStrip() {
         return Sets.newHashSet(doNotStrip);
     }

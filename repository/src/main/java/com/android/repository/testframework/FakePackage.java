@@ -32,10 +32,10 @@ import com.android.repository.impl.meta.CommonFactory;
 import com.android.repository.impl.meta.RepoPackageImpl;
 import com.android.repository.impl.meta.TypeDetails;
 import com.google.common.base.Objects;
-import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.util.Collection;
+import java.util.Comparator;
 
 /**
  * A fake {@link RepoPackage} for use in unit tests, that contains some behavior (e.g. around
@@ -45,7 +45,7 @@ import java.util.Collection;
  * Probably you want {@link FakeLocalPackage} or {@link FakeRemotePackage}.
  */
 @SuppressWarnings("ConstantConditions")
-public abstract class FakePackage {
+public abstract class FakePackage implements RepoPackage {
     /**
      * A fake {@link LocalPackage} for use in unit tests.
      */
@@ -65,6 +65,8 @@ public abstract class FakePackage {
 
         public FakeLocalPackage(@NonNull String path) {
             super(path);
+            String packagePath = getPath().replace(RepoPackage.PATH_SEPARATOR, File.separatorChar);
+            mLocation = new File("/sdk", packagePath);
         }
 
         @Override
@@ -135,6 +137,7 @@ public abstract class FakePackage {
             private String mCompleteUrl;
             private String mPatchUrl;
             private Revision mPatchSrc;
+            private CompleteType mComplete;
 
             public void setCompleteUrl(String url) {
                 mCompleteUrl = url;
@@ -148,10 +151,12 @@ public abstract class FakePackage {
             @NonNull
             @Override
             public CompleteType getComplete() {
-                if (mCompleteUrl != null) {
-                    CompleteType result = createFactory().createCompleteType();
-                    result.setUrl(mCompleteUrl);
-                    return result;
+                if (mComplete == null && mCompleteUrl != null) {
+                    mComplete = createFactory().createCompleteType();
+                    mComplete.setUrl(mCompleteUrl);
+                }
+                if (mComplete != null) {
+                    return mComplete;
                 }
                 return null;
             }
@@ -194,17 +199,20 @@ public abstract class FakePackage {
         mDetails = details;
     }
 
+    @Override
     @NonNull
     public TypeDetails getTypeDetails() {
         return mDetails == null ? (TypeDetails) RepoManager.getGenericModule()
                 .createLatestFactory().createGenericDetailsType() : mDetails;
     }
 
+    @Override
     @NonNull
     public Revision getVersion() {
         return mVersion;
     }
 
+    @Override
     @NonNull
     public String getDisplayName() {
         return mDisplayName;
@@ -214,6 +222,7 @@ public abstract class FakePackage {
         mDisplayName = displayName;
     }
 
+    @Override
     @Nullable
     public License getLicense() {
         return mLicense;
@@ -223,16 +232,19 @@ public abstract class FakePackage {
         mLicense = license;
     }
 
+    @Override
     @NonNull
     public Collection<Dependency> getAllDependencies() {
         return mDependencies;
     }
 
+    @Override
     @NonNull
     public String getPath() {
         return mPath;
     }
 
+    @Override
     public boolean obsolete() {
         return mObsolete;
     }
@@ -241,23 +253,24 @@ public abstract class FakePackage {
         mObsolete = obsolete;
     }
 
+    @Override
     @NonNull
     public CommonFactory createFactory() {
         return RepoManager.getCommonModule().createLatestFactory();
     }
 
+    @Override
     @NonNull
     public RepoPackageImpl asMarshallable() {
         throw new UnsupportedOperationException();
     }
 
-    @SuppressWarnings("CovariantCompareTo")
-    public int compareTo(@NonNull RepoPackage o) {
-        if (this instanceof LocalPackage != o instanceof LocalPackage) {
-            return this instanceof LocalPackage ? 1 : -1;
-        }
-        return ComparisonChain.start().compare(getPath(), o.getPath())
-                .compare(getVersion(), o.getVersion()).result();
+    @Override
+    public int compareTo(@NonNull RepoPackage other) {
+        return Comparator.comparing(RepoPackage::getPath)
+          .thenComparing(RepoPackage::getVersion)
+          .thenComparing(repoPackage -> repoPackage instanceof LocalPackage)
+          .compare(this, other);
     }
 
     @Override

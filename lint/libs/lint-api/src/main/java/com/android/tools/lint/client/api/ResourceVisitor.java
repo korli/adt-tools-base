@@ -20,11 +20,9 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Detector.XmlScanner;
-import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.ResourceContext;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.google.common.annotations.Beta;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -125,24 +123,8 @@ class ResourceVisitor {
         }
     }
 
-    void visitFile(@NonNull XmlContext context, @NonNull File file) {
-        assert LintUtils.isXmlFile(file);
-
+    void visitFile(@NonNull XmlContext context) {
         try {
-            if (context.document == null) {
-                context.document = parser.parseXml(context);
-                if (context.document == null) {
-                    // No need to log this; the parser should be reporting
-                    // a full warning (such as IssueRegistry#PARSER_ERROR)
-                    // with details, location, etc.
-                    return;
-                }
-                if (context.document.getDocumentElement() == null) {
-                    // Ignore empty documents
-                    return;
-                }
-            }
-
             for (Detector check : allDetectors) {
                 check.beforeCheckFile(context);
             }
@@ -160,17 +142,12 @@ class ResourceVisitor {
                 check.afterCheckFile(context);
             }
         } catch (RuntimeException e) {
-            LintDriver.handleDetectorError(context, e);
-        } finally {
-            if (context.document != null) {
-                parser.dispose(context, context.document);
-                context.document = null;
-            }
+            LintDriver.handleDetectorError(context, context.getDriver(), e);
         }
     }
 
     private void visitElement(@NonNull XmlContext context, @NonNull Element element) {
-        List<Detector.XmlScanner> elementChecks = elementToCheck.get(element.getTagName());
+        List<Detector.XmlScanner> elementChecks = elementToCheck.get(element.getLocalName());
         if (elementChecks != null) {
             assert elementChecks instanceof RandomAccess;
             for (XmlScanner check : elementChecks) {

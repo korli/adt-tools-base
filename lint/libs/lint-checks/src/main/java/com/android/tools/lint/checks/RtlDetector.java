@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012 The Android Open Source Project
+ * Copyright (C) 2012, 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,23 +58,23 @@ import static com.android.SdkConstants.TAG_APPLICATION;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
+import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner;
+import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LayoutDetector;
+import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
-import com.intellij.psi.JavaElementVisitor;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiField;
-import com.intellij.psi.PsiReferenceExpression;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -82,13 +82,17 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.USimpleNameReferenceExpression;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Element;
 
 /**
  * Check which looks for RTL issues (right-to-left support) in layouts
  */
-public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
+public class RtlDetector extends LayoutDetector implements UastScanner {
+
+    // TODO: Use the new merged manifest model
 
     @SuppressWarnings("unchecked")
     private static final Implementation IMPLEMENTATION = new Implementation(
@@ -109,8 +113,8 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
         "attributes, use `start` rather than `left`.\n" +
         "\n" +
         "For XML attributes such as paddingLeft and `layout_marginLeft`, use `paddingStart` " +
-        "and `layout_marginStart`. *NOTE*: If your `minSdkVersion` is less than 17, you should " +
-        "add *both* the older left/right attributes *as well as* the new start/right " +
+        "and `layout_marginStart`. **NOTE**: If your `minSdkVersion` is less than 17, you should " +
+        "add **both** the older left/right attributes **as well as** the new start/right " +
         "attributes. On older platforms, where RTL is not supported and the start/right " +
         "attributes are unknown and therefore ignored, you need the older left/right " +
         "attributes. There is a separate lint check which catches that type of error.\n" +
@@ -127,7 +131,7 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
         "Right-to-left text compatibility issues",
 
         "API 17 adds a `textAlignment` attribute to specify text alignment. However, " +
-        "if you are supporting older versions than API 17, you must *also* specify a " +
+        "if you are supporting older versions than API 17, you must **also** specify a " +
         "gravity or layout_gravity attribute, since older platforms will ignore the " +
         "`textAlignment` attribute.",
 
@@ -163,7 +167,7 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
 
         "Modifying the padding and margin constants in view objects directly is " +
         "problematic when using RTL support, since it can lead to inconsistent states. You " +
-        "*must* use the corresponding setter methods instead (`View#setPadding` etc).",
+        "**must** use the corresponding setter methods instead (`View#setPadding` etc).",
 
         Category.RTL, 3, Severity.WARNING, IMPLEMENTATION).setEnabledByDefault(false);
 
@@ -403,10 +407,16 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
                     if (expectedGravity != null) {
                         String message = String.format(
                                 "To support older versions than API 17 (project specifies %1$d) "
-                                    + "you must *also* specify `gravity` or `layout_gravity=\"%2$s\"`",
+                                    + "you must **also** specify `gravity` or `layout_gravity=\"%2$s\"`",
                                 project.getMinSdk(), expectedGravity);
+
+                        LintFix fix1 = fix().set(ANDROID_URI, ATTR_GRAVITY, expectedGravity)
+                                .build();
+                        LintFix fix2 = fix().set(ANDROID_URI, ATTR_LAYOUT_GRAVITY, expectedGravity)
+                                .build();
+                        LintFix fix = fix().group(fix1, fix2);
                         context.report(COMPAT, attribute,
-                                context.getNameLocation(attribute), message);
+                                context.getNameLocation(attribute), message, fix);
                     }
                 }
                 return;
@@ -495,19 +505,31 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
                 }
             } else {
                 String message;
+                LintFix lintFix;
                 if (project.getMinSdk() >= RTL_API || context.getFolderVersion() >= RTL_API) {
                     message = String.format(
                             "Consider replacing `%1$s` with `%2$s:%3$s=\"%4$s\"` to better support "
                                     + "right-to-left layouts",
                             attribute.getName(), attribute.getPrefix(), rtl, value);
+
+                    lintFix = fix().replace()
+                            .name(String.format("Replace with %1$s:%2$s=\"%3$s\"",
+                                    attribute.getPrefix(), rtl, value))
+                            .text(name).with(rtl)
+                            .build();
                 } else {
                     message = String.format(
                             "Consider adding `%1$s:%2$s=\"%3$s\"` to better support "
                                     + "right-to-left layouts",
                             attribute.getPrefix(), rtl, value);
+                    lintFix = fix()
+                            .name(String.format("Add %1$s:%2$s=\"%3$s\"",
+                                    attribute.getPrefix(), rtl, value))
+                            .set(attribute.getNamespaceURI(), rtl, attribute.getValue())
+                            .build();
                 }
                 context.report(USE_START, attribute,
-                        context.getNameLocation(attribute), message);
+                        context.getNameLocation(attribute), message, lintFix);
             }
         } else {
             if (project.getMinSdk() >= RTL_API || !context.isEnabled(COMPAT)) {
@@ -523,12 +545,15 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
             if (element.hasAttributeNS(ANDROID_URI, old)) {
                 return;
             }
+            String oldValue = convertNewToOld(value);
             String message = String.format(
                     "To support older versions than API 17 (project specifies %1$d) "
-                            + "you should *also* add `%2$s:%3$s=\"%4$s\"`",
+                            + "you should **also** add `%2$s:%3$s=\"%4$s\"`",
                     project.getMinSdk(), attribute.getPrefix(), old,
-                    convertNewToOld(value));
-            context.report(COMPAT, attribute, context.getNameLocation(attribute), message);
+                    oldValue);
+            LintFix fix = fix().set(attribute.getNamespaceURI(), old, oldValue)
+                    .build();
+            context.report(COMPAT, attribute, context.getNameLocation(attribute), message, fix);
         }
     }
 
@@ -544,16 +569,16 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
         return name.startsWith(ATTR_PADDING);
     }
 
-    // ---- Implements JavaScanner ----
+    // ---- Implements UastScanner ----
 
     @Override
-    public List<Class<? extends PsiElement>> getApplicablePsiTypes() {
-        return Collections.singletonList(PsiReferenceExpression.class);
+    public List<Class<? extends UElement>> getApplicableUastTypes() {
+        return Collections.singletonList(USimpleNameReferenceExpression.class);
     }
 
     @Nullable
     @Override
-    public JavaElementVisitor createPsiVisitor(@NonNull JavaContext context) {
+    public UElementHandler createUastHandler(@NonNull JavaContext context) {
         if (rtlApplies(context)) {
             return new IdentifierChecker(context);
         }
@@ -561,29 +586,28 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
         return null;
     }
 
-    private static class IdentifierChecker extends JavaElementVisitor {
-        private final JavaContext mContext;
+    private static class IdentifierChecker extends UElementHandler {
+        private final JavaContext context;
 
         public IdentifierChecker(JavaContext context) {
-            mContext = context;
+            this.context = context;
         }
 
         @Override
-        public void visitReferenceExpression(PsiReferenceExpression node) {
-            String identifier = node.getReferenceName();
+        public void visitSimpleNameReferenceExpression(@NonNull USimpleNameReferenceExpression element) {
+            String identifier = element.getIdentifier();
             boolean isLeft = LEFT_FIELD.equals(identifier);
             boolean isRight = RIGHT_FIELD.equals(identifier);
             if (!isLeft && !isRight) {
                 return;
             }
 
-
-            PsiElement resolved = node.resolve();
+            PsiElement resolved = element.resolve();
             if (!(resolved instanceof PsiField)) {
                 return;
             } else {
                 PsiField field = (PsiField) resolved;
-                if (!mContext.getEvaluator().isMemberInClass(field, FQCN_GRAVITY)) {
+                if (!context.getEvaluator().isMemberInClass(field, FQCN_GRAVITY)) {
                     return;
                 }
             }
@@ -593,12 +617,8 @@ public class RtlDetector extends LayoutDetector implements JavaPsiScanner {
                             + "behavior in right-to-left locales",
                     (isLeft ? GRAVITY_VALUE_START : GRAVITY_VALUE_END).toUpperCase(Locale.US),
                     (isLeft ? GRAVITY_VALUE_LEFT : GRAVITY_VALUE_RIGHT).toUpperCase(Locale.US));
-            PsiElement locationNode = node.getReferenceNameElement();
-            if (locationNode == null) {
-                locationNode = node;
-            }
-            Location location = mContext.getLocation(locationNode);
-            mContext.report(USE_START, node, location, message);
+            Location location = context.getLocation(element);
+            context.report(USE_START, element, location, message);
         }
     }
 }

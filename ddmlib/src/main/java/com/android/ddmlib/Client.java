@@ -17,11 +17,10 @@
 package com.android.ddmlib;
 
 import com.android.annotations.NonNull;
-import com.android.ddmlib.DebugPortManager.IDebugPortProvider;
 import com.android.ddmlib.AndroidDebugBridge.IClientChangeListener;
+import com.android.ddmlib.DebugPortManager.IDebugPortProvider;
 import com.android.ddmlib.jdwp.JdwpAgent;
 import com.android.ddmlib.jdwp.JdwpProtocol;
-
 import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
@@ -463,15 +462,6 @@ public class Client extends JdwpAgent {
     }
 
     /**
-     * Refreshes the name data for a given Client. This is required as the InstantApp runtime will
-     * initially return a generic process name which can then be refreshed to retrieve the correct
-     * package name.
-     */
-    public void refreshName() throws IOException {
-        HandleHello.sendHelloCommands(this, SERVER_PROTOCOL_VERSION);
-    }
-
-    /**
      * Returns whether any heap update is enabled.
      * @see #setHeapUpdateEnabled(boolean)
      */
@@ -654,6 +644,7 @@ public class Client extends JdwpAgent {
             return;
         }
 
+        packet.log("Client: sending jdwp packet to Android Device");
         // Synchronizing on this variable is still useful as we do not want to threads
         // reading at the same time from the same channel, and the only change that
         // can happen to this channel is to be closed and mChan become null.
@@ -747,8 +738,9 @@ public class Client extends JdwpAgent {
                     if (MonitorThread.getInstance().getRetryOnBadHandshake()) {
                         // we should drop the client, but also attempt to reopen it.
                         // This is done by the DeviceMonitor.
-                        mDevice.getMonitor().addClientToDropAndReopen(this,
-                                IDebugPortProvider.NO_STATIC_PORT);
+                        mDevice.getClientTracker()
+                                .trackClientToDropAndReopen(
+                                        this, IDebugPortProvider.NO_STATIC_PORT);
                     } else {
                         // mark it as bad, close the socket, and don't retry
                         mConnState = ST_NOT_JDWP;

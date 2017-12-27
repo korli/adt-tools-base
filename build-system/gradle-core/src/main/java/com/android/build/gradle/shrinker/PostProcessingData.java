@@ -19,7 +19,6 @@ package com.android.build.gradle.shrinker;
 import com.android.annotations.NonNull;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.Sets;
-
 import java.util.Set;
 
 /**
@@ -29,12 +28,10 @@ import java.util.Set;
  * we record nodes that need "additional attention" for later, when reading input classes.
  */
 class PostProcessingData<T> {
-    @NonNull
-    private final Set<T> virtualMethods = Sets.newConcurrentHashSet();
-    @NonNull
-    private final Set<T> multipleInheritance = Sets.newConcurrentHashSet();
-    @NonNull
-    private final Set<T> interfaceInheritance = Sets.newConcurrentHashSet();
+    @NonNull private final Set<T> virtualMethods = Sets.newConcurrentHashSet();
+    @NonNull private final Set<T> multipleInheritance = Sets.newConcurrentHashSet();
+    @NonNull private final Set<T> interfaceInheritance = Sets.newConcurrentHashSet();
+
     @NonNull
     private final Set<UnresolvedReference<T>> unresolvedReferences = Sets.newConcurrentHashSet();
 
@@ -64,19 +61,12 @@ class PostProcessingData<T> {
         final boolean invokespecial;
         @NonNull final DependencyType dependencyType;
 
-        UnresolvedReference(@NonNull T method, @NonNull T target, boolean invokespecial) {
-            this.method = method;
-            this.target = target;
-            this.invokespecial = invokespecial;
-            this.dependencyType = DependencyType.REQUIRED_CODE_REFERENCE;
-        }
-
         public UnresolvedReference(
-                @NonNull T method,
+                @NonNull T referencingMethod,
                 @NonNull T target,
                 boolean invokespecial,
                 @NonNull DependencyType dependencyType) {
-            this.method = method;
+            this.method = referencingMethod;
             this.target = target;
             this.dependencyType = dependencyType;
             this.invokespecial = invokespecial;

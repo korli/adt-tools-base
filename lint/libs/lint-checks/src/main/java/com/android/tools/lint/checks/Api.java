@@ -16,7 +16,6 @@
 
 package com.android.tools.lint.checks;
 
-
 import com.android.annotations.NonNull;
 import com.android.utils.XmlUtils;
 import java.io.File;
@@ -38,47 +37,22 @@ import org.xml.sax.SAXException;
  *
  */
 public class Api {
-
     /**
      * Parses simplified API file.
      * @param apiFile the file to read
      * @return a new ApiInfo
      */
     public static Api parseApi(File apiFile) {
-        InputStream inputStream = null;
-        try {
-            inputStream = new FileInputStream(apiFile);
+        try (InputStream inputStream = new FileInputStream(apiFile)) {
             SAXParserFactory parserFactory = SAXParserFactory.newInstance();
             XmlUtils.configureSaxFactory(parserFactory, false, false);
             SAXParser parser = XmlUtils.createSaxParser(parserFactory);
             ApiParser apiParser = new ApiParser();
             parser.parse(inputStream, apiParser);
             inputStream.close();
-
-            // Also read in API (unless regenerating the map for newer libraries)
-            //noinspection PointlessBooleanExpression,TestOnlyProblems
-            if (!ApiLookup.DEBUG_FORCE_REGENERATE_BINARY) {
-                inputStream = Api.class.getResourceAsStream("api-versions-support-library.xml");
-                if (inputStream != null) {
-                    parser.parse(inputStream, apiParser);
-                }
-            }
-
             return new Api(apiParser.getClasses(), apiParser.getPackages());
-        } catch (ParserConfigurationException e) {
+        } catch (ParserConfigurationException | SAXException | IOException e) {
             e.printStackTrace();
-        } catch (SAXException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } finally {
-            if (inputStream != null) {
-                try {
-                    inputStream.close();
-                } catch (IOException e) {
-                    // ignore
-                }
-            }
         }
 
         return null;

@@ -20,14 +20,17 @@ import static com.android.manifmerger.Actions.ActionType;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.annotations.VisibleForTesting;
+import com.android.utils.XmlUtils;
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
-
-import org.w3c.dom.Node;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import org.w3c.dom.Element;
+import org.w3c.dom.NamedNodeMap;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 
 /**
  * Validator that runs post merging activities and verifies that all "tools:" instructions
@@ -83,18 +86,131 @@ public class PostValidator {
     }
 
     /**
+     * Enforces {@link com.android.SdkConstants#TOOLS_URI} declaration in the top level element, if
+     * necessary. It is possible that the original manifest file did not contain any attribute
+     * declaration, therefore not requiring a xmlns: declaration. Yet the implicit elements handling
+     * may have added attributes requiring the namespace declaration.
+     */
+    protected static void enforceToolsNamespaceDeclaration(@NonNull XmlDocument xmlDocument) {
+        XmlElement manifest = xmlDocument.getRootNode();
+        String toolsNamespaceAttributeName =
+                SdkConstants.XMLNS + XmlUtils.NS_SEPARATOR + SdkConstants.TOOLS_NS_NAME;
+        for (XmlAttribute xmlAttribute : manifest.getAttributes()) {
+            if (xmlAttribute.getXml().getName().equals(toolsNamespaceAttributeName)
+                    && SdkConstants.TOOLS_URI.equals(xmlAttribute.getValue())) {
+                return;
+            }
+        }
+        // if we are here, we did not find the namespace declaration, so we add it if
+        // tools namespace is used anywhere in the xml document
+        if (elementUsesNamespace(manifest.getXml(), SdkConstants.TOOLS_NS_NAME)) {
+            manifest.getXml().setAttribute(toolsNamespaceAttributeName, SdkConstants.TOOLS_URI);
+        }
+    }
+
+    /**
+     * Check whether element or any of its descendants have an attribute with the given namespace
+     *
+     * @param element the element under consideration
+     * @param namespaceName the name of the namespace under consideration
+     * @return true if element or any of its descendants have an attribute with the given namespace,
+     *     false otherwise.
+     */
+    @VisibleForTesting
+    static boolean elementUsesNamespace(@NonNull Element element, @NonNull String namespaceName) {
+        NamedNodeMap namedNodeMap = element.getAttributes();
+        for (int i = 0; i < namedNodeMap.getLength(); i++) {
+            Node attribute = namedNodeMap.item(i);
+            if (namespaceName.equals(attribute.getPrefix())) {
+                return true;
+            }
+        }
+        NodeList childNodes = element.getChildNodes();
+        for (int i = 0; i < childNodes.getLength(); i++) {
+            Node childNode = childNodes.item(i);
+            if (childNode instanceof Element) {
+                if (elementUsesNamespace((Element) childNode, namespaceName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+
+    /**
      * Reorder child elements :
-     * <li>
-     *     <ul> <application> is moved last in the list of children
-     * of the <manifest> element.
-     *     <ul> uses-sdk is moved first in the list of children of the <manifest> element </ul>
-     * </li>
+     * <ul>
+     *     <li>&lt;activity-alias&gt; elements within &lt;application&gt; are moved after the
+     *     &lt;activity&gt; they target.</li>
+     *     <li>&lt;application&gt; is moved last in the list of children
+     *     of the <manifest> element.</li>
+     *     <li>uses-sdk is moved first in the list of children of the &lt;manifest&gt; element</li>
+     * </ul>
      * @param xmlElement the root element of the manifest document.
      */
     private static void reOrderElements(@NonNull XmlElement xmlElement) {
 
+        reOrderActivityAlias(xmlElement);
         reOrderApplication(xmlElement);
         reOrderUsesSdk(xmlElement);
+    }
+
+    /**
+     * Reorder activity-alias elements to after the activity they reference
+     *
+     * @param xmlElement the root element of the manifest document.
+     */
+    private static void reOrderActivityAlias(@NonNull XmlElement xmlElement) {
+
+        // look up application element.
+        Optional<XmlElement> element = xmlElement
+                .getNodeByTypeAndKey(ManifestModel.NodeTypes.APPLICATION, null);
+        if (!element.isPresent()) {
+            return;
+        }
+        XmlElement applicationElement = element.get();
+
+        List<XmlElement> activityAliasElements = applicationElement
+                .getAllNodesByType(ManifestModel.NodeTypes.ACTIVITY_ALIAS);
+        for (XmlElement activityAlias : activityAliasElements) {
+            // get targetActivity attribute
+            Optional<XmlAttribute> attribute = activityAlias.getAttribute(
+                    XmlNode.fromNSName(SdkConstants.ANDROID_URI, "android", "targetActivity"));
+            if (!attribute.isPresent()) {
+                continue;
+            }
+            String targetActivity = attribute.get().getValue();
+
+            // look up target activity element
+            element = applicationElement
+                    .getNodeByTypeAndKey(ManifestModel.NodeTypes.ACTIVITY, targetActivity);
+            if (!element.isPresent()) {
+                continue;
+            }
+            XmlElement activity = element.get();
+
+            // move the activity-alias to after the activity
+            Node nextSibling = activity.getXml().getNextSibling();
+
+            // move the activity-alias's comments if any.
+            List<Node> comments = XmlElement.getLeadingComments(activityAlias.getXml());
+
+            if (!comments.isEmpty() && !comments.get(0).equals(nextSibling)) {
+                for (Node comment : comments) {
+                    applicationElement.getXml().removeChild(comment);
+                    applicationElement.getXml().insertBefore(comment, nextSibling);
+                }
+            }
+
+            // move the activity-alias element if neither it or its comments immediately follow the
+            // target activity.
+            if (!activityAlias.getXml().equals(nextSibling)
+                    && !(!comments.isEmpty() && comments.get(0).equals(nextSibling))) {
+                applicationElement.getXml().removeChild(activityAlias.getXml());
+                applicationElement.getXml().insertBefore(activityAlias.getXml(), nextSibling);
+            }
+        }
     }
 
     /**
@@ -131,7 +247,7 @@ public class PostValidator {
      */
     private static void reOrderUsesSdk(@NonNull XmlElement xmlElement) {
 
-        // look up application element.
+        // look up uses-sdk element.
         Optional<XmlElement> element = xmlElement
                 .getNodeByTypeAndKey(ManifestModel.NodeTypes.USES_SDK, null);
         if (!element.isPresent()) {

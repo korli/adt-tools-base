@@ -1,0 +1,19 @@
+apply plugin: 'com.android.application'
+apply plugin: 'com.example.compiler'
+
+android {
+    compileSdkVersion rootProject.latestCompileSdk
+    buildToolsVersion = rootProject.buildToolsVersion
+
+    defaultConfig {
+        minSdkVersion 8
+    }
+
+    publishNonDefault true
+}
+
+dependencies {
+    api project(':library')
+    api project(':jar')
+    testImplementation 'junit:junit:4.12'
+}

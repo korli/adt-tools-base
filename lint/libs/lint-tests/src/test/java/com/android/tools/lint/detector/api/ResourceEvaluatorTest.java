@@ -16,24 +16,32 @@
 
 package com.android.tools.lint.detector.api;
 
-import com.android.ide.common.resources.ResourceUrl;
 import com.android.resources.ResourceType;
+import com.android.resources.ResourceUrl;
+import com.android.utils.Pair;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.psi.JavaRecursiveElementVisitor;
 import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiLocalVariable;
 import java.io.File;
 import java.util.EnumSet;
 import java.util.concurrent.atomic.AtomicReference;
 import junit.framework.TestCase;
 import org.intellij.lang.annotations.Language;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UFile;
+import org.jetbrains.uast.UVariable;
+import org.jetbrains.uast.visitor.AbstractUastVisitor;
 
 @SuppressWarnings("ClassNameDiffersFromFileName")
 public class ResourceEvaluatorTest extends TestCase {
-    private static void check(String expected, String statementsSource,
-            final String targetVariable, boolean getSpecificType, boolean allowDereference) {
+
+    @Language("JAVA")
+    private static String getString(String statementsSource) {
         @Language("JAVA")
-        String source = ""
+        String s = ""
                 + "package test.pkg;\n"
                 + "public class Test {\n"
                 + "    public void test() {\n"
@@ -54,10 +62,75 @@ public class ResourceEvaluatorTest extends TestCase {
                 + "        }\n"
                 + "    }"
                 + "}\n";
+        return s;
+    }
 
-        JavaContext context = LintUtilsTest.parsePsi(source, new File("src/test/pkg/Test.java"));
+    private static void checkUast(String expected, String statementsSource,
+            final String targetVariable, boolean getSpecificType, boolean allowDereference) {
+        @Language("JAVA")
+        String source = getString(statementsSource);
+        Pair<JavaContext, Disposable> pair =
+                LintUtilsTest.parseUast(source, new File("src/test/pkg/Test.java"));
+        JavaContext context = pair.getFirst();
+        Disposable disposable = pair.getSecond();
         assertNotNull(context);
-        PsiJavaFile javaFile = context.getJavaFile();
+        UFile uFile = context.getUastFile();
+        assertNotNull(uFile);
+
+        // Find the expression
+        final AtomicReference<UExpression> reference = new AtomicReference<>();
+        uFile.accept(new AbstractUastVisitor() {
+            @Override
+            public boolean visitVariable(UVariable variable) {
+                String name = variable.getName();
+                if (name != null && name.equals(targetVariable)) {
+                    reference.set(variable.getUastInitializer());
+                }
+
+                return super.visitVariable(variable);
+            }
+        });
+
+        UExpression expression = reference.get();
+        ResourceEvaluator evaluator = new ResourceEvaluator(context.getEvaluator())
+                .allowDereference(allowDereference);
+
+        if (getSpecificType) {
+            ResourceUrl actual = evaluator.getResource(expression);
+            if (expected == null) {
+                assertNull(actual);
+            } else {
+                assertNotNull("Couldn't compute resource for " + source + ", expected " + expected,
+                        actual);
+
+                assertEquals(expected, actual.toString());
+            }
+        } else {
+            EnumSet<ResourceType> types = evaluator.getResourceTypes(expression);
+            if (expected == null) {
+                assertNull(types);
+            } else {
+                assertNotNull("Couldn't compute resource types for " + source
+                        + ", expected " + expected, types);
+
+                assertEquals(expected, types.toString());
+            }
+        }
+        Disposer.dispose(disposable);
+    }
+
+    private static void check(String expected, String statementsSource,
+            final String targetVariable, boolean getSpecificType, boolean allowDereference) {
+        checkUast(expected, statementsSource, targetVariable, getSpecificType, allowDereference);
+
+        @Language("JAVA")
+        String source = getString(statementsSource);
+        Pair<JavaContext, Disposable> pair =
+                LintUtilsTest.parsePsi(source, new File("src/test/pkg/Test.java"));
+        JavaContext context = pair.getFirst();
+        Disposable disposable = pair.getSecond();
+        assertNotNull(context);
+        PsiFile javaFile = context.getPsiFile();
         assertNotNull(javaFile);
 
         // Find the expression
@@ -97,6 +170,7 @@ public class ResourceEvaluatorTest extends TestCase {
                 assertEquals(expected, types.toString());
             }
         }
+        Disposer.dispose(disposable);
     }
 
     private static void checkType(String expected, String statementsSource,
@@ -169,13 +243,6 @@ public class ResourceEvaluatorTest extends TestCase {
                 "w");
     }
 
-    public void testMethodCallTypesNoDereference() throws Exception {
-        checkTypes(null, ""
-                        + "android.app.Activity context = null;"
-                        + "int w = context.getResources().getColor(R.color.green);",
-                "w", false);
-    }
-
     public void testConditionalTypes() throws Exception {
         // Constant expression: we know exactly which branch to take
         checkTypes("[color]", ""
@@ -190,5 +257,14 @@ public class ResourceEvaluatorTest extends TestCase {
                         + "int z = RED;\n"
                         + "int w = toString().indexOf('x') > 2 ? z : R.string.foo",
                 "w");
+    }
+
+    public void testResourceTypes() {
+        assertEquals(ResourceType.ANIM, ResourceEvaluator.getTypeFromAnnotationSignature(
+                ResourceEvaluator.ANIM_RES_ANNOTATION));
+        assertEquals(ResourceType.STRING, ResourceEvaluator.getTypeFromAnnotationSignature(
+                ResourceEvaluator.STRING_RES_ANNOTATION));
+        assertEquals(ResourceType.LAYOUT, ResourceEvaluator.getTypeFromAnnotationSignature(
+                ResourceEvaluator.LAYOUT_RES_ANNOTATION));
     }
 }

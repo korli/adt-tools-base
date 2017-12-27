@@ -26,25 +26,27 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 /**
- * A cache for file contents. The cache allows closing a file and saving in memory its contents
- * (or some related information). It can then be used to check if the contents are still valid
- * at some later time. Typical usage flow is:
+ * A cache for file contents. The cache allows closing a file and saving in memory its contents (or
+ * some related information). It can then be used to check if the contents are still valid at some
+ * later time. Typical usage flow is:
  *
  * <p>
- * <pre>
- *    Object fileRepresentation = // ...
- *    File toWrite = // ...
- *    // Write file contents and update in memory representation
- *    CachedFileContents<Object> contents = new CachedFileContents<Object>(toWrite);
- *    contents.closed(fileRepresentation);
  *
- *    // Later, when data is needed:
- *    if (contents.isValid()) {
- *        fileRepresentation = contents.getCache();
- *    } else {
- *        // Re-read the file and recreate the file representation
- *    }
- * </pre>
+ * <pre>{@code
+ * Object fileRepresentation = // ...
+ * File toWrite = // ...
+ * // Write file contents and update in memory representation
+ * CachedFileContents<Object> contents = new CachedFileContents<Object>(toWrite);
+ * contents.closed(fileRepresentation);
+ *
+ * // Later, when data is needed:
+ * if (contents.isValid()) {
+ *     fileRepresentation = contents.getCache();
+ * } else {
+ *     // Re-read the file and recreate the file representation
+ * }
+ * }</pre>
+ *
  * @param <T> the type of cached contents
  */
 public class CachedFileContents<T> {
@@ -53,29 +55,29 @@ public class CachedFileContents<T> {
      * The file.
      */
     @Nonnull
-    private File mFile;
+    private File file;
 
     /**
      * Time when last closed (time when {@link #closed(Object)} was invoked).
      */
-    private long mLastClosed;
+    private long lastClosed;
 
     /**
      * Size of the file when last closed.
      */
-    private long mSize;
+    private long size;
 
     /**
      * Hash of the file when closed. {@code null} if hashing failed for some reason.
      */
     @Nullable
-    private HashCode mHash;
+    private HashCode hash;
 
     /**
      * Cached data associated with the file.
      */
     @Nullable
-    private T mCache;
+    private T cache;
 
     /**
      * Creates a new contents. When the file is written, {@link #closed(Object)} should be invoked
@@ -84,7 +86,7 @@ public class CachedFileContents<T> {
      * @param file the file
      */
     public CachedFileContents(@Nonnull File file) {
-        mFile = file;
+        this.file = file;
     }
 
     /**
@@ -96,10 +98,10 @@ public class CachedFileContents<T> {
      * @param cache an optional cache to save
      */
     public void closed(@Nullable T cache) {
-        mCache = cache;
-        mLastClosed = mFile.lastModified();
-        mSize = mFile.length();
-        mHash = hashFile();
+        this.cache = cache;
+        lastClosed = file.lastModified();
+        size = file.length();
+        hash = hashFile();
     }
 
     /**
@@ -112,24 +114,24 @@ public class CachedFileContents<T> {
     public boolean isValid() {
         boolean valid = true;
 
-        if (!mFile.exists()) {
+        if (!file.exists()) {
             valid = false;
         }
 
-        if (valid && mFile.lastModified() != mLastClosed) {
+        if (valid && file.lastModified() != lastClosed) {
             valid = false;
         }
 
-        if (valid && mFile.length() != mSize) {
+        if (valid && file.length() != size) {
             valid = false;
         }
 
-        if (valid && !Objects.equal(mHash, hashFile())) {
+        if (valid && !Objects.equal(hash, hashFile())) {
             valid = false;
         }
 
         if (!valid) {
-            mCache = null;
+            cache = null;
         }
 
         return valid;
@@ -144,7 +146,7 @@ public class CachedFileContents<T> {
      */
     @Nullable
     public T getCache() {
-        return mCache;
+        return cache;
     }
 
     /**
@@ -155,7 +157,7 @@ public class CachedFileContents<T> {
     @Nullable
     private HashCode hashFile() {
         try {
-            return Files.hash(mFile, Hashing.crc32());
+            return Files.hash(file, Hashing.crc32());
         } catch (IOException e) {
             return null;
         }
@@ -169,6 +171,6 @@ public class CachedFileContents<T> {
      */
     @Nonnull
     public File getFile() {
-        return mFile;
+        return file;
     }
 }

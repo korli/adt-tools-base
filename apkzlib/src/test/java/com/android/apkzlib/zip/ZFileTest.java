@@ -22,17 +22,16 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import com.android.apkzlib.zip.compress.DeflateExecutionCompressor;
 import com.android.apkzlib.zip.utils.CloseableByteSource;
 import com.android.apkzlib.zip.utils.RandomAccessFileUtils;
 import com.google.common.base.Charsets;
 import com.google.common.base.Strings;
-import com.google.common.base.Throwables;
 import com.google.common.hash.Hashing;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Closer;
@@ -45,6 +44,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -146,6 +146,21 @@ public class ZFileTest {
 
         try (ZFile zf = new ZFile(testZip)) {
             assertEquals(1, zf.entries().size());
+            assertTrue(zf.getCentralDirectoryOffset() > 0);
+            assertTrue(zf.getEocdOffset() > 0);
+        }
+    }
+
+    @Test
+    public void readOnlyV2SignedApkSupport() throws Exception {
+        File testZip = ZipTestUtils.cloneRsrc("v2-signed.apk", mTemporaryFolder);
+
+        assertTrue(testZip.setWritable(false));
+
+        try (ZFile zf = new ZFile(testZip)) {
+            assertEquals(416, zf.entries().size());
+            assertTrue(zf.getCentralDirectoryOffset() > 0);
+            assertTrue(zf.getEocdOffset() > 0);
         }
     }
 
@@ -936,6 +951,31 @@ public class ZFileTest {
                     filetMignonKorean + " " + isGoodJapanese,
                     entry.getCentralDirectoryHeader().getName());
             assertArrayEquals(
+                    "Stuff about food is good.\n".getBytes(Charsets.US_ASCII), entry.read());
+        }
+    }
+
+    @Test
+    public void utf8NamesSupportedOnReadingWithoutUtf8Flag() throws Exception {
+        File zip = ZipTestUtils.cloneRsrc("zip-with-utf8-filename.zip", mTemporaryFolder);
+
+        // Reset bytes 7 and 122 that have the flag in the local header and central directory.
+        byte[] data = Files.toByteArray(zip);
+        data[7] = 0;
+        data[122] = 0;
+        Files.write(data, zip);
+
+        try (ZFile f = new ZFile(zip)) {
+            assertEquals(1, f.entries().size());
+
+            StoredEntry entry = f.entries().iterator().next();
+            String filetMignonKorean = "\uc548\uc2eC \uc694\ub9ac";
+            String isGoodJapanese = "\u3068\u3066\u3082\u826f\u3044";
+
+            assertEquals(
+                    filetMignonKorean + " " + isGoodJapanese,
+                    entry.getCentralDirectoryHeader().getName());
+            assertArrayEquals(
                     "Stuff about food is good.\n".getBytes(Charsets.US_ASCII),
                     entry.read());
         }
@@ -1369,6 +1409,7 @@ public class ZFileTest {
         /*
          * Open the zip file and compute where the local header CRC32 is.
          */
+        long crcOffset;
         try (ZFile zf = new ZFile(zipFile)) {
             StoredEntry se = zf.get("foo");
             assertNotNull(se);
@@ -1376,41 +1417,256 @@ public class ZFileTest {
 
             /*
              * Twelve bytes from the CD offset, we have the start of the CRC32 of the zip entry.
-             * Corrupt it.
              */
-            byte[] crc = new byte[4];
-            zf.directFullyRead(cdOffset - 12, crc);
-            crc[0]++;
-            zf.directWrite(cdOffset - 12, crc);
+            crcOffset = cdOffset - 12;
         }
 
         /*
-         * Now open the zip file and it should fail.
+         * Corrupt the CRC32.
          */
-        try {
-            new ZFile(zipFile);
-            fail();
-        } catch (IOException e) {
-            /*
-             * We should be complaining about the CRC32 somewhere...
-             */
-            boolean foundCrc32Complain = false;
-
-            assertTrue(
-                    Throwables.getCausalChain(e).stream()
-                            .map(Throwable::getMessage)
-                            .anyMatch(s -> s.contains("CRC32")));
+        byte[] crc = readSegment(zipFile, crcOffset, 4);
+        crc[0]++;
+        try (RandomAccessFile raf = new RandomAccessFile(zipFile, "rw")) {
+            raf.seek(crcOffset);
+            raf.write(crc);
         }
 
         /*
-         * But opening with data validation skip should work.
+         * Now open the zip file and it should write a message in the log.
          */
         ZFileOptions options = new ZFileOptions();
-        options.setSkipDataDescriptionValidation(true);
+        options.setVerifyLogFactory(VerifyLogs::unlimited);
         try (ZFile zf = new ZFile(zipFile, options)) {
-            /*
-             * Nothing to do.
-             */
+            VerifyLog vl = zf.getVerifyLog();
+            assertTrue(vl.getLogs().isEmpty());
+            StoredEntry fooEntry = zf.get("foo");
+            vl = fooEntry.getVerifyLog();
+            assertEquals(1, vl.getLogs().size());
+            assertTrue(vl.getLogs().get(0).contains("CRC32"));
+        }
+    }
+
+    @Test
+    public void detectIncorrectVersionToExtractInCentralDirectory() throws Exception {
+        File zipFile = new File(mTemporaryFolder.getRoot(), "a.zip");
+
+        /*
+         * Create a valid zip file.
+         */
+        try (ZFile zf = new ZFile(zipFile)) {
+            zf.add("foo", new ByteArrayInputStream(new byte[0]));
+        }
+
+        /*
+         * Change the "version to extract" in the central directory to 0x7777.
+         */
+        int versionToExtractOffset =
+                ZFileTestConstants.LOCAL_HEADER_SIZE
+                        + 3
+                        + CentralDirectory.F_VERSION_EXTRACT.offset();
+        byte[] allZipBytes = Files.toByteArray(zipFile);
+        allZipBytes[versionToExtractOffset] = 0x77;
+        allZipBytes[versionToExtractOffset + 1] = 0x77;
+        Files.write(allZipBytes, zipFile);
+
+        /*
+         * Opening the file and it should write a message in the log. The entry has the right
+         * version to extract (20), but it issues a warning because it is not equal to the one
+         * in the central directory.
+         */
+        ZFileOptions options = new ZFileOptions();
+        options.setVerifyLogFactory(VerifyLogs::unlimited);
+        try (ZFile zf = new ZFile(zipFile, options)) {
+            VerifyLog vl = zf.getVerifyLog();
+            assertEquals(1, vl.getLogs().size());
+            assertTrue(vl.getLogs().get(0).toLowerCase(Locale.US).contains("version"));
+            assertTrue(vl.getLogs().get(0).toLowerCase(Locale.US).contains("extract"));
+            StoredEntry fooEntry = zf.get("foo");
+            vl = fooEntry.getVerifyLog();
+            assertEquals(1, vl.getLogs().size());
+            assertTrue(vl.getLogs().get(0).toLowerCase(Locale.US).contains("version"));
+            assertTrue(vl.getLogs().get(0).toLowerCase(Locale.US).contains("extract"));
+        }
+    }
+
+    @Test
+    public void detectIncorrectVersionToExtractInLocalHeader() throws Exception {
+        File zipFile = new File(mTemporaryFolder.getRoot(), "a.zip");
+
+        /*
+         * Create a valid zip file.
+         */
+        try (ZFile zf = new ZFile(zipFile)) {
+            zf.add("foo", new ByteArrayInputStream(new byte[0]));
+        }
+
+        /*
+         * Change the "version to extract" in the local header to 0x7777.
+         */
+        int versionToExtractOffset = StoredEntry.F_VERSION_EXTRACT.offset();
+        byte[] allZipBytes = Files.toByteArray(zipFile);
+        allZipBytes[versionToExtractOffset] = 0x77;
+        allZipBytes[versionToExtractOffset + 1] = 0x77;
+        Files.write(allZipBytes, zipFile);
+
+        /*
+         * Opening the file should log an error message.
+         */
+        ZFileOptions options = new ZFileOptions();
+        options.setVerifyLogFactory(VerifyLogs::unlimited);
+        try (ZFile zf = new ZFile(zipFile, options)) {
+            VerifyLog vl = zf.getVerifyLog();
+            assertTrue(vl.getLogs().isEmpty());
+            StoredEntry fooEntry = zf.get("foo");
+            vl = fooEntry.getVerifyLog();
+            assertEquals(1, vl.getLogs().size());
+            assertTrue(vl.getLogs().get(0).toLowerCase(Locale.US).contains("version"));
+            assertTrue(vl.getLogs().get(0).toLowerCase(Locale.US).contains("extract"));
+        }
+    }
+
+    @Test
+    public void sortZipContentsWithDeferredCrc32() throws Exception {
+        /*
+         * Create a zip file with deferred CRC32 and files in non-alphabetical order.
+         * ZipOutputStream always creates deferred CRC32 entries.
+         */
+        File zipFile = new File(mTemporaryFolder.getRoot(), "a.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile))) {
+            zos.putNextEntry(new ZipEntry("b"));
+            zos.write(new byte[1000]);
+            zos.putNextEntry(new ZipEntry("a"));
+            zos.write(new byte[1000]);
+        }
+
+        /*
+         * Now open the zip using a ZFile and sort the contents and check that the deferred CRC32
+         * bits were reset.
+         */
+        try (ZFile zf = new ZFile(zipFile)) {
+            StoredEntry a = zf.get("a");
+            assertNotNull(a);
+            assertNotSame(DataDescriptorType.NO_DATA_DESCRIPTOR, a.getDataDescriptorType());
+            StoredEntry b = zf.get("b");
+            assertNotNull(b);
+            assertNotSame(DataDescriptorType.NO_DATA_DESCRIPTOR, b.getDataDescriptorType());
+            assertTrue(
+                    a.getCentralDirectoryHeader().getOffset()
+                            > b.getCentralDirectoryHeader().getOffset());
+
+            zf.sortZipContents();
+            zf.update();
+
+            a = zf.get("a");
+            assertNotNull(a);
+            assertSame(DataDescriptorType.NO_DATA_DESCRIPTOR, a.getDataDescriptorType());
+            b = zf.get("b");
+            assertNotNull(b);
+            assertSame(DataDescriptorType.NO_DATA_DESCRIPTOR, b.getDataDescriptorType());
+
+            assertTrue(
+                    a.getCentralDirectoryHeader().getOffset()
+                            < b.getCentralDirectoryHeader().getOffset());
+        }
+
+        /*
+         * Open the file again and check there are no warnings.
+         */
+        try (ZFile zf = new ZFile(zipFile)) {
+            VerifyLog vl = zf.getVerifyLog();
+            assertEquals(0, vl.getLogs().size());
+
+            StoredEntry a = zf.get("a");
+            assertNotNull(a);
+            vl = a.getVerifyLog();
+            assertEquals(0, vl.getLogs().size());
+
+            StoredEntry b = zf.get("b");
+            assertNotNull(b);
+            vl = b.getVerifyLog();
+            assertEquals(0, vl.getLogs().size());
+        }
+    }
+
+    @Test
+    public void alignZipContentsWithDeferredCrc32() throws Exception {
+        /*
+         * Create an unaligned zip file with deferred CRC32 and files in non-alphabetical order.
+         * We need an uncompressed file to make realigning have any effect.
+         */
+        File zipFile = new File(mTemporaryFolder.getRoot(), "a.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile))) {
+            zos.putNextEntry(new ZipEntry("x"));
+            zos.write(new byte[1000]);
+            zos.putNextEntry(new ZipEntry("y"));
+            zos.write(new byte[1000]);
+            ZipEntry zEntry = new ZipEntry("z");
+            zEntry.setSize(1000);
+            zEntry.setMethod(ZipEntry.STORED);
+            zEntry.setCrc(Hashing.crc32().hashBytes(new byte[1000]).asInt());
+            zos.putNextEntry(zEntry);
+            zos.write(new byte[1000]);
+        }
+
+        /*
+         * Now open the zip using a ZFile and realign the contents and check that the deferred CRC32
+         * bits were reset.
+         */
+        ZFileOptions options = new ZFileOptions();
+        options.setAlignmentRule(AlignmentRules.constant(2000));
+        try (ZFile zf = new ZFile(zipFile, options)) {
+            StoredEntry x = zf.get("x");
+            assertNotNull(x);
+            assertNotSame(DataDescriptorType.NO_DATA_DESCRIPTOR, x.getDataDescriptorType());
+            StoredEntry y = zf.get("y");
+            assertNotNull(y);
+            assertNotSame(DataDescriptorType.NO_DATA_DESCRIPTOR, y.getDataDescriptorType());
+            StoredEntry z = zf.get("z");
+            assertNotNull(z);
+            assertSame(DataDescriptorType.NO_DATA_DESCRIPTOR, z.getDataDescriptorType());
+
+            zf.realign();
+            zf.update();
+
+            x = zf.get("x");
+            assertNotNull(x);
+            assertSame(DataDescriptorType.NO_DATA_DESCRIPTOR, x.getDataDescriptorType());
+            y = zf.get("y");
+            assertNotNull(y);
+            assertSame(DataDescriptorType.NO_DATA_DESCRIPTOR, y.getDataDescriptorType());
+            z = zf.get("z");
+            assertNotNull(z);
+            assertSame(DataDescriptorType.NO_DATA_DESCRIPTOR, z.getDataDescriptorType());
+        }
+    }
+
+    @Test
+    public void openingZFileDoesNotRemoveDataDescriptors() throws Exception {
+        /*
+         * Create a zip file with deferred CRC32.
+         */
+        File zipFile = new File(mTemporaryFolder.getRoot(), "a.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(zipFile))) {
+            zos.putNextEntry(new ZipEntry("a"));
+            zos.write(new byte[1000]);
+        }
+
+        /*
+         * Open using ZFile and check that the deferred CRC32 is there.
+         */
+        try (ZFile zf = new ZFile(zipFile)) {
+            StoredEntry se = zf.get("a");
+            assertNotNull(se);
+            assertNotEquals(DataDescriptorType.NO_DATA_DESCRIPTOR, se.getDataDescriptorType());
+        }
+
+        /*
+         * Open using ZFile (again) and check that the deferred CRC32 is there.
+         */
+        try (ZFile zf = new ZFile(zipFile)) {
+            StoredEntry se = zf.get("a");
+            assertNotNull(se);
+            assertNotEquals(DataDescriptorType.NO_DATA_DESCRIPTOR, se.getDataDescriptorType());
         }
     }
 }

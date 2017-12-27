@@ -20,8 +20,13 @@ import com.android.annotations.NonNull;
 import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.checks.AccessibilityDetector;
 import com.android.tools.lint.detector.api.Detector;
+import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintUtilsTest;
 import com.android.tools.lint.detector.api.Project;
+import com.android.utils.Pair;
 import com.google.common.collect.Lists;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.util.Disposer;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,31 +68,46 @@ public class LintDriverTest extends AbstractCheckTest {
 
     public void testMissingResourceDirectory() throws Exception {
         //noinspection all // Sample code
-        assertEquals("No warnings.", lintProject(xml("res/layout/layout1.xml", ""
-                            + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-                            + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
-                            + "    android:layout_width=\"match_parent\"\n"
-                            + "    android:layout_height=\"match_parent\"\n"
-                            + "    android:orientation=\"vertical\" >\n"
-                            + "\n"
-                            + "    <include\n"
-                            + "        android:layout_width=\"wrap_content\"\n"
-                            + "        android:layout_height=\"wrap_content\"\n"
-                            + "        layout=\"@layout/layout2\" />\n"
-                            + "\n"
-                            + "    <Button\n"
-                            + "        android:id=\"@+id/button1\"\n"
-                            + "        android:layout_width=\"wrap_content\"\n"
-                            + "        android:layout_height=\"wrap_content\"\n"
-                            + "        android:text=\"Button\" />\n"
-                            + "\n"
-                            + "    <Button\n"
-                            + "        android:id=\"@+id/button2\"\n"
-                            + "        android:layout_width=\"wrap_content\"\n"
-                            + "        android:layout_height=\"wrap_content\"\n"
-                            + "        android:text=\"Button\" />\n"
-                            + "\n"
-                            + "</LinearLayout>\n")));
+        lint().files(
+                xml("res/layout/layout1.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                        + "    android:layout_width=\"match_parent\"\n"
+                        + "    android:layout_height=\"match_parent\"\n"
+                        + "    android:orientation=\"vertical\" >\n"
+                        + "\n"
+                        + "    <include\n"
+                        + "        android:layout_width=\"wrap_content\"\n"
+                        + "        android:layout_height=\"wrap_content\"\n"
+                        + "        layout=\"@layout/layout2\" />\n"
+                        + "\n"
+                        + "    <Button\n"
+                        + "        android:id=\"@+id/button1\"\n"
+                        + "        android:layout_width=\"wrap_content\"\n"
+                        + "        android:layout_height=\"wrap_content\"\n"
+                        + "        android:text=\"Button\" />\n"
+                        + "\n"
+                        + "    <Button\n"
+                        + "        android:id=\"@+id/button2\"\n"
+                        + "        android:layout_width=\"wrap_content\"\n"
+                        + "        android:layout_height=\"wrap_content\"\n"
+                        + "        android:text=\"Button\" />\n"
+                        + "\n"
+                        + "</LinearLayout>\n"))
+                .run()
+                .expectClean();
+    }
+
+    public void testHasErrors() {
+        //noinspection all // Sample code
+        Pair<JavaContext, Disposable> unit = LintUtilsTest
+                .parsePsi("package test.pkg;\nclass Foo {\n}\n");
+        LintDriver driver = unit.getFirst().getDriver();
+        driver.setHasParserErrors(true);
+        assertTrue(driver.hasParserErrors());
+        driver.setHasParserErrors(false);
+        assertFalse(driver.hasParserErrors());
+        Disposer.dispose(unit.getSecond());
     }
 
     @Override

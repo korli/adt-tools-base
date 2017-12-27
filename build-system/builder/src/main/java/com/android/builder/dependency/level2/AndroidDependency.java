@@ -52,50 +52,13 @@ public final class AndroidDependency extends ExtractedDependency {
     private final File jarsRootFolder;
 
     /**
-     * Whether the library is an android Lib sub-module. This is different from testing
-     * {@link #getProjectPath()} as a module could wrap a local aar, which is not the same as a
-     * lib sub-module.
+     * Whether the library is an android Lib sub-module. This is different from testing {@link
+     * #getProjectPath()} as a module could wrap a local aar, which is not the same as a lib
+     * sub-module.
      */
     private final boolean isSubModule;
 
     private final int hashCode;
-
-    public static AndroidDependency createLocalTestedAarLibrary(
-            @NonNull File artifactFile,
-            @NonNull String name,
-            @Nullable String projectPath,
-            @NonNull File extractedFolder) {
-        return new AndroidDependency(
-                artifactFile,
-                new MavenCoordinatesImpl(
-                        "__tested_library__",
-                        artifactFile.getPath(),
-                        "unspecified"),
-                name,
-                projectPath,
-                extractedFolder,
-                extractedFolder, /*jarsRootFolder*/
-                null, /*variant*/
-                true /*IsSubModule*/);
-    }
-
-    public static AndroidDependency createStagedAarLibrary(
-            @NonNull File artifactFile,
-            @NonNull MavenCoordinates coordinates,
-            @NonNull String name,
-            @Nullable String projectPath,
-            @NonNull File extractedFolder,
-            @Nullable String variant) {
-        return new AndroidDependency(
-                artifactFile,
-                coordinates,
-                name,
-                projectPath,
-                extractedFolder,
-                extractedFolder, /*jarsRootFolder*/
-                variant,
-                true /*IsSubModule*/);
-    }
 
     public static AndroidDependency createExplodedAarLibrary(
             @NonNull File artifactFile,
@@ -114,8 +77,8 @@ public final class AndroidDependency extends ExtractedDependency {
                 false /*IsSubModule*/);
     }
 
-    private AndroidDependency(
-            @NonNull File artifactFile,
+    public AndroidDependency(
+            @Nullable File artifactFile,
             @NonNull MavenCoordinates coordinates,
             @NonNull String name,
             @Nullable String projectPath,
@@ -132,6 +95,13 @@ public final class AndroidDependency extends ExtractedDependency {
         Preconditions.checkArgument(variant == null || projectPath != null);
     }
 
+    @NonNull
+    @Override
+    public File getArtifactFile() {
+        throw new UnsupportedOperationException(
+                "getArtifactFile() is no longer supported by AndroidDependency.");
+    }
+
     /**
      * Returns whether the library is an android Lib sub-module.
      *
@@ -146,7 +116,6 @@ public final class AndroidDependency extends ExtractedDependency {
      * returns the list of local jar for this android AAR.
      *
      * This look on the file system for any jars under $AAR/lib
-     * @return
      */
     @NonNull
     public List<File> getLocalJars() {
@@ -163,12 +132,14 @@ public final class AndroidDependency extends ExtractedDependency {
         return localJars;
     }
 
-    @Override @NonNull
+    @Override
+    @NonNull
     public File getJarFile() {
         return new File(getJarsRootFolder(), FN_CLASSES_JAR);
     }
 
-    @Nullable @Override
+    @Nullable
+    @Override
     public List<File> getAdditionalClasspath() {
         return getLocalJars();
     }

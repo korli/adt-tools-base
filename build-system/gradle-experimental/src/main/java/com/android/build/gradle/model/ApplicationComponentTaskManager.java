@@ -20,11 +20,11 @@ import android.databinding.tool.DataBindingBuilder;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.internal.ApplicationTaskManager;
-import com.android.build.gradle.internal.DependencyManager;
 import com.android.build.gradle.internal.SdkHandler;
-import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.profile.Recorder;
 import com.google.common.collect.ImmutableList;
@@ -38,32 +38,36 @@ import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
 public class ApplicationComponentTaskManager extends ApplicationTaskManager {
 
     public ApplicationComponentTaskManager(
+            @NonNull GlobalScope globalScope,
             @NonNull Project project,
+            @NonNull ProjectOptions projectOptions,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull DataBindingBuilder dataBindingBuilder,
             @NonNull AndroidConfig extension,
             @NonNull SdkHandler sdkHandler,
-            @NonNull NdkHandler ndkHandler,
-            @NonNull DependencyManager dependencyManager,
             @NonNull ToolingModelBuilderRegistry toolingRegistry,
             @NonNull Recorder recorder) {
         super(
+                globalScope,
                 project,
+                projectOptions,
                 androidBuilder,
                 dataBindingBuilder,
                 extension,
                 sdkHandler,
-                ndkHandler,
-                dependencyManager,
                 toolingRegistry,
                 recorder);
-        isComponentModelPlugin = true;
+    }
+
+    @Override
+    public boolean isComponentModelPlugin() {
+        return true;
     }
 
     @Override
     protected Collection<Object> getNdkBuildable(BaseVariantData variantData) {
         NdkComponentModelPlugin plugin = project.getPlugins().getPlugin(NdkComponentModelPlugin.class);
-        return ImmutableList.<Object>copyOf(plugin.getBinaries(variantData.getVariantConfiguration()));
+        return ImmutableList.copyOf(plugin.getBinaries(variantData.getVariantConfiguration()));
     }
 
     @Override

@@ -20,11 +20,10 @@ import com.android.build.gradle.internal.LoggerWrapper;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.sdk.TargetInfo;
 import com.android.sdklib.BuildToolInfo;
-import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.google.common.base.Preconditions;
+import org.gradle.api.tasks.Internal;
 
-import java.io.File;
 
 public abstract class BaseTask extends DefaultAndroidTask {
 
@@ -36,9 +35,11 @@ public abstract class BaseTask extends DefaultAndroidTask {
 
     /**
      * Returns the androidBuilder.
+     *
      * @throws IllegalStateException if androidBuilder has not been set,
      */
     @NonNull
+    @Internal("No influence on output, this is to give access to the build to other classes")
     protected AndroidBuilder getBuilder() {
         Preconditions.checkState(androidBuilder != null,
                 "androidBuilder required for task '%s'.", getName());
@@ -46,6 +47,7 @@ public abstract class BaseTask extends DefaultAndroidTask {
     }
 
     @NonNull
+    @Internal
     protected ILogger getILogger() {
         if (iLogger == null) {
             iLogger = new LoggerWrapper(getLogger());
@@ -55,9 +57,11 @@ public abstract class BaseTask extends DefaultAndroidTask {
 
     /**
      * Returns the BuildToolInfo.
+     *
      * @throws IllegalStateException if androidBuilder.targetInfo has not been set,
      */
     @NonNull
+    @Internal("No influence on output, this is to give access to the build tools")
     protected BuildToolInfo getBuildTools() {
         TargetInfo targetInfo = getBuilder().getTargetInfo();
         Preconditions.checkState(targetInfo != null,

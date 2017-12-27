@@ -25,17 +25,21 @@ import com.android.builder.png.QueuedCruncher;
 import com.android.ide.common.process.ProcessExecutor;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.ide.common.process.ProcessOutputHandler;
+import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.repository.Revision;
 import com.android.sdklib.BuildToolInfo;
+import com.android.tools.aapt2.Aapt2RenamingConventions;
 import com.android.utils.ILogger;
 import com.google.common.base.Preconditions;
-
 import java.io.File;
 
 /**
  * Implementation of {@link com.android.builder.internal.aapt.Aapt} that uses out-of-process
  * execution of {@code aapt2}.
+ *
+ * <p>Deprecated now, use {@link com.android.builder.internal.aapt.v2.AaptV2Jni} instead.
  */
+@Deprecated
 public class OutOfProcessAaptV2 extends AbstractProcessExecutionAapt {
 
     /**
@@ -74,8 +78,10 @@ public class OutOfProcessAaptV2 extends AbstractProcessExecutionAapt {
         super(processExecutor, processOutputHandler);
 
         Preconditions.checkArgument(
-                intermediateDir.isDirectory(),
-                "!intermediateDir.isDirectory()");
+                BuildToolInfo.PathId.AAPT2.isPresentIn(buildToolInfo.getRevision()),
+                "Aapt2 requires newer build tools");
+        Preconditions.checkArgument(
+                intermediateDir.isDirectory(), "!intermediateDir.isDirectory()");
 
         mBuildToolInfo = buildToolInfo;
         mIntermediateDir = intermediateDir;
@@ -83,28 +89,29 @@ public class OutOfProcessAaptV2 extends AbstractProcessExecutionAapt {
 
     @Nullable
     @Override
-    protected CompileInvocation makeCompileProcessBuilder(
-            @NonNull File file, @NonNull File output) throws AaptException {
-        Preconditions.checkArgument(file.isFile(), "!file.isFile()");
-        Preconditions.checkArgument(output.isDirectory(), "!output.isDirectory()");
+    protected CompileInvocation makeCompileProcessBuilder(@NonNull CompileResourceRequest request)
+            throws AaptException {
+        Preconditions.checkArgument(request.getInput().isFile(), "!file.isFile()");
+        Preconditions.checkArgument(request.getOutput().isDirectory(), "!output.isDirectory()");
 
         return new CompileInvocation(
                 new ProcessInfoBuilder()
                         .setExecutable(getAapt2ExecutablePath())
-                        .addArgs(AaptV2CommandBuilder.makeCompile(file, output)),
-                new File(output, Aapt2RenamingConventions.compilationRename(file)));
+                        .addArgs("compile")
+                        .addArgs(AaptV2CommandBuilder.makeCompile(request)),
+                new File(
+                        request.getOutput(),
+                        Aapt2RenamingConventions.compilationRename(request.getInput())));
     }
 
     @NonNull
     @Override
     protected ProcessInfoBuilder makePackageProcessBuilder(@NonNull AaptPackageConfig config)
             throws AaptException {
-        ProcessInfoBuilder builder = new ProcessInfoBuilder();
-
-        builder.setExecutable(getAapt2ExecutablePath());
-        builder.addArgs(AaptV2CommandBuilder.makeLink(config, mIntermediateDir, mBuildToolInfo));
-
-        return builder;
+        return new ProcessInfoBuilder()
+                .setExecutable(getAapt2ExecutablePath())
+                .addArgs("link")
+                .addArgs(AaptV2CommandBuilder.makeLink(config, mIntermediateDir));
     }
 
     /**
@@ -123,12 +130,15 @@ public class OutOfProcessAaptV2 extends AbstractProcessExecutionAapt {
     }
 
     @Override
-    public void start() {
-        // we don't batch.
+    public void close() {
+        // since we don't batch, we are done.
     }
 
     @Override
-    public void end() throws InterruptedException {
-        // since we don't batch, we are done.
+    @NonNull
+    public File compileOutputFor(@NonNull CompileResourceRequest request) {
+        return new File(
+                request.getOutput(),
+                Aapt2RenamingConventions.compilationRename(request.getInput()));
     }
 }

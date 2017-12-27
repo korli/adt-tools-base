@@ -8,21 +8,11 @@ android {
     compileSdkVersion rootProject.latestCompileSdk
     buildToolsVersion = rootProject.buildToolsVersion
 
-    testBuildType rootProject.useJack ? "debug" : "minified"
-
     defaultConfig {
         versionCode 12
         versionName "2.0"
         minSdkVersion 16
         targetSdkVersion 16
-    }
-
-    buildTypes {
-        minified.initWith(buildTypes.debug)
-        minified {
-            minifyEnabled true
-            proguardFile getDefaultProguardFile('proguard-android.txt')
-        }
     }
 
     dexOptions {

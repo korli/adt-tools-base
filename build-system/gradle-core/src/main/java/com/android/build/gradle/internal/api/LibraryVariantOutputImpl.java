@@ -19,9 +19,10 @@ package com.android.build.gradle.internal.api;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.api.LibraryVariantOutput;
-import com.android.build.gradle.internal.variant.BaseVariantOutputData;
-import com.android.build.gradle.internal.variant.LibVariantOutputData;
-
+import com.android.build.gradle.internal.variant.TaskContainer;
+import com.android.build.gradle.tasks.AndroidZip;
+import com.android.ide.common.build.ApkData;
+import java.io.File;
 import org.gradle.api.tasks.bundling.Zip;
 
 /**
@@ -32,22 +33,32 @@ import org.gradle.api.tasks.bundling.Zip;
  */
 public class LibraryVariantOutputImpl extends BaseVariantOutputImpl implements LibraryVariantOutput {
 
-    private final LibVariantOutputData variantOutputData;
-
-    public LibraryVariantOutputImpl(@NonNull LibVariantOutputData variantOutputData) {
-        this.variantOutputData = variantOutputData;
+    public LibraryVariantOutputImpl(
+            @NonNull ApkData apkData, @NonNull TaskContainer taskContainer) {
+        super(apkData, taskContainer);
     }
 
-    @NonNull
     @Override
-    protected BaseVariantOutputData getVariantOutputData() {
-        return variantOutputData;
+    @NonNull
+    protected ApkData getApkData() {
+        return apkData;
     }
 
     @Nullable
     @Override
     public Zip getPackageLibrary() {
-        return variantOutputData.packageLibTask;
+        return taskContainer.getTaskByType(AndroidZip.class);
+    }
+
+    @NonNull
+    @Override
+    public File getOutputFile() {
+        Zip packageTask = getPackageLibrary();
+        if (packageTask != null) {
+            return new File(packageTask.getDestinationDir(), apkData.getOutputFileName());
+        } else {
+            return super.getOutputFile();
+        }
     }
 
     @Override

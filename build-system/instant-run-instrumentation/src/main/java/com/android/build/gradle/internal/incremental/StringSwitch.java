@@ -20,18 +20,16 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.Ordering;
-
-import org.objectweb.asm.Label;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.Type;
-import org.objectweb.asm.commons.GeneratorAdapter;
-import org.objectweb.asm.commons.Method;
-
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import org.objectweb.asm.Label;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
+import org.objectweb.asm.commons.GeneratorAdapter;
+import org.objectweb.asm.commons.Method;
 
 
 /**
@@ -66,7 +64,7 @@ abstract class StringSwitch {
     private static final Type OBJECT_TYPE = Type.getType(java.lang.Object.class);
     private static final Type STRING_TYPE = Type.getType(java.lang.String.class);
     private static final Type INSTANT_RELOAD_EXCEPTION_TYPE =
-            Type.getObjectType(IncrementalVisitor.PACKAGE + "/InstantReloadException");
+            Type.getObjectType(IncrementalVisitor.RUNTIME_PACKAGE + "/InstantReloadException");
 
     // Methods overridden by caller to implement the switch behavior
 

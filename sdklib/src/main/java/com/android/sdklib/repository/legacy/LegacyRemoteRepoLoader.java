@@ -16,13 +16,11 @@
 package com.android.sdklib.repository.legacy;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.annotations.VisibleForTesting;
-import com.android.prefs.AndroidLocation;
 import com.android.repository.Revision;
 import com.android.repository.api.Channel;
 import com.android.repository.api.ConsoleProgressIndicator;
 import com.android.repository.api.Dependency;
+import com.android.repository.api.Downloader;
 import com.android.repository.api.FallbackRemoteRepoLoader;
 import com.android.repository.api.License;
 import com.android.repository.api.ProgressIndicator;
@@ -43,7 +41,6 @@ import com.android.sdklib.LayoutlibVersion;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.sdklib.repository.legacy.descriptors.PkgType;
 import com.android.sdklib.repository.legacy.remote.RemotePkgInfo;
-import com.android.sdklib.repository.legacy.remote.internal.DownloadCache;
 import com.android.sdklib.repository.legacy.remote.internal.archives.ArchFilter;
 import com.android.sdklib.repository.legacy.remote.internal.packages.RemoteAddonPkgInfo;
 import com.android.sdklib.repository.legacy.remote.internal.packages.RemotePlatformPkgInfo;
@@ -55,7 +52,6 @@ import com.android.sdklib.repository.targets.OptionalLibraryImpl;
 import com.google.common.collect.ComparisonChain;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
@@ -67,44 +63,19 @@ import java.util.List;
 public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
 
     /**
-     * Caching downloader used by {@link SdkSource}s.
-     */
-    private DownloadCache mDownloadCache;
-
-    /**
-     * Sets the {@link DownloadCache} for us to use, so that a custom one can be used during tests.
-     *
-     * @param cache The {@link DownloadCache} to use. If {@code null} a new {@link DownloadCache}
-     *              will be created lazily.
-     */
-    @VisibleForTesting
-    public void setDownloadCache(@Nullable DownloadCache cache) {
-        mDownloadCache = cache;
-    }
-
-    /**
-     * Gets or creates a {@link DownloadCache} using the settings from our {@link
-     * SettingsController} and {@link AndroidLocation}.
-     */
-    private DownloadCache getDownloadCache(@NonNull SettingsController settings) {
-        if (mDownloadCache == null) {
-            mDownloadCache =
-                    DownloadCache.inUserHome(
-                            FileOpUtils.create(), DownloadCache.Strategy.FRESH_CACHE, settings);
-        }
-        return mDownloadCache;
-    }
-
-    /**
      * Parses xml files using the {@link SdkSource} mechanism into {@link LegacyRemotePackage}s.
      */
     @NonNull
     @Override
     public Collection<RemotePackage> parseLegacyXml(@NonNull RepositorySource source,
-            @NonNull SettingsController settings, @NonNull ProgressIndicator progress) {
+            @NonNull Downloader downloader, @NonNull SettingsController settings,
+            @NonNull ProgressIndicator progress) {
         SdkSource legacySource;
         RemotePkgInfo[] packages = null;
-        for (SchemaModule module : source.getPermittedModules()) {
+        Collection<SchemaModule<?>> modules = source.getPermittedModules();
+        double progressMax = 0;
+        double progressIncrement = 1. / modules.size();
+        for (SchemaModule module : modules) {
             legacySource = null;
             if (module.equals(AndroidSdkHandler.getRepositoryModule())) {
                 legacySource = new SdkRepoSource(source.getUrl(), "Legacy Repo Source");
@@ -114,9 +85,10 @@ public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
                 legacySource = new SdkSysImgSource(source.getUrl(), "Legacy System Image Source");
             }
             if (legacySource != null) {
-                legacySource
-                        .load(getDownloadCache(settings), new TaskMonitorProgressIndicatorAdapter(progress),
-                                settings.getForceHttp());
+                legacySource.load(
+                        downloader,
+                        settings,
+                        progress.createSubProgress(progressMax + progressIncrement));
                 if (legacySource.getFetchError() != null) {
                     progress.logInfo(legacySource.getFetchError());
                 }
@@ -125,6 +97,8 @@ public class LegacyRemoteRepoLoader implements FallbackRemoteRepoLoader {
                     break;
                 }
             }
+            progressMax += progressIncrement;
+            progress.setFraction(progressMax);
         }
         List<RemotePackage> result = Lists.newArrayList();
         if (packages != null) {

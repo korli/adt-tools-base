@@ -37,13 +37,11 @@ import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
-
+import java.util.concurrent.atomic.AtomicReference;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Represents a loaded xml document.
@@ -135,15 +133,32 @@ public class XmlDocument {
     public Optional<XmlDocument> merge(
             @NonNull XmlDocument lowerPriorityDocument,
             @NonNull MergingReport.Builder mergingReportBuilder) {
+        return merge(lowerPriorityDocument, mergingReportBuilder,
+                true /* addImplicitPermissions */);
+    }
+
+    /**
+     * merge this higher priority document with a higher priority document.
+     * @param lowerPriorityDocument the lower priority document to merge in.
+     * @param mergingReportBuilder the merging report to record errors and actions.
+     * @param addImplicitPermissions whether to perform implicit permission addition.
+     * @return a new merged {@link com.android.manifmerger.XmlDocument} or
+     * {@link Optional#absent()} if there were errors during the merging activities.
+     */
+    @NonNull
+    public Optional<XmlDocument> merge(
+            @NonNull XmlDocument lowerPriorityDocument,
+            @NonNull MergingReport.Builder mergingReportBuilder,
+            boolean addImplicitPermissions) {
 
         if (getFileType() == Type.MAIN) {
-            mergingReportBuilder.getActionRecorder().recordDefaultNodeAction(getRootNode());
+            mergingReportBuilder.getActionRecorder().recordAddedNodeAction(getRootNode(), false);
         }
 
         getRootNode().mergeWithLowerPriorityNode(
                 lowerPriorityDocument.getRootNode(), mergingReportBuilder);
 
-        addImplicitElements(lowerPriorityDocument, mergingReportBuilder);
+        addImplicitElements(lowerPriorityDocument, mergingReportBuilder, addImplicitPermissions);
 
         // force re-parsing as new nodes may have appeared.
         return mergingReportBuilder.hasErrors()
@@ -251,8 +266,18 @@ public class XmlDocument {
     }
 
     /**
-     * Returns the package name to use to expand the attributes values with the
-     * document's package name
+     * Returns the split name if this manifest file has one.
+     *
+     * @return the split name or empty string.
+     */
+    public String getSplitName() {
+        return mRootElement.getAttribute("split");
+    }
+
+    /**
+     * Returns the package name to use to expand the attributes values with the document's package
+     * name
+     *
      * @return the package name to use for attribute expansion.
      */
     public String getPackageNameForAttributeExpansion() {
@@ -302,7 +327,7 @@ public class XmlDocument {
      * build.gradle or can be expressed in the uses_sdk element.
      */
     @NonNull
-    private String getMinSdkVersion() {
+    public String getMinSdkVersion() {
         // check for system properties.
         String injectedMinSdk = mSystemPropertyResolver.getValue(ManifestSystemProperty.MIN_SDK_VERSION);
         if (injectedMinSdk != null) {
@@ -365,7 +390,8 @@ public class XmlDocument {
      */
     @SuppressWarnings("unchecked") // compiler confused about varargs and generics.
     private void addImplicitElements(@NonNull XmlDocument lowerPriorityDocument,
-            @NonNull MergingReport.Builder mergingReport) {
+                                     @NonNull MergingReport.Builder mergingReport,
+                                     boolean addImplicitPermissions) {
 
         // if this document is an overlay, tolerate the absence of uses-sdk and do not
         // assume implicit minimum versions.
@@ -439,8 +465,10 @@ public class XmlDocument {
         if (!checkUsesSdkMinVersion(lowerPriorityDocument, mergingReport)) {
             String error = String.format(
                             "uses-sdk:minSdkVersion %1$s cannot be smaller than version "
-                                    + "%2$s declared in library %3$s\n"
-                                    + "\tSuggestion: use tools:overrideLibrary=\"%4$s\" to force usage",
+                                    + "%2$s declared in library %3$s as the library might be using APIs not available in %1$s\n"
+                                    + "\tSuggestion: use a compatible library with a minSdk of at most %1$s,\n"
+                                    + "\t\tor increase this project's minSdk version to at least %2$s,\n"
+                                    + "\t\tor use tools:overrideLibrary=\"%4$s\" to force usage (may lead to runtime failures)",
                             getMinSdkVersion(),
                             lowerPriorityDocument.getRawMinSdkVersion(),
                             lowerPriorityDocument.getSourceFile().print(false),
@@ -464,6 +492,10 @@ public class XmlDocument {
 
         // There is no need to add any implied permissions when targeting an old runtime.
         if (thisTargetSdk < 4) {
+            return;
+        }
+
+        if (!addImplicitPermissions) {
             return;
         }
 

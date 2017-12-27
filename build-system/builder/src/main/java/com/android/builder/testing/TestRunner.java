@@ -21,49 +21,34 @@ import com.android.builder.testing.api.DeviceConnector;
 import com.android.builder.testing.api.TestException;
 import com.android.utils.ILogger;
 import com.google.common.annotations.Beta;
-
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
-/**
- * A test runner able to run tests on a list of {@link DeviceConnector}
- */
+/** A test runner able to run tests on a list of {@link DeviceConnector} */
 @Beta
 public interface TestRunner {
 
     /**
      * Returns true if the tests succeeded.
      *
-     * @param projectName
-     * @param variantName
-     * @param testApk
-     * @param testData
-     * @param deviceList
-     * @param maxThreads the max number of threads to run in parallel. 0 means unlimited.
      * @param timeoutInMs time out in milliseconds
      * @param installOptions parameters passed to the pm install command.
-     * @param resultsDir
-     * @param coverageDir
-     * @param logger
      * @return true if the test succeed
-     *
-     * @throws TestException
-     * @throws InterruptedException
      */
     boolean runTests(
-            @NonNull  String projectName,
-            @NonNull  String variantName,
-            @NonNull  File testApk,
-            @NonNull  TestData testData,
-            @NonNull  List<? extends DeviceConnector> deviceList,
-                      int maxThreads,
-                      int timeoutInMs,
-            @NonNull  Collection<String> installOptions,
-            @NonNull  File resultsDir,
-            @NonNull  File coverageDir,
-            @NonNull  ILogger logger)
-                throws TestException, NoAuthorizedDeviceFoundException, InterruptedException;
+            @NonNull String projectName,
+            @NonNull String variantName,
+            @NonNull TestData testData,
+            @NonNull Set<File> helperApks,
+            @NonNull List<? extends DeviceConnector> deviceList,
+            int timeoutInMs,
+            @NonNull Collection<String> installOptions,
+            @NonNull File resultsDir,
+            @NonNull File coverageDir,
+            @NonNull ILogger logger)
+            throws TestException, NoAuthorizedDeviceFoundException, InterruptedException;
 
     class NoAuthorizedDeviceFoundException extends Exception {
 

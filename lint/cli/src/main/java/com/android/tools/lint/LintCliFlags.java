@@ -48,14 +48,19 @@ public class LintCliFlags {
     private final List<Reporter> reporters = Lists.newArrayList();
     private boolean quiet;
     private boolean warnAll;
+    private boolean checkTests;
+    private boolean checkGenerated;
+    private boolean checkDependencies = true;
     private boolean noWarnings;
     private boolean allErrors;
     private boolean fatalOnly;
     private boolean explainIssues;
+    private File projectDescriptor;
     private List<File> sources;
     private List<File> classes;
     private List<File> libraries;
     private List<File> resources;
+    private String compileSdkVersion;
     private File baselineFile;
 
     private File defaultConfiguration;
@@ -214,6 +219,48 @@ public class LintCliFlags {
     }
 
     /**
+     * Returns whether lint should run all checks on test sources, instead of just the
+     * lint checks that have been specifically written to include tests (e.g. checks
+     * looking for specific test errors, or checks that need to consider testing code
+     * such as the unused resource detector)
+     *
+     * @return true to check tests, defaults to false
+     */
+    public boolean isCheckTestSources() {
+        return checkTests;
+    }
+
+    /** Sets whether lint should run all the normal checks on test sources */
+    public void setCheckTestSources(boolean checkTests) {
+        this.checkTests = checkTests;
+    }
+
+    /**
+     * Returns whether lint should run checks on generated sources.
+     */
+    public boolean isCheckGeneratedSources() {
+        return checkGenerated;
+    }
+
+    /** Sets whether lint should check generated sources */
+    public void setCheckGeneratedSources(boolean checkGenerated) {
+        this.checkGenerated = checkGenerated;
+    }
+
+    /**
+     * Returns whether lint should check all dependencies too as part of its analysis. Default is
+     * true.
+     */
+    public boolean isCheckDependencies() {
+        return checkDependencies;
+    }
+
+    /** Sets whether lint should check dependencies too */
+    public void setCheckDependencies(boolean checkDependencies) {
+        this.checkDependencies = checkDependencies;
+    }
+
+    /**
      * Returns whether lint should include all output (e.g. include all alternate
      * locations, not truncating long messages, etc.)
      */
@@ -353,6 +400,64 @@ public class LintCliFlags {
      */
     public void setResourcesOverride(@Nullable List<File> resources) {
         this.resources = resources;
+    }
+
+    /**
+     * Gets the optional <b>manual override</b> of the project hierarchy. Normally null.
+     * <p>
+     * Normally, the source, library and resource paths for a project should be computed by the
+     * {@link LintClient} itself, using available project metadata. However, the user can specify
+     * the project hierarchy explicitly. This is normally done when running lint on raw source code
+     * without proper metadata (or when using a build system unknown to lint, such as say {@code
+     * make}).
+     */
+    @Nullable
+    public File getProjectDescriptorOverride() {
+        return projectDescriptor;
+    }
+
+    /**
+     * Sets the optional <b>manual override</b> of the project hierarchy. Normally null.
+     * <p>
+     * Normally, the source, library and resource paths for a project should be computed by the
+     * {@link LintClient} itself, using available project metadata. However, the user can specify
+     * the project hierarchy explicitly. This is normally done when running lint on raw source code
+     * without proper metadata (or when using a build system unknown to lint, such as say {@code
+     * make}).
+     */
+    public void setProjectDescriptorOverride(@Nullable File projectDescriptor) {
+        this.projectDescriptor = projectDescriptor;
+    }
+
+    /**
+     * Gets the optional compileSdkVersion override. Normally null.
+     * <p>
+     * Normally, the compileSdkVersion (e.g. the build target version) is known by lint
+     * from the build system (it's specified explicitly in build.gradle, and in older
+     * Eclipse-based projects, in the project.properties file). However, when using
+     * third party / unsupported build systems, there's a fallback mechanism you can use
+     * specifying the set of manifests, resources and sources via dedicated flags. In those
+     * cases the compileSdkVersion is unknown. This flag lets you provide a specific
+     * dedicated version to use.
+     */
+    @Nullable
+    public String getCompileSdkVersionOverride() {
+        return compileSdkVersion;
+    }
+
+    /**
+     * Sets the optional compileSdkVersion override. Normally null.
+     * <p>
+     * Normally, the compileSdkVersion (e.g. the build target version) is known by lint
+     * from the build system (it's specified explicitly in build.gradle, and in older
+     * Eclipse-based projects, in the project.properties file). However, when using
+     * third party / unsupported build systems, there's a fallback mechanism you can use
+     * specifying the set of manifests, resources and sources via dedicated flags. In those
+     * cases the compileSdkVersion is unknown. This flag lets you provide a specific
+     * dedicated version to use.
+     */
+    public void setCompileSdkVersionOverride(@Nullable String compileSdkVersion) {
+        this.compileSdkVersion = compileSdkVersion;
     }
 
     /**

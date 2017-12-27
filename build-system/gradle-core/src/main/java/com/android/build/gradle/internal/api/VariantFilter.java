@@ -22,7 +22,6 @@ import com.android.builder.core.VariantConfiguration;
 import com.android.builder.core.VariantType;
 import com.android.builder.model.BuildType;
 import com.android.builder.model.ProductFlavor;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -114,10 +113,12 @@ public class VariantFilter implements com.android.build.gradle.api.VariantFilter
     @Override
     public String getName() {
         if (name == null) {
-            name = VariantConfiguration.computeFullName(
-                    VariantConfiguration.computeFlavorName(flavors),
-                    buildType,
-                    type);
+            name =
+                    VariantConfiguration.computeFullName(
+                            VariantConfiguration.computeFlavorName(flavors),
+                            buildType,
+                            type,
+                            null /* testedType */);
         }
 
         return name;

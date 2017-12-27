@@ -16,8 +16,5 @@
 
 package com.android.build.gradle.integration.common.category;
 
-/**
- * JUnit category used to label tests that requires a connected device.
- */
-public interface DeviceTests {
-}
+/** JUnit category used to label tests that requires a connected device. */
+public class DeviceTests {}

@@ -20,7 +20,6 @@ import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.google.common.base.Objects;
-
 import java.util.regex.Pattern;
 
 /**
@@ -45,6 +44,37 @@ import java.util.regex.Pattern;
  */
 public final class AndroidVersion implements Comparable<AndroidVersion> {
 
+    /**
+     * SDK version codes mirroring ones found in Build#VERSION_CODES on Android.
+     */
+    public static class VersionCodes {
+        public static final int BASE = 1;
+        public static final int BASE_1_1 = 2;
+        public static final int CUPCAKE = 3;
+        public static final int DONUT = 4;
+        public static final int ECLAIR = 5;
+        public static final int ECLAIR_0_1 = 6;
+        public static final int ECLAIR_MR1 = 7;
+        public static final int FROYO = 8;
+        public static final int GINGERBREAD = 9;
+        public static final int GINGERBREAD_MR1 = 10;
+        public static final int HONEYCOMB = 11;
+        public static final int HONEYCOMB_MR1 = 12;
+        public static final int HONEYCOMB_MR2 = 13;
+        public static final int ICE_CREAM_SANDWICH = 14;
+        public static final int ICE_CREAM_SANDWICH_MR1 = 15;
+        public static final int JELLY_BEAN = 16;
+        public static final int JELLY_BEAN_MR1 = 17;
+        public static final int JELLY_BEAN_MR2 = 18;
+        public static final int KITKAT = 19;
+        public static final int KITKAT_WATCH = 20;
+        public static final int LOLLIPOP = 21;
+        public static final int LOLLIPOP_MR1 = 22;
+        public static final int N = 24;
+        public static final int N_MR1 = 25;
+        public static final int O = 26;
+    }
+
     private final int mApiLevel;
     @Nullable
     private final String mCodename;
@@ -63,6 +93,10 @@ public final class AndroidVersion implements Comparable<AndroidVersion> {
 
     /** First version to have multi-user support (JB-MR2, API 17) */
     public static final AndroidVersion SUPPORTS_MULTI_USER = new AndroidVersion(17, null);
+
+    /** Minimum API versions that are recommended for use in testing apps */
+    public static final int MIN_RECOMMENDED_API = 22;
+    public static final int MIN_RECOMMENDED_WEAR_API = 25;
 
     /**
      * Thrown when an {@link AndroidVersion} object could not be created.
@@ -85,20 +119,24 @@ public final class AndroidVersion implements Comparable<AndroidVersion> {
     }
 
     /**
-     * <p>
-     * Creates an {@link AndroidVersion} from a string that may be an integer API
-     * level or a string codename.
-     * </p>
-     * <Em>Important</em>: An important limitation of this method is that cannot possible
-     * recreate the API level integer from a pure string codename. This is only OK to use
-     * if the caller can guarantee that only {@link #getApiString()} will be used later.
-     * Wrong things will happen if the caller then tries to resolve the numeric
-     * {@link #getApiLevel()}.
+     * Creates an {@link AndroidVersion} with the given api level of a release version (the codename
+     * is null).
+     */
+    public AndroidVersion(int apiLevel) {
+        this(apiLevel, null);
+    }
+
+    /**
+     * Creates an {@link AndroidVersion} from a string that may be an integer API level or a string
+     * codename. <Em>Important</em>: An important limitation of this method is that cannot possible
+     * recreate the API level integer from a pure string codename. This is only OK to use if the
+     * caller can guarantee that only {@link #getApiString()} will be used later. Wrong things will
+     * happen if the caller then tries to resolve the numeric {@link #getApiLevel()}.
      *
-     * @param apiOrCodename A non-null API integer or a codename in its "ALL_CAPS" format.
-     *                      "REL" is notable not a valid codename.
-     * @throws AndroidVersionException if the input isn't a pure integer or doesn't look like
-     *                      a valid string codename.
+     * @param apiOrCodename A non-null API integer or a codename in its "ALL_CAPS" format. "REL" is
+     *     notable not a valid codename.
+     * @throws AndroidVersionException if the input isn't a pure integer or doesn't look like a
+     *     valid string codename.
      */
     public AndroidVersion(@NonNull String apiOrCodename) throws AndroidVersionException {
         int apiLevel = 0;
@@ -181,6 +219,11 @@ public final class AndroidVersion implements Comparable<AndroidVersion> {
      */
     public boolean isPreview() {
         return mCodename != null;
+    }
+
+    /** Checks if the version is having legacy multidex support. */
+    public boolean isLegacyMultidex() {
+        return this.getFeatureLevel() < 21;
     }
 
     /**

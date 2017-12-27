@@ -17,7 +17,6 @@
 package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatApk;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.JAVA;
 
 import com.android.build.gradle.integration.common.fixture.BuildModel;
@@ -30,8 +29,6 @@ import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
 import com.android.builder.model.level2.GraphItem;
-import com.android.ide.common.process.ProcessException;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -46,10 +43,9 @@ public class AppWithProvidedLocalJarTest {
     public static GradleTestProject project = GradleTestProject.builder()
             .fromTestProject("projectWithLocalDeps")
             .create();
-    static ModelContainer<AndroidProject> model;
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         TestFileUtils.appendToFile(project.getBuildFile(),
                 "\n" +
                 "apply plugin: \"com.android.application\"\n" +
@@ -64,29 +60,49 @@ public class AppWithProvidedLocalJarTest {
                 "}\n");
 
         project.execute("clean", "assembleDebug");
-        model = project.model().withFeature(BuildModel.Feature.FULL_DEPENDENCIES).getSingle();
     }
 
     @AfterClass
     public static void cleanUp() {
         project = null;
-        model = null;
     }
 
     @Test
-    public void checkProvidedLocalJarIsNotPackaged() throws IOException, ProcessException {
-        assertThatApk(project.getApk("debug"))
+    public void checkProvidedLocalJarIsNotPackaged() throws Exception {
+        assertThat(project.getApk("debug"))
                 .doesNotContainClass("Lcom/example/android/multiproject/person/People;");
     }
 
     @Test
-    public void checkProvidedLocalJarIsInTheMainArtifactDependency() {
+    public void checkBasicModel() throws Exception {
+        ModelContainer<AndroidProject> model = project.model().getSingle();
         LibraryGraphHelper helper = new LibraryGraphHelper(model);
 
         Variant variant = ModelHelper.getVariant(model.getOnlyModel().getVariants(), "debug");
 
         DependencyGraphs dependencyGraph = variant.getMainArtifact().getDependencyGraphs();
 
+        checkCompileDeps(helper, dependencyGraph);
+    }
+
+    @Test
+    public void checkFullModel() throws Exception {
+        ModelContainer<AndroidProject> model =
+                project.model().withFeature(BuildModel.Feature.FULL_DEPENDENCIES).getSingle();
+        LibraryGraphHelper helper = new LibraryGraphHelper(model);
+
+        Variant variant = ModelHelper.getVariant(model.getOnlyModel().getVariants(), "debug");
+
+        DependencyGraphs dependencyGraph = variant.getMainArtifact().getDependencyGraphs();
+        checkCompileDeps(helper, dependencyGraph);
+
+        // check that the package graph does not contain the item (or anything else)
+        assertThat(dependencyGraph.getPackageDependencies())
+                .named("package dependencies")
+                .isEmpty();
+    }
+
+    private void checkCompileDeps(LibraryGraphHelper helper, DependencyGraphs dependencyGraph) {
         // assert that there is one java library dependency
         assertThat(helper.on(dependencyGraph).withType(JAVA).asList())
                 .named("Java Library dependencies")
@@ -96,11 +112,6 @@ public class AppWithProvidedLocalJarTest {
         assertThat(dependencyGraph.getProvidedLibraries())
                 .named("compile provided list")
                 .containsExactly(javaItem.getArtifactAddress());
-
-        // check that the package graph does not contain the item (or anything else)
-
-        assertThat(dependencyGraph.getPackageDependencies())
-                .named("package dependencies")
-                .isEmpty();
     }
+
 }

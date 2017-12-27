@@ -17,27 +17,22 @@
 package com.android.build.gradle.integration.instant;
 
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
+import static com.android.testutils.truth.MoreTruth.assertThatDex;
 
 import com.android.build.gradle.integration.common.fixture.Adb;
 import com.android.build.gradle.integration.common.fixture.GradleTestProject;
 import com.android.build.gradle.integration.common.fixture.Logcat;
-import com.android.build.gradle.integration.common.truth.AbstractAndroidSubject;
-import com.android.build.gradle.integration.common.truth.ApkSubject;
-import com.android.build.gradle.integration.common.utils.AssumeUtil;
-import com.android.build.gradle.internal.incremental.ColdswapMode;
 import com.android.build.gradle.internal.incremental.InstantRunVerifierStatus;
 import com.android.builder.model.InstantRun;
-import com.android.testutils.truth.DexClassSubject;
-import com.android.testutils.truth.DexFileSubject;
-import com.android.testutils.truth.IndirectSubject;
-import com.android.tools.fd.client.InstantRunArtifact;
-import com.android.tools.fd.client.InstantRunArtifactType;
-import com.android.tools.fd.client.InstantRunBuildInfo;
+import com.android.sdklib.AndroidVersion;
+import com.android.testutils.apk.Apk;
+import com.android.testutils.apk.SplitApks;
+import com.android.tools.ir.client.InstantRunArtifact;
+import com.android.tools.ir.client.InstantRunArtifactType;
+import com.android.tools.ir.client.InstantRunBuildInfo;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import com.google.common.truth.Expect;
-import java.io.IOException;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -61,34 +56,25 @@ public class ConditionalApiUse {
     @Rule
     public Expect expect = Expect.createAndEnableStackTrace();
 
-    @Before
-    public void checkEnvironment() {
-        // IR currently does not work with Jack - http://b.android.com/224374
-        AssumeUtil.assumeNotUsingJack();
-    }
-
     @Test
     public void buildFor19() throws Exception {
 
-        InstantRun instantRunModel = InstantRunTestUtils.doInitialBuild(
-                project, 19, ColdswapMode.AUTO);
+        InstantRun instantRunModel =
+                InstantRunTestUtils.doInitialBuild(project, new AndroidVersion(19, null));
 
-        ApkSubject apkSubject = expect.about(ApkSubject.FACTORY)
-                .that(project.getApk("debug"));
+        Apk apk = project.getApk("debug");
 
-        IndirectSubject<DexClassSubject> myCameraAccessExceptionClass = apkSubject
-                .hasClass("Lcom/android/tests/conditionalApiUse/MyException;",
-                        AbstractAndroidSubject.ClassFileScope.MAIN);
+        assertThat(apk)
+                .hasMainClass("Lcom/android/tests/conditionalApiUse/MyException;")
+                .that()
+                .doesNotHaveField("$change");
 
         // since we are building for 19, and the super class of MyException did not
         // exist at that release level, it should not be instrumented.
-        myCameraAccessExceptionClass.that().doesNotHaveField("$change");
 
         makeHotswapCompatibleChange();
 
-        project.executor()
-                .withInstantRun(19, ColdswapMode.AUTO)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(19, null)).run("assembleDebug");
 
         // because we touched a class that was not compatible with InstantRun, we should have
         // a coldswap event.
@@ -102,36 +88,32 @@ public class ConditionalApiUse {
 
     @Test
     public void buildFor23() throws Exception {
-        InstantRun instantRunModel = InstantRunTestUtils.doInitialBuild(
-                project, 23, ColdswapMode.AUTO);
+        InstantRun instantRunModel =
+                InstantRunTestUtils.doInitialBuild(project, new AndroidVersion(23, null));
 
-        ApkSubject apkSubject = expect.about(ApkSubject.FACTORY)
-                .that(project.getApk("debug"));
+        SplitApks apks = InstantRunTestUtils.getCompiledColdSwapChange(instantRunModel);
 
-        IndirectSubject<DexClassSubject> myCameraAccessExceptionClass = apkSubject
-                .hasClass("Lcom/android/tests/conditionalApiUse/MyException;",
-                        AbstractAndroidSubject.ClassFileScope.INSTANT_RUN);
-
+        assertThat(apks)
+                .hasClass("Lcom/android/tests/conditionalApiUse/MyException;")
+                .that()
+                .hasField("$change");
         // since we are building for 23, and the super class exists, the exception class should
         // be instrumented.
-        myCameraAccessExceptionClass.that().hasField("$change");
 
         makeHotswapCompatibleChange();
 
-        project.executor()
-                .withInstantRun(23, ColdswapMode.AUTO)
-                .run("assembleDebug");
+        project.executor().withInstantRun(new AndroidVersion(23, null)).run("assembleDebug");
 
         InstantRunArtifact reloadDexArtifact = InstantRunTestUtils
                 .getReloadDexArtifact(instantRunModel);
 
-        expect.about(DexFileSubject.FACTORY)
-                .that(reloadDexArtifact.file)
+        assertThatDex(reloadDexArtifact.file)
                 .containsClass("Lcom/android/tests/conditionalApiUse/MyException$override;")
-                .that().hasMethod("toString");
+                .that()
+                .hasMethod("toString");
     }
 
-    private void makeHotswapCompatibleChange() throws IOException {
+    private void makeHotswapCompatibleChange() throws Exception {
         String updatedClass = "package com.android.tests.conditionalApiUse;\n"
                 + "\n"
                 + "import android.hardware.camera2.CameraAccessException;\n"

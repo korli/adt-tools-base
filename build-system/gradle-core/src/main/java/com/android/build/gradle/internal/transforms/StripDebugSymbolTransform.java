@@ -25,6 +25,7 @@ import com.android.build.api.transform.DirectoryInput;
 import com.android.build.api.transform.Format;
 import com.android.build.api.transform.JarInput;
 import com.android.build.api.transform.QualifiedContent;
+import com.android.build.api.transform.QualifiedContent.Scope;
 import com.android.build.api.transform.SecondaryFile;
 import com.android.build.api.transform.Status;
 import com.android.build.api.transform.Transform;
@@ -46,9 +47,6 @@ import com.android.utils.ILogger;
 import com.android.utils.ImmutableCollectors;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-
-import org.gradle.api.Project;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileSystem;
@@ -59,6 +57,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.gradle.api.Project;
 
 /**
  * Transform to remove debug symbols from native libraries.
@@ -72,18 +71,21 @@ public class StripDebugSymbolTransform extends Transform {
 
     @NonNull
     private final Set<PathMatcher> excludeMatchers;
+    private final boolean isLibrary;
 
     public StripDebugSymbolTransform(
             @NonNull Project project,
             @NonNull NdkHandler ndkHandler,
-            @NonNull Set<String> excludePattern) {
+            @NonNull Set<String> excludePattern,
+            boolean isLibrary) {
 
         this.excludeMatchers = excludePattern.stream()
                 .map(StripDebugSymbolTransform::compileGlob)
                 .collect(ImmutableCollectors.toImmutableSet());
+        this.isLibrary = isLibrary;
         checkArgument(ndkHandler.isConfigured());
 
-        for(Abi abi : ndkHandler.getSupportedAbis()) {
+        for (Abi abi : Abi.values()) {
             stripExecutables.put(abi, ndkHandler.getStripExecutable(abi));
         }
         this.project = project;
@@ -103,7 +105,10 @@ public class StripDebugSymbolTransform extends Transform {
 
     @NonNull
     @Override
-    public Set<QualifiedContent.Scope> getScopes() {
+    public Set<? super Scope> getScopes() {
+        if (isLibrary) {
+            return TransformManager.PROJECT_ONLY;
+        }
         return TransformManager.SCOPE_FULL_PROJECT;
     }
 
@@ -112,11 +117,16 @@ public class StripDebugSymbolTransform extends Transform {
         return true;
     }
 
+    @Override
+    public boolean isCacheable() {
+        return true;
+    }
+
     @NonNull
     @Override
     public Collection<SecondaryFile> getSecondaryFiles() {
         return stripExecutables.values().stream()
-                .map(f -> new SecondaryFile(f, false))
+                .map(SecondaryFile::nonIncremental)
                 .collect(Collectors.toList());
     }
 
@@ -164,7 +174,7 @@ public class StripDebugSymbolTransform extends Transform {
                                 }
                                 break;
                             case REMOVED:
-                                FileUtils.deleteIfExists(strippedLib);
+                                FileUtils.deletePath(new File(output, path));
                                 break;
                             default:
                                 break;

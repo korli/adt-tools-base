@@ -9,17 +9,6 @@ java_library(
     ],
 )
 
-# Part of the standalone-jps-builder artifact from IDEA
-java_import(
-    name = "formc-deps",
-    jars = [
-        "prebuilts/asm-all.jar",
-        "prebuilts/jdom.jar",
-        "prebuilts/jgoodies-forms.jar",
-        "prebuilts/jps-builders.jar",
-    ],
-)
-
 java_binary(
     name = "jasmin-compiler",
     srcs = glob(["src/com/android/tools/jasmin/JasminCompiler.java"]),
@@ -65,26 +54,50 @@ java_binary(
 )
 
 genrule(
-    name = "kotlin-compiler",
-    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.0.1-release-IJ143-46.zip"],
+    name = "kotlin-compiler.genrule",
+    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.1.0-release-112.zip"],
     outs = ["kotlin-compiler.jar"],
     cmd = "$(location :unzipper) $< Kotlin/kotlinc/lib/kotlin-compiler.jar:$@",
     tools = [":unzipper"],
 )
 
+java_import(
+    name = "kotlin-compiler",
+    jars = [":kotlin-compiler.genrule"],
+)
+
 genrule(
-    name = "kotlin-runtime",
-    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.0.1-release-IJ143-46.zip"],
+    name = "kotlin-runtime.genrule",
+    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.1.0-release-112.zip"],
     outs = [
         "kotlin-runtime.jar",
         "kotlin-reflect.jar",
-        "kotlin-test.jar",
+        "kotlin-script-runtime.jar",
     ],
     cmd = "$(location :unzipper) $< " +
           "Kotlin/kotlinc/lib/kotlin-runtime.jar:$(@D)/kotlin-runtime.jar " +
           "Kotlin/kotlinc/lib/kotlin-reflect.jar:$(@D)/kotlin-reflect.jar " +
-          "Kotlin/kotlinc/lib/kotlin-test.jar:$(@D)/kotlin-test.jar",
+          "Kotlin/kotlinc/lib/kotlin-script-runtime.jar:$(@D)/kotlin-script-runtime.jar",
     tools = [":unzipper"],
+)
+
+java_import(
+    name = "kotlin-runtime",
+    jars = [":kotlin-runtime.genrule"],
+    visibility = ["//visibility:public"],
+)
+
+genrule(
+    name = "kotlin-test.genrule",
+    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.1.0-release-112.zip"],
+    outs = ["kotlin-test.jar"],
+    cmd = "$(location :unzipper) $< Kotlin/kotlinc/lib/kotlin-test.jar:$(@D)/kotlin-test.jar",
+    tools = [":unzipper"],
+)
+
+java_import(
+    name = "kotlin-test",
+    jars = [":kotlin-test.genrule"],
     visibility = ["//visibility:public"],
 )
 
@@ -107,8 +120,8 @@ java_binary(
     visibility = ["//visibility:public"],
     runtime_deps = [":kotlin-runtime"],
     deps = [
-        ":formc-deps",
         ":utils",
+        "//prebuilts/tools/common/bazel/formc-deps",
     ],
 )
 
@@ -125,11 +138,18 @@ java_binary(
     runtime_deps = [":utils"],
 )
 
+java_binary(
+    name = "properties_merger",
+    main_class = "com.android.tools.utils.PropertiesMerger",
+    visibility = ["//visibility:public"],
+    runtime_deps = [":utils"],
+)
+
 java_library(
     name = "maven",
-    srcs = glob(["src/**/maven/*.java"]),
+    srcs = glob(["src/com/android/tools/maven/**/*.java"]),
     deps = [
-        ":utils",
+        "//tools/base/third_party:com.google.code.findbugs_jsr305",
         "//tools/base/third_party:com.google.guava_guava",
         "//tools/base/third_party:org.apache.maven_maven-aether-provider",
         "//tools/base/third_party:org.eclipse.aether_aether-connector-basic",
@@ -139,43 +159,93 @@ java_library(
 
 java_binary(
     name = "pom_generator",
-    main_class = "com.android.tools.maven.PomGenerator",
+    srcs = ["src/com/android/tools/binaries/PomGenerator.java"],
+    jvm_flags = ["-Xmx1g"],
+    main_class = "com.android.tools.binaries.PomGenerator",
     visibility = ["//visibility:public"],
-    runtime_deps = [":maven"],
+    runtime_deps = [
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-simple/1.7.2:jar",
+    ],
+    deps = [
+        ":maven",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.apache.maven_maven-aether-provider",
+    ],
 )
 
 java_binary(
     name = "repo_builder",
-    main_class = "com.android.tools.maven.RepoBuilder",
+    srcs = ["src/com/android/tools/binaries/RepoBuilder.java"],
+    main_class = "com.android.tools.binaries.RepoBuilder",
     visibility = ["//visibility:public"],
-    runtime_deps = [":maven"],
+    runtime_deps = [
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-simple/1.7.2:jar",
+    ],
+    deps = [
+        ":maven",
+        ":utils",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.apache.maven_maven-aether-provider",
+    ],
 )
 
 # See README.md
 java_binary(
     name = "java_import_generator",
-    main_class = "com.android.tools.maven.JavaImportGenerator",
+    srcs = ["src/com/android/tools/binaries/JavaImportGenerator.java"],
+    main_class = "com.android.tools.binaries.JavaImportGenerator",
     visibility = ["//visibility:public"],
     runtime_deps = [
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-simple/1.7.2:jar",
+    ],
+    deps = [
         ":maven",
+        ":utils",
+        "//tools/base/third_party:com.google.code.findbugs_jsr305",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.apache.maven_maven-aether-provider",
     ],
 )
 
 # See README.md
 java_binary(
     name = "third_party_build_generator",
-    main_class = "com.android.tools.maven.ThirdPartyBuildGenerator",
+    srcs = [
+        "src/com/android/tools/binaries/JavaImportGenerator.java",
+        "src/com/android/tools/binaries/ThirdPartyBuildGenerator.java",
+    ],
+    main_class = "com.android.tools.binaries.ThirdPartyBuildGenerator",
     visibility = ["//visibility:public"],
-    runtime_deps = [":maven"],
+    runtime_deps = [
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-simple/1.7.2:jar",
+    ],
+    deps = [
+        ":maven",
+        ":utils",
+        "//tools/base/third_party:com.google.code.findbugs_jsr305",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.apache.maven_maven-aether-provider",
+    ],
 )
 
 # See README.md
 java_binary(
     name = "add_dependency",
-    main_class = "com.android.tools.maven.AddDependency",
+    srcs = [
+        "src/com/android/tools/binaries/AddDependency.java",
+        "src/com/android/tools/binaries/JavaImportGenerator.java",
+    ],
+    main_class = "com.android.tools.binaries.AddDependency",
     visibility = ["//visibility:public"],
     runtime_deps = [
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-simple/1.7.2:jar",
+    ],
+    deps = [
         ":maven",
+        ":utils",
+        "//tools/base/third_party:com.google.code.findbugs_jsr305",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.apache.maven_maven-aether-provider",
     ],
 )
 
@@ -189,7 +259,8 @@ java_binary(
         "//prebuilts/tools/common/m2/repository/org/anarres/jarjar/jarjar-core/1.0.0:jar",
         "//prebuilts/tools/common/m2/repository/org/ow2/asm/asm-commons/5.0.4:jar",
         "//prebuilts/tools/common/m2/repository/org/ow2/asm/asm/5.0.4:jar",
-        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-api/1.7.7:jar",
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-api/1.7.2:jar",
+        "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-simple/1.7.2:jar",
     ],
 )
 
@@ -207,18 +278,58 @@ java_binary(
 
 config_setting(
     name = "darwin",
-    values = {
-        "cpu": "darwin",
-    },
+    values = {"cpu": "darwin"},
     visibility = ["//visibility:public"],
 )
 
-# TODO: Temporary test rule for repo generation
+config_setting(
+    name = "windows",
+    values = {"cpu": "x64_windows"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_cpu_x86",
+    values = {"android_cpu": "x86"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_cpu_x86_64",
+    values = {"android_cpu": "x86_64"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_cpu_arm",
+    values = {"android_cpu": "armeabi-v7a"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "android_cpu_arm_64",
+    values = {"android_cpu": "arm64-v8a"},
+    visibility = ["//visibility:public"],
+)
+
+# Use cpu for armeabi since android_cpu default value is armeabi
+config_setting(
+    name = "android_cpu_armeabi",
+    values = {"cpu": "armeabi"},
+    visibility = ["//visibility:public"],
+)
+
 maven_repo(
     name = "offline_repo",
     artifacts = [
+        "//tools/data-binding:tools.compiler",
         "//tools/base/build-system/gradle",
         "//tools/base/build-system/gradle-experimental",
+        "//tools/base/build-system/java-lib-plugin/java-lib-model-builder",
+        "//tools/base/devicelib:tools.devicelib",
+        "//tools/base/lint/libs/lint-tests",
+        "//tools/base/testutils:tools.testutils",
     ],
+    include_sources = True,
     visibility = ["//visibility:public"],
 )

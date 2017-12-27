@@ -18,7 +18,6 @@ package com.android.build.gradle.integration.dependencies;
 
 import static com.android.build.gradle.integration.common.fixture.BuildModel.Feature.FULL_DEPENDENCIES;
 import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThat;
-import static com.android.build.gradle.integration.common.truth.TruthHelper.assertThatAar;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Filter.PROVIDED;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Property.GRADLE_PATH;
 import static com.android.build.gradle.integration.common.utils.LibraryGraphHelper.Type.MODULE;
@@ -31,10 +30,8 @@ import com.android.build.gradle.integration.common.utils.ModelHelper;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
 import com.android.builder.model.level2.DependencyGraphs;
-import com.android.ide.common.process.ProcessException;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-import java.io.IOException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -53,7 +50,7 @@ public class LibWithProvidedDirectJarTest {
     private static LibraryGraphHelper helper;
 
     @BeforeClass
-    public static void setUp() throws IOException {
+    public static void setUp() throws Exception {
         Files.write("include 'app', 'library', 'jar'", project.getSettingsFile(), Charsets.UTF_8);
 
         appendToFile(project.getSubproject("app").getBuildFile(),
@@ -81,13 +78,13 @@ public class LibWithProvidedDirectJarTest {
     }
 
     @Test
-    public void checkProvidedJarIsNotPackaged() throws IOException, ProcessException {
-        assertThatAar(project.getSubproject("library").getAar("debug"))
+    public void checkProvidedJarIsNotPackaged() throws Exception {
+        assertThat(project.getSubproject("library").getAar("debug"))
                 .doesNotContainClass("Lcom/example/android/multiproject/person/People;");
     }
 
     @Test
-    public void checkProvidedJarIsIntheLibCompileDeps() {
+    public void checkProvidedJarIsIntheLibCompileDeps() throws Exception {
         Variant variant = ModelHelper.getVariant(
                 modelContainer.getModelMap().get(":library").getVariants(), "debug");
 
@@ -103,7 +100,7 @@ public class LibWithProvidedDirectJarTest {
     }
 
     @Test
-    public void checkProvidedJarIsNotIntheLibPackageDeps() {
+    public void checkProvidedJarIsNotIntheLibPackageDeps() throws Exception {
         Variant variant = ModelHelper.getVariant(
                 modelContainer.getModelMap().get(":library").getVariants(), "debug");
 
@@ -112,7 +109,7 @@ public class LibWithProvidedDirectJarTest {
     }
 
     @Test
-    public void checkProvidedJarIsNotInTheAppDeps() {
+    public void checkProvidedJarIsNotInTheAppDeps() throws Exception {
         Variant variant = ModelHelper.getVariant
                 (modelContainer.getModelMap().get(":app").getVariants(), "debug");
 

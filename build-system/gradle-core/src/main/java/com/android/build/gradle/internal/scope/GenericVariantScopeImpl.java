@@ -20,16 +20,14 @@ import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.pipeline.TransformTask;
 import com.android.build.gradle.tasks.PackageApplication;
 import com.google.common.collect.Lists;
-
-import org.gradle.api.DefaultTask;
-
 import java.util.List;
+import org.gradle.api.DefaultTask;
 
 /**
  * Partial implementation of the {@link InstantRunVariantScope} that contains generic implementation
  * of the interface for Gradle or an external build system.
  */
-public abstract class GenericVariantScopeImpl implements InstantRunVariantScope {
+public abstract class GenericVariantScopeImpl extends TaskOutputHolderImpl implements InstantRunVariantScope {
 
     private AndroidTask<TransformTask> instantRunVerifierTask;
 

@@ -16,27 +16,30 @@
 
 package com.android.builder.internal.aapt.v2;
 
+import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.builder.core.VariantType;
 import com.android.builder.internal.aapt.AaptException;
 import com.android.builder.internal.aapt.AaptPackageConfig;
 import com.android.builder.internal.aapt.AaptUtils;
-import com.android.builder.model.AaptOptions;
-import com.android.sdklib.BuildToolInfo;
+import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.sdklib.IAndroidTarget;
+import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Builds the command lines for use with {@code aapt2}.
@@ -49,38 +52,47 @@ public final class AaptV2CommandBuilder {
     private AaptV2CommandBuilder() {}
 
     /**
-     * Creates the command line used to compile a resource.
-     * See {@link com.android.builder.internal.aapt.Aapt#compile(File, File)}.
+     * Creates the command line used to compile a resource. See {@link
+     * com.android.builder.internal.aapt.Aapt#compile(CompileResourceRequest)}.
      *
-     * @param file see above
-     * @param output see above
      * @return the command line arguments
      */
-    public static ImmutableList<String> makeCompile(@NonNull File file, @NonNull File output) {
-        return ImmutableList.of(
-                "compile",
-                "-o",
-                output.getAbsolutePath(),
-                file.getAbsolutePath());
+    public static ImmutableList<String> makeCompile(@NonNull CompileResourceRequest request) {
+        ImmutableList.Builder<String> parameters = new ImmutableList.Builder();
+
+        if (request.isPseudoLocalize()) {
+            parameters.add("--pseudo-localize");
+        }
+
+        if (!request.isPngCrunching()) {
+            // Only pass --no-crunch for png files and not for 9-patch files as that breaks them.
+            String lowerName = request.getInput().getPath().toLowerCase(Locale.US);
+            if (lowerName.endsWith(SdkConstants.DOT_PNG)
+                    && !lowerName.endsWith(SdkConstants.DOT_9PNG)) {
+                parameters.add("--no-crunch");
+            }
+        }
+
+        parameters.add("--legacy");
+        parameters.add("-o", request.getOutput().getAbsolutePath());
+        parameters.add(request.getInput().getAbsolutePath());
+
+        return parameters.build();
     }
 
     /**
      * Creates the command line used to link the package.
-     * See {@link com.android.builder.internal.aapt.Aapt#link(AaptPackageConfig)}.
+     *
+     * <p>See {@link com.android.builder.internal.aapt.Aapt#link(AaptPackageConfig)}.
      *
      * @param config see above
      * @param intermediateDir a directory for intermediate files
-     * @param buildToolInfo build tools
      * @return the command line arguments
      * @throws AaptException failed to build the command line
      */
     public static ImmutableList<String> makeLink(
-            @NonNull AaptPackageConfig config,
-            @NonNull File intermediateDir,
-            @NonNull BuildToolInfo buildToolInfo) throws AaptException {
+            @NonNull AaptPackageConfig config, @NonNull File intermediateDir) throws AaptException {
         ImmutableList.Builder<String> builder = ImmutableList.builder();
-
-        builder.add("link");
 
         if (config.isVerbose()) {
             builder.add("-v");
@@ -94,17 +106,53 @@ public final class AaptV2CommandBuilder {
         Preconditions.checkNotNull(target);
         builder.add("-I", target.getPath(IAndroidTarget.ANDROID_JAR));
 
+        config.getImports().forEach(file -> builder.add("-I", file.getAbsolutePath()));
+
         File manifestFile = config.getManifestFile();
         Preconditions.checkNotNull(manifestFile);
         builder.add("--manifest", manifestFile.getAbsolutePath());
 
-        if (config.getResourceDir() != null) {
-            // TODO: Fix when aapt 2 supports -R directories (http://b.android.com/209331)
-            // builder.addArgs("-R", config.getResourceDir().getAbsolutePath());
+        File resourceOutputApk;
+        if (config.getResourceOutputApk() != null) {
+            resourceOutputApk = config.getResourceOutputApk();
+        } else {
+            // FIXME: Fix when aapt 2 support not providing -o (http://b.android.com/210026)
             try {
-                Files.walk(config.getResourceDir().toPath())
-                        .filter(Files::isRegularFile)
-                        .forEach((p) -> builder.add("-R", p.toString()));
+                File tmpOutput = File.createTempFile("aapt-", "-out");
+                tmpOutput.deleteOnExit();
+                resourceOutputApk = tmpOutput;
+            } catch (IOException e) {
+                throw new AaptException("No output apk defined and failed to create tmp file", e);
+            }
+        }
+        builder.add("-o", resourceOutputApk.getAbsolutePath());
+
+        if (config.getResourceDir() != null) {
+            try {
+                if (config.isListResourceFiles()) {
+                    // AAPT2 only accepts individual files passed to the -R flag. In order to not
+                    // pass every single resource file, instead create a temporary file containing a
+                    // list of resource files and pass it as the only -R argument.
+                    File file =
+                            new File(
+                                    intermediateDir,
+                                    "resources-list-for-" + resourceOutputApk.getName() + ".txt");
+
+                    // Resources list could have changed since last run.
+                    FileUtils.deleteIfExists(file);
+                    try (FileOutputStream fos = new FileOutputStream(file);
+                         PrintWriter pw = new PrintWriter(fos)) {
+
+                        Files.walk(config.getResourceDir().toPath())
+                                .filter(Files::isRegularFile)
+                                .forEach((p) -> pw.print(p.toString() + " "));
+                    }
+                    builder.add("-R", "@" + file.getAbsolutePath());
+                } else {
+                    Files.walk(config.getResourceDir().toPath())
+                            .filter(Files::isRegularFile)
+                            .forEach((p) -> builder.add("-R", p.toString()));
+                }
             } catch (IOException e) {
                 throw new AaptException("Failed to walk path " + config.getResourceDir());
             }
@@ -117,36 +165,24 @@ public final class AaptV2CommandBuilder {
             builder.add("--java", config.getSourceOutputDir().getAbsolutePath());
         }
 
-        if (config.getResourceOutputApk() != null) {
-            builder.add("-o", config.getResourceOutputApk().getAbsolutePath());
-        } else {
-            // FIXME: Fix when aapt 2 support not providing -o (http://b.android.com/210026)
-            try {
-                File tmpOutput = File.createTempFile("aapt-", "-out");
-                tmpOutput.deleteOnExit();
-                builder.add("-o", tmpOutput.getAbsolutePath());
-            } catch (IOException e) {
-                throw new AaptException("No output apk defined and failed to create tmp file", e);
-            }
+        if (config.getProguardOutputFile() != null) {
+            builder.add("--proguard", config.getProguardOutputFile().getAbsolutePath());
         }
 
-        if (config.getProguardOutputFile()!= null) {
-            builder.add("--proguard", config.getProguardOutputFile().getAbsolutePath());
+        if (config.getMainDexListProguardOutputFile() != null) {
+            builder.add(
+                    "--proguard-main-dex",
+                    config.getMainDexListProguardOutputFile().getAbsolutePath());
         }
 
         if (config.getSplits() != null) {
             for (String split : config.getSplits()) {
-                // FIXME: Fix when --split is supported (http://b.android.com/212372)
-//                builder.addArgs("--split", split);
+                String splitter = File.pathSeparator;
+                builder.add("--split", resourceOutputApk + "_" + split + splitter + split);
             }
         }
 
         // options controlled by build variants
-
-        if (config.isDebuggable()) {
-//            builder.addArgs("--debug-mode");
-        }
-
         ILogger logger = config.getLogger();
         Preconditions.checkNotNull(logger);
         if (config.getVariantType() != VariantType.ANDROID_TEST
@@ -154,39 +190,19 @@ public final class AaptV2CommandBuilder {
             builder.add("--custom-package", config.getCustomPackageForR());
         }
 
-        if (config.isPseudoLocalize()) {
-            Preconditions.checkState(buildToolInfo.getRevision().getMajor() >= 21);
-//            builder.addArgs("--pseudo-localize");
-        }
-
         // bundle specific options
         boolean generateFinalIds = true;
         if (config.getVariantType() == VariantType.LIBRARY) {
-            generateFinalIds = false;
-        } else if (config.getVariantType() == VariantType.ATOM && config.getBaseFeature() != null) {
             generateFinalIds = false;
         }
         if (!generateFinalIds) {
             builder.add("--non-final-ids");
         }
 
-        // AAPT options
-        AaptOptions options = config.getOptions();
-        Preconditions.checkNotNull(options);
-        String ignoreAssets = options.getIgnoreAssets();
-        if (ignoreAssets != null) {
-//            builder.addArgs("--ignore-assets", ignoreAssets);
-        }
-
-        if (config.getOptions().getFailOnMissingConfigEntry()) {
-            Preconditions.checkState(buildToolInfo.getRevision().getMajor() > 20);
-//            builder.addArgs("--error-on-missing-config-entry");
-        }
-
         /*
          * Never compress apks.
          */
-//        builder.addArgs("-0", "apk");
+        builder.add("-0", "apk");
 
         /*
          * Add custom no-compress extensions.
@@ -245,10 +261,20 @@ public final class AaptV2CommandBuilder {
             builder.add("--preferred-density", preferredDensity);
         }
 
-        if (config.getSymbolOutputDir() != null && (config.getVariantType() == VariantType.LIBRARY
-                || !config.getLibraries().isEmpty())) {
-//            builder.addArgs("--output-text-symbols",
-//                    config.getSymbolOutputDir().getAbsolutePath());
+        if (config.getSymbolOutputDir() != null
+                && (config.getVariantType() == VariantType.LIBRARY
+                        || !config.getLibrarySymbolTableFiles().isEmpty())) {
+            File rDotTxt = new File(config.getSymbolOutputDir(), "R.txt");
+            builder.add("--output-text-symbols", rDotTxt.getAbsolutePath());
+        }
+
+        if (config.getPackageId() != null) {
+            builder.add("--package-id", "0x" + Integer.toHexString(config.getPackageId()));
+            for (File dependentFeature : config.getDependentFeatures()) {
+                builder.add("-I", dependentFeature.getAbsolutePath());
+            }
+        } else if (!config.getDependentFeatures().isEmpty()) {
+            throw new AaptException("Dependent features configured but no package ID was set.");
         }
 
         builder.add("--no-version-vectors");

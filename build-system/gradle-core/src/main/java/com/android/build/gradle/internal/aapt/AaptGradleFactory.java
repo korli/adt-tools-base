@@ -18,14 +18,15 @@ package com.android.build.gradle.internal.aapt;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.AndroidGradleOptions;
-import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.VariantType;
 import com.android.builder.internal.aapt.Aapt;
 import com.android.builder.internal.aapt.v1.AaptV1;
+import com.android.builder.internal.aapt.v2.AaptV2Jni;
 import com.android.builder.internal.aapt.v2.OutOfProcessAaptV2;
+import com.android.builder.internal.aapt.v2.QueueableAapt2;
 import com.android.builder.sdk.TargetInfo;
+import com.android.builder.utils.FileCache;
+import com.android.ide.common.internal.WaitableExecutor;
 import com.android.ide.common.process.LoggedProcessOutputHandler;
 import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.process.TeeProcessOutputHandler;
@@ -35,6 +36,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import java.io.File;
+import java.io.IOException;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.gradle.api.Project;
@@ -50,96 +52,26 @@ public final class AaptGradleFactory {
     /**
      * Creates a new {@link Aapt} instance based on project configuration.
      *
-     * @param builder the android builder project model
-     * @param scope the scope of the variant to use {@code aapt2} with
-     * @param intermediateDir intermediate directory for aapt to use
-     * @return the newly-created instance
-     */
-    @NonNull
-    public static Aapt make(
-            @NonNull AndroidBuilder builder,
-            @NonNull VariantScope scope,
-            @NonNull File intermediateDir) {
-        return make(builder, true, scope, intermediateDir);
-    }
-
-    /**
-     * Creates a new {@link Aapt} instance based on project configuration.
-     *
-     * @param builder the android builder project model
-     * @param crunchPng should PNGs be crunched?
-     * @param scope the scope of the variant to use {@code aapt2} with
-     * @param intermediateDir intermediate directory for aapt to use
-     * @return the newly-created instance
-     */
-    @NonNull
-    public static Aapt make(
-            @NonNull AndroidBuilder builder,
-            boolean crunchPng,
-            @NonNull VariantScope scope,
-            @NonNull File intermediateDir) {
-        return make(
-                builder,
-                new LoggedProcessOutputHandler(new FilteringLogger(builder.getLogger())),
-                crunchPng,
-                scope.getGlobalScope().getProject(),
-                scope.getVariantConfiguration().getType(),
-                intermediateDir,
-                scope.getGlobalScope().getExtension().getAaptOptions().getCruncherProcesses());
-    }
-
-    /**
-     * Creates a new {@link Aapt} instance based on project configuration.
-     *
-     * @param builder the android builder project model
-     * @param crunchPng should PNGs be crunched?
-     * @param project the Gradle project
-     * @param variantType type of the variant to process
-     * @param intermediateDir intermediate directory for aapt to use
-     * @param cruncherProcesses the number of cruncher processes to use, if cruncher processes are
-     * used
-     * @return the newly-created instance
-     */
-    @NonNull
-    public static Aapt make(
-            @NonNull AndroidBuilder builder,
-            boolean crunchPng,
-            @NonNull Project project,
-            @NonNull VariantType variantType,
-            @NonNull File intermediateDir,
-            int cruncherProcesses) {
-        return make(
-                builder,
-                null,
-                crunchPng,
-                project,
-                variantType,
-                intermediateDir,
-                cruncherProcesses);
-    }
-
-    /**
-     * Creates a new {@link Aapt} instance based on project configuration.
-     *
+     * @param aaptGeneration which aapt to use
      * @param builder the android builder project model
      * @param outputHandler the output handler to use
+     * @param fileCache the cache to use for AAPT2 jni.
      * @param crunchPng should PNGs be crunched?
-     * @param project the Gradle project
-     * @param variantType type of the variant to process
      * @param intermediateDir intermediate directory for aapt to use
      * @param cruncherProcesses the number of cruncher processes to use, if cruncher processes are
-     * used
+     *     used
      * @return the newly-created instance
      */
     @NonNull
     public static Aapt make(
+            @NonNull AaptGeneration aaptGeneration,
             @NonNull AndroidBuilder builder,
             @Nullable ProcessOutputHandler outputHandler,
+            @Nullable FileCache fileCache,
             boolean crunchPng,
-            @NonNull Project project,
-            @NonNull VariantType variantType,
             @NonNull File intermediateDir,
-            int cruncherProcesses) {
+            int cruncherProcesses)
+            throws IOException {
         TargetInfo target = builder.getTargetInfo();
         Preconditions.checkNotNull(target, "target == null");
         BuildToolInfo buildTools = target.getBuildTools();
@@ -149,36 +81,42 @@ public final class AaptGradleFactory {
                         outputHandler,
                         new LoggedProcessOutputHandler(new FilteringLogger(builder.getLogger())));
 
-        if (AndroidGradleOptions.isAapt2Enabled(project) &&
-                BuildToolInfo.PathId.AAPT2.isPresentIn(buildTools.getRevision())) {
-            return new OutOfProcessAaptV2(
-                    builder.getProcessExecutor(),
-                    teeOutputHandler,
-                    buildTools,
-                    intermediateDir,
-                    new FilteringLogger(builder.getLogger()));
-        } else {
-            AaptV1.PngProcessMode processMode;
-            if (crunchPng) {
-                processMode = AaptV1.PngProcessMode.ALL;
-            } else {
-                processMode = AaptV1.PngProcessMode.NO_CRUNCH;
-            }
-
-            return new AaptV1(
-                    builder.getProcessExecutor(),
-                    teeOutputHandler,
-                    buildTools,
-                    new FilteringLogger(builder.getLogger()),
-                    processMode,
-                    cruncherProcesses);
+        switch (aaptGeneration) {
+            case AAPT_V1:
+                return new AaptV1(
+                        builder.getProcessExecutor(),
+                        teeOutputHandler,
+                        buildTools,
+                        new FilteringLogger(builder.getLogger()),
+                        crunchPng ? AaptV1.PngProcessMode.ALL : AaptV1.PngProcessMode.NO_CRUNCH,
+                        cruncherProcesses);
+            case AAPT_V2:
+                return new OutOfProcessAaptV2(
+                        builder.getProcessExecutor(),
+                        teeOutputHandler,
+                        buildTools,
+                        intermediateDir,
+                        new FilteringLogger(builder.getLogger()));
+            case AAPT_V2_JNI:
+                return new AaptV2Jni(
+                        intermediateDir,
+                        WaitableExecutor.useGlobalSharedThreadPool(),
+                        teeOutputHandler,
+                        fileCache);
+            case AAPT_V2_DAEMON_MODE:
+                return new QueueableAapt2(
+                        teeOutputHandler,
+                        buildTools,
+                        intermediateDir,
+                        new FilteringLogger(builder.getLogger()),
+                        0 /* use default */);
+            default:
+                throw new IllegalArgumentException("unknown aapt generation" + aaptGeneration);
         }
     }
 
-    /**
-     * Logger that downgrades some warnings to info level.
-     */
-    private static class FilteringLogger implements ILogger {
+    /** Logger that downgrades some warnings to info level. */
+    public static class FilteringLogger implements ILogger {
 
         /**
          * Ignored warnings in the aapt messages.
@@ -193,13 +131,12 @@ public final class AaptGradleFactory {
         @NonNull
         private final ILogger mDelegate;
 
-
         /**
          * Creates a new logger.
          *
          * @param delegate the logger ot delegate messages to
          */
-        private FilteringLogger(@NonNull ILogger delegate) {
+        public FilteringLogger(@NonNull ILogger delegate) {
             mDelegate = delegate;
         }
 

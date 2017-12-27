@@ -26,6 +26,7 @@ import static com.android.tools.lint.detector.api.Severity.WARNING;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.CombinedInput;
 import com.android.tools.lint.LintCliClient;
 import com.android.tools.lint.LintCliFlags;
 import com.android.tools.lint.Reporter;
@@ -76,6 +77,9 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
     private boolean showAll;
     private boolean checkReleaseBuilds = true;
     private boolean explainIssues = true;
+    private boolean checkTestSources;
+    private boolean checkGeneratedSources;
+    private boolean checkDependencies;
     @Nullable
     private File lintConfig;
     private boolean textReport;
@@ -115,8 +119,11 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
             boolean showAll,
             boolean explainIssues,
             boolean checkReleaseBuilds,
+            boolean checkTestSources,
+            boolean checkGeneratedSources,
+            boolean checkDependencies,
             @Nullable File baselineFile,
-            @Nullable Map<String,Integer> severityOverrides) {
+            @Nullable Map<String, Integer> severityOverrides) {
         this.disable = disable;
         this.enable = enable;
         this.check = check;
@@ -137,6 +144,9 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
         this.showAll = showAll;
         this.explainIssues = explainIssues;
         this.checkReleaseBuilds = checkReleaseBuilds;
+        this.checkTestSources = checkTestSources;
+        this.checkGeneratedSources = checkGeneratedSources;
+        this.checkDependencies = checkDependencies;
         this.baselineFile = baselineFile;
 
         if (severityOverrides != null) {
@@ -169,6 +179,9 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
                 source.isShowAll(),
                 source.isExplainIssues(),
                 source.isCheckReleaseBuilds(),
+                source.isCheckTestSources(),
+                source.isCheckGeneratedSources(),
+                source.isCheckDependencies(),
                 source.getBaselineFile(),
                 source.getSeverityOverrides()
         );
@@ -334,6 +347,37 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
         this.warningsAsErrors = allErrors;
     }
 
+    @Override
+    public boolean isCheckTestSources() {
+        return checkTestSources;
+    }
+
+    /** Sets whether lint should check test sources */
+    public void setCheckTestSources(boolean checkTestSources) {
+        this.checkTestSources = checkTestSources;
+    }
+
+    @Override
+    public boolean isCheckGeneratedSources() {
+        return checkGeneratedSources;
+    }
+
+    /** Sets whether lint should check generated sources */
+    public void setCheckGeneratedSources(boolean checkGeneratedSources) {
+        this.checkGeneratedSources = checkGeneratedSources;
+    }
+
+    @Override
+    @Input
+    public boolean isCheckDependencies() {
+        return checkDependencies;
+    }
+
+    /** Sets whether lint should check dependencies too */
+    public void setCheckDependencies(boolean checkDependencies) {
+        this.checkDependencies = checkDependencies;
+    }
+
     /** Returns whether lint should include explanations for issue errors. (Note that
      * HTML and XML reports intentionally do this unconditionally, ignoring this setting.) */
     @Override
@@ -497,6 +541,9 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
         flags.setCheckAllWarnings(checkAllWarnings);
         flags.setIgnoreWarnings(ignoreWarnings);
         flags.setWarningsAsErrors(warningsAsErrors);
+        flags.setCheckTestSources(checkTestSources);
+        flags.setCheckGeneratedSources(checkGeneratedSources);
+        flags.setCheckDependencies(checkDependencies);
         flags.setShowEverything(showAll);
         flags.setDefaultConfiguration(lintConfig);
         flags.setSeverityOverrides(severities);
@@ -857,5 +904,15 @@ public class LintOptions implements com.android.builder.model.LintOptions, Seria
             default:
                 return IGNORE;
         }
+    }
+
+    // Workaround for https://issuetracker.google.com/67418335
+    @Input
+    @NonNull
+    public String getCombinedInput() {
+        return new CombinedInput()
+                .add("htmlOutput", getHtmlOutput())
+                .add("xmlOutput", getXmlOutput())
+                .toString();
     }
 }

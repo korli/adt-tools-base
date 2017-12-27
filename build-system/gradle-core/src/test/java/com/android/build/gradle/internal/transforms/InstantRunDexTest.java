@@ -47,18 +47,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.Files;
-
-import org.gradle.api.Project;
-import org.gradle.api.logging.Logger;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
-import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -66,12 +54,20 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.gradle.api.Project;
+import org.gradle.api.logging.Logger;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
-/**
- * Tests for the InstantRunDex transform.
- */
-@RunWith(MockitoJUnitRunner.class)
+/** Tests for the InstantRunDex transform. */
 public class InstantRunDexTest {
+    @Rule public MockitoRule rule = MockitoJUnit.rule().silent();
 
     @Mock
     InstantRunVariantScope variantScope;
@@ -85,8 +81,7 @@ public class InstantRunDexTest {
     @Mock
     TransformOutputProvider transformOutputProvider;
 
-    @Mock
-    InstantRunBuildContext instantRunBuildContext;
+    @Mock InstantRunBuildContext buildContext;
 
     @Mock
     DexOptions dexOptions;
@@ -121,7 +116,7 @@ public class InstantRunDexTest {
         File oldRestartFile = new File(restartOutputFolder, "restart.dex");
         assertTrue(oldRestartFile.createNewFile());
 
-        when(variantScope.getInstantRunBuildContext()).thenReturn(instantRunBuildContext);
+        when(variantScope.getInstantRunBuildContext()).thenReturn(buildContext);
         when(variantScope.getRestartDexOutputFolder()).thenReturn(restartOutputFolder);
         when(variantScope.getReloadDexOutputFolder()).thenReturn(reloadOutputFolder);
         when(variantScope.getGlobalScope()).thenReturn(globalScope);
@@ -149,7 +144,7 @@ public class InstantRunDexTest {
     public void testVerifierFlaggedClass()
             throws TransformException, InterruptedException, IOException {
 
-        when(instantRunBuildContext.hasPassedVerification()).thenReturn(Boolean.FALSE);
+        when(buildContext.hasPassedVerification()).thenReturn(Boolean.FALSE);
 
         final List<File> convertedFiles = new ArrayList<>();
         InstantRunDex instantRunDex = getTestedDex(convertedFiles);
@@ -167,7 +162,7 @@ public class InstantRunDexTest {
     @Test
     public void testVerifierPassedClassOnLollipopOrAbove()
             throws TransformException, InterruptedException, IOException {
-        when(instantRunBuildContext.hasPassedVerification()).thenReturn(Boolean.TRUE);
+        when(buildContext.hasPassedVerification()).thenReturn(Boolean.TRUE);
 
         List<File> convertedFiles = new ArrayList<>();
         InstantRunDex instantRunDex = getTestedDex(convertedFiles);
@@ -178,7 +173,7 @@ public class InstantRunDexTest {
                 .build());
 
         assertThat(variantScope.getReloadDexOutputFolder().listFiles()).isNotEmpty();
-        verify(instantRunBuildContext).addChangedFile(
+        verify(buildContext).addChangedFile(
                 eq(FileType.RELOAD_DEX),
                 any(File.class));
     }
@@ -186,15 +181,12 @@ public class InstantRunDexTest {
     @Test
     public void testVerifierPassedClassOnDalvik()
             throws TransformException, InterruptedException, IOException {
-        when(instantRunBuildContext.hasPassedVerification()).thenReturn(Boolean.TRUE);
+        when(buildContext.hasPassedVerification()).thenReturn(Boolean.TRUE);
         when(project.getProperties()).then(
                 invocation -> ImmutableMap.of("android.injected.build.api", "15"));
 
-        InstantRunDex instantRunDex = new InstantRunDex(
-                variantScope,
-                ()-> dexByteCodeConverter,
-                dexOptions,
-                logger);
+        InstantRunDex instantRunDex =
+                new InstantRunDex(variantScope, () -> dexByteCodeConverter, dexOptions, logger, 1);
 
         instantRunDex.transform(new TransformInvocationBuilder(context)
                 .addReferencedInputs(ImmutableList.of(getTransformInput(directoryInput)))
@@ -206,16 +198,12 @@ public class InstantRunDexTest {
 
     @Test
     public void testNoChanges() throws TransformException, InterruptedException, IOException {
-        when(instantRunBuildContext.hasPassedVerification()).thenReturn(Boolean.TRUE);
+        when(buildContext.hasPassedVerification()).thenReturn(Boolean.TRUE);
         when(project.getProperties()).then(
                 invocation -> ImmutableMap.of("android.injected.build.api", "15"));
 
-
-        InstantRunDex instantRunDex = new InstantRunDex(
-                variantScope,
-                ()-> dexByteCodeConverter,
-                dexOptions,
-                logger);
+        InstantRunDex instantRunDex =
+                new InstantRunDex(variantScope, () -> dexByteCodeConverter, dexOptions, logger, 1);
 
         instantRunDex.transform(new TransformInvocationBuilder(context)
                 .addOutputProvider(transformOutputProvider)
@@ -226,11 +214,7 @@ public class InstantRunDexTest {
     }
 
     private InstantRunDex getTestedDex(final List<File> convertedFiles) {
-        return  new InstantRunDex(
-                variantScope,
-                ()-> dexByteCodeConverter,
-                dexOptions,
-                logger) {
+        return new InstantRunDex(variantScope, () -> dexByteCodeConverter, dexOptions, logger, 1) {
 
             @Override
             protected JarClassesBuilder getJarClassBuilder(File outputFile) {

@@ -67,9 +67,18 @@
             </value>
           </option>
         </GroovyCodeStyleSettings>
-        <JavaCodeStyleSettings>
-          <option name="CLASS_NAMES_IN_JAVADOC" value="3" />
-        </JavaCodeStyleSettings>
+        <JetCodeStyleSettings>
+          <option name="PACKAGES_TO_USE_STAR_IMPORTS">
+            <value>
+              <package name="kotlinx.android.synthetic" withSubpackages="true" static="false" />
+            </value>
+          </option>
+          <option name="NAME_COUNT_TO_USE_STAR_IMPORT" value="2147483647" />
+          <option name="NAME_COUNT_TO_USE_STAR_IMPORT_FOR_MEMBERS" value="2147483647" />
+        </JetCodeStyleSettings>
+        <MarkdownNavigatorCodeStyleSettings>
+          <option name="RIGHT_MARGIN" value="72" />
+        </MarkdownNavigatorCodeStyleSettings>
         <XML>
           <option name="XML_LEGACY_SETTINGS_IMPORTED" value="true" />
         </XML>
@@ -102,7 +111,6 @@
           <option name="BLOCK_COMMENT_AT_FIRST_COLUMN" value="false" />
           <option name="KEEP_CONTROL_STATEMENT_IN_ONE_LINE" value="false" />
           <option name="KEEP_BLANK_LINES_IN_CODE" value="1" />
-          <option name="BLANK_LINES_AFTER_CLASS_HEADER" value="1" />
           <option name="ALIGN_MULTILINE_PARAMETERS" value="false" />
           <option name="ALIGN_MULTILINE_FOR" value="false" />
           <option name="CALL_PARAMETERS_WRAP" value="1" />
@@ -113,7 +121,6 @@
           <option name="THROWS_KEYWORD_WRAP" value="1" />
           <option name="METHOD_CALL_CHAIN_WRAP" value="1" />
           <option name="BINARY_OPERATION_WRAP" value="1" />
-          <option name="BINARY_OPERATION_SIGN_ON_NEXT_LINE" value="true" />
           <option name="TERNARY_OPERATION_WRAP" value="1" />
           <option name="TERNARY_OPERATION_SIGNS_ON_NEXT_LINE" value="true" />
           <option name="FOR_STATEMENT_WRAP" value="1" />
@@ -130,6 +137,13 @@
         <codeStyleSettings language="JSON">
           <option name="KEEP_BLANK_LINES_IN_CODE" value="1" />
           <option name="PARENT_SETTINGS_INSTALLED" value="true" />
+        </codeStyleSettings>
+        <codeStyleSettings language="kotlin">
+          <option name="KEEP_BLANK_LINES_IN_DECLARATIONS" value="1" />
+          <option name="KEEP_BLANK_LINES_IN_CODE" value="1" />
+          <option name="ALIGN_MULTILINE_PARAMETERS" value="false" />
+          <option name="CALL_PARAMETERS_WRAP" value="5" />
+          <option name="METHOD_PARAMETERS_WRAP" value="5" />
         </codeStyleSettings>
       </value>
     </option>

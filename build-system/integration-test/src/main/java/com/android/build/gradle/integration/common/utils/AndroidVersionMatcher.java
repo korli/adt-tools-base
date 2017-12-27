@@ -18,7 +18,6 @@ package com.android.build.gradle.integration.common.utils;
 
 import com.android.sdklib.AndroidVersion;
 import com.google.common.collect.Range;
-
 import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
@@ -69,6 +68,24 @@ public class AndroidVersionMatcher {
                         .appendText("Android versions in the ")
                         .appendText(range.toString())
                         .appendText(" range.");
+            }
+        };
+    }
+
+    public static Matcher<AndroidVersion> exactly(int value) {
+        return new BaseMatcher<AndroidVersion>() {
+            @Override
+            public boolean matches(Object item) {
+                return item instanceof AndroidVersion &&
+                        ((AndroidVersion) item).getApiLevel() == value;
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description
+                        .appendText("Android version ")
+                        .appendValue(value)
+                        .appendText(".");
             }
         };
     }
