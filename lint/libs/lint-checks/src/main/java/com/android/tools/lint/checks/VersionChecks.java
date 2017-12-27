@@ -1,57 +1,22 @@
 package com.android.tools.lint.checks;
 
-import static com.android.tools.lint.detector.api.LintUtils.getNextInstruction;
-import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.sdklib.SdkVersionInfo;
 import com.android.tools.lint.detector.api.ClassContext;
-import com.intellij.psi.PsiClass;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiExpression;
-import com.intellij.psi.PsiField;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiMethod;
-import com.intellij.psi.PsiMethodCallExpression;
-import com.intellij.psi.PsiModifier;
-import com.intellij.psi.PsiModifierList;
-import com.intellij.psi.PsiParameter;
-import com.intellij.psi.PsiParameterList;
-import com.intellij.psi.PsiReferenceExpression;
-import com.intellij.psi.PsiVariable;
+import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTreeUtil;
-import java.util.Collections;
-import java.util.List;
-import org.jetbrains.uast.UBinaryExpression;
-import org.jetbrains.uast.UBlockExpression;
-import org.jetbrains.uast.UCallExpression;
-import org.jetbrains.uast.UClass;
-import org.jetbrains.uast.UElement;
-import org.jetbrains.uast.UExpression;
-import org.jetbrains.uast.UIfExpression;
-import org.jetbrains.uast.ULiteralExpression;
-import org.jetbrains.uast.ULocalVariable;
-import org.jetbrains.uast.UMethod;
-import org.jetbrains.uast.UPolyadicExpression;
-import org.jetbrains.uast.UQualifiedReferenceExpression;
-import org.jetbrains.uast.UReferenceExpression;
-import org.jetbrains.uast.UReturnExpression;
-import org.jetbrains.uast.UUnaryExpression;
-import org.jetbrains.uast.UastBinaryOperator;
-import org.jetbrains.uast.UastContext;
-import org.jetbrains.uast.UastPrefixOperator;
-import org.jetbrains.uast.UastUtils;
+import org.jetbrains.uast.*;
 import org.jetbrains.uast.visitor.AbstractUastVisitor;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.FieldInsnNode;
-import org.objectweb.asm.tree.InsnList;
-import org.objectweb.asm.tree.IntInsnNode;
-import org.objectweb.asm.tree.JumpInsnNode;
-import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.*;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
+
+import java.util.Collections;
+import java.util.List;
+
+import static com.android.tools.lint.detector.api.LintUtils.getNextInstruction;
+import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 
 /**
  * Utility methods for checking whether a given element is surrounded (or preceded!) by
