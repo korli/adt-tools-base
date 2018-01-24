@@ -11,8 +11,8 @@
       <sourceFolder url="file://$MODULE_DIR$/src/test/tools" isTestSource="false" />
     </content>
     <orderEntry type="inheritedJdk" />
-    <orderEntry type="module" module-name="chunkio" />
-    <orderEntry type="module" module-name="chunkio-processor" />
+    <orderEntry type="module" module-name="android.sdktools.chunkio" />
+    <orderEntry type="module" module-name="android.sdktools.chunkio-processor" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
   </component>

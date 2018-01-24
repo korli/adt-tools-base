@@ -8,7 +8,7 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="module" module-name="ddmlib" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.ddmlib" exported="" />
     <orderEntry type="library" name="Guava" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
   </component>

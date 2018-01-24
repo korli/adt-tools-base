@@ -8,6 +8,6 @@
     </content>
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="inheritedJdk" />
-    <orderEntry type="module" module-name="common" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.common" exported="" />
   </component>
 </module>

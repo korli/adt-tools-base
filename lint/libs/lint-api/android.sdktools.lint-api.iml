@@ -9,18 +9,18 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="library" exported="" name="asm-tools" level="project" />
     <orderEntry type="library" exported="" name="lombok-ast" level="project" />
-    <orderEntry type="module" module-name="android-annotations" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.android-annotations" exported="" />
     <orderEntry type="library" exported="" name="Guava" level="project" />
-    <orderEntry type="module" module-name="builder-model" exported="" />
-    <orderEntry type="module" module-name="common" />
-    <orderEntry type="module" module-name="sdklib" />
-    <orderEntry type="module" module-name="sdk-common" exported="" />
-    <orderEntry type="module" module-name="layoutlib-api" exported="" />
-    <orderEntry type="module" module-name="java-psi-api" exported="" />
-    <orderEntry type="module" module-name="java-psi-impl" />
-    <orderEntry type="module" module-name="manifest-merger" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.builder-model" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.common" />
+    <orderEntry type="module" module-name="android.sdktools.sdklib" />
+    <orderEntry type="module" module-name="android.sdktools.sdk-common" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.layoutlib-api" exported="" />
+    <orderEntry type="module" module-name="intellij.java.psi" exported="" />
+    <orderEntry type="module" module-name="intellij.java.psi.impl" />
+    <orderEntry type="module" module-name="android.sdktools.manifest-merger" exported="" />
     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
-    <orderEntry type="module" module-name="uast-common" exported="" />
-    <orderEntry type="module" module-name="uast-java" exported="" />
+    <orderEntry type="module" module-name="intellij.platform.uast" exported="" />
+    <orderEntry type="module" module-name="intellij.java.uast" exported="" />
   </component>
 </module>

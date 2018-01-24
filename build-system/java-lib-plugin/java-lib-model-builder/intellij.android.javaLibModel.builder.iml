@@ -9,8 +9,8 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="module" module-name="java-lib-model" />
-    <orderEntry type="module" module-name="android-annotations" />
+    <orderEntry type="module" module-name="intellij.android.javaLibModel" />
+    <orderEntry type="module" module-name="android.sdktools.android-annotations" />
     <orderEntry type="library" scope="TEST" name="equalsverifier" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
     <orderEntry type="library" name="Gradle" level="project" />

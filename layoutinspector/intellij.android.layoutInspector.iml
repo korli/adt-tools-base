@@ -8,9 +8,9 @@
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
-    <orderEntry type="module" module-name="common" exported="" />
-    <orderEntry type="module" module-name="android-annotations" />
-    <orderEntry type="module" module-name="ddmlib" />
+    <orderEntry type="module" module-name="android.sdktools.common" exported="" />
+    <orderEntry type="module" module-name="android.sdktools.android-annotations" />
+    <orderEntry type="module" module-name="android.sdktools.ddmlib" />
     <orderEntry type="library" name="gson" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
   </component>
