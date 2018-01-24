@@ -24,10 +24,11 @@ import com.android.repository.testframework.MockFileOp;
 import com.android.testutils.TestResources;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableSet;
+import junit.framework.TestCase;
+
 import java.io.File;
 import java.net.URL;
 import java.util.List;
-import junit.framework.TestCase;
 
 /**
  * Tests for {@link RepositorySourceProvider}s.
@@ -49,7 +50,7 @@ public class AddonListSourceProviderTest extends TestCase {
                         getClass().getResourceAsStream("/addons_list_sample_1.xml"));
         List<RepositorySource> sources = provider.getSources(downloader, progress, false);
         progress.assertNoErrorsOrWarnings();
-        assertEquals(4, sources.size());
+        assertEquals(sources.toString(), 4, sources.size());
         assertEquals("ありがとうございます。", sources.get(1).getDisplayName());
         assertEquals(ImmutableSet.of(AndroidSdkHandler.getAddonModule()),
                 sources.get(1).getPermittedModules());
@@ -60,7 +61,7 @@ public class AddonListSourceProviderTest extends TestCase {
         progress = new FakeProgressIndicator();
         sources = provider.getSources(downloader, progress, true);
         progress.assertNoErrorsOrWarnings();
-        assertEquals(6, sources.size());
+        assertEquals(sources.toString(), 6, sources.size());
         assertEquals("ありがとうございます。", sources.get(1).getDisplayName());
         assertEquals(ImmutableSet.of(AndroidSdkHandler.getAddonModule()),
                 sources.get(1).getPermittedModules());
@@ -75,7 +76,7 @@ public class AddonListSourceProviderTest extends TestCase {
         progress = new FakeProgressIndicator();
         sources = provider.getSources(downloader, progress, true);
         progress.assertNoErrorsOrWarnings();
-        assertEquals(6, sources.size());
+        assertEquals(sources.toString(), 6, sources.size());
         assertEquals(ImmutableSet.of(AndroidSdkHandler.getAddonModule()),
                 sources.get(1).getPermittedModules());
         assertEquals(ImmutableSet.of(AndroidSdkHandler.getSysImgModule()),
