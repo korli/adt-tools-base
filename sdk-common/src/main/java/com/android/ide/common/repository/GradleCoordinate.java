@@ -686,9 +686,7 @@ public class GradleCoordinate {
                     return delta;
                 }
             }
-            if (sizeA == sizeB) {
-                return 0;
-            } else {
+            if (sizeA != sizeB) {
                 // Treat X.0 and X.0.0 as equal
                 List<RevisionComponent> revisionList;
                 int returnValueIfNonZero;
@@ -699,7 +697,8 @@ public class GradleCoordinate {
                     from = sizeA;
                     to = sizeB;
                     returnValueIfNonZero = -1;
-                } else {
+                }
+                else {
                     revisionList = a.mRevisions;
                     from = sizeB;
                     to = sizeA;
@@ -711,12 +710,13 @@ public class GradleCoordinate {
                         if (revision.asInteger() != 0) {
                             return returnValueIfNonZero;
                         }
-                    } else {
+                    }
+                    else {
                         return returnValueIfNonZero;
                     }
                 }
-                return 0;
             }
+            return 0;
         }
     }
 }

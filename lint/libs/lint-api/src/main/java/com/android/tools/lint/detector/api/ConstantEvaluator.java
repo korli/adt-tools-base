@@ -1768,12 +1768,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 long l = ((Number) value).longValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev == l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1784,12 +1782,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 int l = ((Number) value).intValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev == l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1802,12 +1798,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 long l = ((Number) value).longValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev != l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1818,12 +1812,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 int l = ((Number) value).intValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev != l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1836,12 +1828,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 long l = ((Number) value).longValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev > l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1852,12 +1842,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 int l = ((Number) value).intValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev > l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1870,12 +1858,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 long l = ((Number) value).longValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev >= l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1886,12 +1872,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 int l = ((Number) value).intValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev >= l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1904,12 +1888,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 long l = ((Number) value).longValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev < l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1920,12 +1902,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 int l = ((Number) value).intValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev < l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1938,12 +1918,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 long l = ((Number) value).longValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev <= l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
@@ -1954,12 +1932,10 @@ public class ConstantEvaluator {
                             Object value = values.get(i);
                             if (value instanceof Number) {
                                 int l = ((Number) value).intValue();
-                                if (i == 0) {
-                                    prev = l;
-                                } else {
+                                if (i != 0) {
                                     result = prev <= l;
-                                    prev = l;
                                 }
+                                prev = l;
                             }
                         }
                         return result;
