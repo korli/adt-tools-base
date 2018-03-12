@@ -12,7 +12,6 @@
     <orderEntry type="module" module-name="android.sdktools.instant-run-common" />
     <orderEntry type="module" module-name="android.sdktools.ddmlib" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
-    <orderEntry type="module" module-name="android.sdktools.android-annotations" />
     <orderEntry type="module" module-name="android.sdktools.common" />
     <orderEntry type="library" scope="TEST" name="mockito" level="project" />
   </component>
