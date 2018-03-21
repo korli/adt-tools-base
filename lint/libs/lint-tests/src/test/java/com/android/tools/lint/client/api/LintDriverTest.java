@@ -16,12 +16,13 @@
 
 package com.android.tools.lint.client.api;
 
+import static com.android.tools.lint.detector.api.LintUtilsTest.parse;
+
 import com.android.annotations.NonNull;
 import com.android.tools.lint.checks.AbstractCheckTest;
 import com.android.tools.lint.checks.AccessibilityDetector;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.JavaContext;
-import com.android.tools.lint.detector.api.LintUtilsTest;
 import com.android.tools.lint.detector.api.Project;
 import com.android.utils.Pair;
 import com.google.common.collect.Lists;
@@ -36,7 +37,7 @@ import java.util.List;
 @SuppressWarnings("javadoc")
 public class LintDriverTest extends AbstractCheckTest {
     @SuppressWarnings({"ResultOfMethodCallIgnored", "ConstantConditions"})
-    public void testClassEntryCompare() throws Exception {
+    public void testClassEntryCompare() {
         ClassEntry c0 = new ClassEntry(new File("/a1/Foo.class"), null, null, null);
         ClassEntry c1 = new ClassEntry(new File("/a1/Foo.clazz"), null, null, null);
         ClassEntry c2 = new ClassEntry(new File("/a1/Foo$Inner1.class"), null, null, null);
@@ -59,14 +60,14 @@ public class LintDriverTest extends AbstractCheckTest {
     }
 
     @SuppressWarnings("ConstantConditions")
-    public void testClassEntryCompareContract() throws Exception {
+    public void testClassEntryCompareContract() {
         ClassEntry c0 = new ClassEntry(new File("abcde"), null, null, null);
         ClassEntry c1 = new ClassEntry(new File("abcde"), null, null, null);
         assertTrue(c0.compareTo(c1) <= 0);
         assertTrue(c1.compareTo(c0) <= 0);
     }
 
-    public void testMissingResourceDirectory() throws Exception {
+    public void testMissingResourceDirectory() {
         //noinspection all // Sample code
         lint().files(
                 xml("res/layout/layout1.xml", ""
@@ -100,8 +101,8 @@ public class LintDriverTest extends AbstractCheckTest {
 
     public void testHasErrors() {
         //noinspection all // Sample code
-        Pair<JavaContext, Disposable> unit = LintUtilsTest
-                .parsePsi("package test.pkg;\nclass Foo {\n}\n");
+        Pair<JavaContext, Disposable> unit =
+                parse("package test.pkg;\nclass Foo {\n}\n", new File("src/test/pkg/Foo.java"));
         LintDriver driver = unit.getFirst().getDriver();
         driver.setHasParserErrors(true);
         assertTrue(driver.hasParserErrors());

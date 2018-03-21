@@ -16,10 +16,11 @@
 
 package com.android.build.gradle.internal.dsl;
 
+import com.android.build.gradle.internal.errors.DeprecationReporter;
+import com.android.build.gradle.internal.errors.DeprecationReporter.DeprecationTarget;
 import com.android.builder.core.DefaultDexOptions;
-import com.android.builder.core.ErrorReporter;
-import com.android.builder.model.SyncIssue;
 import java.util.Arrays;
+import javax.inject.Inject;
 
 /**
  * DSL object for configuring dx options.
@@ -27,35 +28,24 @@ import java.util.Arrays;
 @SuppressWarnings("unused") // Exposed in the DSL.
 public class DexOptions extends DefaultDexOptions {
 
-    private static final String INCREMENTAL_IGNORED =
-            "The `android.dexOptions.incremental` property"
-                    + " is deprecated and it has no effect on the build process.";
+    private final DeprecationReporter deprecationReporter;
 
-    private static final String OPTIMIZE_IGNORED =
-            "The `android.dexOptions.optimize` property is deprecated. Dex will"
-                    + " always be optimized.";
-
-    private final ErrorReporter mErrorReporter;
-
-    public DexOptions(ErrorReporter errorReporter) {
-        this.mErrorReporter = errorReporter;
+    @Inject
+    public DexOptions(DeprecationReporter deprecationReporter) {
+        this.deprecationReporter = deprecationReporter;
     }
 
     /** @deprecated ignored */
     @Deprecated
     public boolean getIncremental() {
-        mErrorReporter.handleSyncWarning(
-                null,
-                SyncIssue.TYPE_GENERIC,
-                INCREMENTAL_IGNORED);
+        deprecationReporter.reportObsoleteUsage(
+                "DexOptions.incremental", DeprecationTarget.DEX_OPTIONS);
         return false;
     }
 
     public void setIncremental(boolean ignored) {
-        mErrorReporter.handleSyncWarning(
-                null,
-                SyncIssue.TYPE_GENERIC,
-                INCREMENTAL_IGNORED);
+        deprecationReporter.reportObsoleteUsage(
+                "DexOptions.incremental", DeprecationTarget.DEX_OPTIONS);
     }
 
     public void additionalParameters(String... parameters) {
@@ -67,9 +57,7 @@ public class DexOptions extends DefaultDexOptions {
      */
     @Deprecated
     public void setOptimize(@SuppressWarnings("UnusedParameters") Boolean optimize) {
-        mErrorReporter.handleSyncWarning(
-                null,
-                SyncIssue.TYPE_GENERIC,
-                OPTIMIZE_IGNORED + "\n" + OPTIMIZE_WARNING);
+        deprecationReporter.reportObsoleteUsage(
+                "DexOptions.optimize", DeprecationTarget.DEX_OPTIONS);
     }
 }

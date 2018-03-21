@@ -20,22 +20,26 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.api.JavaCompileOptions;
+import com.android.build.gradle.internal.errors.DeprecationReporter;
 import com.android.build.gradle.internal.scope.CodeShrinker;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.core.DefaultBuildType;
-import com.android.builder.core.ErrorReporter;
+import com.android.builder.errors.EvalIssueReporter;
+import com.android.builder.errors.EvalIssueReporter.Type;
 import com.android.builder.internal.ClassFieldImpl;
 import com.android.builder.model.BaseConfig;
 import com.android.builder.model.ClassField;
-import com.android.builder.model.SyncIssue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import java.io.Serializable;
 import java.util.List;
 import java.util.function.Supplier;
+import javax.inject.Inject;
 import org.gradle.api.Action;
+import org.gradle.api.Incubating;
 import org.gradle.api.Project;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.tasks.Internal;
 
 /** DSL object to configure build types. */
 @SuppressWarnings({"unused", "WeakerAccess", "UnusedReturnValue", "Convert2Lambda"})
@@ -45,7 +49,7 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
 
     /**
      * Whether the current thread should check that the both the old and new way of configuring
-     * bytecode postprocessing are not used at the same time.
+     * bytecode postProcessing are not used at the same time.
      *
      * <p>The checks are disabled during {@link #initWith(com.android.builder.model.BuildType)}.
      */
@@ -59,7 +63,7 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
                     });
 
     /**
-     * Describes how code postprocessing is configured. We don't allow mixing the old and new DSLs.
+     * Describes how code postProcessing is configured. We don't allow mixing the old and new DSLs.
      */
     public enum PostprocessingConfiguration {
         POSTPROCESSING_BLOCK,
@@ -69,11 +73,11 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
     @NonNull private final Project project;
     @NonNull private final NdkOptions ndkConfig;
     @NonNull private final ExternalNativeBuildOptions externalNativeBuildOptions;
-    @NonNull private final JackOptions jackOptions;
     @NonNull
     private final com.android.build.gradle.internal.dsl.JavaCompileOptions javaCompileOptions;
     @NonNull private final ShaderOptions shaderOptions;
-    @NonNull private final ErrorReporter errorReporter;
+    @NonNull private final EvalIssueReporter issueReporter;
+    @NonNull private final DeprecationReporter deprecationReporter;
     @NonNull private final PostprocessingOptions postprocessingOptions;
 
     @Nullable private PostprocessingConfiguration postprocessingConfiguration;
@@ -84,33 +88,40 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
     private Boolean crunchPngs;
     private boolean isCrunchPngsDefault = true;
 
+    @Inject
     public BuildType(
             @NonNull String name,
             @NonNull Project project,
-            @NonNull Instantiator instantiator,
-            @NonNull ErrorReporter errorReporter) {
+            @NonNull ObjectFactory objectFactory,
+            @NonNull EvalIssueReporter issueReporter,
+            @NonNull DeprecationReporter deprecationReporter) {
         super(name);
         this.project = project;
-        this.errorReporter = errorReporter;
-        jackOptions = instantiator.newInstance(JackOptions.class, errorReporter);
+        this.issueReporter = issueReporter;
+        this.deprecationReporter = deprecationReporter;
+
         javaCompileOptions =
-                instantiator.newInstance(
+                objectFactory.newInstance(
                         com.android.build.gradle.internal.dsl.JavaCompileOptions.class,
-                        instantiator);
-        shaderOptions = instantiator.newInstance(ShaderOptions.class);
-        ndkConfig = instantiator.newInstance(NdkOptions.class);
-        externalNativeBuildOptions = instantiator.newInstance(ExternalNativeBuildOptions.class,
-                instantiator);
-        postprocessingOptions = instantiator.newInstance(PostprocessingOptions.class, project);
+                        objectFactory);
+        shaderOptions = objectFactory.newInstance(ShaderOptions.class);
+        ndkConfig = objectFactory.newInstance(NdkOptions.class);
+        externalNativeBuildOptions =
+                objectFactory.newInstance(ExternalNativeBuildOptions.class, objectFactory);
+        postprocessingOptions = objectFactory.newInstance(PostprocessingOptions.class, project);
     }
 
     @VisibleForTesting
     BuildType(
-            @NonNull String name, @NonNull Project project, @NonNull ErrorReporter errorReporter) {
+            @NonNull String name,
+            @NonNull Project project,
+            @NonNull EvalIssueReporter issueReporter,
+            @NonNull DeprecationReporter deprecationReporter) {
+
         super(name);
         this.project = project;
-        this.errorReporter = errorReporter;
-        jackOptions = new JackOptions(errorReporter);
+        this.issueReporter = issueReporter;
+        this.deprecationReporter = deprecationReporter;
         javaCompileOptions = new com.android.build.gradle.internal.dsl.JavaCompileOptions();
         shaderOptions = new ShaderOptions();
         ndkConfig = new NdkOptions();
@@ -201,13 +212,6 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
         return externalNativeBuildOptions;
     }
 
-    /** {@inheritDoc} */
-    @Override
-    @NonNull
-    public JackOptions getJackOptions() {
-        return jackOptions;
-    }
-
     /** Options for configuration Java compilation. */
     @Override
     @NonNull
@@ -247,7 +251,6 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
         super._initWith(that);
         BuildType thatBuildType = (BuildType) that;
         ndkConfig._initWith(thatBuildType.getNdkConfig());
-        jackOptions._initWith(thatBuildType.getJackOptions());
         javaCompileOptions.getAnnotationProcessorOptions()._initWith(
                 thatBuildType.getJavaCompileOptions().getAnnotationProcessorOptions());
         shrinkResources = thatBuildType.isShrinkResources();
@@ -297,7 +300,7 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
                     String.format(
                             "BuildType(%s): buildConfigField '%s' value is being replaced: %s -> %s",
                             getName(), name, alreadyPresent.getValue(), value);
-            errorReporter.handleSyncWarning(null, SyncIssue.TYPE_GENERIC, message);
+            issueReporter.reportWarning(Type.GENERIC, message);
         }
         addBuildConfigField(new ClassFieldImpl(type, name, value));
     }
@@ -323,7 +326,7 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
                     String.format(
                             "BuildType(%s): resValue '%s' value is being replaced: %s -> %s",
                             getName(), name, alreadyPresent.getValue(), value);
-            errorReporter.handleSyncWarning(null, SyncIssue.TYPE_GENERIC, message);
+            issueReporter.reportWarning(Type.GENERIC, message);
         }
         addResValue(new ClassFieldImpl(type, name, value));
     }
@@ -499,54 +502,6 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
     }
 
     /**
-     * The Jack toolchain is deprecated.
-     *
-     * <p>If you want to use Java 8 language features, use the improved support included in the
-     * default toolchain. To learn more, read <a
-     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     * features</a>.
-     *
-     * @deprecated For more information, read <a
-     *     href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     *     features</a>
-     */
-    @Deprecated
-    public void jackOptions(@NonNull Action<JackOptions> action) {
-        action.execute(jackOptions);
-    }
-
-    /**
-     * The Jack toolchain is deprecated.
-     *
-     * <p>If you want to use Java 8 language features, use the improved support included in the
-     * default toolchain. To learn more, read <a
-     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     * features</a>.
-     *
-     * @deprecated For more information, read <a
-     *     href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     *     features</a>
-     */
-    @Deprecated
-    @Nullable
-    public Boolean getUseJack() {
-        errorReporter.handleSyncWarning(
-                null, SyncIssue.TYPE_GENERIC, JackOptions.DEPRECATION_WARNING);
-        return null;
-    }
-
-    /**
-     * Whether the experimental Jack toolchain should be used.
-     *
-     * @deprecated use jack.setEnabled instead.
-     */
-    @Deprecated
-    public void setUseJack(@Nullable Boolean useJack) {
-        errorReporter.handleSyncWarning(
-                null, SyncIssue.TYPE_GENERIC, JackOptions.DEPRECATION_WARNING);
-    }
-
-    /**
      * Configure shader compiler options for this build type.
      */
     public void shaders(@NonNull Action<ShaderOptions> action) {
@@ -651,31 +606,26 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
         return isCrunchPngsDefault;
     }
 
-    public void jarJarRuleFile(@NonNull Object file) {
-        getJarJarRuleFiles().add(project.file(file));
-    }
-
-    public void jarJarRuleFiles(@NonNull Object... files) {
-        getJarJarRuleFiles().clear();
-        for (Object file : files) {
-            getJarJarRuleFiles().add(project.file(file));
-        }
-    }
-
+    /** This DSL is incubating and subject to change. */
+    @Incubating
+    @Internal
     @NonNull
     public PostprocessingOptions getPostprocessing() {
         checkPostprocessingConfiguration(
-                PostprocessingConfiguration.POSTPROCESSING_BLOCK, "getPostprocessing");
+                PostprocessingConfiguration.POSTPROCESSING_BLOCK, "getPostProcessing");
         return postprocessingOptions;
     }
 
+    /** This DSL is incubating and subject to change. */
+    @Incubating
+    @Internal
     public void postprocessing(@NonNull Action<PostprocessingOptions> action) {
         checkPostprocessingConfiguration(
-                PostprocessingConfiguration.POSTPROCESSING_BLOCK, "postprocessing");
+                PostprocessingConfiguration.POSTPROCESSING_BLOCK, "postProcessing");
         action.execute(postprocessingOptions);
     }
 
-    /** Describes how postprocessing was configured. Not to be used from the DSL. */
+    /** Describes how postProcessing was configured. Not to be used from the DSL. */
     @NonNull
     public PostprocessingConfiguration getPostprocessingConfiguration() {
         // If the user didn't configure anything, stick to the old DSL.
@@ -686,7 +636,7 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
 
     /**
      * Checks that the user is consistently using either the new or old DSL for configuring bytecode
-     * postprocessing.
+     * postProcessing.
      */
     private void checkPostprocessingConfiguration(
             @NonNull PostprocessingConfiguration used, @NonNull String methodName) {
@@ -705,20 +655,20 @@ public class BuildType extends DefaultBuildType implements CoreBuildType, Serial
                     // TODO: URL with more details.
                     message =
                             String.format(
-                                    "The `postprocessing` block cannot be used with together with the `%s` method.",
+                                    "The `postProcessing` block cannot be used with together with the `%s` method.",
                                     postprocessingDslMethodUsed);
                     break;
                 case OLD_DSL:
                     // TODO: URL with more details.
                     message =
                             String.format(
-                                    "The `%s` method cannot be used with together with the `postprocessing` block.",
+                                    "The `%s` method cannot be used with together with the `postProcessing` block.",
                                     methodName);
                     break;
                 default:
                     throw new AssertionError("Unknown value " + used);
             }
-            errorReporter.handleSyncError(methodName, SyncIssue.TYPE_GENERIC, message);
+            issueReporter.reportError(Type.GENERIC, message, methodName);
         }
     }
 

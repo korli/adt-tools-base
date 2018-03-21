@@ -15,24 +15,12 @@
  */
 package com.android.sdklib.repository;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.prefs.AndroidLocation;
 import com.android.repository.Revision;
-import com.android.repository.api.ConstantSourceProvider;
-import com.android.repository.api.LocalPackage;
-import com.android.repository.api.ProgressIndicator;
-import com.android.repository.api.RemoteListSourceProvider;
-import com.android.repository.api.RemotePackage;
-import com.android.repository.api.RepoManager;
-import com.android.repository.api.RepoPackage;
-import com.android.repository.api.Repository;
-import com.android.repository.api.RepositorySource;
-import com.android.repository.api.RepositorySourceProvider;
-import com.android.repository.api.SchemaModule;
+import com.android.repository.api.*;
 import com.android.repository.impl.meta.RepositoryPackages;
 import com.android.repository.impl.sources.LocalSourceProvider;
 import com.android.repository.io.FileOp;
@@ -41,32 +29,21 @@ import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.IAndroidTarget;
 import com.android.sdklib.repository.legacy.LegacyLocalRepoLoader;
 import com.android.sdklib.repository.legacy.LegacyRemoteRepoLoader;
-import com.android.sdklib.repository.meta.AddonFactory;
-import com.android.sdklib.repository.meta.DetailsTypes;
-import com.android.sdklib.repository.meta.RepoFactory;
-import com.android.sdklib.repository.meta.SdkCommonFactory;
-import com.android.sdklib.repository.meta.SysImgFactory;
+import com.android.sdklib.repository.meta.*;
 import com.android.sdklib.repository.sources.RemoteSiteType;
 import com.android.sdklib.repository.targets.AndroidTargetManager;
 import com.android.sdklib.repository.targets.SystemImage;
 import com.android.sdklib.repository.targets.SystemImageManager;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Range;
+import com.google.common.collect.*;
+
 import java.io.File;
 import java.net.URISyntaxException;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
+
+import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * Android SDK interface to {@link RepoManager}. Ensures that the proper android sdk-specific
@@ -712,6 +689,7 @@ public final class AndroidSdkHandler {
                 // mark the cached packages invalid if the sources change.
                 userProvider.setRepoManager(result);
             }
+            result.setFallbackRemoteRepoLoader(new LegacyRemoteRepoLoader());
 
             result.setLocalPath(localLocation);
 
@@ -725,7 +703,6 @@ public final class AndroidSdkHandler {
                 result.loadSynchronously(0, progress, null, null);
             }
 
-            result.setFallbackRemoteRepoLoader(new LegacyRemoteRepoLoader());
             return result;
         }
     }

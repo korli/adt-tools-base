@@ -25,20 +25,27 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.external.cmake.CmakeUtils;
-import com.android.build.gradle.external.gson.NativeBuildConfigValue;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
+import com.android.build.gradle.internal.cxx.json.AndroidBuildGradleJsons;
+import com.android.build.gradle.internal.cxx.json.NativeBuildConfigValueMini;
+import com.android.build.gradle.internal.cxx.json.NativeLibraryValueMini;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeCmakeOptions;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeNdkBuildOptions;
 import com.android.build.gradle.internal.model.CoreExternalNativeBuild;
 import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.profile.AnalyticsUtil;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.StringOption;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.ErrorReporter;
+import com.android.builder.errors.EvalIssueReporter;
+import com.android.builder.errors.EvalIssueReporter.Type;
 import com.android.builder.model.ApiVersion;
-import com.android.builder.model.SyncIssue;
+import com.android.builder.profile.ProcessProfileWriter;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.repository.Revision;
@@ -51,14 +58,22 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.google.common.io.Files;
+import com.google.gson.Gson;
+import com.google.gson.stream.JsonReader;
+import com.google.wireless.android.sdk.stats.GradleBuildVariant;
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.StringReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import org.gradle.api.GradleException;
 import org.gradle.api.InvalidUserDataException;
@@ -71,13 +86,13 @@ import org.gradle.api.tasks.OutputFiles;
  * Base class for generation of native JSON.
  */
 public abstract class ExternalNativeJsonGenerator {
+    @NonNull protected final String variantName;
+    @NonNull protected final AndroidBuilder androidBuilder;
+    @NonNull protected final GradleBuildVariant.Builder stats;
     @NonNull
     private final NdkHandler ndkHandler;
     private final int minSdkVersion;
-    @NonNull protected final String variantName;
     @NonNull private final Collection<Abi> abis;
-    @NonNull
-    protected final AndroidBuilder androidBuilder;
     @NonNull
     private final File makefile;
     @NonNull
@@ -116,7 +131,8 @@ public abstract class ExternalNativeJsonGenerator {
             @Nullable List<String> buildArguments,
             @Nullable List<String> cFlags,
             @Nullable List<String> cppFlags,
-            @NonNull List<File> nativeBuildConfigurationsJsons) {
+            @NonNull List<File> nativeBuildConfigurationsJsons,
+            @NonNull GradleBuildVariant.Builder stats) {
         this.ndkHandler = ndkHandler;
         this.minSdkVersion = minSdkVersion;
         this.variantName = variantName;
@@ -133,6 +149,7 @@ public abstract class ExternalNativeJsonGenerator {
         this.cFlags = cFlags == null ? Lists.newArrayList() : cFlags;
         this.cppFlags = cppFlags == null ? Lists.newArrayList() : cppFlags;
         this.nativeBuildConfigurationsJsons = nativeBuildConfigurationsJsons;
+        this.stats = stats;
     }
 
     /**
@@ -143,37 +160,27 @@ public abstract class ExternalNativeJsonGenerator {
     }
 
     /**
-     * Check whether the given JSON file should be regenerated.
+     * If JSON exists then check whether any of the build files referenced in the JSON are more
+     * recent than the JSON itself. This is an indication that the JSON need to be regenerated.
      */
-    private static boolean shouldRebuildJson(@NonNull File json, @NonNull String groupName)
-            throws IOException {
+    private boolean dependentBuildFileChanged(@NonNull File json) throws IOException {
         if (!json.exists()) {
-            // deciding that JSON file should be rebuilt because it doesn't exist
-            return true;
+            return false;
         }
 
         // Now check whether the JSON is out-of-date with respect to the build files it declares.
-        NativeBuildConfigValue config = ExternalNativeBuildTaskUtils
-                .getNativeBuildConfigValue(json, groupName);
+        NativeBuildConfigValueMini config =
+                AndroidBuildGradleJsons.getNativeBuildMiniConfig(json, stats);
         if (config.buildFiles != null) {
-            long jsonLastModified = java.nio.file.Files.getLastModifiedTime(
-                    json.toPath()).toMillis();
             for (File buildFile : config.buildFiles) {
-                if (!buildFile.exists()) {
-                    // If build file doesn't exist in JSON then the JSON should be regenerated to
-                    // see if user has set a new one.
-                    return true;
-                }
-                long buildFileLastModified = java.nio.file.Files.getLastModifiedTime(
-                        buildFile.toPath()).toMillis();
-                if (buildFileLastModified > jsonLastModified) {
-                    // deciding that JSON file should be rebuilt because is older than buildFile
+                if (!ExternalNativeBuildTaskUtils.fileIsUpToDate(buildFile, json)) {
+                    diagnostic(
+                            "noticing that build file '%s' is out of date with respect to %s",
+                            buildFile, json);
                     return true;
                 }
             }
         }
-
-        // deciding that JSON file should not be rebuilt because it is up-to-date
         return false;
     }
 
@@ -186,29 +193,34 @@ public abstract class ExternalNativeJsonGenerator {
             diagnostic("building json with force flag %s", forceJsonGeneration);
             buildAndPropagateException(forceJsonGeneration);
         } catch (@NonNull IOException | GradleException e) {
-            androidBuilder.getErrorReporter().handleSyncError(
-                    variantName,
-                    SyncIssue.TYPE_EXTERNAL_NATIVE_BUILD_CONFIGURATION,
-                    e.getMessage());
+            androidBuilder
+                    .getIssueReporter()
+                    .reportError(
+                            Type.EXTERNAL_NATIVE_BUILD_CONFIGURATION, e.getMessage(), variantName);
         } catch (ProcessException e) {
-            androidBuilder.getErrorReporter().handleSyncError(
-                    e.getMessage(),
-                    SyncIssue.TYPE_EXTERNAL_NATIVE_BUILD_PROCESS_EXCEPTION,
-                    String.format("executing external native build for %s %s",
-                            getNativeBuildSystem().getName(),
-                            makefile));
+            androidBuilder
+                    .getIssueReporter()
+                    .reportError(
+                            Type.EXTERNAL_NATIVE_BUILD_PROCESS_EXCEPTION,
+                            String.format(
+                                    "executing external native build for %s %s",
+                                    getNativeBuildSystem().getName(), makefile),
+                            e.getMessage());
         }
     }
 
     private void buildAndPropagateException(boolean forceJsonGeneration)
             throws IOException, ProcessException {
         diagnostic("starting JSON generation");
-        diagnostic("bringing JSONs up-to-date");
-
         Exception firstException = null;
         for (Abi abi : abis) {
+            GradleBuildVariant.NativeBuildConfigInfo.Builder variantStats =
+                    GradleBuildVariant.NativeBuildConfigInfo.newBuilder();
+            variantStats.setAbi(AnalyticsUtil.getAbi(abi.getName()));
+            variantStats.setDebuggable(this.debuggable);
+            long startTime = System.currentTimeMillis();
+            variantStats.setGenerationStartMs(startTime);
             try {
-
                 int abiPlatformVersion = ndkHandler.findSuitablePlatformVersion(
                         abi.getName(), minSdkVersion);
                 diagnostic("using platform version %s for ABI %s and min SDK version %s",
@@ -231,40 +243,75 @@ public abstract class ExternalNativeJsonGenerator {
                     rebuildDueToMissingPreviousCommand = true;
                 } else {
                     String previousBuildCommand =
-                            Files.asCharSource(commandFile, Charsets.UTF_8).read();
+                            new String(Files.readAllBytes(commandFile.toPath()), Charsets.UTF_8);
                     if (!previousBuildCommand.equals(currentBuildCommand)) {
                         rebuildDueToChangeInCommandFile = true;
                     }
                 }
-                boolean generateDueToBuildFileChange = shouldRebuildJson(expectedJson, variantName);
+                boolean generateDueToMissingJson = !expectedJson.exists();
+                boolean dependentBuildFilesHaveChanged = dependentBuildFileChanged(expectedJson);
+
                 if (forceJsonGeneration
-                        || generateDueToBuildFileChange
+                        || generateDueToMissingJson
                         || rebuildDueToMissingPreviousCommand
-                        || rebuildDueToChangeInCommandFile) {
+                        || rebuildDueToChangeInCommandFile
+                        || dependentBuildFilesHaveChanged) {
                     diagnostic("rebuilding JSON %s due to:", expectedJson);
+                    boolean isSoftRegenerate = true;
+
                     if (forceJsonGeneration) {
-                        diagnostic("- force flag");
+                        diagnostic("- force flag, will remove stale json folder");
+                        isSoftRegenerate = false;
                     }
 
-                    if (generateDueToBuildFileChange) {
-                        diagnostic("- dependent build file missing or changed");
+                    if (generateDueToMissingJson) {
+                        diagnostic(
+                                "- expected json %s file is not present, "
+                                        + "will remove stale json folder",
+                                expectedJson);
+                        isSoftRegenerate = false;
                     }
 
                     if (rebuildDueToMissingPreviousCommand) {
-                        diagnostic("- missing previous command file %s", commandFile);
+                        diagnostic(
+                                "- missing previous command file %s, "
+                                        + "will remove stale json folder",
+                                commandFile);
+                        isSoftRegenerate = false;
                     }
 
                     if (rebuildDueToChangeInCommandFile) {
-                        diagnostic("- command changed from previous");
+                        diagnostic(
+                                "- command changed from previous, "
+                                        + "will remove stale json folder");
+                        isSoftRegenerate = false;
                     }
 
-                    // If the JSON is out-of-date then also remove entire JSON folder to avoid
-                    // stale build contents especially for CMake which doesn't tolerate
-                    // incremental updates to generated build files.
+                    if (dependentBuildFilesHaveChanged) {
+                        diagnostic("- a dependent build file changed");
+                    }
+
+                    // Related to https://issuetracker.google.com/69408798
+                    // Something has changed so we need to clean up some build intermediates and
+                    // outputs.
+                    // - If only a build file has changed then we try to keep .o files and,
+                    // in the case of CMake, the generated Ninja project. In this case we must
+                    // remove .so files because they are automatically packaged in the APK on a
+                    // *.so basis.
+                    // - If there is some other cause to recreate the JSon, such as command-line
+                    // changed then wipe out the whole JSon folder.
                     if (jsonFolder.exists()) {
-                        diagnostic("removing stale contents from '%s'",
-                                expectedJson.getParentFile());
-                        FileUtils.deletePath(expectedJson.getParentFile());
+                        if (isSoftRegenerate) {
+                            diagnostic(
+                                    "keeping json folder '%s' but regenerating project",
+                                    expectedJson.getParentFile());
+
+                        } else {
+                            diagnostic(
+                                    "removing stale contents from '%s'",
+                                    expectedJson.getParentFile());
+                            FileUtils.deletePath(expectedJson.getParentFile());
+                        }
                     }
 
                     if (expectedJson.getParentFile().mkdirs()) {
@@ -281,8 +328,7 @@ public abstract class ExternalNativeJsonGenerator {
                             expectedJson.getParentFile(),
                             String.format("%s_build_output.txt", getNativeBuildSystem().getName()));
                     diagnostic("write build output %s", outputTextFile.getAbsolutePath());
-                    Files.write(buildOutput, outputTextFile, Charsets.UTF_8);
-
+                    Files.write(outputTextFile.toPath(), buildOutput.getBytes(Charsets.UTF_8));
                     processBuildOutput(buildOutput, abi.getName(), abiPlatformVersion);
 
                     if (!expectedJson.exists()) {
@@ -292,30 +338,46 @@ public abstract class ExternalNativeJsonGenerator {
                                         expectedJson));
                     }
 
+                    // Related to https://issuetracker.google.com/69408798
+                    // Targets may have been removed or there could be other orphaned extra .so
+                    // files. Remove these and rely on the build step to replace them if they are
+                    // legitimate. This is to prevent unexpected .so files from being packaged in
+                    // the APK.
+                    removeUnexpectedSoFiles(
+                            abi,
+                            AndroidBuildGradleJsons.getNativeBuildMiniConfig(expectedJson, stats));
+
                     // Write the ProcessInfo to a file, this has all the flags used to generate the
                     // JSON. If any of these change later the JSON will be regenerated.
                     diagnostic("write command file %s", commandFile.getAbsolutePath());
-                    Files.write(currentBuildCommand, commandFile, Charsets.UTF_8);
+                    Files.write(commandFile.toPath(), currentBuildCommand.getBytes(Charsets.UTF_8));
                 } else {
                     diagnostic("JSON '%s' was up-to-date", expectedJson);
+                    variantStats.setOutcome(
+                            GradleBuildVariant.NativeBuildConfigInfo.GenerationOutcome
+                                    .SUCCESS_UP_TO_DATE);
                 }
             } catch (@NonNull GradleException | IOException | ProcessException e) {
+                variantStats.setOutcome(
+                        GradleBuildVariant.NativeBuildConfigInfo.GenerationOutcome.FAILED);
                 // If one ABI fails to build that doesn't mean others will. Continue processing
                 // all ABIs so that we can get some JSON so the user can still edit the project
                 // in Android Studio.
                 if (firstException == null) {
                     firstException = e;
                 }
+            } finally {
+                variantStats.setGenerationDurationMs(System.currentTimeMillis() - startTime);
+                stats.addNativeBuildConfig(variantStats.build());
             }
         }
-        diagnostic("build complete");
 
         if (firstException == null) {
-            diagnostic("build completed without problems");
+            diagnostic("JSON generation completed without problems");
             return;
         }
 
-        diagnostic("build completed with problems");
+        diagnostic("JSON generation completed with problems");
         if (firstException instanceof GradleException) {
             throw (GradleException) firstException;
         }
@@ -325,6 +387,49 @@ public abstract class ExternalNativeJsonGenerator {
         }
 
         throw (ProcessException) firstException;
+    }
+
+    /**
+     * This function removes unexpected so files from disk. Unexpected means they exist on disk but
+     * are not present as a build output from the json.
+     *
+     * <p>It is generally valid for there to be extra .so files because the build system may copy
+     * libraries to the output folder. This function is meant to be used in cases where we suspect
+     * the .so may have been orphaned by the build system due to a change in build files.
+     *
+     * @param abi the abi to remove .so files for
+     * @param config the existing miniconfig
+     * @throws IOException in the case that json is missing or can't be read or some other IO
+     *     problem.
+     */
+    private void removeUnexpectedSoFiles(
+            @NonNull Abi abi, @NonNull NativeBuildConfigValueMini config) throws IOException {
+
+        // Gather all .so files from the folder indicated by the abi
+        File expectedOutputFolder = FileUtils.join(objFolder, abi.getName());
+        if (!expectedOutputFolder.isDirectory()) {
+            // Nothing to clean
+            return;
+        }
+
+        // Gather all expected build outputs
+        List<Path> expectedSoFiles = Lists.newArrayList();
+        for (NativeLibraryValueMini library : config.libraries.values()) {
+            expectedSoFiles.add(library.output.toPath());
+        }
+
+        Files.walk(expectedOutputFolder.toPath())
+                .filter(Files::isRegularFile)
+                .filter(path -> path.toString().endsWith(".so"))
+                .filter(path -> !expectedSoFiles.contains(path))
+                .forEach(
+                        path -> {
+                            if (path.toFile().delete()) {
+                                diagnostic(
+                                        "deleted unexpected build output %s in incremental regenerate",
+                                        path);
+                            }
+                        });
     }
 
     /**
@@ -369,7 +474,7 @@ public abstract class ExternalNativeJsonGenerator {
      * Log low level diagnostic information.
      */
     void diagnostic(String format, Object... args) {
-        androidBuilder.getLogger().verbose(
+        androidBuilder.getLogger().info(
                 "External native generate JSON " + variantName + ": " + format, args);
     }
 
@@ -398,11 +503,11 @@ public abstract class ExternalNativeJsonGenerator {
     }
 
     @NonNull
-    public Collection<NativeBuildConfigValue> readExistingNativeBuildConfigurations()
-            throws IOException {
+    public Collection<JsonReader> streamExistingNativeBuildConfigurations()
+            throws FileNotFoundException {
         List<File> files = getNativeBuildConfigurationsJsons();
         diagnostic("reading %s JSON files", files.size());
-        List<NativeBuildConfigValue> result = Lists.newArrayList();
+        List<JsonReader> result = Lists.newArrayList();
         List<File> existing = Lists.newArrayList();
         for (File file : files) {
             if (file.exists()) {
@@ -412,16 +517,25 @@ public abstract class ExternalNativeJsonGenerator {
                 // If the tool didn't create the JSON file then create fallback with the
                 // information we have so the user can see partial information in the UI.
                 diagnostic("using fallback JSON for %s", file.getAbsolutePath());
-                NativeBuildConfigValue fallback = new NativeBuildConfigValue();
+                NativeBuildConfigValueMini fallback = new NativeBuildConfigValueMini();
                 fallback.buildFiles = Lists.newArrayList(makefile);
-                result.add(fallback);
+
+                String jsonText = new Gson().toJson(fallback);
+                result.add(new JsonReader(new StringReader(new Gson().toJson(fallback))));
             }
         }
 
-        result.addAll(ExternalNativeBuildTaskUtils.getNativeBuildConfigValues(
-                existing,
-                variantName));
+        for (File json : existing) {
+            JsonReader reader = new JsonReader(new FileReader(json));
+            result.add(reader);
+        }
         return result;
+    }
+
+    /** @return the variant name for this generator */
+    @NonNull
+    public String getVariantName() {
+        return variantName;
     }
 
     /** Return ABIs that are available on the platform. */
@@ -429,7 +543,7 @@ public abstract class ExternalNativeJsonGenerator {
     private static List<Abi> filterToAvailableAbis(
             @NonNull Collection<Abi> supportedAbis,
             @NonNull Collection<String> userRequestedAbis,
-            @NonNull ErrorReporter errorReporter,
+            @NonNull EvalIssueReporter issueReporter,
             @NonNull String variantName) {
         List<String> requestedButNotAvailable = Lists.newArrayList();
         List<Abi> result = Lists.newArrayList();
@@ -447,14 +561,14 @@ public abstract class ExternalNativeJsonGenerator {
             // them a SyncIssue that describes which ones are the problem.
             Iterable<String> supportedAbisNames =
                     supportedAbis.stream().map(Abi::getName)::iterator;
-            errorReporter.handleSyncError(
-                    variantName,
-                    SyncIssue.TYPE_EXTERNAL_NATIVE_BUILD_CONFIGURATION,
+            issueReporter.reportError(
+                    Type.EXTERNAL_NATIVE_BUILD_CONFIGURATION,
                     String.format(
                             "ABIs [%s] are not supported for platform. Supported ABIs are "
                                     + "[%s].",
                             Joiner.on(", ").join(requestedButNotAvailable),
-                            Joiner.on(", ").join(supportedAbisNames)));
+                            Joiner.on(", ").join(supportedAbisNames)),
+                    variantName);
         }
         return result;
     }
@@ -526,11 +640,12 @@ public abstract class ExternalNativeJsonGenerator {
     /**
      * Get the set of abiFilters from the externalNativeBuild part of the DSL. For example,
      *
-     * defaultConfig {
-     *     cmake {
-     *         abiFilters "x86", "x86_64"
+     * <pre>
+     *     defaultConfig {
+     *          cmake {
+     *              abiFilters "x86", "x86_64"
+     *          }
      *     }
-     * }
      *
      * @return a Set of ABIs to build. Return the empty set if nothing was specified.
      */
@@ -565,6 +680,7 @@ public abstract class ExternalNativeJsonGenerator {
 
     @NonNull
     public static ExternalNativeJsonGenerator create(
+            @NonNull String projectPath,
             @NonNull File projectDir,
             @NonNull File buildDir,
             @Nullable File externalNativeBuildDir,
@@ -581,8 +697,10 @@ public abstract class ExternalNativeJsonGenerator {
                             "NDK not configured. %s\n" + "Download it with SDK manager.",
                             ndkFolder == null ? "" : ndkFolder));
         }
-        final BaseVariantData variantData = scope.getVariantData();
-        final GradleVariantConfiguration variantConfig = variantData.getVariantConfiguration();
+        BaseVariantData variantData = scope.getVariantData();
+        GradleVariantConfiguration variantConfig = variantData.getVariantConfiguration();
+        GradleBuildVariant.Builder stats =
+                ProcessProfileWriter.getOrCreateVariant(projectPath, scope.getFullVariantName());
         File intermediates = FileUtils.join(
                 scope.getGlobalScope().getIntermediatesDir(),
                 buildSystem.getName(),
@@ -619,8 +737,17 @@ public abstract class ExternalNativeJsonGenerator {
                         : filterToAvailableAbis(
                                 ndkHandler.getSupportedAbis(),
                                 userRequestedAbis,
-                                androidBuilder.getErrorReporter(),
+                                androidBuilder.getIssueReporter(),
                                 variantData.getName());
+
+        // Check injected target ABI, if present is valid.
+        ProjectOptions projectOptions = scope.getGlobalScope().getProjectOptions();
+        if (projectOptions.get(BooleanOption.BUILD_ONLY_TARGET_ABI)) {
+            checkInjectedAbiIsValid(
+                    projectOptions.get(StringOption.IDE_BUILD_TARGET_ABI),
+                    validAbis,
+                    scope.getGlobalScope().getErrorHandler());
+        }
 
         // Produce the list of expected JSON files. This list includes possibly invalid ABIs
         // so that generator can create fallback JSON for them.
@@ -636,30 +763,33 @@ public abstract class ExternalNativeJsonGenerator {
                                 : userRequestedAbis);
 
         switch (buildSystem) {
-            case NDK_BUILD: {
-                CoreExternalNativeNdkBuildOptions options =
-                        variantConfig.getExternalNativeBuildOptions()
-                                .getExternalNativeNdkBuildOptions();
-                checkNotNull(options, "NdkBuild options not found");
-                return new NdkBuildExternalNativeJsonGenerator(
-                        ndkHandler,
-                        minSdkVersionApiLevel,
-                        variantData.getName(),
-                        validAbis,
-                        androidBuilder,
-                        projectDir,
-                        sdkHandler.getSdkFolder(),
-                        sdkHandler.getNdkFolder(),
-                        soFolder,
-                        objFolder,
-                        externalNativeBuildFolder,
-                        makefile,
-                        variantConfig.getBuildType().isDebuggable(),
-                        options.getArguments(),
-                        options.getcFlags(),
-                        options.getCppFlags(),
-                        expectedJsons);
-            }
+            case NDK_BUILD:
+                {
+                    CoreExternalNativeNdkBuildOptions options =
+                            variantConfig
+                                    .getExternalNativeBuildOptions()
+                                    .getExternalNativeNdkBuildOptions();
+                    checkNotNull(options, "NdkBuild options not found");
+                    return new NdkBuildExternalNativeJsonGenerator(
+                            ndkHandler,
+                            minSdkVersionApiLevel,
+                            variantData.getName(),
+                            validAbis,
+                            androidBuilder,
+                            projectDir,
+                            sdkHandler.getSdkFolder(),
+                            sdkHandler.getNdkFolder(),
+                            soFolder,
+                            objFolder,
+                            externalNativeBuildFolder,
+                            makefile,
+                            variantConfig.getBuildType().isDebuggable(),
+                            options.getArguments(),
+                            options.getcFlags(),
+                            options.getCppFlags(),
+                            expectedJsons,
+                            stats);
+                }
             case CMAKE:
                 return createCmakeExternalNativeJsonGenerator(
                         variantData,
@@ -672,9 +802,34 @@ public abstract class ExternalNativeJsonGenerator {
                         objFolder,
                         externalNativeBuildFolder,
                         makefile,
-                        expectedJsons);
+                        expectedJsons,
+                        stats);
             default:
                 throw new IllegalArgumentException("Unknown ExternalNativeJsonGenerator type");
+        }
+    }
+
+    private static void checkInjectedAbiIsValid(
+            @Nullable String targetAbiString,
+            @NonNull Collection<Abi> validAbis,
+            @NonNull EvalIssueReporter issueReporter) {
+        if (targetAbiString != null) {
+            Abi buildTargetAbi = Abi.getByName(targetAbiString);
+            if (buildTargetAbi != null) {
+                if (!validAbis.contains(buildTargetAbi)) {
+                    issueReporter.reportError(
+                            Type.GENERIC,
+                            String.format(
+                                    "Cannot build for ABI: %1$s supported ABIs are: %2$s",
+                                    buildTargetAbi.getName(),
+                                    validAbis.isEmpty()
+                                            ? "none"
+                                            : validAbis
+                                                    .stream()
+                                                    .map(Abi::getName)
+                                                    .collect(Collectors.joining(", "))));
+                }
+            }
         }
     }
 
@@ -693,7 +848,8 @@ public abstract class ExternalNativeJsonGenerator {
             @NonNull File objFolder,
             @NonNull File externalNativeBuildFolder,
             @NonNull File makefile,
-            List<File> expectedJsons) {
+            List<File> expectedJsons,
+            @NonNull GradleBuildVariant.Builder stats) {
         final GradleVariantConfiguration variantConfig = variantData.getVariantConfiguration();
 
         AndroidConfig extension = variantData.getScope().getGlobalScope().getExtension();
@@ -732,7 +888,8 @@ public abstract class ExternalNativeJsonGenerator {
                 options.getArguments(),
                 options.getcFlags(),
                 options.getCppFlags(),
-                expectedJsons);
+                expectedJsons,
+                stats);
     }
 
     private static File findExternalNativeBuildFolder(
@@ -764,10 +921,9 @@ public abstract class ExternalNativeJsonGenerator {
                             buildSystem.getName(),
                             variantData.getName());
             androidBuilder
-                    .getErrorReporter()
-                    .handleSyncError(
-                            "",
-                            SyncIssue.TYPE_EXTERNAL_NATIVE_BUILD_CONFIGURATION,
+                    .getIssueReporter()
+                    .reportError(
+                            Type.EXTERNAL_NATIVE_BUILD_CONFIGURATION,
                             String.format(
                                     Locale.getDefault(),
                                     "The build staging directory you specified ('%s')"
@@ -781,6 +937,38 @@ public abstract class ExternalNativeJsonGenerator {
         }
 
         return externalNativeBuildPath;
+    }
+
+    @NonNull
+    protected static File getSdkCmakeExecutable(@NonNull File sdkFolder) {
+        if (isWindows()) {
+            return new File(getSdkCmakeBinFolder(sdkFolder), "cmake.exe");
+        }
+        return new File(getSdkCmakeBinFolder(sdkFolder), "cmake");
+    }
+
+    @NonNull
+    public void forEachNativeBuildConfiguration(Consumer<JsonReader> callback) throws IOException {
+        List<File> files = getNativeBuildConfigurationsJsons();
+        diagnostic("streaming %s JSON files", files.size());
+        for (File file : getNativeBuildConfigurationsJsons()) {
+            if (file.exists()) {
+                diagnostic("string JSON file %s", file.getAbsolutePath());
+                try (JsonReader reader = new JsonReader(new FileReader(file))) {
+                    callback.accept(reader);
+                }
+            } else {
+                // If the tool didn't create the JSON file then create fallback with the
+                // information we have so the user can see partial information in the UI.
+                diagnostic("streaming fallback JSON for %s", file.getAbsolutePath());
+                NativeBuildConfigValueMini fallback = new NativeBuildConfigValueMini();
+                fallback.buildFiles = Lists.newArrayList(makefile);
+                try (JsonReader reader =
+                        new JsonReader(new StringReader(new Gson().toJson(fallback)))) {
+                    callback.accept(reader);
+                }
+            }
+        }
     }
 
     @NonNull
@@ -862,14 +1050,6 @@ public abstract class ExternalNativeJsonGenerator {
     @NonNull
     Collection<Abi> getAbis() {
         return abis;
-    }
-
-    @NonNull
-    protected static File getSdkCmakeExecutable(@NonNull File sdkFolder) {
-        if (isWindows()) {
-            return new File(getSdkCmakeBinFolder(sdkFolder), "cmake.exe");
-        }
-        return new File(getSdkCmakeBinFolder(sdkFolder), "cmake");
     }
 
     @NonNull

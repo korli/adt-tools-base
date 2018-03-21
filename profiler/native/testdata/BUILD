@@ -1,11 +1,6 @@
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
-    name = "dex",
-    srcs = glob(["dex/**"]),
-)
-
-filegroup(
     name = "utils",
     srcs = glob(["utils/**"]),
 )
@@ -23,4 +18,9 @@ filegroup(
 filegroup(
     name = "perfd/network",
     srcs = glob(["perfd/network/**"]),
+)
+
+filegroup(
+    name = "perfd/graphics",
+    srcs = glob(["perfd/graphics/**"]),
 )

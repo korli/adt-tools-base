@@ -18,19 +18,20 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.CLASS_VIEW;
 import static com.android.SdkConstants.CLASS_VIEWGROUP;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INT;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 
 import com.android.annotations.NonNull;
 import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.google.common.collect.Lists;
 import com.intellij.psi.PsiMethod;
 import java.util.Collections;
@@ -48,7 +49,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor;
 /**
  * Looks for ListView scrolling performance: should use view holder pattern
  */
-public class ViewHolderDetector extends Detector implements UastScanner {
+public class ViewHolderDetector extends Detector implements SourceCodeScanner {
 
     private static final Implementation IMPLEMENTATION = new Implementation(
             ViewHolderDetector.class,
@@ -78,7 +79,7 @@ public class ViewHolderDetector extends Detector implements UastScanner {
     public ViewHolderDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     public List<Class<? extends UElement>> getApplicableUastTypes() {
@@ -139,7 +140,7 @@ public class ViewHolderDetector extends Detector implements UastScanner {
             UExpression receiver = node.getReceiver();
             //noinspection VariableNotUsedInsideIf
             if (receiver != null) {
-                String methodName = node.getMethodName();
+                String methodName = getMethodName(node);
                 if (INFLATE.equals(methodName)
                         && node.getValueArgumentCount() >= 1) {
                     // See if we're inside a conditional

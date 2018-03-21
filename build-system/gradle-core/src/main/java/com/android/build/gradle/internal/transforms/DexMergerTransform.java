@@ -34,10 +34,10 @@ import com.android.build.api.transform.TransformOutputProvider;
 import com.android.build.gradle.internal.LoggerWrapper;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
 import com.android.build.gradle.internal.pipeline.TransformManager;
-import com.android.builder.core.ErrorReporter;
 import com.android.builder.dexing.DexMergerTool;
 import com.android.builder.dexing.DexingType;
 import com.android.ide.common.blame.Message;
+import com.android.ide.common.blame.MessageReceiver;
 import com.android.ide.common.blame.ParsingProcessOutputHandler;
 import com.android.ide.common.blame.parser.DexParser;
 import com.android.ide.common.blame.parser.ToolOutputParser;
@@ -109,13 +109,13 @@ public class DexMergerTransform extends Transform {
     @NonNull private final DexMergerTool dexMerger;
     private final int minSdkVersion;
     private final boolean isDebuggable;
-    @NonNull private final ErrorReporter errorReporter;
+    @NonNull private final MessageReceiver messageReceiver;
     @NonNull private final ForkJoinPool forkJoinPool = ForkJoinPool.commonPool();
 
     public DexMergerTransform(
             @NonNull DexingType dexingType,
             @Nullable FileCollection mainDexListFile,
-            @NonNull ErrorReporter errorReporter,
+            @NonNull MessageReceiver messageReceiver,
             @NonNull DexMergerTool dexMerger,
             int minSdkVersion,
             boolean isDebuggable) {
@@ -127,7 +127,7 @@ public class DexMergerTransform extends Transform {
         Preconditions.checkState(
                 (dexingType == DexingType.LEGACY_MULTIDEX) == (mainDexListFile != null),
                 "Main dex list must only be set when in legacy multidex");
-        this.errorReporter = errorReporter;
+        this.messageReceiver = messageReceiver;
     }
 
     @NonNull
@@ -167,9 +167,11 @@ public class DexMergerTransform extends Transform {
     @NonNull
     @Override
     public Map<String, Object> getParameterInputs() {
-        Map<String, Object> params = Maps.newHashMapWithExpectedSize(2);
+        Map<String, Object> params = Maps.newHashMapWithExpectedSize(4);
         params.put("dexing-type", dexingType.name());
         params.put("dex-merger-tool", dexMerger.name());
+        params.put("is-debuggable", isDebuggable);
+        params.put("min-sdk-version", minSdkVersion);
 
         return params;
     }
@@ -191,15 +193,11 @@ public class DexMergerTransform extends Transform {
         Preconditions.checkNotNull(
                 outputProvider, "Missing output object for transform " + getName());
 
-        if (dexMerger == DexMergerTool.D8) {
-            logger.info("D8 is used to merge dex.");
-        }
-
         ProcessOutputHandler outputHandler =
                 new ParsingProcessOutputHandler(
                         new ToolOutputParser(new DexParser(), Message.Kind.ERROR, logger),
                         new ToolOutputParser(new DexParser(), logger),
-                        errorReporter);
+                        messageReceiver);
 
         if (!transformInvocation.isIncremental()) {
             outputProvider.deleteAll();
@@ -208,26 +206,23 @@ public class DexMergerTransform extends Transform {
         ProcessOutput output = null;
         List<ForkJoinTask<Void>> mergeTasks;
         try (Closeable ignored = output = outputHandler.createOutput()) {
-            if (dexingType == DexingType.NATIVE_MULTIDEX) {
+            if (dexingType == DexingType.NATIVE_MULTIDEX && isDebuggable) {
                 mergeTasks =
-                        handleNativeMultiDex(
+                        handleNativeMultiDexDebug(
                                 transformInvocation.getInputs(),
                                 output,
                                 outputProvider,
                                 transformInvocation.isIncremental());
             } else {
-                mergeTasks =
-                        handleLegacyAndMonoDex(
-                                transformInvocation.getInputs(), output, outputProvider);
+                mergeTasks = mergeDex(transformInvocation.getInputs(), output, outputProvider);
             }
 
             // now wait for all merge tasks completion
             mergeTasks.forEach(ForkJoinTask::join);
-
-        } catch (IOException e) {
-            throw new TransformException(e);
         } catch (Exception e) {
-            throw new TransformException(Throwables.getRootCause(e));
+            // Print the error always, even without --stacktrace
+            logger.error(null, Throwables.getStackTraceAsString(e));
+            throw new TransformException(e);
         } finally {
             if (output != null) {
                 try {
@@ -239,9 +234,12 @@ public class DexMergerTransform extends Transform {
         }
     }
 
-    /** For legacy and mono-dex we always merge all dex archives, non-incrementally. */
+    /**
+     * For legacy and mono-dex we always merge all dex archives, non-incrementally. For release
+     * native multidex we do the same, to get the smallest possible dex files.
+     */
     @NonNull
-    private List<ForkJoinTask<Void>> handleLegacyAndMonoDex(
+    private List<ForkJoinTask<Void>> mergeDex(
             @NonNull Collection<TransformInput> inputs,
             @NonNull ProcessOutput output,
             @NonNull TransformOutputProvider outputProvider)
@@ -283,7 +281,7 @@ public class DexMergerTransform extends Transform {
      * multiple DEX files).
      */
     @NonNull
-    private List<ForkJoinTask<Void>> handleNativeMultiDex(
+    private List<ForkJoinTask<Void>> handleNativeMultiDexDebug(
             @NonNull Collection<TransformInput> inputs,
             @NonNull ProcessOutput output,
             @NonNull TransformOutputProvider outputProvider,
@@ -575,6 +573,7 @@ public class DexMergerTransform extends Transform {
             @Nullable Path mainDexList) {
         DexMergerTransformCallable callable =
                 new DexMergerTransformCallable(
+                        messageReceiver,
                         dexingType,
                         output,
                         dexOutputDir,

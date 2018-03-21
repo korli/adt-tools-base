@@ -45,6 +45,7 @@ import com.android.sdklib.internal.project.ProjectProperties;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.sdklib.repository.IdDisplay;
 import com.android.sdklib.repository.LoggerProgressIndicatorWrapper;
+import com.android.sdklib.repository.targets.SystemImage;
 import com.android.utils.GrabProcessOutput;
 import com.android.utils.GrabProcessOutput.IProcessOutput;
 import com.android.utils.GrabProcessOutput.Wait;
@@ -166,6 +167,9 @@ public class AvdManager {
      * AVD/config.ini key name representing the name of the device this avd was based on.
      */
     public static final String AVD_INI_DEVICE_NAME = "hw.device.name"; //$NON-NLS-1$
+
+    /** AVD/config.ini key name representing if it's Chrome OS (App Runtime for Chrome). */
+    public static final String AVD_INI_ARC = "hw.arc";
 
     /**
      * AVD/config.ini key name representing the display name of the AVD
@@ -312,9 +316,11 @@ public class AvdManager {
     public static final Pattern NUMERIC_SKIN_SIZE = Pattern.compile("([0-9]{2,})x([0-9]{2,})"); //$NON-NLS-1$
     public static final String USERDATA_IMG = "userdata.img";
     public static final String USERDATA_QEMU_IMG = "userdata-qemu.img";
+    public static final String SNAPSHOTS_DIRECTORY = "snapshots";
 
     private static final String BOOT_PROP = "boot.prop"; //$NON-NLS-1$
     static final String CONFIG_INI = "config.ini"; //$NON-NLS-1$
+    private static final String HARDWARE_QEMU_INI = "hardware-qemu.ini";
     private static final String SDCARD_IMG = "sdcard.img"; //$NON-NLS-1$
     private static final String SNAPSHOTS_IMG = "snapshots.img"; //$NON-NLS-1$
 
@@ -793,31 +799,50 @@ public class AvdManager {
         File iniFile = null;
         boolean needCleanup = false;
         try {
-            if ( !mFop.exists(avdFolder) ) {
+            AvdInfo newAvdInfo = null;
+            HashMap<String, String> configValues = new HashMap<>();
+            if (!mFop.exists(avdFolder)) {
                 // create the AVD folder.
                 mFop.mkdirs(avdFolder);
                 // We're not editing an existing AVD.
                 editExisting = false;
-            } else if (removePrevious) {
+            }
+            else if (removePrevious) {
                 // AVD already exists and removePrevious is set, try to remove the
                 // directory's content first (but not the directory itself).
                 try {
                     deleteContentOf(avdFolder);
-                } catch (SecurityException e) {
+                }
+                catch (SecurityException e) {
                     log.warning("Failed to delete %1$s: %2$s", avdFolder.getAbsolutePath(), e);
                 }
-            } else if (!editExisting) {
+            }
+            else if (!editExisting) {
                 // The AVD already exists, we want to keep it, and we're not
                 // editing it. We must be making a copy. Duplicate the folder.
-                return duplicateAvd(avdFolder, avdName, systemImage, log);
+                String oldAvdFolderPath = avdFolder.getAbsolutePath();
+                newAvdInfo = duplicateAvd(avdFolder, avdName, systemImage, log);
+                if (newAvdInfo == null) {
+                    return null;
+                }
+                avdFolder = new File(newAvdInfo.getDataFolderPath());
+                configValues.putAll(newAvdInfo.getProperties());
+                // If the hardware config includes an SD Card path in the old directory,
+                // update the path to the new directory
+                if (hardwareConfig != null) {
+                    String oldSdCardPath = hardwareConfig.get(AVD_INI_SDCARD_PATH);
+                    if (oldSdCardPath != null && oldSdCardPath.startsWith(oldAvdFolderPath)) {
+                        // The hardware config points to the old directory. Substitute the new directory.
+                        hardwareConfig.put(AVD_INI_SDCARD_PATH, oldSdCardPath.replace(oldAvdFolderPath, newAvdInfo.getDataFolderPath()));
+                    }
+                }
             }
 
-            // actually write the ini file
+            // Write the AVD ini file
             iniFile = createAvdIniFile(avdName, avdFolder, removePrevious,
               systemImage.getAndroidVersion());
 
             needCleanup = true;
-            HashMap<String, String> configValues = new HashMap<>();
 
             createAvdUserdata(systemImage, avdFolder, log);
             createAvdConfigFile(systemImage, configValues, log);
@@ -829,6 +854,7 @@ public class AvdManager {
             configValues.put(AVD_INI_TAG_DISPLAY, tag.getDisplay());
             configValues.put(AVD_INI_ABI_TYPE, systemImage.getAbiType());
             configValues.put(AVD_INI_PLAYSTORE_ENABLED, Boolean.toString(deviceHasPlayStore && systemImage.hasPlayStore()));
+            configValues.put(AVD_INI_ARC, Boolean.toString(SystemImage.CHROMEOS_TAG.equals(tag)));
 
             writeCpuArch(systemImage, configValues, log);
 
@@ -844,12 +870,13 @@ public class AvdManager {
 
             AvdInfo oldAvdInfo = getAvd(avdName, false /*validAvdOnly*/);
 
-            AvdInfo newAvdInfo = createAvdInfoObject(systemImage, avdName,
-                    removePrevious, editExisting,
-                    iniFile, avdFolder, oldAvdInfo, configValues);
+            if (newAvdInfo == null) {
+                newAvdInfo = createAvdInfoObject(systemImage, avdName,
+                                                 removePrevious, editExisting,
+                                                 iniFile, avdFolder, oldAvdInfo, configValues);
+            }
 
             if ((removePrevious || editExisting) &&
-                    newAvdInfo != null &&
                     oldAvdInfo != null &&
                     !oldAvdInfo.getDataFolderPath().equals(newAvdInfo.getDataFolderPath())) {
                 log.warning("Removing previous AVD directory at %s",
@@ -890,6 +917,8 @@ public class AvdManager {
 
     /**
      * Duplicates an existing AVD.
+     * Update the 'config.ini' and 'hw-qemu.ini' files
+     * to reference the new name and path.
      *
      * @param origAvd the AVD to be duplicated
      * @param newAvdName name of the new copy
@@ -918,9 +947,17 @@ public class AvdManager {
                     log);
             configVals.put(AVD_INI_AVD_ID, newAvdName);
             configVals.put(AVD_INI_DISPLAY_NAME, newAvdName);
+            writeIniFile(configIni, configVals, true);
 
-            File destConfigIni = new File(destAvdFolder, CONFIG_INI);
-            writeIniFile(destConfigIni, configVals, true);
+            // Update the AVD name and paths in the new copies of config.ini and hardware-qemu.ini
+            String origAvdName = origAvd.getName().replace(".avd", "");
+            String origAvdPath = origAvd.getAbsolutePath();
+            String newAvdPath = destAvdFolder.getAbsolutePath();
+
+            configVals = updateNameAndIniPaths(configIni, origAvdName, origAvdPath, newAvdName, newAvdPath, log);
+
+            File hwQemu = new File(destAvdFolder, HARDWARE_QEMU_INI);
+            updateNameAndIniPaths(hwQemu, origAvdName, origAvdPath, newAvdName, newAvdPath, log);
 
             // Create <AVD name>.ini
             File iniFile = createAvdIniFile(newAvdName, destAvdFolder, false,
@@ -937,6 +974,37 @@ public class AvdManager {
             log.warning("Exception while duplicating an AVD: %1$s", e);
             return null;
         }
+    }
+
+    /**
+     * Modifies an ini file to switch values from an old AVD name and path to
+     * a new AVD name and path.
+     * Values that are {@link oldName} are switched to {@link newName}
+     * Values that start with {@link oldPath} are modified to start with {@link newPath}
+     * @return the updated ini settings
+     */
+    @Nullable
+    private Map<String, String> updateNameAndIniPaths(@NonNull File iniFile,
+                                                      @NonNull String oldName,
+                                                      @NonNull String oldPath,
+                                                      @NonNull String newName,
+                                                      @NonNull String newPath,
+                                                      @NonNull ILogger log) throws IOException {
+        Map<String, String> iniVals = parseIniFile(new FileOpFileWrapper(iniFile, mFop, false), log);
+        if (iniVals != null) {
+            for (Map.Entry<String, String> iniEntry : iniVals.entrySet()) {
+                String origIniValue = iniEntry.getValue();
+                if (origIniValue.equals(oldName)) {
+                    iniVals.put(iniEntry.getKey(), newName);
+                }
+                if (origIniValue.startsWith(oldPath)) {
+                    String newIniValue = origIniValue.replace(oldPath, newPath);
+                    iniVals.put(iniEntry.getKey(), newIniValue);
+                }
+            }
+            writeIniFile(iniFile, iniVals, true);
+        }
+        return iniVals;
     }
 
     /**
@@ -1856,7 +1924,16 @@ public class AvdManager {
         String abiType = systemImage.getAbiType();
         Abi abi = Abi.getEnum(abiType);
         if (abi != null) {
-            values.put(AVD_INI_CPU_ARCH, abi.getCpuArch());
+            String arch = abi.getCpuArch();
+            // Chrome OS image is a speical case: the system image
+            // is actually x86_64 while the android container inside
+            // it is x86. We have to set it x86_64 to let it boot
+            // under android emulator.
+            if (arch.equals(SdkConstants.CPU_ARCH_INTEL_ATOM)
+                    && SystemImage.CHROMEOS_TAG.equals(systemImage.getTag())) {
+                arch = SdkConstants.CPU_ARCH_INTEL_ATOM64;
+            }
+            values.put(AVD_INI_CPU_ARCH, arch);
 
             String model = abi.getCpuModel();
             if (model != null) {
@@ -2070,7 +2147,6 @@ public class AvdManager {
 
             if (imageHardwardConfig != null) {
                 finalHardwareValues.putAll(imageHardwardConfig);
-                values.putAll(imageHardwardConfig);
             }
         }
 
@@ -2084,16 +2160,20 @@ public class AvdManager {
 
                 if (skinHardwareConfig != null) {
                     finalHardwareValues.putAll(skinHardwareConfig);
-                    values.putAll(skinHardwareConfig);
                 }
             }
         }
 
-        // finally put the hardware provided by the user.
+        // put the hardware provided by the user.
         if (hardwareConfig != null) {
             finalHardwareValues.putAll(hardwareConfig);
-            values.putAll(hardwareConfig);
         }
+
+        // Finally add hardware properties
+        if (values == null) {
+            values = new HashMap<>();
+        }
+        values.putAll(finalHardwareValues);
 
         File configIniFile = new File(avdFolder, CONFIG_INI);
         writeIniFile(configIniFile, values, true);

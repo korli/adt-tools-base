@@ -8,11 +8,15 @@ version = rootProject.ext.baseVersion
 
 dependencies {
     compile project(':base:lint')
+    compile project(':base:intellij-core')
+    compile project(':base:uast')
     compile project(':base:layoutlib-api')
     compile project(':base:testutils')
     compile libs.junit
     compile libs.mockito_core
 
+    testCompile project(':base:apkparser:binary-resources')
+    testCompile project(':base:apkparser:apkanalyzer')
     testCompile libs.groovy
     testCompile libs.truth
 }

@@ -1,4 +1,4 @@
-# How to Bazel
+# Building and Testing with Bazel
 
 This directory contains the core files to run studio-master-dev tests using
 bazel.
@@ -20,11 +20,13 @@ ln -s <workspace>/tools/base/bazel ~/bin/bazel
 Then no matter where you are in the workspace, bazel will find the right
 platform-specific binary and run it.
 
-## Running all the tests
+__macOS users:___ You may run into a clang error after reinstalling or updating XCode.
+To resolve this error, clear bazel of previous configurations with the following command:
+```
+$ bazel clean --expunge
+```
 
-*** note
-Warning: On a Mac, append `--genrule_strategy=standalone --spawn_strategy=standalone`
-***
+## Running all the tests
 
 The command to run all the bazel tests run by the PSQ is:
 
@@ -57,7 +59,7 @@ bazel build //tools/adt/idea/...
 To run a single test:
 
 ```
-bazel test //tools/adt/idea/android/... --test_filter=AndroidLayoutDomTest
+bazel test //tools/adt/idea/android/... --test_filter=AndroidLayoutDomTest --test_output=streamed
 ```
 
 To debug a single test, which will open remote debugging:

@@ -22,8 +22,8 @@ import com.android.builder.core.VariantType;
 import com.android.builder.internal.aapt.AaptException;
 import com.android.builder.internal.aapt.AaptPackageConfig;
 import com.android.builder.internal.aapt.AaptUtils;
+import com.android.builder.internal.aapt.BlockingResourceLinker;
 import com.android.ide.common.res2.CompileResourceRequest;
-import com.android.sdklib.IAndroidTarget;
 import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.google.common.base.Joiner;
@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * Builds the command lines for use with {@code aapt2}.
@@ -58,7 +59,7 @@ public final class AaptV2CommandBuilder {
      * @return the command line arguments
      */
     public static ImmutableList<String> makeCompile(@NonNull CompileResourceRequest request) {
-        ImmutableList.Builder<String> parameters = new ImmutableList.Builder();
+        ImmutableList.Builder<String> parameters = new ImmutableList.Builder<>();
 
         if (request.isPseudoLocalize()) {
             parameters.add("--pseudo-localize");
@@ -66,7 +67,7 @@ public final class AaptV2CommandBuilder {
 
         if (!request.isPngCrunching()) {
             // Only pass --no-crunch for png files and not for 9-patch files as that breaks them.
-            String lowerName = request.getInput().getPath().toLowerCase(Locale.US);
+            String lowerName = request.getInputFile().getPath().toLowerCase(Locale.US);
             if (lowerName.endsWith(SdkConstants.DOT_PNG)
                     && !lowerName.endsWith(SdkConstants.DOT_9PNG)) {
                 parameters.add("--no-crunch");
@@ -74,8 +75,8 @@ public final class AaptV2CommandBuilder {
         }
 
         parameters.add("--legacy");
-        parameters.add("-o", request.getOutput().getAbsolutePath());
-        parameters.add(request.getInput().getAbsolutePath());
+        parameters.add("-o", request.getOutputDirectory().getAbsolutePath());
+        parameters.add(request.getInputFile().getAbsolutePath());
 
         return parameters.build();
     }
@@ -83,28 +84,26 @@ public final class AaptV2CommandBuilder {
     /**
      * Creates the command line used to link the package.
      *
-     * <p>See {@link com.android.builder.internal.aapt.Aapt#link(AaptPackageConfig)}.
+     * <p>See {@link BlockingResourceLinker#link(AaptPackageConfig, ILogger)}.
      *
      * @param config see above
-     * @param intermediateDir a directory for intermediate files
      * @return the command line arguments
      * @throws AaptException failed to build the command line
      */
-    public static ImmutableList<String> makeLink(
-            @NonNull AaptPackageConfig config, @NonNull File intermediateDir) throws AaptException {
+    public static ImmutableList<String> makeLink(@NonNull AaptPackageConfig config)
+            throws AaptException {
         ImmutableList.Builder<String> builder = ImmutableList.builder();
 
-        if (config.isVerbose()) {
+        if (config.getVerbose()) {
             builder.add("-v");
         }
 
-        File stableResourceIdsFile = new File(intermediateDir, "stable-resource-ids.txt");
-        // TODO: For now, we ignore this file, but as soon as aapt2 supports it, we'll use it.
+        if (config.getGenerateProtos()) {
+            builder.add("--proto-format");
+        }
 
         // inputs
-        IAndroidTarget target = config.getAndroidTarget();
-        Preconditions.checkNotNull(target);
-        builder.add("-I", target.getPath(IAndroidTarget.ANDROID_JAR));
+        builder.add("-I", Preconditions.checkNotNull(config.getAndroidJarPath()));
 
         config.getImports().forEach(file -> builder.add("-I", file.getAbsolutePath()));
 
@@ -127,34 +126,43 @@ public final class AaptV2CommandBuilder {
         }
         builder.add("-o", resourceOutputApk.getAbsolutePath());
 
-        if (config.getResourceDir() != null) {
+        if (!config.getResourceDirs().isEmpty()) {
             try {
                 if (config.isListResourceFiles()) {
                     // AAPT2 only accepts individual files passed to the -R flag. In order to not
                     // pass every single resource file, instead create a temporary file containing a
                     // list of resource files and pass it as the only -R argument.
-                    File file =
+                    File resourceListFile =
                             new File(
-                                    intermediateDir,
+                                    Preconditions.checkNotNull(
+                                            config.getIntermediateDir(),
+                                            "Intermediate directory must be supplied."),
                                     "resources-list-for-" + resourceOutputApk.getName() + ".txt");
 
                     // Resources list could have changed since last run.
-                    FileUtils.deleteIfExists(file);
-                    try (FileOutputStream fos = new FileOutputStream(file);
-                         PrintWriter pw = new PrintWriter(fos)) {
+                    FileUtils.deleteIfExists(resourceListFile);
+                    for (File dir : config.getResourceDirs()) {
+                        try (FileOutputStream fos = new FileOutputStream(resourceListFile);
+                                PrintWriter pw = new PrintWriter(fos)) {
 
-                        Files.walk(config.getResourceDir().toPath())
-                                .filter(Files::isRegularFile)
-                                .forEach((p) -> pw.print(p.toString() + " "));
+                            Files.walk(dir.toPath())
+                                    .filter(Files::isRegularFile)
+                                    .forEach((p) -> pw.print(p.toString() + " "));
+                        }
                     }
-                    builder.add("-R", "@" + file.getAbsolutePath());
+                    builder.add("-R", "@" + resourceListFile.getAbsolutePath());
                 } else {
-                    Files.walk(config.getResourceDir().toPath())
-                            .filter(Files::isRegularFile)
-                            .forEach((p) -> builder.add("-R", p.toString()));
+                    for (File dir : config.getResourceDirs()) {
+                        Files.walk(dir.toPath())
+                                .filter(Files::isRegularFile)
+                                .forEach((p) -> builder.add("-R", p.toString()));
+                    }
                 }
             } catch (IOException e) {
-                throw new AaptException("Failed to walk path " + config.getResourceDir());
+                throw new AaptException(
+                        "Failed to walk paths "
+                                + Joiner.on(File.pathSeparatorChar).join(config.getResourceDirs()),
+                        e);
             }
         }
 
@@ -183,8 +191,6 @@ public final class AaptV2CommandBuilder {
         }
 
         // options controlled by build variants
-        ILogger logger = config.getLogger();
-        Preconditions.checkNotNull(logger);
         if (config.getVariantType() != VariantType.ANDROID_TEST
                 && config.getCustomPackageForR() != null) {
             builder.add("--custom-package", config.getCustomPackageForR());
@@ -207,7 +213,8 @@ public final class AaptV2CommandBuilder {
         /*
          * Add custom no-compress extensions.
          */
-        Collection<String> noCompressList = config.getOptions().getNoCompress();
+        Collection<String> noCompressList =
+                Objects.requireNonNull(config.getOptions()).getNoCompress();
         if (noCompressList != null) {
             for (String noCompress : noCompressList) {
                 builder.add("-0", noCompress);
@@ -218,23 +225,27 @@ public final class AaptV2CommandBuilder {
             builder.addAll(additionalParameters);
         }
 
-        List<String> resourceConfigs = new ArrayList<String>();
-        resourceConfigs.addAll(config.getResourceConfigs());
+        List<String> resourceConfigs = new ArrayList<>(config.getResourceConfigs());
 
         /*
          * Split the density and language resource configs, since starting in 21, the
          * density resource configs should be passed with --preferred-density to ensure packaging
          * of scalable resources when no resource for the preferred density is present.
          */
-        Collection<String> otherResourceConfigs;
-        String preferredDensity = null;
         Collection<String> densityResourceConfigs = Lists.newArrayList(
                 AaptUtils.getDensityResConfigs(resourceConfigs));
-        otherResourceConfigs = Lists.newArrayList(AaptUtils.getNonDensityResConfigs(
-                resourceConfigs));
-        preferredDensity = config.getPreferredDensity();
+        Collection<String> otherResourceConfigs =
+                Lists.newArrayList(AaptUtils.getNonDensityResConfigs(resourceConfigs));
+        String preferredDensity = config.getPreferredDensity();
 
-        if (preferredDensity != null && !densityResourceConfigs.isEmpty()) {
+
+        Iterable<String> densityResSplits =
+                config.getSplits() != null
+                        ? AaptUtils.getDensityResConfigs(config.getSplits())
+                        : ImmutableList.of();
+
+        if ((preferredDensity != null || densityResSplits.iterator().hasNext())
+                && !densityResourceConfigs.isEmpty()) {
             throw new AaptException(
                     String.format("When using splits in tools 21 and above, "
                                     + "resConfigs should not contain any densities. Right now, it "
@@ -246,6 +257,14 @@ public final class AaptV2CommandBuilder {
         if (densityResourceConfigs.size() > 1) {
             throw new AaptException("Cannot filter assets for multiple densities using "
                     + "SDK build tools 21 or later. Consider using apk splits instead.");
+        }
+
+        // if we are in split mode and resConfigs has been specified, we need to add all the
+        // non density based splits back to the resConfigs otherwise they will be filtered out.
+        if (!otherResourceConfigs.isEmpty() && config.getSplits() != null) {
+            Iterable<String> nonDensitySplits =
+                    AaptUtils.getNonDensityResConfigs(config.getSplits());
+            otherResourceConfigs.addAll(Lists.newArrayList(nonDensitySplits));
         }
 
         if (preferredDensity == null && densityResourceConfigs.size() == 1) {
@@ -278,6 +297,18 @@ public final class AaptV2CommandBuilder {
         }
 
         builder.add("--no-version-vectors");
+
+        if (config.isStaticLibrary()) {
+            builder.add("--static-lib");
+            if (!config.getStaticLibraryDependencies().isEmpty()) {
+                throw new AaptException(
+                        "Static libraries to link against should be passed as imports");
+            }
+        } else {
+            for (File file : config.getStaticLibraryDependencies()) {
+                builder.add(file.getAbsolutePath());
+            }
+        }
 
         return builder.build();
     }

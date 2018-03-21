@@ -26,6 +26,7 @@ import static com.android.SdkConstants.TAG_ITEM;
 import static com.android.SdkConstants.TAG_STRING;
 import static com.android.SdkConstants.TAG_STRING_ARRAY;
 import static com.android.SdkConstants.TOOLS_URI;
+import static com.android.utils.SdkUtils.isServiceKey;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -37,6 +38,7 @@ import com.android.builder.model.Variant;
 import com.android.ide.common.resources.LocaleManager;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.ide.common.resources.configuration.LocaleQualifier;
+import com.android.ide.common.resources.usage.ResourceUsageModel;
 import com.android.resources.ResourceFolderType;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
@@ -555,7 +557,7 @@ public class TranslationDetector extends ResourceXmlDetector {
                     }
 
                     Location location = context.getLocation(attribute);
-                    location.setClientData(element);
+                    location.setData(element);
                     location.setSecondary(mMissingLocations.get(name));
                     mMissingLocations.put(name, location);
                 }
@@ -568,7 +570,7 @@ public class TranslationDetector extends ResourceXmlDetector {
                         return;
                     }
                     Location location = context.getLocation(attribute);
-                    location.setClientData(element);
+                    location.setData(element);
                     location.setMessage("Also translated here");
                     location.setSecondary(mExtraLocations.get(name));
                     mExtraLocations.put(name, location);
@@ -648,33 +650,6 @@ public class TranslationDetector extends ResourceXmlDetector {
             }
 
             // TBD: Also make sure that the strings are not empty or placeholders?
-        }
-    }
-
-    public static boolean isServiceKey(@NonNull String name) {
-        // These are keys used by misc developer services.
-        // Configuration files provided by for example
-        //   https://developers.google.com/cloud-messaging/android/client
-        // in earlier versions would omit translatable="false", which meant users
-        // would run into fatal translation errors at build time.
-        // See for example
-        //    https://code.google.com/p/android/issues/detail?id=195824
-        // For Firebase see also
-        //    https://firebase.google.com/docs/reference/gradle/#processing_the_json_file
-        // And finally
-        //    https://developers.google.com/android/guides/google-services-plugin
-        switch (name) {
-            case "gcm_defaultSenderId":
-            case "google_app_id":
-            case "google_api_key":
-            case "google_storage_bucket":
-            case "ga_trackingID":
-            case "default_web_client_id":
-            case "firebase_database_url":
-            case "google_crash_reporting_api_key":
-                return true;
-            default:
-                return false;
         }
     }
 

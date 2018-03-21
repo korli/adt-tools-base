@@ -20,18 +20,19 @@ import static com.android.SdkConstants.CLASS_VIEW;
 import static com.android.tools.lint.checks.JavaPerformanceDetector.ON_DRAW;
 import static com.android.tools.lint.checks.JavaPerformanceDetector.ON_LAYOUT;
 import static com.android.tools.lint.checks.JavaPerformanceDetector.ON_MEASURE;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.intellij.psi.PsiMethod;
 import java.util.Arrays;
 import java.util.List;
@@ -44,7 +45,7 @@ import org.jetbrains.uast.UastUtils;
 /**
  * Checks for cases where the wrong call is being made
  */
-public class WrongCallDetector extends Detector implements UastScanner {
+public class WrongCallDetector extends Detector implements SourceCodeScanner {
     /** Calling the wrong method */
     public static final Issue ISSUE = Issue.create(
             "WrongCall",
@@ -55,7 +56,7 @@ public class WrongCallDetector extends Detector implements UastScanner {
 
             Category.CORRECTNESS,
             6,
-            Severity.FATAL,
+            Severity.ERROR,
             new Implementation(
                     WrongCallDetector.class,
                     Scope.JAVA_FILE_SCOPE));
@@ -64,7 +65,7 @@ public class WrongCallDetector extends Detector implements UastScanner {
     public WrongCallDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     @Nullable
@@ -90,7 +91,7 @@ public class WrongCallDetector extends Detector implements UastScanner {
 
         PsiMethod method = UastUtils.getParentOfType(node, UMethod.class, true);
         if (method != null) {
-            String callName = node.getMethodName();
+            String callName = getMethodName(node);
             if (callName != null && !callName.equals(method.getName())) {
                 report(context, node, calledMethod);
             }
@@ -111,7 +112,7 @@ public class WrongCallDetector extends Detector implements UastScanner {
         String message = String.format(
                 "Suspicious method call; should probably call \"`%1$s`\" rather than \"`%2$s`\"",
                 suggestion, name);
-        LintFix fix = fix()
+        LintFix fix = LintFix.create()
                 .name("Replace call with " + suggestion + "()").replace().text(name)
                 .with(suggestion)
                 .build();

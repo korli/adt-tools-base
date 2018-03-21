@@ -13,16 +13,16 @@
     <instantiate from="root/res/layout/activity_fullscreen.xml.ftl"
                    to="${escapeXmlAttribute(resOut)}/layout/${layoutName}.xml" />
 
-    <merge from="root/res/values/strings.xml.ftl"
+    <#if isInstantApp!false>
+      <merge from="root/res/values/strings.xml.ftl"
+               to="${escapeXmlAttribute(baseFeatureResOut)}/values/strings.xml" />
+    <#else>
+      <merge from="root/res/values/strings.xml.ftl"
              to="${escapeXmlAttribute(resOut)}/values/strings.xml" />
+    </#if>
 
-<#if generateKotlin>
-    <instantiate from="root/src/app_package/FullscreenActivity.kt.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${activityClass}.kt" />
-<#else>
-    <instantiate from="root/src/app_package/FullscreenActivity.java.ftl"
-                   to="${escapeXmlAttribute(srcOut)}/${activityClass}.java" />
-</#if>
+    <instantiate from="root/src/app_package/FullscreenActivity.${ktOrJavaExt}.ftl"
+                   to="${escapeXmlAttribute(srcOut)}/${activityClass}.${ktOrJavaExt}" />
 
     <open file="${escapeXmlAttribute(resOut)}/layout/${layoutName}.xml" />
 </recipe>

@@ -45,9 +45,6 @@ import java.util.List;
 import org.gradle.api.Action;
 import org.gradle.api.Incubating;
 import org.gradle.api.NamedDomainObjectContainer;
-import org.gradle.api.Project;
-import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.tasks.Internal;
 
 /**
@@ -55,9 +52,6 @@ import org.gradle.api.tasks.Internal;
  */
 public interface AndroidConfig {
 
-    String CONFIG_DESC = "%s dependencies for '%s' sources.";
-    String CONFIG_DESC_OLD = "%s dependencies for '%s' sources (deprecated: use '%s' instead).";
-    String DEPRECATED_CONFIG_WARNING = "Configuration '%s' in project '%s' is deprecated. Use '%s' instead.";
 
     /**
      * Specifies the version of the <a
@@ -285,24 +279,19 @@ public interface AndroidConfig {
     DexOptions getDexOptions();
 
     /**
-     * Configuring JaCoCo using this property is deprecated.
+     * Configure JaCoCo version that is used for offline instrumentation and coverage report.
      *
-     * <p>To specify the version of JaCoCo you want to use, you now need to include it as a
-     * buildscript dependency in your project-level <code>build.gradle</code> file, as follows:
+     * <p>To specify the version of JaCoCo you want to use, add the following to <code>build.gradle
+     * </code> file:
      *
      * <pre>
-     * buildscript {
-     *     dependencies {
-     *         classpath "org.jacoco:org.jacoco.core:&lt;jacoco-version&gt;"
-     *         ...
+     * android {
+     *     jacoco {
+     *         version "&lt;jacoco-version&gt;"
      *     }
      * }
      * </pre>
-     *
-     * @deprecated Instead, include the version of JaCoCo you want to use as a buildscript
-     *     dependency in your project-level <code>build.gradle</code> file.
      */
-    @Deprecated
     JacocoOptions getJacoco();
 
     /**
@@ -515,7 +504,7 @@ public interface AndroidConfig {
      * type-, product flavor-, and build variant-specific source set. you can run this task from the
      * command line as follows:
      *
-     * <pre>./gradlew sourseSets</pre>
+     * <pre>./gradlew sourceSets</pre>
      *
      * <p>The following sample output describes where Gradle expects to find certain files for the
      * "debug" build type:
@@ -638,39 +627,5 @@ public interface AndroidConfig {
      * interfaces.
      */
     @Nullable
-    public String getTestBuildType();
-
-    final class DeprecatedConfigurationAction implements Action<Dependency> {
-
-        @NonNull
-        private final Project project;
-        @NonNull
-        private final Configuration configuration;
-        @NonNull
-        private final String replacement;
-        private boolean warningPrintedAlready = false;
-
-        public DeprecatedConfigurationAction(
-                @NonNull Project project,
-                @NonNull Configuration configuration,
-                @NonNull String replacement) {
-            this.project = project;
-            this.configuration = configuration;
-            this.replacement = replacement;
-        }
-
-        @Override
-        public void execute(Dependency dependency) {
-            if (!warningPrintedAlready) {
-                warningPrintedAlready = true;
-                project.getLogger()
-                        .quiet(
-                                String.format(
-                                        DEPRECATED_CONFIG_WARNING,
-                                        configuration.getName(),
-                                        project.getPath(),
-                                        replacement));
-            }
-        }
-    }
+    String getTestBuildType();
 }

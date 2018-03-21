@@ -1,0 +1,56 @@
+load("//tools/base/build-system/integration-test:integration-test.bzl", "gradle_integration_test")
+
+gradle_integration_test(
+    name = "sdk_tests",
+    # TODO: can we make this test start from no prebuilt SDK.
+    # Note: this test is slightly unusual in testing the auto download, hence the hardcoded file
+    # references. This is not necessarily the pattern to follow in other tests.
+    srcs = glob(["**/*.java"]),
+    data = [
+        "//prebuilts/studio/sdk:build-tools/27.0.3",
+        "//prebuilts/studio/sdk:ndk-bundle",
+        "//prebuilts/studio/sdk:platform-tools",
+        "//prebuilts/studio/sdk:platforms/latest",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/addon2-1.xml",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/build-tools_r27.0.3-linux.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/build-tools_r27.0.3-macosx.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/build-tools_r27.0.3-windows.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/cmake-3.6.4111459-darwin-x86_64.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/cmake-3.6.4111459-linux-x86_64.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/cmake-3.6.4111459-windows-x86_64.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/platform-26_r02.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/platform-tools_r27.0.1-darwin.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/platform-tools_r27.0.1-linux.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/platform-tools_r27.0.1-windows.zip",
+        "//prebuilts/studio/sdk/remote:dl.google.com/android/repository/repository2-1.xml",
+        "//prebuilts/tools/common/cmake:cmake-3.8.2",
+        "//prebuilts/tools/common/kotlin-plugin:Kotlin/kotlinc/build.txt",
+        "//tools/base/build-system:gradle-distrib",
+        "//tools/base/build-system/integration-test:test-projects/commonBuildScript.gradle",
+    ],
+    maven_repos = [
+        "//tools/base/build-system:gradle_plugin_no_databinding_repo",
+        "//tools/base/build-system/integration-test/application:prebuilts",
+    ],
+    deps = [
+        "//tools/apksig",
+        "//tools/base/annotations",
+        "//tools/base/build-system:gradle-api",
+        "//tools/base/build-system/builder",
+        "//tools/base/build-system/builder-model",
+        "//tools/base/build-system/builder-test-api:tools.builder-test-api",
+        "//tools/base/build-system/gradle-api",
+        "//tools/base/build-system/gradle-core",
+        "//tools/base/build-system/integration-test/framework",
+        "//tools/base/common:tools.common",
+        "//tools/base/ddmlib:tools.ddmlib",
+        "//tools/base/instant-run:instant-run-client",
+        "//tools/base/repository:tools.repository",
+        "//tools/base/sdk-common:tools.sdk-common",
+        "//tools/base/sdklib:tools.sdklib",
+        "//tools/base/testutils:tools.testutils",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:com.google.truth_truth",
+        "//tools/base/third_party:junit_junit",
+    ],
+)

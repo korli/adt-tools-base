@@ -22,28 +22,25 @@
 
 using profiler::proto::AllocationContextsResponse;
 using profiler::proto::AllocationsInfo;
-using profiler::proto::DumpDataResponse;
 using profiler::proto::DumpDataRequest;
+using profiler::proto::DumpDataResponse;
 using profiler::proto::ForceGarbageCollectionRequest;
 using profiler::proto::ForceGarbageCollectionResponse;
+using profiler::proto::LegacyAllocationContextsRequest;
+using profiler::proto::LegacyAllocationEventsRequest;
+using profiler::proto::LegacyAllocationEventsResponse;
+using profiler::proto::ListDumpInfosRequest;
+using profiler::proto::ListHeapDumpInfosResponse;
 using profiler::proto::MemoryControlRequest;
+using profiler::proto::MemoryData;
+using profiler::proto::MemoryRequest;
 using profiler::proto::MemoryStartRequest;
 using profiler::proto::MemoryStartResponse;
 using profiler::proto::MemoryStopRequest;
 using profiler::proto::MemoryStopResponse;
-using profiler::proto::MemoryRequest;
-using profiler::proto::MemoryData;
-using profiler::proto::LegacyAllocationContextsRequest;
-using profiler::proto::LegacyAllocationEventsRequest;
-using profiler::proto::LegacyAllocationEventsResponse;
-using profiler::proto::ListHeapDumpInfosResponse;
-using profiler::proto::ListDumpInfosRequest;
+using profiler::proto::Session;
 using profiler::proto::TrackAllocationsRequest;
 using profiler::proto::TrackAllocationsResponse;
-using profiler::proto::SuspendTrackAllocationsRequest;
-using profiler::proto::SuspendTrackAllocationsResponse;
-using profiler::proto::ResumeTrackAllocationsRequest;
-using profiler::proto::ResumeTrackAllocationsResponse;
 using profiler::proto::TriggerHeapDumpRequest;
 using profiler::proto::TriggerHeapDumpResponse;
 
@@ -52,7 +49,7 @@ namespace profiler {
 grpc::Status MemoryServiceImpl::StartMonitoringApp(
     ::grpc::ServerContext* context, const MemoryStartRequest* request,
     MemoryStartResponse* response) {
-  MemoryCollector* collector = GetCollector(request->process_id());
+  MemoryCollector* collector = GetCollector(request->session());
   if (!collector->IsRunning()) {
     collector->Start();
   }
@@ -63,9 +60,10 @@ grpc::Status MemoryServiceImpl::StartMonitoringApp(
 grpc::Status MemoryServiceImpl::StopMonitoringApp(
     ::grpc::ServerContext* context, const MemoryStopRequest* request,
     MemoryStopResponse* response) {
-  auto got = collectors_.find(request->process_id());
+  auto got = collectors_.find(request->session().session_id());
   if (got != collectors_.end() && got->second.IsRunning()) {
     got->second.Stop();
+    // TODO remove stopped collector?
   }
   response->set_status(MemoryStopResponse::SUCCESS);
   return ::grpc::Status::OK;
@@ -75,11 +73,11 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
                                           const MemoryRequest* request,
                                           MemoryData* response) {
   Trace trace("MEM:GetData");
-  auto result = collectors_.find(request->process_id());
+  auto result = collectors_.find(request->session().session_id());
   if (result == collectors_.end()) {
-    return ::grpc::Status(
-        ::grpc::StatusCode::NOT_FOUND,
-        "The memory collector for the specified pid has not been started yet.");
+    return ::grpc::Status(::grpc::StatusCode::NOT_FOUND,
+                          "The memory collector for the specified session has "
+                          "not been started yet.");
   }
 
   result->second.memory_cache()->LoadMemoryData(request->start_time(),
@@ -92,11 +90,11 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
                                                const MemoryRequest* request,
                                                MemoryData* response) {
   Trace trace("MEM:GetJvmtiData");
-  auto result = collectors_.find(request->process_id());
+  auto result = collectors_.find(request->session().session_id());
   if (result == collectors_.end()) {
-    return ::grpc::Status(
-        ::grpc::StatusCode::NOT_FOUND,
-        "The memory collector for the specified pid has not been started yet.");
+    return ::grpc::Status(::grpc::StatusCode::NOT_FOUND,
+                          "The memory collector for the specified session has "
+                          "not been started yet.");
   }
 
   result->second.memory_cache()->LoadMemoryJvmtiData(
@@ -111,8 +109,8 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
     if ((result) == (collectors).end()) {                                     \
       (response)->set_status(status);                                         \
       return ::grpc::Status(::grpc::StatusCode::NOT_FOUND,                    \
-                            "The memory collector for the specified pid has " \
-                            "not been started yet.");                         \
+                            "The memory collector for the specified session " \
+                            "has not been started yet.");                     \
     }                                                                         \
   }
 
@@ -120,9 +118,7 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
     ::grpc::ServerContext* context, const TriggerHeapDumpRequest* request,
     TriggerHeapDumpResponse* response) {
   Trace trace("MEM:TriggerHeapDump");
-  int32_t app_id = request->process_id();
-
-  auto result = collectors_.find(app_id);
+  auto result = collectors_.find(request->session().session_id());
   PROFILER_MEMORY_SERVICE_RETURN_IF_NOT_FOUND_WITH_STATUS(
       result, collectors_, response, TriggerHeapDumpResponse::FAILURE_UNKNOWN)
 
@@ -143,9 +139,7 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
                                               const DumpDataRequest* request,
                                               DumpDataResponse* response) {
   Trace trace("MEM:GetHeapDump");
-  int32_t app_id = request->process_id();
-
-  auto result = collectors_.find(app_id);
+  auto result = collectors_.find(request->session().session_id());
   PROFILER_MEMORY_SERVICE_RETURN_IF_NOT_FOUND_WITH_STATUS(
       result, collectors_, response, DumpDataResponse::FAILURE_UNKNOWN)
 
@@ -163,20 +157,11 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
   }
 }
 
-::grpc::Status MemoryServiceImpl::ListHeapDumpInfos(
-    ::grpc::ServerContext* context, const ListDumpInfosRequest* request,
-    ListHeapDumpInfosResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED,
-                        "Not implemented on device");
-}
-
 ::grpc::Status MemoryServiceImpl::TrackAllocations(
     ::grpc::ServerContext* context, const TrackAllocationsRequest* request,
     TrackAllocationsResponse* response) {
   Trace trace("MEM:TrackAllocations");
-  int32_t app_id = request->process_id();
-
-  auto result = collectors_.find(app_id);
+  auto result = collectors_.find(request->session().session_id());
   PROFILER_MEMORY_SERVICE_RETURN_IF_NOT_FOUND_WITH_STATUS(
       result, collectors_, response, TrackAllocationsResponse::FAILURE_UNKNOWN)
 
@@ -187,7 +172,7 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
 
     // Forwards a control signal to perfa to toggle JVMTI-based tracking.
     MemoryControlRequest control_request;
-    control_request.set_pid(app_id);
+    control_request.set_pid(request->session().pid());
     if (request->enabled()) {
       MemoryControlRequest::EnableTracking* enable_request =
           control_request.mutable_enable_request();
@@ -223,100 +208,15 @@ grpc::Status MemoryServiceImpl::StopMonitoringApp(
   }
 }
 
-::grpc::Status MemoryServiceImpl::SuspendTrackAllocations(
-    ::grpc::ServerContext* context,
-    const SuspendTrackAllocationsRequest* request,
-    SuspendTrackAllocationsResponse* response) {
-  int32_t app_id = request->process_id();
-
-  auto result = collectors_.find(app_id);
-  PROFILER_MEMORY_SERVICE_RETURN_IF_NOT_FOUND_WITH_STATUS(
-      result, collectors_, response, SuspendTrackAllocationsResponse::FAILURE_UNKNOWN)
-
-  if ((result->second).IsRunning()) {
-    // Forwards a control signal to perfa to toggle JVMTI-based tracking.
-    MemoryControlRequest control_request;
-    control_request.set_pid(app_id);
-    control_request.mutable_suspend_request();
-    if (!private_service_->SendRequestToAgent(control_request)) {
-      return ::grpc::Status(::grpc::StatusCode::UNKNOWN,
-                            "Unable to suspend live allocation tracking.");
-    }
-  } else {
-    response->set_status(SuspendTrackAllocationsResponse::NOT_PROFILING);
-    return ::grpc::Status::OK;
-  }
-  response->set_status(SuspendTrackAllocationsResponse::SUCCESS);
-  return ::grpc::Status::OK;
-}
-
-::grpc::Status MemoryServiceImpl::ResumeTrackAllocations(
-    ::grpc::ServerContext* context,
-    const ResumeTrackAllocationsRequest* request,
-    ResumeTrackAllocationsResponse* response) {
-  int32_t app_id = request->process_id();
-
-  auto result = collectors_.find(app_id);
-  PROFILER_MEMORY_SERVICE_RETURN_IF_NOT_FOUND_WITH_STATUS(
-      result, collectors_, response, ResumeTrackAllocationsResponse::FAILURE_UNKNOWN)
-
-  if ((result->second).IsRunning()) {
-    // Forwards a control signal to perfa to toggle JVMTI-based tracking.
-    MemoryControlRequest control_request;
-    control_request.set_pid(app_id);
-    control_request.mutable_resume_request();
-    if (!private_service_->SendRequestToAgent(control_request)) {
-      return ::grpc::Status(::grpc::StatusCode::UNKNOWN,
-                            "Unable to resume live allocation tracking.");
-    }
-  } else {
-    response->set_status(ResumeTrackAllocationsResponse::NOT_PROFILING);
-    return ::grpc::Status::OK;
-  }
-  response->set_status(ResumeTrackAllocationsResponse::SUCCESS);
-  return ::grpc::Status::OK;
-}
-
 #undef PROFILER_MEMORY_SERVICE_RETURN_IF_NOT_FOUND
 
-::grpc::Status MemoryServiceImpl::GetLegacyAllocationContexts(
-    ::grpc::ServerContext* context,
-    const LegacyAllocationContextsRequest* request,
-    AllocationContextsResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED,
-                        "Not implemented on device");
-}
-
-::grpc::Status MemoryServiceImpl::GetLegacyAllocationEvents(
-    ::grpc::ServerContext* context,
-    const LegacyAllocationEventsRequest* request,
-    LegacyAllocationEventsResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED,
-                        "Not implemented on device");
-}
-
-::grpc::Status MemoryServiceImpl::GetLegacyAllocationDump(
-    ::grpc::ServerContext* context, const DumpDataRequest* request,
-    DumpDataResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED,
-                        "Not implemented on device");
-}
-
-::grpc::Status MemoryServiceImpl::ForceGarbageCollection(
-    ::grpc::ServerContext* context,
-    const ForceGarbageCollectionRequest* request,
-    ForceGarbageCollectionResponse* response) {
-  return ::grpc::Status(::grpc::StatusCode::UNIMPLEMENTED,
-                        "Not implemented on device");
-}
-
-MemoryCollector* MemoryServiceImpl::GetCollector(int32_t app_id) {
-  auto got = collectors_.find(app_id);
+MemoryCollector* MemoryServiceImpl::GetCollector(const Session& session) {
+  auto got = collectors_.find(session.session_id());
   if (got == collectors_.end()) {
     // Use the forward version of pair to avoid defining a move constructor.
     auto emplace_result = collectors_.emplace(
-        std::piecewise_construct, std::forward_as_tuple(app_id),
-        std::forward_as_tuple(app_id, clock_, file_cache_));
+        std::piecewise_construct, std::forward_as_tuple(session.session_id()),
+        std::forward_as_tuple(session.pid(), clock_, file_cache_));
     assert(emplace_result.second);
     got = emplace_result.first;
   }

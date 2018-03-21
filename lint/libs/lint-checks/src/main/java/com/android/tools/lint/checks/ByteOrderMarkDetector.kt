@@ -16,10 +16,11 @@
 
 package com.android.tools.lint.checks
 
+import com.android.resources.ResourceFolderType
 import com.android.tools.lint.client.api.UElementHandler
 import com.android.tools.lint.detector.api.Category
 import com.android.tools.lint.detector.api.Context
-import com.android.tools.lint.detector.api.Detector
+import com.android.tools.lint.detector.api.GradleScanner
 import com.android.tools.lint.detector.api.Implementation
 import com.android.tools.lint.detector.api.Issue
 import com.android.tools.lint.detector.api.JavaContext
@@ -27,6 +28,7 @@ import com.android.tools.lint.detector.api.Location
 import com.android.tools.lint.detector.api.ResourceXmlDetector
 import com.android.tools.lint.detector.api.Scope
 import com.android.tools.lint.detector.api.Severity
+import com.android.tools.lint.detector.api.SourceCodeScanner
 import com.android.tools.lint.detector.api.XmlContext
 import org.w3c.dom.Document
 import java.util.EnumSet
@@ -34,7 +36,7 @@ import java.util.EnumSet
 /**
  * Checks that byte order marks do not appear in resource names
  */
-class ByteOrderMarkDetector : ResourceXmlDetector(), Detector.UastScanner, Detector.GradleScanner {
+class ByteOrderMarkDetector : ResourceXmlDetector(), SourceCodeScanner, GradleScanner {
     companion object Issues {
 
         /** Detects BOM characters in the middle of files  */
@@ -49,7 +51,7 @@ part of a resource name in one particular translation, that name will not be con
 to the base resource's name and the translation will not be used.""",
                 Category.I18N,
                 8,
-                Severity.FATAL,
+                Severity.ERROR,
                 Implementation(
                         ByteOrderMarkDetector::class.java,
                         // Applies to all text files
@@ -66,6 +68,10 @@ to the base resource's name and the translation will not be used.""",
     }
 
     override fun beforeCheckFile(context: Context) {
+        if (context is XmlContext && context.resourceFolderType == ResourceFolderType.RAW) {
+            return
+        }
+
         val source = context.getContents() ?: return
         val max = source.length
         for (i in 1 until max) {

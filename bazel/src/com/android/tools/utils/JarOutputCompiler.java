@@ -19,12 +19,10 @@ package com.android.tools.utils;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.stream.Stream;
 
 public abstract class JarOutputCompiler {
 
@@ -40,6 +38,7 @@ public abstract class JarOutputCompiler {
     }
 
     protected int run(List<String> args) throws IOException {
+        args = filterOptions(args);
         Options options = parseOptions(args.iterator());
         if (options.out == null) {
             usage("Output file not specified.");
@@ -55,6 +54,10 @@ public abstract class JarOutputCompiler {
         }
         new Zipper().directoryToZip(tmp, options.out);
         return 0;
+    }
+
+    protected List<String> filterOptions(List<String> args) {
+        return args;
     }
 
     private Options parseOptions(Iterator<String> it) throws IOException {

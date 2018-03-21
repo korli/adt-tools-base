@@ -18,7 +18,6 @@ package com.android.tools.lint.checks.infrastructure;
 
 import static com.android.SdkConstants.ANDROID_MANIFEST_XML;
 import static com.android.SdkConstants.DOT_GRADLE;
-import static com.android.SdkConstants.DOT_JAR;
 import static org.junit.Assert.assertTrue;
 
 import com.android.annotations.NonNull;
@@ -26,7 +25,6 @@ import com.android.annotations.Nullable;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.Variant;
 import com.android.testutils.TestUtils;
-import com.android.tools.lint.EcjParser;
 import com.android.tools.lint.LintCliFlags;
 import com.android.tools.lint.Warning;
 import com.android.tools.lint.checks.BuiltinIssueRegistry;
@@ -47,7 +45,6 @@ import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.utils.NullLogger;
 import com.android.utils.Pair;
-import com.android.utils.SdkUtils;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -57,9 +54,10 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URL;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -97,17 +95,16 @@ public class TestLintTask {
     EnumSet<Scope> customScope;
     public boolean forceSymbolResolutionErrors;
     TestLintClient client;
-    boolean skipExtraTokenChecks = true;
     Detector detector;
     File[] customRules;
     boolean ignoreUnknownGradleConstructs;
     Boolean supportResourceRepository;
     boolean allowMissingSdk;
     boolean requireCompileSdk;
-    boolean runCompatChecks = true;
     boolean vital;
     Map<String, byte[]> mockNetworkData;
     boolean allowNetworkAccess;
+    boolean allowDuplicates = false;
 
     /** Creates a new lint test task */
     public TestLintTask() {
@@ -513,20 +510,6 @@ public class TestLintTask {
     }
 
     /**
-     * Normally lint will run your detectors <b>twice</b>, first on the
-     * plain source code, and then a second time where it has inserted whitespace
-     * and parentheses pretty much everywhere, to help catch bugs where your detector
-     * is only checking direct parents or siblings rather than properly allowing for
-     * whitespace and parenthesis nodes which can be present for example when using
-     * PSI inside the IDE. You can skip these extra checks by calling this method.
-     */
-    public TestLintTask skipExtraTokenChecks() {
-        ensurePreRun();
-        skipExtraTokenChecks = true;
-        return this;
-    }
-
-    /**
      * Tells the lint infrastructure to silently ignore any unknown Gradle constructs
      * it encounters when processing a Gradle file and attempting to build up mocks
      * for the Gradle builder model
@@ -551,6 +534,39 @@ public class TestLintTask {
     public TestLintTask forceSymbolResolutionErrors() {
         ensurePreRun();
         this.forceSymbolResolutionErrors = true;
+        return this;
+    }
+
+    /**
+     * Normally the lint test infrastructure ensures that all reported errors
+     * are unique (which means that no error has the exact same message for
+     * the exact same error range in the source file). That's normally a sign
+     * of a bug in the detector. If you're trying to report multiple issues that
+     * happen to overlap the same region for the same issue id, make sure that
+     * the error message is unique; the common way to do that is to include
+     * parameters in the error message, such as the name of the variable or
+     * expression in question, and so on.
+     *
+     * There <b>are</b> some cases where it's very difficult to avoid reporting
+     * the same error message twice. For example, the ResourceTypeDetector,
+     * when it discovers that an expression has a certain resource type
+     * (e.g. "R.drawable.foo" is a @DrawableRes, as is "getResources().getDrawable(x)")
+     * it sees if this expression is used in a surrounding binary expression
+     * for comparison purposes and warns if you're performing some suspicious
+     * comparisons (for resource types only equals/not-equals is expected;
+     * making number-range comparisons is usually a bug.)   If you report
+     * this bug on the binary expression, you could end up reporting it twice
+     * if we reach the expression both from the left operand and from the right
+     * operand. But you don't want to limit reporting the error to just one of
+     * those branches since it needs to work for both the case when both sides
+     * have a known resource type as when either only the left or only the right
+     * have a known resource type. In these scenarios you can turn off the
+     * duplicate check.
+     *
+     * @return this, for constructor chaining
+     */
+    public TestLintTask allowDuplicates() {
+        this.allowDuplicates = true;
         return this;
     }
 
@@ -658,10 +674,6 @@ public class TestLintTask {
     public TestLintResult run() {
         alreadyRun = true;
         ensureConfigured();
-
-        if (!allowCompilationErrors) {
-            EcjParser.skipComputingEcjErrors = false;
-        }
 
         File rootDir = Files.createTempDir();
         try {
@@ -852,6 +864,7 @@ public class TestLintTask {
 
             if (customRules != null) {
                 TestLintClient client = createClient();
+                client.task = this;
                 List<JarFileIssueRegistry> registries =
                         JarFileIssueRegistry.Factory.get(client, Arrays.asList(customRules));
                 IssueRegistry[] array = registries.toArray(new IssueRegistry[0]);
@@ -863,13 +876,13 @@ public class TestLintTask {
                 checkedIssues = Lists.newArrayList();
                 // Find issues defined in the class
                 Class<? extends Detector> detectorClass = detector.getClass();
-                for (Field field : detectorClass.getFields()) {
-                    if ((field.getModifiers() & Modifier.STATIC) != 0
-                            && field.getType() == Issue.class) {
-                        try {
-                            checkedIssues.add((Issue) field.get(null));
-                        } catch (IllegalAccessException ignore) {
-                        }
+                addIssuesFromClass(checkedIssues, detectorClass);
+                if (checkedIssues.isEmpty()) {
+                    // Look in file
+                    try {
+                        Class<?> fileClass = Class.forName(detectorClass.getName() + "Kt");
+                        addIssuesFromClass(checkedIssues, fileClass);
+                    } catch (ClassNotFoundException ignore) {
                     }
                 }
                 if (checkedIssues.isEmpty()) {
@@ -905,16 +918,49 @@ public class TestLintTask {
         return checkedIssues;
     }
 
-    /**
-     * Whether lint should run compat checks (for PSI and Lombok); for now, defaults
-     * to true.
-     *
-     * @param runCompatChecks whether to run compat checks
-     * @return this, for constructor chaining
-     */
-    public TestLintTask runCompatChecks(boolean runCompatChecks) {
-        this.runCompatChecks = runCompatChecks;
-        return this;
+    /** Adds issue fields found in the given class */
+    private static void addIssuesFromClass(@NonNull List<Issue> checkedIssues,
+            @NonNull Class<?> detectorClass) {
+        addIssuesFromFields(checkedIssues, detectorClass.getFields());
+
+        // Use getDeclaredFields to also pick up private fields (e.g. backing fields
+        // for Kotlin properties); we can't *only* use getDeclaredFields since we
+        // also want to pick up inherited fields (for example used in the GradleDetector
+        // subclasses.)
+        addIssuesFromFields(checkedIssues, detectorClass.getDeclaredFields());
+
+        for (Method method : detectorClass.getDeclaredMethods()) {
+            if ((method.getModifiers() & Modifier.STATIC) != 0
+                    && method.getReturnType() == Issue.class
+                    && method.getName().startsWith("get")
+                    && method.getParameterCount() == 0) {
+                try {
+                    method.setAccessible(true);
+                    Issue issue = (Issue) method.invoke(null);
+                    if (!checkedIssues.contains(issue)) {
+                        checkedIssues.add(issue);
+                    }
+                } catch (IllegalAccessException | InvocationTargetException ignore) {
+                }
+            }
+        }
+    }
+
+    private static void addIssuesFromFields(@NonNull List<Issue> checkedIssues, Field[] fields) {
+        for (Field field : fields) {
+            if ((field.getModifiers() & Modifier.STATIC) != 0
+                    && !field.getName().startsWith("_")
+                    && field.getType() == Issue.class) {
+                try {
+                    field.setAccessible(true);
+                    Issue issue = (Issue) field.get(null);
+                    if (!checkedIssues.contains(issue)) {
+                        checkedIssues.add(issue);
+                    }
+                } catch (IllegalAccessException ignore) {
+                }
+            }
+        }
     }
 
     /**

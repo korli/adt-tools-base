@@ -27,11 +27,11 @@ import junit.framework.TestCase;
 import org.mockito.Mockito;
 
 public class JavaContextTest extends TestCase {
-    public void testSuppressedBytecode() throws Exception {
+    public void testSuppressedBytecode() {
         // Regression test for https://issuetracker.google.com/issues/37335487
         String source = "package test.pkg;\npublic class Test { }\n";
         Pair<JavaContext, Disposable> pair =
-                LintUtilsTest.parseUast(source, new File("src/test/pkg/Test.java"));
+                LintUtilsTest.parse(source, new File("src/test/pkg/Test.java"));
         JavaContext context = pair.getFirst();
         Disposable disposable = pair.getSecond();
         PsiElement compiled = Mockito.mock(PsiCompiledFile.class);

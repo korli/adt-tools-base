@@ -13,17 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// This class deliberately refers to deprecated APIs like Lombok and PSI
-@file:Suppress("DEPRECATION")
 
 package com.android.tools.lint.client.api
 
+import com.android.SdkConstants
 import com.android.SdkConstants.DOT_CLASS
-import com.android.tools.lint.detector.api.Detector.JavaPsiScanner
-import com.android.tools.lint.detector.api.Detector.JavaScanner
+import com.android.tools.lint.detector.api.CURRENT_API
 import com.android.tools.lint.detector.api.Issue
-import com.android.tools.lint.detector.api.Scope
 import com.android.tools.lint.detector.api.Severity
+import com.android.tools.lint.detector.api.describeApi
 import com.android.utils.SdkUtils
 import java.io.File
 import java.io.IOException
@@ -50,52 +48,20 @@ private constructor(
         /** The custom lint check's issue registry that this [JarFileIssueRegistry] wraps */
         registry: IssueRegistry) : IssueRegistry() {
 
-    private val issues: List<Issue> = registry.issues.toList()
+    override val issues: List<Issue> = registry.issues.toList()
     private var timestamp: Long = jarFile.lastModified()
 
-    private var hasLombokLegacyDetectors: Boolean = false
-    private var hasPsiLegacyDetectors: Boolean = false
-
-    /** True if one or more java detectors were found that use the old Lombok-based API  */
-    fun hasLombokLegacyDetectors(): Boolean {
-        return hasLombokLegacyDetectors
-    }
-
-    /** True if one or more java detectors were found that use the old PSI-based API  */
-    fun hasPsiLegacyDetectors(): Boolean {
-        return hasPsiLegacyDetectors
-    }
-
-    override fun isUpToDate(): Boolean {
-        return timestamp == jarFile.lastModified()
-    }
+    override val isUpToDate: Boolean
+        get() = timestamp == jarFile.lastModified()
 
     init {
-        // If it's an old registry, look through the issues to see if it
-        // provides Java scanning and if so create the old style visitors
-        for (issue in issues) {
-            val scope = issue.implementation.scope
-            if (scope.contains(Scope.JAVA_FILE) || scope.contains(Scope.JAVA_LIBRARIES)
-                    || scope.contains(Scope.ALL_JAVA_FILES)) {
-                val detectorClass = issue.implementation.detectorClass
-                if (JavaScanner::class.java.isAssignableFrom(detectorClass)) {
-                    hasLombokLegacyDetectors = true
-                } else if (JavaPsiScanner::class.java.isAssignableFrom(detectorClass)) {
-                    hasPsiLegacyDetectors = true
-                }
-                break
-            }
-        }
-
         val loader = registry.javaClass.classLoader
         if (loader is URLClassLoader) {
             loadAndCloseURLClassLoader(client, jarFile, loader)
         }
     }
 
-    override fun getIssues(): List<Issue> {
-        return issues
-    }
+    override val api: Int = com.android.tools.lint.detector.api.CURRENT_API
 
     companion object Factory {
         /** Service key for automatic discovery of lint rules */
@@ -207,7 +173,90 @@ private constructor(
                 val loader = client.createUrlClassLoader(arrayOf(url),
                         JarFileIssueRegistry::class.java.classLoader)
                 val registryClass = Class.forName(className, true, loader)
-                registryClass.newInstance() as IssueRegistry
+                val registry = registryClass.newInstance() as IssueRegistry
+
+                val issues = try {
+                    registry.issues
+                } catch (e: Throwable) {
+                    val stacktrace = StringBuilder()
+                    LintDriver.appendStackTraceSummary(e, stacktrace)
+                    val message = "Lint found one or more custom checks that could not " +
+                            "be loaded. The most likely reason for this is that it is using an " +
+                            "older, incompatible or unsupported API in lint. Make sure these " +
+                            "lint checks are updated to the new APIs. The issue registry class " +
+                            "is $className. The class loading issue is ${e.message}: $stacktrace"
+
+                    LintClient.report(client = client, issue = OBSOLETE_LINT_CHECK,
+                        message = message, file = jarFile)
+                    return null
+                }
+
+                try {
+                    val apiField = registryClass.getDeclaredMethod("getApi")
+                    val api = apiField.invoke(registry) as Int
+                    if (api < CURRENT_API) {
+                        val message = "Lint found an issue registry (`$className`) which is " +
+                                "older than the current API level; these checks may not work " +
+                                "correctly.\n" +
+                                "\n" +
+                                "Recompile the checks against the latest version. " +
+                                "Custom check API version is $api (${describeApi(api)}), " +
+                                "current lint API level is $CURRENT_API " +
+                                "(${describeApi(CURRENT_API)})"
+                        LintClient.report(client = client, issue = OBSOLETE_LINT_CHECK,
+                                message = message, file = jarFile)
+                        // Not returning here: try to run the checks
+                    } else {
+                        try {
+                            val minApi = registry.minApi
+                            if (minApi > CURRENT_API) {
+                                val message = "Lint found an issue registry (`$className`) which " +
+                                        "requires a newer API level. That means that the custom " +
+                                        "lint checks are intended for a newer lint version; please " +
+                                        "upgrade"
+                                LintClient.report(client = client, issue = OBSOLETE_LINT_CHECK,
+                                        message = message, file = jarFile)
+                                return null
+                            }
+                        } catch (ignore: Throwable) {
+                        }
+                    }
+                } catch (e: Throwable) {
+                    var message = "Lint found an issue registry (`$className`) which did not " +
+                        "specify the Lint API version it was compiled with.\n" +
+                        "\n" +
+                        "**This means that the lint checks are likely not compatible.**\n" +
+                        "\n" +
+                        "If you are the author of this lint check, make your lint " +
+                        "`IssueRegistry` class contain\n" +
+                        "\u00a0\u00a0override val api: Int = com.android.tools.lint.detector.api.CURRENT_API\n" +
+                        "or from Java,\n" +
+                        "\u00a0\u00a0@Override public int getApi() { return com.android.tools.lint.detector.api.ApiKt.CURRENT_API; }"
+
+                    val issueIds = issues.map { it.id }.sorted()
+                    if (issueIds.any()) {
+                        message += ("\n" +
+                            "\n" +
+                            "If you are just using lint checks from a third party library " +
+                            "you have no control over, you can disable these lint checks (if " +
+                            "they misbehave) like this:\n" +
+                            "\n" +
+                            "    android {\n" +
+                            "        lintOptions {\n" +
+                            "            disable ${issueIds.joinToString(
+                                separator = ",\n                    ") { "\"$it\"" }}\n" +
+                            "        }\n" +
+                            "    }\n").
+                                // Force indentation
+                                replace("    ", "\u00a0\u00a0\u00a0\u00a0")
+                    }
+
+                    LintClient.report(client = client, issue = OBSOLETE_LINT_CHECK,
+                            message = message, file = jarFile)
+                    // Not returning here: try to run the checks
+                }
+
+                registry
             } catch (e: Throwable) {
                 client.log(e, "Could not load custom lint check jar file %1\$s", jarFile)
                 null
@@ -230,9 +279,6 @@ private constructor(
                     var isLegacy = false
                     if (attribute == null) {
                         attribute = attrs[Attributes.Name(MF_LINT_REGISTRY_OLD)]
-                        // It's an old rule. We don't yet conclude that
-                        //   hasLombokLegacyDetectors=true
-                        // because the lint checks may not be Java related.
                         if (attribute != null) {
                             isLegacy = true
                         }
@@ -295,7 +341,7 @@ private constructor(
          * with the file. We'll do that here. However, the whole point of the
          * [JarFileIssueRegistry] is that when lint is run over and over again
          * as the user is editing in the IDE and we're background checking the code, we
-         * don't to keep loading the custom view classes over and over again: we want to
+         * don't want to keep loading the custom view classes over and over again: we want to
          * cache them. Therefore, just closing the URLClassLoader right away isn't great
          * either. However, it turns out it's safe to close the URLClassLoader once you've
          * loaded the classes you need, since the URLClassLoader will continue to serve
@@ -312,29 +358,40 @@ private constructor(
                 client: LintClient,
                 file: File,
                 loader: URLClassLoader) {
+            if (SdkConstants.CURRENT_PLATFORM != SdkConstants.PLATFORM_WINDOWS) {
+                // We don't need to close the class loader on other platforms than Windows
+                return
+            }
+
             // Before closing the jar file, proactively load all classes:
             try {
                 JarFile(file).use { jar ->
                     val enumeration = jar.entries()
                     while (enumeration.hasMoreElements()) {
                         val entry = enumeration.nextElement()
-                        var name = entry.name
+                        val path = entry.name
                         // Load non-inner-classes
-                        if (name.endsWith(DOT_CLASS)) {
+                        if (path.endsWith(DOT_CLASS) && path.indexOf('$') == -1) {
                             // Strip .class suffix and change .jar file path (/)
                             // to class name (.'s).
-                            name = name.substring(0, name.length - DOT_CLASS.length)
-                            name = name.replace('/', '.')
+                            val name = path.substring(0, path.length - DOT_CLASS.length).
+                                    replace('/', '.')
                             try {
-                                val aClass = Class.forName(name, true, loader)
+                                val cls = Class.forName(name, true, loader)
                                 // Actually, initialize them too to make sure basic classes
                                 // needed by the detector are available
-                                aClass.newInstance()
+                                if (!(cls.isAnnotation || cls.isEnum || cls.isInterface)) {
+                                    try {
+                                        val defaultConstructor = cls.getConstructor()
+                                        defaultConstructor.isAccessible = true
+                                        defaultConstructor.newInstance()
+                                    } catch (ignore: NoSuchMethodException) {
+                                    }
+                                }
                             } catch (e: Throwable) {
                                 client.log(Severity.ERROR, e,
                                         "Failed to prefetch $name from $file")
                             }
-
                         }
                     }
                 }

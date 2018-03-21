@@ -7,6 +7,7 @@ import com.android.build.gradle.api.BaseVariant;
 import com.android.build.gradle.api.BaseVariantOutput;
 import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.SdkHandler;
+import com.android.build.gradle.internal.dependency.SourceSetManager;
 import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
@@ -15,7 +16,6 @@ import com.android.builder.core.AndroidBuilder;
 import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
 import org.gradle.api.internal.DefaultDomainObjectSet;
-import org.gradle.internal.reflect.Instantiator;
 
 /**
  * {@code android} extension for {@code com.android.test} projects.
@@ -30,26 +30,25 @@ public class TestExtension extends BaseExtension implements TestAndroidConfig {
     public TestExtension(
             @NonNull Project project,
             @NonNull ProjectOptions projectOptions,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
             @NonNull NamedDomainObjectContainer<BuildType> buildTypes,
             @NonNull NamedDomainObjectContainer<ProductFlavor> productFlavors,
             @NonNull NamedDomainObjectContainer<SigningConfig> signingConfigs,
             @NonNull NamedDomainObjectContainer<BaseVariantOutput> buildOutputs,
+            @NonNull SourceSetManager sourceSetManager,
             @NonNull ExtraModelInfo extraModelInfo) {
         super(
                 project,
                 projectOptions,
-                instantiator,
                 androidBuilder,
                 sdkHandler,
                 buildTypes,
                 productFlavors,
                 signingConfigs,
                 buildOutputs,
-                extraModelInfo,
-                false);
+                sourceSetManager,
+                extraModelInfo);
     }
 
     /**

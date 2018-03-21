@@ -9,10 +9,7 @@ dependencies {
 }
 
 jar {
-    from zipTree("../../../../../prebuilts/tools/common/intellij-core/171.4249.32/intellij-core.jar")
-    from zipTree("../../../../../prebuilts/tools/common/intellij-core/171.4249.32/picocontainer.jar")
-    from zipTree("../../../../../prebuilts/tools/common/intellij-core/171.4249.32/annotations.jar")
-    from zipTree("../../../../../prebuilts/tools/common/intellij-core/171.4249.32/asm-all.jar")
+    from zipTree("../../../../../prebuilts/tools/common/lint-psi/intellij-core/intellij-core.jar")
 }
 
 project.ext.pomName = 'IntelliJ IDEA Core'
@@ -21,4 +18,3 @@ project.ext.pomDesc = 'IntelliJ IDEA Core'
 apply from: "$rootDir/buildSrc/base/publish.gradle"
 apply from: "$rootDir/buildSrc/base/bintray.gradle"
 apply from: "$rootDir/buildSrc/base/javadoc.gradle"
-

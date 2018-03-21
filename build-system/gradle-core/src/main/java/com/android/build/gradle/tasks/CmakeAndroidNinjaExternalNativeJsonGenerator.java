@@ -24,6 +24,7 @@ import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.builder.core.AndroidBuilder;
 import com.android.ide.common.process.ProcessException;
+import com.google.wireless.android.sdk.stats.GradleBuildVariant;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
@@ -52,7 +53,8 @@ class CmakeAndroidNinjaExternalNativeJsonGenerator extends CmakeExternalNativeJs
             @Nullable List<String> buildArguments,
             @Nullable List<String> cFlags,
             @Nullable List<String> cppFlags,
-            @NonNull List<File> nativeBuildConfigurationsJsons) {
+            @NonNull List<File> nativeBuildConfigurationsJsons,
+            @NonNull GradleBuildVariant.Builder stats) {
         super(
                 ndkHandler,
                 minSdkVersion,
@@ -70,7 +72,8 @@ class CmakeAndroidNinjaExternalNativeJsonGenerator extends CmakeExternalNativeJs
                 buildArguments,
                 cFlags,
                 cppFlags,
-                nativeBuildConfigurationsJsons);
+                nativeBuildConfigurationsJsons,
+                stats);
     }
 
     @NonNull
@@ -88,7 +91,7 @@ class CmakeAndroidNinjaExternalNativeJsonGenerator extends CmakeExternalNativeJs
 
     @NonNull
     @Override
-    public String executeProcess(
+    public String executeProcessAndGetOutput(
             @NonNull String abi, int abiPlatformVersion, @NonNull File outputJsonDir)
             throws ProcessException, IOException {
         return executeBuildProcessAndLogError(

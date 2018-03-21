@@ -35,10 +35,10 @@ grpc::Status NetworkServiceImpl::GetData(
     grpc::ServerContext *context, const proto::NetworkDataRequest *request,
     proto::NetworkDataResponse *response) {
   Trace trace("NET:GetData");
-  int pid = request->process_id();
+  int32_t pid = request->session().pid();
   NetworkProfilerBuffer *app_buffer = nullptr;
   for (const auto &buffer : app_buffers_) {
-    if (pid == buffer->pid()) {
+    if (pid == buffer->id()) {
       app_buffer = buffer.get();
       break;
     }
@@ -56,9 +56,9 @@ grpc::Status NetworkServiceImpl::GetData(
     if (type == NetworkDataRequest::ALL ||
         (type == NetworkDataRequest::SPEED && value.has_speed_data()) ||
         (type == NetworkDataRequest::CONNECTIONS &&
-            value.has_connection_data()) ||
+         value.has_connection_data()) ||
         (type == NetworkDataRequest::CONNECTIVITY &&
-            value.has_connectivity_data())) {
+         value.has_connectivity_data())) {
       *(response->add_data()) = value;
     }
   }
@@ -68,7 +68,7 @@ grpc::Status NetworkServiceImpl::GetData(
 grpc::Status NetworkServiceImpl::StartMonitoringApp(
     grpc::ServerContext *context, const proto::NetworkStartRequest *request,
     proto::NetworkStartResponse *response) {
-  int32_t pid = request->process_id();
+  int32_t pid = request->session().pid();
   auto *buffer = new NetworkProfilerBuffer(kBufferCapacity, pid);
   app_buffers_.emplace_back(buffer);
   collector_.Start(pid, buffer);
@@ -78,10 +78,10 @@ grpc::Status NetworkServiceImpl::StartMonitoringApp(
 grpc::Status NetworkServiceImpl::StopMonitoringApp(
     grpc::ServerContext *context, const proto::NetworkStopRequest *request,
     proto::NetworkStopResponse *response) {
-  int pid = request->process_id();
+  int32_t pid = request->session().pid();
   collector_.Stop(pid);
   for (auto it = app_buffers_.begin(); it != app_buffers_.end(); it++) {
-    if (pid == (*it)->pid()) {
+    if (pid == (*it)->id()) {
       it->reset();
       app_buffers_.erase(it);
       break;
@@ -93,14 +93,15 @@ grpc::Status NetworkServiceImpl::StopMonitoringApp(
 grpc::Status NetworkServiceImpl::GetHttpRange(grpc::ServerContext *context,
                                               const HttpRangeRequest *httpRange,
                                               HttpRangeResponse *response) {
-  auto range =
-      network_cache_.GetRange(httpRange->process_id(), httpRange->start_timestamp(),
-                              httpRange->end_timestamp());
+  auto range = network_cache_.GetRange(httpRange->session().pid(),
+                                       httpRange->start_timestamp(),
+                                       httpRange->end_timestamp());
 
   for (const auto &conn : range) {
     HttpConnectionData *data = response->add_data();
     data->set_conn_id(conn.id);
     data->set_start_timestamp(conn.start_timestamp);
+    data->set_uploaded_timestamp(conn.uploaded_timestamp);
     data->set_downloading_timestamp(conn.downloading_timestamp);
     data->set_end_timestamp(conn.end_timestamp);
   }
@@ -120,7 +121,7 @@ grpc::Status NetworkServiceImpl::GetHttpDetails(
         request_details->set_url(conn->request.url);
         request_details->set_method(conn->request.method);
         request_details->set_fields(conn->request.fields);
-        request_details->set_trace(conn->request.trace);
+        request_details->set_trace_id(conn->request.trace_id);
       } break;
 
       case HttpDetailsRequest::RESPONSE: {
@@ -140,17 +141,16 @@ grpc::Status NetworkServiceImpl::GetHttpDetails(
         if (conn->response.payload_id != "") {
           auto body_details = response->mutable_response_body();
           body_details->set_payload_id(conn->response.payload_id);
+          body_details->set_payload_size(conn->response.payload_size);
         }
       } break;
 
       case HttpDetailsRequest::ACCESSING_THREADS: {
-        if (conn->response.payload_id != "") {
-          auto accessing_threads = response->mutable_accessing_threads();
-          for (auto thread: conn->threads) {
-            auto t = accessing_threads->add_thread();
-            t->set_id(thread.id);
-            t->set_name(thread.name);
-          }
+        auto accessing_threads = response->mutable_accessing_threads();
+        for (auto thread : conn->threads) {
+          auto t = accessing_threads->add_thread();
+          t->set_id(thread.id);
+          t->set_name(thread.name);
         }
       } break;
 

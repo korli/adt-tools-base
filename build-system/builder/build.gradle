@@ -4,8 +4,6 @@ apply plugin: 'clone-artifacts'
 apply plugin: 'jacoco-tools-base'
 
 dependencies {
-    compileOnly libs.auto_value
-
     compile project(':base:builder-model')
     compile project(':base:builder-test-api')
 
@@ -33,6 +31,7 @@ dependencies {
     compile libs.jopt
     compile libs.json_simple
 
+    testCompile libs.kotlin_test
     testCompile libs.junit
     testCompile libs.mockito_core
     testCompile libs.truth
@@ -71,12 +70,6 @@ sourceSets {
     }
 }
 
-task copyVersionProperties(type: Copy) {
-    from project.file(project.getRootProject().getProperty("versionProperties"))
-    rename({"version.properties"})
-    into project.file("$generatedResources/com/android/builder")
-}
-
 // setup annotation processor output directory
 tasks.compileJava {
     doFirst {
@@ -85,8 +78,6 @@ tasks.compileJava {
     options.compilerArgs += ['-s', generatedSources]
     outputs.dir(generatedSources)
 }
-
-tasks.compileJava.dependsOn copyVersionProperties
 
 jar.manifest.attributes("Builder-Version": version)
 
@@ -105,19 +96,11 @@ dependencies {
         transitive = false
     }
 
-    provided(project(':base:apkzlib')) {
+    provided(project(':apkzlib')) {
         transitive = false
     }
 
-    sourcesProvided(project(path:':base:apkzlib', configuration:'sourcesOnly')) {
-        transitive = false
-    }
-
-    provided(project(':base:aaptjlib')) {
-        transitive = false
-    }
-
-    sourcesProvided(project(path:':base:aaptjlib', configuration:'sourcesOnly')) {
+    sourcesProvided(project(path:':apkzlib', configuration:'sourcesOnly')) {
         transitive = false
     }
 
@@ -125,9 +108,7 @@ dependencies {
         transitive = false
     }
 
-    provided(project(path: ':external:r8')) {
-        transitive = false
-    }
+    provided(files('../../../../prebuilts/r8/d8-master.jar'))
 
     sourcesProvided(project(path:':dx', configuration:'sourcesOnly')) {
         transitive = false
@@ -136,7 +117,7 @@ dependencies {
     resourcesRuntime(project(path: ':external:desugar', configuration: 'fatJar')) {
         transitive = false
     }
-    resourcesRuntime(project(path: ':external:desugar', configuration: 'runtimeTryWithResources')) {
+    resourcesRuntime(project(':external:desugar:tryWithResourcesRuntime')) {
         transitive = false
     }
 }

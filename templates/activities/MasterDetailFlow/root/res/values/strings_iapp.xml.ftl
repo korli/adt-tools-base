@@ -1,3 +1,5 @@
 <resources>
-    <string name="title_${detail_name}">${escapeXmlString(objectKind)} Detail</string>
+    <#if !isNewProject>
+    <string name="title_${activityToLayout(activityClass)}">${escapeXmlString(activityTitle)}</string>
+    </#if>
 </resources>

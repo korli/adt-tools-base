@@ -16,52 +16,66 @@
 
 package com.android.testutils;
 
+import static org.junit.Assert.assertTrue;
+
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
+import com.android.annotations.concurrency.GuardedBy;
 import com.android.utils.FileUtils;
+import com.android.utils.PathUtils;
+import com.google.common.base.Charsets;
 import com.google.common.io.Files;
-import junit.framework.TestCase;
-
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-
-import static org.junit.Assert.assertTrue;
+import java.util.Arrays;
+import java.util.LinkedList;
+import java.util.List;
+import junit.framework.TestCase;
 
 /**
  * Utility methods to deal with loading the test data.
  */
 public class TestUtils {
+    /** Default timeout for the {@link #eventually(Runnable)} check. */
+    private static final Duration DEFAULT_EVENTUALLY_TIMEOUT = Duration.ofSeconds(10);
+
+    /** Time to wait between checks to obtain the value of an eventually supplier. */
+    private static final long EVENTUALLY_CHECK_CYCLE_TIME_MS = 10;
+
+    @GuardedBy("TestUtils.class")
+    private static File workspaceRoot = null;
 
     /**
-     * Kotlin version that is used in new project templates and integration tests.
+     * Returns Kotlin version that is used in new project templates and integration tests.
      *
-     * <p>This version needs to be present in prebuilts for tests to pass.
-     *
-     * <p>This version should be checked into prebuilts (see tools/base/bazel/README.md) and in sync
-     * with the version in:
+     * <p>This version is determined based on the checked-in kotlin-plugin prebuilt, and should be
+     * in sync with the version in:
      *
      * <ul>
      *   <li>buildSrc/base/dependencies.properties
      *   <li>tools/base/third_party/BUILD (this is generated from dependencies.properties)
-     *   <li>tools/base/build-system/integration-test/BUILD
+     *   <li>tools/base/build-system/integration-test/application/BUILD
+     *   <li>tools/base/build-system/integration-test/databinding/BUILD.bazel
      *   <li>tools/adt/idea/android/BUILD
      *   <li>tools/base/.idea/libraries definition for kotlin-stdlib-jre8
      *   <li>tools/idea/.idea/libraries definition for kotlin-stdlib-jre8
      * </ul>
      */
-    public static final String KOTLIN_VERSION_FOR_TESTS = "1.1.3-2";
-
-    /**
-     * Default timeout for the {@link #eventually(Runnable)} check.
-     */
-    private static final Duration DEFAULT_EVENTUALLY_TIMEOUT = Duration.ofSeconds(10);
-
-    /**
-     * Time to wait between checks to obtain the value of an eventually supplier.
-     */
-    private static final long EVENTUALLY_CHECK_CYCLE_TIME_MS = 10;
+    @NonNull
+    public static String getKotlinVersionForTests() {
+        try {
+            return Files.readLines(
+                            getWorkspaceFile(
+                                    "prebuilts/tools/common/kotlin-plugin/Kotlin/kotlinc/build.txt"),
+                            Charsets.UTF_8)
+                    .get(0);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Could not determine Kotlin plugin version", ex);
+        }
+    }
 
     /**
      * Returns a File for the subfolder of the test resource data.
@@ -110,59 +124,70 @@ public class TestUtils {
 
     public static File createTempDirDeletedOnExit() {
         final File tempDir = Files.createTempDir();
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> deleteFile(tempDir)));
+        PathUtils.addRemovePathHook(tempDir.toPath());
         return tempDir;
     }
 
     /**
      * Returns the root of the entire Android Studio codebase.
      *
-     * From this path, you should be able to access any file in the workspace via its full path,
+     * <p>From this path, you should be able to access any file in the workspace via its full path,
      * e.g.
      *
-     * new File(TestUtils.getWorkspaceRoot(), "tools/adt/idea/android/testSrc");
-     * new File(TestUtils.getWorkspaceRoot(), "prebuilts/studio/jdk");
+     * <p>new File(TestUtils.getWorkspaceRoot(), "tools/adt/idea/android/testSrc"); new
+     * File(TestUtils.getWorkspaceRoot(), "prebuilts/studio/jdk");
      *
-     * If this method is called by code run via IntelliJ / Gradle, it will simply walk its
+     * <p>If this method is called by code run via IntelliJ / Gradle, it will simply walk its
      * ancestor tree looking for the WORKSPACE file at its root; if called from Bazel, it will
      * simply return the runfiles directory (which should be a mirror of the WORKSPACE root except
      * only populated with explicitly declared dependencies).
      *
-     * Instead of calling this directly, prefer calling {@link #getWorkspaceFile(String)} as it
+     * <p>Instead of calling this directly, prefer calling {@link #getWorkspaceFile(String)} as it
      * is more resilient to cross-platform testing.
      *
      * @throws IllegalStateException if the current directory of the test is not a subdirectory of
-     * the workspace directory when this method is called. This shouldn't happen if the test is run
-     * by Bazel or run by IntelliJ with default configuration settings (where the working directory
-     * is initialized to the module root).
+     *     the workspace directory when this method is called. This shouldn't happen if the test is
+     *     run by Bazel or run by IntelliJ with default configuration settings (where the working
+     *     directory is initialized to the module root).
      */
     @NonNull
-    public static File getWorkspaceRoot() {
-        // If we are using Bazel (which defines the following env vars), simply use the sandboxed
-        // root they provide us.
-        String workspace = System.getenv("TEST_WORKSPACE");
-        String workspaceParent = System.getenv("TEST_SRCDIR");
-        if (workspace != null && workspaceParent != null) {
-            return new File(workspaceParent, workspace);
-        }
+    public static synchronized File getWorkspaceRoot() {
+        // The logic below depends on the current working directory, so we save the results and hope the first call
+        // is early enough for the user.dir property to be unchanged.
+        if (workspaceRoot == null) {
+            // If we are using Bazel (which defines the following env vars), simply use the sandboxed
+            // root they provide us.
+            String workspace = System.getenv("TEST_WORKSPACE");
+            String workspaceParent = System.getenv("TEST_SRCDIR");
+            File currDir = new File("");
+            if (workspace != null && workspaceParent != null) {
+                currDir = new File(workspaceParent, workspace);
+                workspaceRoot = currDir;
+            }
+            File initialDir = currDir;
 
-        // If here, we're using a non-Bazel build system. At this point, assume our working
-        // directory is located underneath our codebase's root folder, so keep navigating up until
-        // we find it.
-        File pwd = new File("");
-        File currDir = pwd;
-        while (!new File(currDir, "WORKSPACE").exists()) {
-            currDir = currDir.getAbsoluteFile().getParentFile();
+            // If we're using a non-Bazel build system. At this point, assume our working
+            // directory is located underneath our codebase's root folder, so keep navigating up until
+            // we find it. If we're using Bazel, we should still look to see if there's a larger
+            // outermost workspace since we might be within a nested workspace.
+            while (currDir != null) {
+                currDir = currDir.getAbsoluteFile();
+                if (new File(currDir, "WORKSPACE").exists()) {
+                    workspaceRoot = currDir;
+                }
+                currDir = currDir.getParentFile();
+            }
 
-            if (currDir == null) {
+            if (workspaceRoot == null) {
                 throw new IllegalStateException(
-                        "Could not find WORKSPACE root. Is the original working directory a " +
-                                "subdirectory of the Android Studio codebase?\n\n" +
-                                "pwd = " + pwd.getAbsolutePath());
+                        "Could not find WORKSPACE root. Is the original working directory a "
+                                + "subdirectory of the Android Studio codebase?\n\n"
+                                + "pwd = "
+                                + initialDir.getAbsolutePath());
             }
         }
 
-        return currDir;
+        return workspaceRoot;
     }
 
     /**
@@ -192,10 +217,28 @@ public class TestUtils {
         }
 
         if (!f.exists()) {
-            throw new IllegalArgumentException("File \"" + f.getAbsolutePath() + "\" not found.");
+            throw new IllegalArgumentException("File \"" + path + "\" not found at \"" + getWorkspaceRoot() + "\"");
         }
 
         return f;
+    }
+
+    /**
+     * @return a directory which tests can output data to. If running through Bazel's test runner,
+     *     this returns the directory as specified by the TEST_UNDECLARED_OUTPUT_DIR environment
+     *     variable. Data written to this directory will be zipped and made available under the
+     *     WORKSPACE_ROOT/bazel-testlogs/ after the test completes. For non-Bazel runs, this
+     *     currently returns a tmp directory that is deleted on exit.
+     */
+    @NonNull
+    public static File getTestOutputDir() {
+        // If running via bazel, returns the sandboxed test output dir.
+        String testOutputDir = System.getenv("TEST_UNDECLARED_OUTPUTS_DIR");
+        if (testOutputDir != null) {
+            return new File(testOutputDir);
+        }
+
+        return createTempDirDeletedOnExit();
     }
 
     /**
@@ -222,6 +265,25 @@ public class TestUtils {
     }
 
     /**
+     * Returns the SDK directory relative to the workspace.
+     *
+     * @throws IllegalStateException if the current OS is not supported.
+     * @throws IllegalArgumentException if the path results in a file not found.
+     * @return a valid File object pointing at the SDK directory.
+     */
+    @NonNull
+    public static String getRelativeSdk() {
+        OsType osType = OsType.getHostOs();
+        if (osType == OsType.UNKNOWN) {
+            throw new IllegalStateException(
+                    "SDK test not supported on unknown platform: " + OsType.getOsName());
+        }
+
+        String hostDir = osType.getFolderName();
+        return "prebuilts/studio/sdk/" + hostDir;
+    }
+
+    /**
      * Returns the SDK directory.
      *
      * @throws IllegalStateException if the current OS is not supported.
@@ -230,14 +292,7 @@ public class TestUtils {
      */
     @NonNull
     public static File getSdk() {
-        OsType osType = OsType.getHostOs();
-        if (osType == OsType.UNKNOWN) {
-            throw new IllegalStateException(
-                    "SDK test not supported on unknown platform: " + OsType.getOsName());
-        }
-
-        String hostDir = osType.getFolderName();
-        return getWorkspaceFile("prebuilts/studio/sdk/" + hostDir);
+        return getWorkspaceFile(getRelativeSdk());
     }
 
     /**
@@ -248,6 +303,18 @@ public class TestUtils {
     @NonNull
     public static File getNdk() {
         return new File(getSdk(), SdkConstants.FD_NDK);
+    }
+
+    /**
+     * Returns the remote SDK directory.
+     *
+     * @throws IllegalArgumentException if the path results in a file not found.
+     * @return a valid File object pointing at the remote SDK directory.
+     */
+    @NonNull
+    public static Path getRemoteSdk() {
+        return getWorkspaceFile("prebuilts/studio/sdk/remote/dl.google.com/android/repository")
+                .toPath();
     }
 
     @NonNull
@@ -446,4 +513,44 @@ public class TestUtils {
                 "Timed out waiting for runnable not to throw; last error was:",
                 lastError);
     }
+
+    /**
+     * Launches a new process to execute the class {@code toRun} main() method and blocks until the
+     * process exits.
+     *
+     * @param toRun the class whose main() method will be executed in a new process.
+     * @param args the arguments for the class {@code toRun} main() method
+     * @throws RuntimeException if any (checked or runtime) exception occurs or the process returns
+     *     an exit value other than 0
+     */
+    public static void launchProcess(@NonNull Class toRun, String... args) {
+        List<String> commandAndArgs = new LinkedList<>();
+        commandAndArgs.add(FileUtils.join(System.getProperty("java.home"), "bin", "java"));
+        commandAndArgs.add("-cp");
+        commandAndArgs.add(System.getProperty("java.class.path"));
+        commandAndArgs.add(toRun.getName());
+        commandAndArgs.addAll(Arrays.asList(args));
+
+        ProcessBuilder processBuilder = new ProcessBuilder(commandAndArgs);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+        processBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
+        Process process;
+        try {
+            process = processBuilder.start();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        try {
+            process.waitFor();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        if (process.exitValue() != 0) {
+            throw new RuntimeException(
+                    "Process returned non-zero exit value: " + process.exitValue());
+        }
+    }
+
 }

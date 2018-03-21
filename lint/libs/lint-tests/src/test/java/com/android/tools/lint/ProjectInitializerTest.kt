@@ -20,6 +20,8 @@ import com.android.SdkConstants.ANDROID_URI
 import com.android.SdkConstants.ATTR_NAME
 import com.android.testutils.TestUtils
 import com.android.tools.lint.LintCliFlags.ERRNO_SUCCESS
+import com.android.tools.lint.checks.AbstractCheckTest.base64gzip
+import com.android.tools.lint.checks.AbstractCheckTest.jar
 import com.android.tools.lint.checks.infrastructure.ProjectDescription
 import com.android.tools.lint.checks.infrastructure.ProjectDescription.Type.LIBRARY
 import com.android.tools.lint.checks.infrastructure.TestFile
@@ -266,15 +268,15 @@ baseline.xml: Information: 1 error was filtered out because it is listed in the 
 project.xml:5: Error: test.jar (relative to ROOT) does not exist [LintError]
 <classpath jar="test.jar" />
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-res/values/strings.xml:4: Error: string1 has already been defined in this folder [DuplicateDefinition]
+res${File.separatorChar}values${File.separatorChar}strings.xml:4: Error: string1 has already been defined in this folder [DuplicateDefinition]
     <string name="string1">String 2</string>
             ~~~~~~~~~~~~~~
-    res/values/strings.xml:3: Previously defined here
-../Library/AndroidManifest.xml:9: Error: Permission name SEND_SMS is not unique (appears in both foo.permission.SEND_SMS and bar.permission.SEND_SMS) [UniquePermission]
+    res${File.separatorChar}values${File.separatorChar}strings.xml:3: Previously defined here
+..${File.separatorChar}Library${File.separatorChar}AndroidManifest.xml:9: Error: Permission name SEND_SMS is not unique (appears in both foo.permission.SEND_SMS and bar.permission.SEND_SMS) [UniquePermission]
     <permission android:name="bar.permission.SEND_SMS"
                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     AndroidManifest.xml:9: Previous permission here
-3 errors, 1 warnings (1 error filtered by baseline baseline.xml)
+3 errors, 0 warnings (1 error filtered by baseline baseline.xml)
 
 """,
                 "",
@@ -286,6 +288,8 @@ res/values/strings.xml:4: Error: string1 has already been defined in this folder
                 arrayOf("--quiet",
                         "--check",
                         "UniquePermission,DuplicateDefinition,SdCardPath",
+                        "--text",
+                        "stdout",
                         "--project",
                         File(root, "project.xml").path),
 
@@ -335,6 +339,20 @@ project.xml:4: Error: Unexpected tag unknown [LintError]
     fun testSimpleProject() {
         val root = temp.newFolder()
         val projects = lint().files(
+                java("src/test/pkg/InterfaceMethodTest.java", """
+                    package test.pkg;
+
+                    @SuppressWarnings({"unused", "ClassNameDiffersFromFileName"})
+                    public interface InterfaceMethodTest {
+                        void someMethod();
+                        default void method2() {
+                            System.out.println("test");
+                        }
+                        static void method3() {
+                            System.out.println("test");
+                        }
+                    }
+                    """).indented(),
                 java("C.java", """
 import android.app.Fragment;
 
@@ -347,9 +365,9 @@ public class C {
 }"""),
                 xml("AndroidManifest.xml", """
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.android.tools.lint.test"
     android:versionCode="1"
     android:versionName="1.0" >
-
     <uses-sdk
         android:minSdkVersion="15"
         android:targetSdkVersion="22" />
@@ -371,6 +389,7 @@ public class C {
                 <module name="M" android="true" library="true">
                 <manifest file="AndroidManifest.xml" />
                 <src file="C.java" />
+                <src file="src/test/pkg/InterfaceMethodTest.java" />
             </module>
             </project>""".trimIndent()
         val descriptorFile = File(root, "project.xml")
@@ -395,6 +414,149 @@ C.java:6: Warning: Do not hardcode "/sdcard/"; use Environment.getExternalStorag
 
                 // Args
                 arrayOf("--quiet",
+                        "--project",
+                        descriptorFile.path),
+
+                null, null)
+    }
+
+    @Test
+    fun testAar() {
+        // Check for missing application icon and have that missing icon be supplied by
+        // an AAR dependency and make its way into the merged manifest.
+        val root = temp.newFolder()
+        val projects = lint().files(
+                xml("AndroidManifest.xml", """
+                    <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+                        package="com.android.tools.lint.test"
+                        android:versionCode="1"
+                        android:versionName="1.0" >
+                        <uses-sdk android:minSdkVersion="14" />
+                        <application />
+
+                    </manifest>"""),
+                xml("res/values/not_in_project.xml", """
+                    <resources>
+                        <string name="string2">String 1</string>
+                        <string name="string2">String 2</string>
+                    </resources>
+                    """)).createProjects(root)
+        val projectDir = projects[0]
+
+        val aarFile = temp.newFile("foo-bar.aar")
+        aarFile.createNewFile()
+        val aar = temp.newFolder("aar-exploded")
+        @Language("XML")
+        val aarManifest = """
+                    <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+                        package="com.android.tools.lint.test"
+                        android:versionCode="1"
+                        android:versionName="1.0" >
+
+                        <uses-sdk android:minSdkVersion="14" />
+                        <application android:icon='@mipmap/my_application_icon'/>
+
+                    </manifest>"""
+        Files.asCharSink(File(aar, "AndroidManifest.xml"), Charsets.UTF_8).write(aarManifest)
+
+        @Language("XML")
+        val descriptor = """
+            <project>
+            <sdk dir='${TestUtils.getSdk()}'/>
+            <root dir="$projectDir" />
+                <module name="M" android="true" library="false">
+                <manifest file="AndroidManifest.xml" />
+                <aar file="$aarFile" extracted="$aar" />
+            </module>
+            </project>""".trimIndent()
+        val descriptorFile = File(root, "project.xml")
+        Files.asCharSink(descriptorFile, Charsets.UTF_8).write(descriptor)
+
+        MainTest.checkDriver("No issues found.", "",
+
+                // Expected exit code
+                ERRNO_SUCCESS,
+
+                // Args
+                arrayOf("--quiet",
+                        "--check",
+                        "MissingApplicationIcon",
+                        "--project",
+                        descriptorFile.path),
+
+                null, null)
+    }
+
+    @Test
+    fun testJar() {
+        // Check for missing application icon and have that missing icon be supplied by
+        // an AAR dependency and make its way into the merged manifest.
+        val root = temp.newFolder()
+        val projects = lint().files(
+                java("src/test/pkg/Child.java", "" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.os.Parcel;\n" +
+                        "\n" +
+                        "public class Child extends Parent {\n" +
+                        "    @Override\n" +
+                        "    public int describeContents() {\n" +
+                        "        return 0;\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    @Override\n" +
+                        "    public void writeToParcel(Parcel dest, int flags) {\n" +
+                        "\n" +
+                        "    }\n" +
+                        "}\n")).createProjects(root)
+        val projectDir = projects[0]
+
+        /*
+        Compiled from
+            package test.pkg;
+            import android.os.Parcelable;
+            public abstract class Parent implements Parcelable {
+            }
+         */
+        val jarFile = jar("parent.jar",
+                base64gzip("test/pkg/Parent.class", "" +
+                        "H4sIAAAAAAAAAF1Pu07DQBCcTRw7cQx5SHwAXaDgipQgmkhUFkRKlP5sn8IF" +
+                        "cxedL/wXFRJFPoCPQuw5qdBKo53Z2R3tz+/3EcAc0xRdXCYYJRgnmBDiB220" +
+                        "fyR0ZzcbQrSwlSKMcm3U8+G9UG4ti5qVaW5LWW+k04Gfxci/6oYwyb1qvNi/" +
+                        "bcVSOmX8PSFd2YMr1ZMOvuFJvtvJD5mhh5gT/q0QxmEqamm24qXYqZKlK2kq" +
+                        "Z3UlbBNspapDbnSNDn/B8fwScfFBxoSZaDnQu/0CfXLTQZ8xPokYMGbnPsWw" +
+                        "Xc9a18UfxkO3QyIBAAA=")).createFile(root)
+
+
+        @Language("XML")
+        val descriptor = """
+            <project>
+            <sdk dir='${TestUtils.getSdk()}'/>
+            <root dir="$projectDir" />
+                <module name="M" android="true" library="false">
+                <jar file="$jarFile" />
+                <src file="src/test/pkg/Child.java" />
+            </module>
+            </project>""".trimIndent()
+        val descriptorFile = File(root, "project.xml")
+        Files.asCharSink(descriptorFile, Charsets.UTF_8).write(descriptor)
+
+        MainTest.checkDriver("" +
+                // We only find this error if we correctly include the jar dependency
+                // which provides the parent class which implements Parcelable.
+                "src/test/pkg/Child.java:5: Error: This class implements Parcelable but does not provide a CREATOR field [ParcelCreator]\n".replace('/', File.separatorChar) +
+                "public class Child extends Parent {\n" +
+                "             ~~~~~\n" +
+                "1 errors, 0 warnings\n",
+                "",
+
+                // Expected exit code
+                ERRNO_SUCCESS,
+
+                // Args
+                arrayOf("--quiet",
+                        "--check",
+                        "ParcelCreator",
                         "--project",
                         descriptorFile.path),
 

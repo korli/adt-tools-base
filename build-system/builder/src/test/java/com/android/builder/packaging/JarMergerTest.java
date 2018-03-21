@@ -62,7 +62,7 @@ public class JarMergerTest {
 
     @Test
     public void basicDirectory() throws Exception {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
         Path dir = createDirectoryWithClassAndResource();
 
         try (JarMerger merger = new JarMerger(out)) {
@@ -99,7 +99,7 @@ public class JarMergerTest {
 
     @Test
     public void basicJar() throws Exception {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
         Path dir = createJarWithClass();
 
         try (JarMerger merger = new JarMerger(out)) {
@@ -112,7 +112,7 @@ public class JarMergerTest {
 
     @Test
     public void basicFilter() throws Exception {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
         try (JarMerger merger = new JarMerger(out, ZipEntryFilter.CLASSES_ONLY)) {
             merger.addDirectory(createDirectoryWithClassAndResource());
             merger.addJar(createJarWithClass());
@@ -128,7 +128,7 @@ public class JarMergerTest {
 
     @Test
     public void basicFilter2() throws Exception {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
         try (JarMerger merger =
                 new JarMerger(out, entry -> !ZipEntryFilter.CLASSES_ONLY.checkEntry(entry))) {
             merger.addDirectory(createDirectoryWithClassAndResource());
@@ -139,7 +139,7 @@ public class JarMergerTest {
 
     @Test
     public void transformerInstrument() throws Exception {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
 
         JarMerger.Transformer transformer =
                 (path, is) -> {
@@ -154,14 +154,15 @@ public class JarMergerTest {
             merger.addDirectory(
                     createDirectoryWithClassAndResource(),
                     ZipEntryFilter.CLASSES_ONLY,
-                    transformer);
+                    transformer,
+                    null);
         }
         assertThat(getEntries(out)).containsExactly("com/example/MyClass.class", REMOVED_TYPEDEFS);
     }
 
     @Test
     public void transformerRemove() throws Exception {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
         JarMerger.Transformer transformer =
                 (path, is) -> {
                     switch (path) {
@@ -175,14 +176,15 @@ public class JarMergerTest {
             merger.addDirectory(
                     createDirectoryWithClassAndResource(),
                     ZipEntryFilter.CLASSES_ONLY,
-                    transformer);
+                    transformer,
+                    null);
         }
         assertThat(getEntries(out)).isEmpty();
     }
 
     @Test
     public void throwingFilter() throws IOException {
-        Path out = Jimfs.newFileSystem().getPath("/out/output.jar");
+        Path out = Jimfs.newFileSystem(Configuration.unix()).getPath("/out/output.jar");
 
         ZipEntryFilter zipEntryFilter =
                 entry -> {
@@ -208,7 +210,7 @@ public class JarMergerTest {
 
     @Test
     public void preservesCompression() throws IOException {
-        Path root = Jimfs.newFileSystem().getPath("/");
+        Path root = Jimfs.newFileSystem(Configuration.unix()).getPath("/");
         Path out = root.resolve("/out/output.jar");
         Path jar = root.resolve("/in/jar.jar");
 
@@ -242,7 +244,8 @@ public class JarMergerTest {
     }
 
     private static Path createDirectoryWithClassAndResource() throws IOException {
-        return createDirectoryWithClassAndResource(Jimfs.newFileSystem().getPath("test", "dir"));
+        return createDirectoryWithClassAndResource(
+                Jimfs.newFileSystem(Configuration.unix()).getPath("test", "dir"));
     }
 
     private static Path createDirectoryWithClassAndResource(@NonNull Path dir) throws IOException {
@@ -256,7 +259,7 @@ public class JarMergerTest {
     }
 
     private static Path createJarWithClass() throws IOException {
-        Path jar = Jimfs.newFileSystem().getPath("test", "testjar.jar");
+        Path jar = Jimfs.newFileSystem(Configuration.unix()).getPath("test", "testjar.jar");
         Files.createDirectories(jar.getParent());
         try (JarOutputStream jos =
                 new JarOutputStream(new BufferedOutputStream(Files.newOutputStream(jar)))) {

@@ -16,25 +16,16 @@
  */
 #include "simpleperf_manager.h"
 
-#include <fcntl.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <memory>
 #include <sstream>
-#include <vector>
 
 #include "utils/bash_command.h"
-#include "utils/clock.h"
 #include "utils/current_process.h"
-#include "utils/fs/file_system.h"
-#include "utils/installer.h"
 #include "utils/log.h"
-#include "utils/package_manager.h"
 #include "utils/process_manager.h"
 #include "utils/trace.h"
 
@@ -42,32 +33,15 @@ using std::string;
 
 namespace profiler {
 
-const char *SimplePerfManager::kSimpleperfExecutable = "simpleperf";
-
-SimplePerfManager::~SimplePerfManager() {
+SimpleperfManager::~SimpleperfManager() {
   string error;
   for (auto const &record : profiled_) {
-    StopSimplePerf(record.second, &error);
+    StopSimpleperf(record.second, &error);
   }
 }
 
-bool SimplePerfManager::EnableProfiling(std::string *error) const {
-  // By default, linuxSE disallow profiling. This enables it.
-  // simpleperf already has CTS tests ensuring the following command running
-  // successfully.
-  string enable_profiling_output;
-  BashCommandRunner enable_profiling("setprop");
-  bool enable_profiling_result =
-      enable_profiling.Run("security.perf_harden 0", &enable_profiling_output);
-  if (!enable_profiling_result) {
-    error->append("\n");
-    error->append("Unable to setprop to enable profiling.");
-    return false;
-  }
-  return true;
-}
-
-bool SimplePerfManager::StartProfiling(const std::string &app_name,
+bool SimpleperfManager::StartProfiling(const std::string &app_name,
+                                       const std::string &abi_arch,
                                        int sampling_interval_us,
                                        std::string *trace_path,
                                        std::string *error) {
@@ -90,32 +64,22 @@ bool SimplePerfManager::StartProfiling(const std::string &app_name,
   }
   Log::D("%s app has pid:%d", app_name.c_str(), pid);
 
-  if (!EnableProfiling(error)) return false;
-
-  // Install simple_perf
-  string app_pkg_name = ProcessManager::GetPackageNameFromAppName(app_name);
-  Installer installer(app_pkg_name);
-  if (!installer.Install(kSimpleperfExecutable, error)) return false;
-
-  string simple_perf_binary_abspath;
-  bool inst_result = installer.GetInstallationPath(
-      kSimpleperfExecutable, &simple_perf_binary_abspath, error);
-  if (!inst_result) return false;
+  if (!simpleperf_.EnableProfiling()) {
+    error->append("\n");
+    error->append("Unable to setprop to enable profiling.");
+    return false;
+  }
 
   // Build entry to keep track of what is being profiled.
   OnGoingProfiling entry;
-  entry.app_pkg_name = app_pkg_name;
   entry.pid = pid;
-
-  PackageManager pm;
-  if (!pm.GetAppDataPath(app_pkg_name, &entry.app_dir, error)) return false;
-
-  string trace_filebase = GetFileBaseName(app_name);
-
-  entry.output_prefix = trace_filebase;
+  entry.abi_arch = abi_arch;
+  entry.output_prefix = GetFileBaseName(app_name);
   entry.trace_path =
-      CurrentProcess::dir() + entry.output_prefix + ".simple_perf.trace";
-  entry.log_filepath = entry.app_dir + "/" + trace_filebase + ".log";
+      CurrentProcess::dir() + entry.output_prefix + ".simpleperf.trace";
+  entry.log_file_path = CurrentProcess::dir() + entry.output_prefix + ".log";
+  entry.raw_trace_path = CurrentProcess::dir() + entry.output_prefix + ".dat";
+  // Point trace path to entry's trace path so the trace can be pulled later.
   *trace_path = entry.trace_path;
 
   // fork process to run simpleperf profiling.
@@ -128,27 +92,9 @@ bool SimplePerfManager::StartProfiling(const std::string &app_name,
       break;  // Useless but make the compiler happy.
     }
     case 0: {  // Child Process
-      //  Redirect stdout and stderr to a file (useful is perf crashes).
-      int fd = open(entry.log_filepath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC,
-                    S_IRUSR | S_IRGRP | S_IROTH);
-      dup2(fd, fileno(stdout));
-      dup2(fd, fileno(stderr));
-      close(fd);
-
-      std::stringstream string_pid;
-      string_pid << pid;
-
-      int one_sec_in_us = 1000000;
-      std::stringstream samples_per_sec;
-      samples_per_sec << one_sec_in_us / sampling_interval_us;
-
-      string data_filepath = entry.app_dir + "/" + entry.output_prefix + ".dat";
-
-      execlp("run-as", "run-as", app_pkg_name.c_str(),
-             simple_perf_binary_abspath.c_str(), "record", "--call-graph",
-             "dwarf", "-o", data_filepath.c_str(), "-p",
-             string_pid.str().c_str(), "-f", samples_per_sec.str().c_str(),
-             NULL);
+      simpleperf_.Record(
+          pid, ProcessManager::GetPackageNameFromAppName(app_name), abi_arch,
+          entry.raw_trace_path, sampling_interval_us, entry.log_file_path);
       exit(EXIT_FAILURE);
       break;  // Useless break but makes compiler happy.
     }
@@ -162,8 +108,8 @@ bool SimplePerfManager::StartProfiling(const std::string &app_name,
   return true;
 }
 
-string SimplePerfManager::GetFileBaseName(const string &app_name) const {
-  std::stringstream trace_filebase;
+string SimpleperfManager::GetFileBaseName(const string &app_name) const {
+  std::ostringstream trace_filebase;
   trace_filebase << "simpleperf-";
   trace_filebase << app_name;
   trace_filebase << "-";
@@ -171,12 +117,12 @@ string SimplePerfManager::GetFileBaseName(const string &app_name) const {
   return trace_filebase.str();
 }
 
-bool SimplePerfManager::IsProfiling(const std::string &app_name) {
+bool SimpleperfManager::IsProfiling(const std::string &app_name) {
   return profiled_.find(app_name) != profiled_.end();
 }
 
-bool SimplePerfManager::StopProfiling(const std::string &app_name,
-                                      std::string *error) {
+bool SimpleperfManager::StopProfiling(const std::string &app_name,
+                                      bool need_result, std::string *error) {
   std::lock_guard<std::mutex> lock(start_stop_mutex_);
   Trace trace("CPU:StopProfiling simpleperf");
   Log::D("Profiler:Stopping profiling for %s", app_name.c_str());
@@ -196,76 +142,64 @@ bool SimplePerfManager::StopProfiling(const std::string &app_name,
   pid_t current_pid = pm.GetPidForBinary(app_name);
   Log::D("%s app has pid:%d", app_name.c_str(), current_pid);
 
-  // Make sure it is still running.
-  if (current_pid == -1) {
-    string msg = "App died since profiling started.";
-    error->append("\n");
-    error->append(msg);
-    Log::D("%s", msg.c_str());
-    return false;
+  bool success = true;
+  if (need_result) {
+    // Make sure it is still running.
+    if (current_pid == -1) {
+      string msg = "App died since profiling started.";
+      error->append("\n");
+      error->append(msg);
+      Log::D("%s", msg.c_str());
+      success = false;
+    }
+
+    // Make sure pid is what is expected
+    if (current_pid != ongoing_recording.pid) {
+      // Looks like the app was restarted. Simpleperf died as a result.
+      string msg = "Recorded pid and current app pid do not match: Aborting";
+      error->append("\n");
+      error->append(msg);
+      Log::D("%s", msg.c_str());
+      success = false;
+    }
   }
 
-  // Make sure pid is what is expected
-  if (current_pid != ongoing_recording.pid) {
-    // Looks like the app was restarted. Simple perf died as a result.
-    string msg = "Recorded pid and current app pid do not match: Aborting";
-    error->append("\n");
-    error->append(msg);
-    Log::D("%s", msg.c_str());
-    return false;
-  }
-
-  // Make sure simpleperf is still running.
+  // No simpleperf should be running after tracing is stopped. Simpleperf is
+  // expected to die when the app exits, but there may be bug preventing it
+  // killing itself. Simpleperf may also die (due to bugs) even if the app is
+  // running.
   if (!pm.IsPidAlive(ongoing_recording.simpleperf_pid)) {
-    string msg = "Simple perf died while profiling. Logfile :" +
-                 ongoing_recording.log_filepath;
+    string msg = "Simpleperf died while profiling. Logfile :" +
+                 ongoing_recording.log_file_path;
     Log::D("%s", msg.c_str());
     *error = msg;
-    return false;
+    success = false;
+  } else {
+    bool stop_simpleperf_success = StopSimpleperf(ongoing_recording, error);
+    success = success && stop_simpleperf_success;
+    if (stop_simpleperf_success) {
+      if (!WaitForSimpleperf(ongoing_recording, error)) success = false;
+    }
   }
 
-  if (!StopSimplePerf(ongoing_recording, error)) return false;
-
-  if (!WaitForSimplerPerf(ongoing_recording, error)) return false;
-
-  string app_pkg_name = ProcessManager::GetPackageNameFromAppName(app_name);
-  if (!ConvertRawToProto(app_pkg_name, ongoing_recording, error)) return false;
-
-  // Due to LinuxSE restrictions, "adb pull" cannot access file in app data
-  // folder.
-  // The workaround is to copy this file to perfd base before doing an
-  // "adb pull"
-  string tmp_proto_trace = ongoing_recording.app_dir + "/" +
-                           ongoing_recording.output_prefix + ".tmp";
-  if (!MoveTraceToPickupDir(ongoing_recording, tmp_proto_trace, app_pkg_name,
-                            error)) {
-    CleanUp(app_pkg_name, ongoing_recording, tmp_proto_trace);
-    // Also delete dst trace since it may have been created.
-    BashCommandRunner deleter("rm");
-    deleter.Run(ongoing_recording.trace_path, nullptr);
-    return false;
+  if (need_result && success) {
+    if (!ConvertRawToProto(ongoing_recording, error)) success = false;
   }
 
-  CleanUp(app_pkg_name, ongoing_recording, tmp_proto_trace);
+  CleanUp(ongoing_recording);
 
-  return true;
+  return success;
 }
 
-bool SimplePerfManager::StopSimplePerf(
+bool SimpleperfManager::StopSimpleperf(
     const OnGoingProfiling &ongoing_recording, string *error) const {
-  // Ask simple perf to stop profiling this app.
-  // It is not possible to use a system call:
-  // kill(ongoing_recording.simpleperf_pid, SIGTERM);
-  // because simplerpef is running under app userid.
-  // We have to do it with run-as.
+  // Ask simpleperf to stop profiling this app.
   Log::D("Sending SIGTERM to simpleperf(%d).",
          ongoing_recording.simpleperf_pid);
-  BashCommandRunner kill_simple_perf("kill");
-  std::stringstream string_pid;
-  string_pid << ongoing_recording.simpleperf_pid;
-  bool kill_simpler_perf_result = kill_simple_perf.RunAs(
-      string_pid.str(), ongoing_recording.app_pkg_name, error);
-  if (!kill_simpler_perf_result) {
+  bool kill_simpleperf_result =
+      simpleperf_.KillSimpleperf(ongoing_recording.simpleperf_pid);
+
+  if (!kill_simpleperf_result) {
     string msg = "Failed to send SIGTERM to simpleperf";
     error->append("\n");
     error->append(msg);
@@ -275,67 +209,20 @@ bool SimplePerfManager::StopSimplePerf(
   return true;
 }
 
-bool SimplePerfManager::MoveTraceToPickupDir(
-    const OnGoingProfiling &ongoing_recording, const string &tmp_proto_trace,
-    const string &app_pkg_name, string *error) const {
-  string output;
-
-  // Make sure dst file does not exist.
-  BashCommandRunner deleter("rm");
-  deleter.Run(ongoing_recording.trace_path, nullptr);
-
-  std::stringstream copy_command;
-  copy_command << "-c 'run-as ";
-  copy_command << app_pkg_name << " ";
-  copy_command << "cat ";
-  copy_command << tmp_proto_trace << "'";
-  copy_command << " | ";
-  copy_command << "cat > ";
-  copy_command << ongoing_recording.trace_path;
-
-  BashCommandRunner runner("sh");
-  bool copyResult = runner.Run(copy_command.str(), &output);
-  if (!copyResult) {
-    string msg = "Unable to copy report to pickup area:" + output;
-    Log::D("%s", msg.c_str());
-    error->append("\n");
-    error->append(msg);
-    return false;
-  }
-  return true;
+void SimpleperfManager::CleanUp(
+    const OnGoingProfiling &ongoing_recording) const {
+  BashCommandRunner deleter("rm -f");
+  deleter.Run(ongoing_recording.raw_trace_path, nullptr);
+  deleter.Run(ongoing_recording.log_file_path, nullptr);
 }
 
-void SimplePerfManager::CleanUp(const string &app_pkg_name,
-                                const OnGoingProfiling &ongoing_recording,
-                                const string &tmp_proto_trace) const {
-  BashCommandRunner deleter("rm");
-  deleter.RunAs(tmp_proto_trace, app_pkg_name, nullptr);
-  deleter.RunAs(ongoing_recording.log_filepath, app_pkg_name, nullptr);
-}
-
-bool SimplePerfManager::ConvertRawToProto(
-    const string &app_pkg_name, const OnGoingProfiling &ongoing_recording,
-    string *error) const {
-  string simple_perf_binary_abspath;
-  Installer installer(app_pkg_name);
-  installer.GetInstallationPath(kSimpleperfExecutable,
-                                &simple_perf_binary_abspath, error);
-  BashCommandRunner simpleperf_report(simple_perf_binary_abspath);
+bool SimpleperfManager::ConvertRawToProto(
+    const OnGoingProfiling &ongoing_recording, string *error) const {
   string output;
-  std::stringstream parameters;
-  parameters << "report-sample ";
-  parameters << "--protobuf ";
-  parameters << "--show-callchain ";
-  parameters << "-i ";
-  parameters << ongoing_recording.app_dir + "/" +
-                    ongoing_recording.output_prefix + ".dat";
-  parameters << " ";
-  parameters << "-o ";
-  parameters << ongoing_recording.app_dir + "/" +
-                    ongoing_recording.output_prefix + ".tmp";
-  bool report_result =
-      simpleperf_report.RunAs(parameters.str(), app_pkg_name, &output);
-  if (!report_result) {
+  bool report_sample_result = simpleperf_.ReportSample(
+      ongoing_recording.raw_trace_path, ongoing_recording.trace_path,
+      ongoing_recording.abi_arch, &output);
+  if (!report_sample_result) {
     string msg = "Unable to generate simpleperf report:" + output;
     Log::D("%s", msg.c_str());
     error->append("\n");
@@ -345,10 +232,9 @@ bool SimplePerfManager::ConvertRawToProto(
   return true;
 }
 
-bool SimplePerfManager::WaitForSimplerPerf(
+bool SimpleperfManager::WaitForSimpleperf(
     const OnGoingProfiling &ongoing_recording, string *error) const {
-  // Wait until simpleperf is done outputting collected data to the .dat
-  // file.
+  // Wait until simpleperf is done outputting collected data to the .dat file.
   int status;
   int wait_result = waitpid(ongoing_recording.simpleperf_pid, &status, 0);
 
@@ -363,8 +249,8 @@ bool SimplePerfManager::WaitForSimplerPerf(
 
   // Make sure simpleperf exited normally.
   if (!WIFEXITED(status)) {
-    string msg = "Simpleperf did not exist as expected. Logfile:" +
-                 ongoing_recording.log_filepath;
+    string msg = "Simpleperf did not exit as expected. Logfile: " +
+                 ongoing_recording.log_file_path;
     Log::D("%s", msg.c_str());
     error->append("\n");
     error->append(msg);

@@ -22,11 +22,10 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import com.google.common.collect.ImmutableList;
+import com.android.SdkConstants;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Path;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -148,9 +147,11 @@ public class FileUtilsTest {
         assertThat(FileUtils.isSameFile(fooHardLinkFile, fooFile)).isTrue();
 
         // Test symbolic links
-        File fooSymbolicLinkFile = new File(mTemporaryFolder.getRoot(), "fooSymbolicLink");
-        java.nio.file.Files.createSymbolicLink(fooSymbolicLinkFile.toPath(), fooFile.toPath());
-        assertThat(FileUtils.isSameFile(fooSymbolicLinkFile, fooFile)).isTrue();
+        if (SdkConstants.currentPlatform() != SdkConstants.PLATFORM_WINDOWS) {
+            File fooSymbolicLinkFile = new File(mTemporaryFolder.getRoot(), "fooSymbolicLink");
+            java.nio.file.Files.createSymbolicLink(fooSymbolicLinkFile.toPath(), fooFile.toPath());
+            assertThat(FileUtils.isSameFile(fooSymbolicLinkFile, fooFile)).isTrue();
+        }
     }
 
     @Test
@@ -179,45 +180,5 @@ public class FileUtilsTest {
                         "playback",
                         "CameraPlaybackGlue$CameraPlaybackHost.class"),
                 FileUtils.relativePossiblyNonExistingPath(fileToProcess, inputDir));
-    }
-
-    @Test
-    public void testPathDelete() throws IOException {
-        Path root = mTemporaryFolder.getRoot().toPath().resolve("root");
-        java.nio.file.Files.createDirectories(root.resolve("a/a"));
-        java.nio.file.Files.createDirectories(root.resolve("b"));
-        java.nio.file.Files.createDirectories(root.resolve("c/c/c"));
-
-        java.nio.file.Files.write(root.resolve("a/a/t.txt"), ImmutableList.of("content"));
-        java.nio.file.Files.write(root.resolve("b/t.txt"), ImmutableList.of("content"));
-
-        PathUtils.deleteIfExists(root);
-
-        assertThat(java.nio.file.Files.notExists(root)).isTrue();
-    }
-
-    @Test
-    public void testPathDeleteOnlyDirs() throws IOException {
-        Path root = mTemporaryFolder.getRoot().toPath().resolve("root");
-        java.nio.file.Files.createDirectories(root.resolve("a/a"));
-        java.nio.file.Files.createDirectories(root.resolve("b"));
-        java.nio.file.Files.createDirectories(root.resolve("c/c/c"));
-
-        PathUtils.deleteIfExists(root);
-        assertThat(java.nio.file.Files.notExists(root)).isTrue();
-    }
-
-    @Test
-    public void testPathDeleteNonExisting() throws IOException {
-        PathUtils.deleteIfExists(mTemporaryFolder.getRoot().toPath().resolve("non-existing"));
-    }
-
-    @Test
-    public void testPathDeleteFile() throws IOException {
-        Path root = mTemporaryFolder.getRoot().toPath();
-        java.nio.file.Files.write(root.resolve("t.txt"), ImmutableList.of("content"));
-
-        PathUtils.deleteIfExists(root.resolve("t.txt"));
-        assertThat(java.nio.file.Files.notExists(root.resolve("t.txt"))).isTrue();
     }
 }

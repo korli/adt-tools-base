@@ -63,9 +63,15 @@ public abstract class ApkData implements ApkInfo, VariantOutput {
 
     // FIX-ME: we can have more than one value, especially for languages...
     // so far, we will return things like "fr,fr-rCA" for a single value.
+    @Override
     @Nullable
-    public String getFilter(FilterType filterType) {
-        return ApkData.getFilter(getFilters(), filterType);
+    public FilterData getFilter(FilterType filterType) {
+        for (FilterData filter : getFilters()) {
+            if (VariantOutput.FilterType.valueOf(filter.getFilterType()) == filterType) {
+                return filter;
+            }
+        }
+        return null;
     }
 
     @Nullable
@@ -73,17 +79,22 @@ public abstract class ApkData implements ApkInfo, VariantOutput {
         return ApkData.getFilter(getFilters(), FilterType.valueOf(filterType));
     }
 
+    @Override
     public boolean requiresAapt() {
         return true;
     }
 
-    @Nullable
-    public abstract String getFilterName();
 
+
+    @NonNull
+    @Override
     public abstract String getBaseName();
 
+    @NonNull
+    @Override
     public abstract String getFullName();
 
+    @NonNull
     @Override
     public abstract OutputType getType();
 
@@ -113,11 +124,14 @@ public abstract class ApkData implements ApkInfo, VariantOutput {
         return versionCode;
     }
 
+    @Nullable
+    @Override
     public String getVersionName() {
         return versionName;
     }
 
-    @NonNull
+    @Nullable
+    @Override
     public String getOutputFileName() {
         return outputFileName;
     }
@@ -171,6 +185,7 @@ public abstract class ApkData implements ApkInfo, VariantOutput {
         enabled.set(false);
     }
 
+    @Override
     public boolean isEnabled() {
         return enabled.get();
     }

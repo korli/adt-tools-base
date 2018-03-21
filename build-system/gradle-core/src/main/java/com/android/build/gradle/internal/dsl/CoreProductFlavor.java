@@ -42,9 +42,6 @@ public interface CoreProductFlavor extends ProductFlavor, Named {
      */
     @Deprecated
     @NonNull
-    CoreJackOptions getJackOptions();
-
-    @NonNull
     JavaCompileOptions getJavaCompileOptions();
 
     @NonNull

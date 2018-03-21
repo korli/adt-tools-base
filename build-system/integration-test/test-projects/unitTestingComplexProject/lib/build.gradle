@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 The Android Open Source Project
+ * Copyright (C) 2017 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
  */
 
 apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
 
 apply from: "../../commonLocalRepo.gradle"
 
 android {
     compileSdkVersion rootProject.latestCompileSdk
-    buildToolsVersion = rootProject.buildToolsVersion
 
     testOptions {
         unitTests.all {
@@ -30,9 +30,13 @@ android {
 }
 
 dependencies {
-    testCompile 'junit:junit:4.12'
-    testCompile 'org.mockito:mockito-core:2.7.1'
-    testCompile 'org.jdeferred:jdeferred-android-aar:1.2.3'
-    testCompile 'commons-logging:commons-logging:1.1.1'
-}
+    implementation project(":util-lib")
+    implementation project(":javalib")
 
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jre7:$rootProject.kotlinVersion"
+
+    testImplementation 'junit:junit:4.12'
+    testImplementation 'org.mockito:mockito-core:2.7.1'
+    testImplementation 'org.jdeferred:jdeferred-android-aar:1.2.3'
+    testImplementation 'commons-logging:commons-logging:1.1.1'
+}

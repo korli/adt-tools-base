@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.common.res2;
 
 import static org.junit.Assert.assertFalse;
@@ -28,8 +27,8 @@ import com.google.common.io.Files;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import java.io.File;
-import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -39,7 +38,6 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 public class MergeResourceWriterWithCompilerTest {
-
     @Rule
     public TemporaryFolder mTemporaryFolder = new TemporaryFolder();
 
@@ -53,22 +51,17 @@ public class MergeResourceWriterWithCompilerTest {
 
     @Before
     public final void before() throws Exception {
-        mEmptyPreprocessor = new ResourcePreprocessor() {
-            @Override
-            public boolean needsPreprocessing(File file) {
-                return false;
-            }
+        mEmptyPreprocessor =
+                new ResourcePreprocessor() {
+                    @NonNull
+                    @Override
+                    public Collection<File> getFilesToBeGenerated(@NonNull File original) {
+                        return Collections.emptySet();
+                    }
 
-            @Override
-            public Collection<File> getFilesToBeGenerated(File original) {
-                return null;
-            }
-
-            @Override
-            public void generateFile(File toBeGenerated, File original)
-                    throws IOException {
-            }
-        };
+                    @Override
+                    public void generateFile(@NonNull File toBeGenerated, @NonNull File original) {}
+                };
 
         mSimpleCompiler =
                 new QueueableResourceCompiler() {
@@ -77,7 +70,7 @@ public class MergeResourceWriterWithCompilerTest {
                     public ListenableFuture<File> compile(@NonNull CompileResourceRequest request)
                             throws Exception {
                         File outputPath = compileOutputFor(request);
-                        Files.copy(request.getInput(), outputPath);
+                        Files.copy(request.getInputFile(), outputPath);
                         return Futures.immediateFuture(outputPath);
                     }
 
@@ -86,7 +79,9 @@ public class MergeResourceWriterWithCompilerTest {
 
                     @Override
                     public File compileOutputFor(@NonNull CompileResourceRequest request) {
-                        return new File(request.getOutput(), request.getInput().getName() + "-c");
+                        return new File(
+                                request.getOutputDirectory(),
+                                request.getInputFile().getName() + "-c");
                     }
                 };
 

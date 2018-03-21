@@ -31,11 +31,12 @@ import com.android.annotations.Nullable;
 import com.android.apkzlib.zfile.ApkCreatorFactory;
 import com.android.apkzlib.zfile.NativeLibrariesPackagingMode;
 import com.android.builder.compiling.DependencyFileProcessor;
+import com.android.builder.errors.EvalIssueReporter;
 import com.android.builder.files.IncrementalRelativeFileSets;
 import com.android.builder.files.RelativeFile;
 import com.android.builder.internal.TestManifestGenerator;
-import com.android.builder.internal.aapt.Aapt;
 import com.android.builder.internal.aapt.AaptPackageConfig;
+import com.android.builder.internal.aapt.BlockingResourceLinker;
 import com.android.builder.internal.compiler.AidlProcessor;
 import com.android.builder.internal.compiler.DirectoryWalker;
 import com.android.builder.internal.compiler.PreDexCache;
@@ -43,14 +44,10 @@ import com.android.builder.internal.compiler.RenderScriptProcessor;
 import com.android.builder.internal.compiler.ShaderProcessor;
 import com.android.builder.internal.packaging.IncrementalPackager;
 import com.android.builder.model.SigningConfig;
-import com.android.builder.model.SyncIssue;
 import com.android.builder.packaging.PackagerException;
 import com.android.builder.sdk.SdkInfo;
 import com.android.builder.sdk.TargetInfo;
-import com.android.builder.symbols.RGeneration;
-import com.android.builder.symbols.SymbolIo;
-import com.android.builder.symbols.SymbolTable;
-import com.android.builder.symbols.SymbolUtils;
+import com.android.ide.common.blame.MessageReceiver;
 import com.android.ide.common.internal.WaitableExecutor;
 import com.android.ide.common.process.CachedProcessOutputHandler;
 import com.android.ide.common.process.JavaProcessExecutor;
@@ -64,6 +61,10 @@ import com.android.ide.common.res2.FileStatus;
 import com.android.ide.common.signing.CertificateInfo;
 import com.android.ide.common.signing.KeystoreHelper;
 import com.android.ide.common.signing.KeytoolException;
+import com.android.ide.common.symbols.RGeneration;
+import com.android.ide.common.symbols.SymbolIo;
+import com.android.ide.common.symbols.SymbolTable;
+import com.android.ide.common.symbols.SymbolUtils;
 import com.android.manifmerger.ManifestMerger2;
 import com.android.manifmerger.ManifestProvider;
 import com.android.manifmerger.ManifestSystemProperty;
@@ -104,19 +105,16 @@ import java.util.zip.ZipFile;
  * specific build steps.
  *
  * <p>To use: create a builder with {@link #AndroidBuilder(String, String, ProcessExecutor,
- * JavaProcessExecutor, ErrorReporter, ILogger, boolean)}
+ * JavaProcessExecutor, EvalIssueReporter, MessageReceiver, ILogger, boolean)}
  *
  * <p>then build steps can be done with:
  *
  * <ol>
- *   <li>{@link #mergeManifestsForApplication(File, List, List, String, String, int, String, String,
- *       String, Integer, String, String, String, ManifestMerger2.MergeType, Map, List, File)}
- *   <li>{@link #mergeManifestsForTestVariant(String, String, String, String, String, Boolean,
- *       Boolean, String, File, List, Map, File, File)}
- *   <li>{@link #processResources(Aapt, AaptPackageConfig.Builder, boolean)}
- *   <li>{@link #compileAllAidlFiles(Collection, File, File, Collection, Collection,
- *       DependencyFileProcessor, ProcessOutputHandler)}
- *   <li>{@link #getDexByteCodeConverter()}
+ *   <li>{@link #mergeManifestsForApplication }
+ *   <li>{@link #mergeManifestsForTestVariant }
+ *   <li>{@link #processResources }
+ *   <li>{@link #compileAllAidlFiles }
+ *   <li>{@link #getDexByteCodeConverter() }
  * </ol>
  *
  * <p>Java compilation is not handled but the builder provides the boot classpath with {@link
@@ -125,14 +123,14 @@ import java.util.zip.ZipFile;
 public class AndroidBuilder {
 
     /** Minimal supported version of build tools. */
-    public static final Revision MIN_BUILD_TOOLS_REV = new Revision(26, 0, 2);
+    public static final Revision MIN_BUILD_TOOLS_REV = new Revision(27, 0, 3);
 
     /**
      * Default version of build tools that will be used if the user does not specify.
      *
      * <p><strong>Update the DSL documentation on BaseExtension when changing this value.</strong>
      */
-    public static final Revision DEFAULT_BUILD_TOOLS_REVISION = new Revision(26, 0, 2);
+    public static final Revision DEFAULT_BUILD_TOOLS_REVISION = new Revision(27, 0, 3);
 
     /** API level for split APKs. */
     private static final int API_LEVEL_SPLIT_APK = 21;
@@ -146,8 +144,8 @@ public class AndroidBuilder {
     private final ProcessExecutor mProcessExecutor;
     @NonNull
     private final JavaProcessExecutor mJavaProcessExecutor;
-    @NonNull
-    private final ErrorReporter mErrorReporter;
+    @NonNull private final EvalIssueReporter issueReporter;
+    @NonNull private final MessageReceiver messageReceiver;
 
     private final boolean mVerboseExec;
 
@@ -166,8 +164,8 @@ public class AndroidBuilder {
 
     /**
      * Creates an AndroidBuilder.
-     * <p>
-     * <var>verboseExec</var> is needed on top of the ILogger due to remote exec tools not being
+     *
+     * <p><var>verboseExec</var> is needed on top of the ILogger due to remote exec tools not being
      * able to output info and verbose messages separately.
      *
      * @param createdBy the createdBy String for the apk manifest.
@@ -179,14 +177,16 @@ public class AndroidBuilder {
             @Nullable String createdBy,
             @NonNull ProcessExecutor processExecutor,
             @NonNull JavaProcessExecutor javaProcessExecutor,
-            @NonNull ErrorReporter errorReporter,
+            @NonNull EvalIssueReporter issueReporter,
+            @NonNull MessageReceiver messageReceiver,
             @NonNull ILogger logger,
             boolean verboseExec) {
         mProjectId = checkNotNull(projectId);
         mCreatedBy = createdBy;
         mProcessExecutor = checkNotNull(processExecutor);
         mJavaProcessExecutor = checkNotNull(javaProcessExecutor);
-        mErrorReporter = checkNotNull(errorReporter);
+        this.issueReporter = checkNotNull(issueReporter);
+        this.messageReceiver = messageReceiver;
         mLogger = checkNotNull(logger);
         mVerboseExec = verboseExec;
     }
@@ -201,22 +201,18 @@ public class AndroidBuilder {
         mTargetInfo = targetInfo;
         mDexByteCodeConverter =
                 new DexByteCodeConverter(
-                        getLogger(),
-                        mTargetInfo,
-                        mJavaProcessExecutor,
-                        mVerboseExec,
-                        getErrorReporter());
+                        getLogger(), mTargetInfo, mJavaProcessExecutor, mVerboseExec);
 
         if (mTargetInfo.getBuildTools().getRevision().compareTo(MIN_BUILD_TOOLS_REV) < 0) {
-            mErrorReporter.handleSyncError(
-                    MIN_BUILD_TOOLS_REV.toString(),
-                    SyncIssue.TYPE_BUILD_TOOLS_TOO_LOW,
+            issueReporter.reportError(
+                    EvalIssueReporter.Type.BUILD_TOOLS_TOO_LOW,
                     String.format(
                             "The SDK Build Tools revision (%1$s) is too low for project '%2$s'. "
                                     + "Minimum required is %3$s",
                             mTargetInfo.getBuildTools().getRevision(),
                             mProjectId,
-                            MIN_BUILD_TOOLS_REV));
+                            MIN_BUILD_TOOLS_REV),
+                    MIN_BUILD_TOOLS_REV.toString());
         }
     }
 
@@ -258,8 +254,13 @@ public class AndroidBuilder {
     }
 
     @NonNull
-    public ErrorReporter getErrorReporter() {
-        return mErrorReporter;
+    public EvalIssueReporter getIssueReporter() {
+        return issueReporter;
+    }
+
+    @NonNull
+    public MessageReceiver getMessageReceiver() {
+        return messageReceiver;
     }
 
     /** Returns the compilation target, if set. */
@@ -300,6 +301,17 @@ public class AndroidBuilder {
         return computeFilteredBootClasspath();
     }
 
+    /**
+     * Returns the list of additional and requested optional library jar files
+     *
+     * @return the list of files from the additional and optional libraries which appear in the
+     *     filtered boot classpath
+     */
+    public List<File> computeAdditionalAndRequestedOptionalLibraries() {
+        return BootClasspathBuilder.computeAdditionalAndRequestedOptionalLibraries(
+                mTargetInfo.getTarget(), mLibraryRequests, issueReporter);
+    }
+
     private List<File> computeFilteredBootClasspath() {
         // computes and caches the filtered boot classpath.
         // Changes here should be applied to #computeFullClasspath()
@@ -308,11 +320,12 @@ public class AndroidBuilder {
             checkState(mTargetInfo != null,
                     "Cannot call getBootClasspath() before setTargetInfo() is called.");
 
-            mBootClasspathFiltered = BootClasspathBuilder.computeFilteredClasspath(
-                    mTargetInfo.getTarget(),
-                    mLibraryRequests,
-                    mErrorReporter,
-                    mSdkInfo.getAnnotationsJar());
+            mBootClasspathFiltered =
+                    BootClasspathBuilder.computeFilteredClasspath(
+                            mTargetInfo.getTarget(),
+                            mLibraryRequests,
+                            issueReporter,
+                            mSdkInfo.getAnnotationsJar());
         }
 
         return mBootClasspathFiltered;
@@ -432,6 +445,7 @@ public class AndroidBuilder {
             @NonNull File mainManifest,
             @NonNull List<File> manifestOverlays,
             @NonNull List<? extends ManifestProvider> dependencies,
+            @NonNull List<File> navigationFiles,
             @Nullable String featureName,
             String packageOverride,
             int versionCode,
@@ -455,6 +469,7 @@ public class AndroidBuilder {
                             .addFlavorAndBuildTypeManifests(
                                     manifestOverlays.toArray(new File[manifestOverlays.size()]))
                             .addManifestProviders(dependencies)
+                            .addNavigationFiles(navigationFiles)
                             .withFeatures(
                                     optionalFeatures.toArray(
                                             new Invoker.Feature[optionalFeatures.size()]))
@@ -582,15 +597,6 @@ public class AndroidBuilder {
      * @param manifestPlaceholders used placeholders in the manifest
      * @param outManifest the output location for the merged manifest
      * @param tmpDir temporary dir used for processing
-     *
-     * @see VariantConfiguration#getApplicationId()
-     * @see VariantConfiguration#getTestedConfig()
-     * @see VariantConfiguration#getMinSdkVersion()
-     * @see VariantConfiguration#getTestedApplicationId()
-     * @see VariantConfiguration#getInstrumentationRunner()
-     * @see VariantConfiguration#getHandleProfiling()
-     * @see VariantConfiguration#getFunctionalTest()
-     * @see VariantConfiguration#getTestLabel()
      */
     public void mergeManifestsForTestVariant(
             @NonNull String testApplicationId,
@@ -772,26 +778,33 @@ public class AndroidBuilder {
      * @param aapt the interface to the {@code aapt} tool
      * @param aaptConfigBuilder aapt command invocation parameters; this will receive some
      *     additional data (build tools, Android target and logger) and will be used to request
-     *     package invocation in {@code aapt} (see {@link Aapt#link(AaptPackageConfig)})
+     *     package invocation in {@code aapt} (see {@link
+     *     BlockingResourceLinker#link(AaptPackageConfig, ILogger)})
      * @throws IOException failed
-     * @throws InterruptedException failed
      * @throws ProcessException failed
      */
     public void processResources(
-            @NonNull Aapt aapt, @NonNull AaptPackageConfig.Builder aaptConfigBuilder)
-            throws IOException, InterruptedException, ProcessException {
+            @NonNull BlockingResourceLinker aapt,
+            @NonNull AaptPackageConfig.Builder aaptConfigBuilder)
+            throws IOException, ProcessException {
 
         checkState(mTargetInfo != null,
                 "Cannot call processResources() before setTargetInfo() is called.");
 
-        aaptConfigBuilder.setBuildToolInfo(mTargetInfo.getBuildTools());
         aaptConfigBuilder.setAndroidTarget(mTargetInfo.getTarget());
-        aaptConfigBuilder.setLogger(mLogger);
 
         AaptPackageConfig aaptConfig = aaptConfigBuilder.build();
+        processResources(aapt, aaptConfig, mLogger);
+    }
+
+    public static void processResources(
+            @NonNull BlockingResourceLinker aapt,
+            @NonNull AaptPackageConfig aaptConfig,
+            @NonNull ILogger logger)
+            throws IOException, ProcessException {
 
         try {
-            aapt.link(aaptConfig).get();
+            aapt.link(aaptConfig, logger);
         } catch (Exception e) {
             throw new ProcessException("Failed to execute aapt", e);
         }
@@ -815,7 +828,7 @@ public class AndroidBuilder {
             // For each dependency, load its symbol file.
             Set<SymbolTable> depSymbolTables =
                     SymbolUtils.loadDependenciesSymbolTables(
-                            aaptConfig.getLibrarySymbolTableFiles(), mainPackageName);
+                            aaptConfig.getLibrarySymbolTableFiles());
 
             boolean finalIds = true;
             if (aaptConfig.getVariantType() == VariantType.LIBRARY) {
@@ -896,9 +909,9 @@ public class AndroidBuilder {
 
         StringBuilder content = new StringBuilder();
         content.append("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
-                .append("<manifest package=\"\" xmlns:android=\"http://schemas.android.com/apk/res/android\">\n")
-                .append("            <uses-sdk android:minSdkVersion=\"")
-                .append(minSdkVersion).append("\"");
+                .append("<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n")
+                .append("    package=\"${packageName}\">\n")
+                .append("    <uses-sdk android:minSdkVersion=\"" + minSdkVersion + "\"");
         if (targetSdkVersion != -1) {
             content.append(" android:targetSdkVersion=\"").append(targetSdkVersion).append("\"");
         }
@@ -994,7 +1007,7 @@ public class AndroidBuilder {
             @NonNull File sourceOutputDir,
             @Nullable File packagedOutputDir,
             @Nullable Collection<String> packageWhitelist,
-            @NonNull List<File> importFolders,
+            @NonNull Iterable<File> importFolders,
             @Nullable DependencyFileProcessor dependencyFileProcessor,
             @NonNull ProcessOutputHandler processOutputHandler)
             throws IOException, InterruptedException, ProcessException {

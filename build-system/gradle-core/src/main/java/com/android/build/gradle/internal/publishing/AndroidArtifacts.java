@@ -16,11 +16,16 @@
 
 package com.android.build.gradle.internal.publishing;
 
+import static com.android.SdkConstants.FD_ASSETS;
+import static com.android.SdkConstants.FD_DEX;
+import static com.android.SdkConstants.FD_LIB;
+import static com.android.SdkConstants.FD_RES;
 import static com.android.build.gradle.internal.publishing.AndroidArtifacts.PublishedConfigType.API_ELEMENTS;
 import static com.android.build.gradle.internal.publishing.AndroidArtifacts.PublishedConfigType.METADATA_ELEMENTS;
 import static com.android.build.gradle.internal.publishing.AndroidArtifacts.PublishedConfigType.RUNTIME_ELEMENTS;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition;
 import org.gradle.api.attributes.Attribute;
 
@@ -38,12 +43,23 @@ public class AndroidArtifacts {
 
     // types for AAR content
     private static final String TYPE_CLASSES = "android-classes";
+    private static final String TYPE_SHARED_CLASSES = "android-shared-classes";
+    private static final String TYPE_DEX = "android-dex";
     private static final String TYPE_JAVA_RES = "android-java-res";
+    private static final String TYPE_SHARED_JAVA_RES = "android-shared-java-res";
     private static final String TYPE_MANIFEST = "android-manifest";
     private static final String TYPE_MANIFEST_METADATA = "android-manifest-metadata";
     private static final String TYPE_ANDROID_RES = "android-res";
+    private static final String TYPE_ANDROID_NAMESPACED_R_CLASS_JAR =
+            "android-res-namespaced-r-class-jar";
+    private static final String TYPE_ANDROID_RES_STATIC_LIBRARY = "android-res-static-library";
+    private static final String TYPE_ANDROID_RES_SHARED_STATIC_LIBRARY =
+            "android-res-shared-static-library";
+    private static final String TYPE_ANDROID_RES_BUNDLE = "android-res-for-bundle";
     private static final String TYPE_ASSETS = "android-assets";
+    private static final String TYPE_SHARED_ASSETS = "android-shared-assets";
     private static final String TYPE_JNI = "android-jni";
+    private static final String TYPE_SHARED_JNI = "android-shared-jni";
     private static final String TYPE_AIDL = "android-aidl";
     private static final String TYPE_RENDERSCRIPT = "android-renderscript";
     private static final String TYPE_LINT_JAR = "android-lint";
@@ -53,6 +69,8 @@ public class AndroidArtifacts {
     private static final String TYPE_SYMBOL_WITH_PACKAGE_NAME = "android-symbol-with-package-name";
     private static final String TYPE_PROGUARD_RULES = "android-proguad";
     private static final String TYPE_DATA_BINDING_ARTIFACT = "android-databinding";
+    private static final String TYPE_DATA_BINDING_BASE_CLASS_LOG_ARTIFACT =
+            "android-databinding-class-log";
     private static final String TYPE_EXPLODED_AAR = "android-exploded-aar";
 
     // types for additional artifacts to go with APK
@@ -109,6 +127,7 @@ public class AndroidArtifacts {
         API_ELEMENTS,
         RUNTIME_ELEMENTS,
         METADATA_ELEMENTS,
+        BUNDLE_ELEMENTS,
     }
 
     public enum ArtifactScope {
@@ -117,22 +136,35 @@ public class AndroidArtifacts {
 
     public enum ArtifactType {
         CLASSES(TYPE_CLASSES),
+        SHARED_CLASSES(TYPE_SHARED_CLASSES),
         // Jar file for annotation processor as both classes and resources are needed, and for building model
         JAR(TYPE_JAR),
+        // published dex folder for bundle
+        DEX(TYPE_DEX, FD_DEX),
 
         // manifest is published to both to compare and detect provided-only library dependencies.
         MANIFEST(TYPE_MANIFEST),
         MANIFEST_METADATA(TYPE_MANIFEST_METADATA),
 
+        // Resources static library are API (where only explicit dependencies are included) and
+        // runtime
+        RES_STATIC_LIBRARY(TYPE_ANDROID_RES_STATIC_LIBRARY),
+        RES_SHARED_STATIC_LIBRARY(TYPE_ANDROID_RES_SHARED_STATIC_LIBRARY),
+        RES_BUNDLE(TYPE_ANDROID_RES_BUNDLE, FD_RES),
+
         // API only elements.
         AIDL(TYPE_AIDL),
         RENDERSCRIPT(TYPE_RENDERSCRIPT),
         DATA_BINDING_ARTIFACT(TYPE_DATA_BINDING_ARTIFACT),
+        DATA_BINDING_BASE_CLASS_LOG_ARTIFACT(TYPE_DATA_BINDING_BASE_CLASS_LOG_ARTIFACT),
+        COMPILE_ONLY_NAMESPACED_R_CLASS_JAR(TYPE_ANDROID_NAMESPACED_R_CLASS_JAR),
 
-        // runtime only elements
-        JAVA_RES(TYPE_JAVA_RES),
+        // runtime and/or bundle elements
+        JAVA_RES(TYPE_JAVA_RES, "root"),
+        SHARED_JAVA_RES(TYPE_SHARED_JAVA_RES),
         ANDROID_RES(TYPE_ANDROID_RES),
-        ASSETS(TYPE_ASSETS),
+        ASSETS(TYPE_ASSETS, FD_ASSETS),
+        SHARED_ASSETS(TYPE_SHARED_ASSETS),
         SYMBOL_LIST(TYPE_SYMBOL),
         /**
          * The symbol list with the package name as the first line. As the r.txt format in the AAR
@@ -140,7 +172,8 @@ public class AndroidArtifacts {
          * AndroidManifest.xml to the existing r.txt file.
          */
         SYMBOL_LIST_WITH_PACKAGE_NAME(TYPE_SYMBOL_WITH_PACKAGE_NAME),
-        JNI(TYPE_JNI),
+        JNI(TYPE_JNI, FD_LIB),
+        SHARED_JNI(TYPE_SHARED_JNI),
         ANNOTATIONS(TYPE_EXT_ANNOTATIONS),
         PUBLIC_RES(TYPE_PUBLIC_RES),
         PROGUARD_RULES(TYPE_PROGUARD_RULES),
@@ -168,14 +201,25 @@ public class AndroidArtifacts {
 
         @NonNull
         private final String type;
+        @Nullable private final String pathPrefix;
 
         ArtifactType(@NonNull String type) {
+            this(type, null);
+        }
+
+        ArtifactType(@NonNull String type, @Nullable String pathPrefix) {
             this.type = type;
+            this.pathPrefix = pathPrefix;
         }
 
         @NonNull
         public String getType() {
             return type;
+        }
+
+        @Nullable
+        public String getPathPrefix() {
+            return pathPrefix;
         }
     }
 }

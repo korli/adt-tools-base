@@ -21,8 +21,8 @@ import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.annotations.concurrency.GuardedBy;
 import com.android.annotations.concurrency.Immutable;
-import com.android.builder.Version;
-import com.android.ide.common.util.JvmWideVariable;
+import com.android.builder.model.Version;
+import com.android.utils.JvmWideVariable;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Verify;
@@ -30,7 +30,9 @@ import com.google.common.reflect.TypeToken;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.Set;
 import javax.annotation.concurrent.ThreadSafe;
 import org.gradle.BuildListener;
 import org.gradle.BuildResult;
@@ -121,6 +123,12 @@ public final class BuildSessionImpl implements BuildSession {
     @NonNull
     private BuildState buildState = BuildState.FINISHED;
 
+    /** The actions that have been executed immediately. */
+    @GuardedBy("this")
+    @NonNull
+    private Set<String> executedActions = new HashSet<>();
+
+
     /** The actions to be executed at the end of the current build. */
     @GuardedBy("this")
     @NonNull
@@ -141,28 +149,41 @@ public final class BuildSessionImpl implements BuildSession {
         // Register a handler to execute at the end of the build. We need to use the "root" Gradle
         // object to get to the end of both regular builds and composite builds.
         Gradle rootGradle = gradle;
+        //noinspection ConstantConditions
         while (rootGradle.getParent() != null) {
             rootGradle = rootGradle.getParent();
         }
         rootGradle.addBuildListener(
                 new BuildListener() {
                     @Override
-                    public void buildStarted(Gradle gradle) {}
+                    public void buildStarted(@NonNull Gradle gradle) {}
 
                     @Override
-                    public void settingsEvaluated(Settings settings) {}
+                    public void settingsEvaluated(@NonNull Settings settings) {}
 
                     @Override
-                    public void projectsLoaded(Gradle gradle) {}
+                    public void projectsLoaded(@NonNull Gradle gradle) {}
 
                     @Override
-                    public void projectsEvaluated(Gradle gradle) {}
+                    public void projectsEvaluated(@NonNull Gradle gradle) {}
 
                     @Override
-                    public void buildFinished(BuildResult buildResult) {
+                    public void buildFinished(@NonNull BuildResult buildResult) {
                         BuildSessionImpl.this.buildFinished();
                     }
                 });
+    }
+
+    @Override
+    public synchronized void executeOnce(
+            @NonNull String actionGroup, @NonNull String actionName, @NonNull Runnable action) {
+        Preconditions.checkState(buildState == BuildState.STARTED);
+
+        String actionId = actionGroup + ":" + actionName;
+        if (!executedActions.contains(actionId)) {
+            executedActions.add(actionId);
+            action.run();
+        }
     }
 
     @Override
@@ -182,12 +203,14 @@ public final class BuildSessionImpl implements BuildSession {
         } finally {
             // If an exception occurred, it may affect the next build, but we won't deal with it
             // for now
+            executedActions.clear();
             buildFinishedActions.clear();
             buildState = BuildState.FINISHED;
         }
     }
 
     @Override
+    @SuppressWarnings("GuardedBy")
     public String toString() {
         //noinspection FieldAccessNotGuarded
         return MoreObjects.toStringHelper(this).add("buildState", buildState.name()).toString();

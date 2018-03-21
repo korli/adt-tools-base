@@ -16,21 +16,8 @@
 
 package com.android.tools.lint.checks;
 
-import static com.google.common.truth.Truth.assertThat;
-
-import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.tools.lint.client.api.UastParser;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.JavaContext;
-import com.android.tools.lint.detector.api.Project;
-import com.android.tools.lint.helpers.DefaultUastParser;
-import com.intellij.lang.java.JavaLanguage;
-import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiFileFactory;
 import org.intellij.lang.annotations.Language;
-import org.jetbrains.uast.UFile;
-import org.jetbrains.uast.UastContext;
 
 @SuppressWarnings({"javadoc", "ClassNameDiffersFromFileName"})
 public class SdCardDetectorTest extends AbstractCheckTest {
@@ -41,7 +28,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
         return new SdCardDetector();
     }
 
-    public void test() throws Exception {
+    public void testBasic() {
         //noinspection all // Sample code
         String expected = ""
                 + "src/test/pkg/SdCardTest.java:13: Warning: Do not hardcode \"/sdcard/\"; use Environment.getExternalStorageDirectory().getPath() instead [SdCardPath]\n"
@@ -127,7 +114,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testSuppress() throws Exception {
+    public void testSuppress() {
         String expected = ""
                 + "src/test/pkg/SuppressTest5.java:40: Warning: Do not hardcode \"/sdcard/\"; use Environment.getExternalStorageDirectory().getPath() instead [SdCardPath]\n"
                 + "  String notAnnotated = \"/sdcard/mypath\";\n"
@@ -195,6 +182,8 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                         + "\n"
                         + "\t\t//noinspection AndroidLintSdCardPath\n"
                         + "\t\tString string4 = \"/sdcard/mypath9\";\n"
+                        + "\t\t/** @noinspection SdCardPath*/\n"
+                        + "\t\tString string5 = \"/sdcard/mypath10\";\n"
                         + "\n"
                         + "\t\treturn string;\n"
                         + "\t}\n"
@@ -206,7 +195,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testUtf8Bom() throws Exception {
+    public void testUtf8Bom() {
         String expected = ""
                 + "src/test/pkg/Utf8BomTest.java:4: Warning: Do not hardcode \"/sdcard/\"; use Environment.getExternalStorageDirectory().getPath() instead [SdCardPath]\n"
                 + "    String s = \"/sdcard/mydir\";\n"
@@ -225,7 +214,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testSuppressInAnnotation() throws Exception {
+    public void testSuppressInAnnotation() {
         lint().files(
                 java("src/test/pkg/MyInterface.java", ""
                         + "package test.pkg;\n"
@@ -238,7 +227,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testMatchInTestIfEnabled() throws Exception {
+    public void testMatchInTestIfEnabled() {
         //noinspection all // Sample code
         lint().files(
                 java("src/test/java/test/pkg/MyTest.java", ""
@@ -270,7 +259,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                         + "0 errors, 2 warnings\n");
     }
 
-    public void testNothingInTests() throws Exception {
+    public void testNothingInTests() {
         //noinspection all // Sample code
         lint().files(
                 java("src/test/java/test/pkg/MyTest.java", ""
@@ -295,7 +284,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testNothingInGenerated() throws Exception {
+    public void testNothingInGenerated() {
         //noinspection all // Sample code
         lint().files(
                 java("generated/test/pkg/MyTest.java", ""
@@ -314,7 +303,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testMatchInGeneratedIfEnabled() throws Exception {
+    public void testMatchInGeneratedIfEnabled() {
         //noinspection all // Sample code
         lint().files(
                 java("generated/test/pkg/MyTest.java", ""
@@ -337,15 +326,30 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                         + "0 errors, 1 warnings\n");
     }
 
-    public void testKotlin() throws Exception {
-        if (skipKotlinTests()) {
-            return;
-        }
+    public void testWindowsCRLF() {
+        // Ensure that offsets are correct on Windows when using CRLF instead of just LF as
+        // line separators.
 
         //noinspection all // Sample code
         lint().files(
+                java("src/test/pkg/MyTest.java", ""
+                        + "package test.pkg;\r\n"
+                        + "\r\n"
+                        + "public class MyTest {\r\n"
+                        + "    String s = \"/sdcard/mydir\";\r\n"
+                        + "}\r\n"))
+                .run()
+                .expect("src/test/pkg/MyTest.java:4: Warning: Do not hardcode \"/sdcard/\"; use Environment.getExternalStorageDirectory().getPath() instead [SdCardPath]\n" +
+                        "    String s = \"/sdcard/mydir\";\n" +
+                        "               ~~~~~~~~~~~~~~~\n" +
+                        "0 errors, 1 warnings\n");
+    }
+
+    public void testKotlin() {
+        //noinspection all // Sample code
+        lint().files(
                 kotlin(""
-                        + "package test.pkg;\n"
+                        + "package test.pkg\n"
                         + "\n"
                         + "class MyTest {\n"
                         + "    val s: String = \"/sdcard/mydir\"\n"
@@ -357,6 +361,21 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                         + "    val s: String = \"/sdcard/mydir\"\n"
                         + "                     ~~~~~~~~~~~~~\n"
                         + "0 errors, 1 warnings\n");
+    }
+
+    public void testSuppressFileAnnotation() {
+        //noinspection all // Sample code
+        lint().files(
+                kotlin(""
+                        + "@file:Suppress(\"unused\", \"SdCardPath\")\n"
+                        + "package test.pkg\n"
+                        + "\n"
+                        + "class MyTest {\n"
+                        + "    val s: String = \"/sdcard/mydir\"\n"
+                        + "}\n"),
+                gradle(""))
+                .run()
+                .expectClean();
     }
 
     public void testGenericsInSignatures() {
@@ -380,6 +399,7 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                         "0 errors, 1 warnings\n");
     }
 
+    // We've recently removed the large file limit (look for PersistentFSConstants)
     public void testLargeFiles() {
         int max = 2600 * 1024;
         StringBuilder large = new StringBuilder(max + 100); // default is 2500
@@ -399,11 +419,15 @@ public class SdCardDetectorTest extends AbstractCheckTest {
                 .allowSystemErrors(true)
                 .allowCompilationErrors()
                 .run()
+                /* We've recently removed the large file limit (look for PersistentFSConstants
+                   references)
                 .expect("src/test/pkg/VeryLarge.java: Error: Source file too large for lint to " +
                         "process (2600KB); the current max size is 2560000KB. You can increase " +
                         "the limit by setting this system property: " +
                         "idea.max.intellisense.filesize=4096 (or even higher) [LintError]\n" +
                         "1 errors, 0 warnings\n");
+                        */
+                .expectClean();
 
         // Bump up the file limit and make sure it no longer complains!
         String prev = System.getProperty("idea.max.intellisense.filesize");

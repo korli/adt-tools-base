@@ -13,35 +13,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.common.res2;
 
+import com.android.annotations.NonNull;
 import java.io.File;
-import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 
 /**
  * A {@link ResourcePreprocessor} used when no other preprocessor is enabled.
  */
 public final class NoOpResourcePreprocessor implements ResourcePreprocessor {
-
     public static final NoOpResourcePreprocessor INSTANCE = new NoOpResourcePreprocessor();
 
     // private constructor to avoid new instances.
     private NoOpResourcePreprocessor() { }
 
+    @NonNull
     @Override
-    public boolean needsPreprocessing(File file) {
-        return false;
+    public Collection<File> getFilesToBeGenerated(@NonNull File original) {
+        return Collections.emptySet();
     }
 
     @Override
-    public Collection<File> getFilesToBeGenerated(File original) {
-        throw new IllegalStateException("Should not be called");
-    }
-
-    @Override
-    public void generateFile(File toBeGenerated, File original) throws IOException {
+    public void generateFile(@NonNull File toBeGenerated, @NonNull File original) {
         throw new IllegalStateException("Should not be called");
     }
 }

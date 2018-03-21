@@ -16,13 +16,17 @@
 
 package com.android.tools.lint;
 
+import static com.android.SdkConstants.DOT_JAVA;
+import static com.android.SdkConstants.DOT_KT;
+import static com.android.SdkConstants.DOT_KTS;
+import static com.android.SdkConstants.FD_TOOLS;
+import static com.android.SdkConstants.FN_SOURCE_PROP;
 import static com.android.manifmerger.MergingReport.MergedManifestKind.MERGED;
 import static com.android.tools.lint.LintCliFlags.ERRNO_CREATED_BASELINE;
 import static com.android.tools.lint.LintCliFlags.ERRNO_ERRORS;
 import static com.android.tools.lint.LintCliFlags.ERRNO_SUCCESS;
 import static com.android.utils.CharSequences.indexOf;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
@@ -36,13 +40,15 @@ import com.android.manifmerger.ManifestMerger2.Invoker.Feature;
 import com.android.manifmerger.ManifestMerger2.MergeType;
 import com.android.manifmerger.MergingReport;
 import com.android.manifmerger.XmlDocument;
+import com.android.repository.api.LocalPackage;
 import com.android.sdklib.IAndroidTarget;
+import com.android.sdklib.repository.AndroidSdkHandler;
+import com.android.sdklib.repository.LoggerProgressIndicatorWrapper;
 import com.android.tools.lint.Reporter.Stats;
 import com.android.tools.lint.checks.HardcodedValuesDetector;
 import com.android.tools.lint.client.api.Configuration;
 import com.android.tools.lint.client.api.DefaultConfiguration;
 import com.android.tools.lint.client.api.IssueRegistry;
-import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.client.api.LintBaseline;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.client.api.LintDriver;
@@ -61,8 +67,11 @@ import com.android.tools.lint.detector.api.Position;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.TextFormat;
+import com.android.tools.lint.helpers.DefaultJavaEvaluator;
 import com.android.tools.lint.helpers.DefaultUastParser;
+import com.android.tools.lint.kotlin.LintKotlinUtils;
 import com.android.utils.CharSequences;
+import com.android.utils.NullLogger;
 import com.android.utils.StdLogger;
 import com.google.common.annotations.Beta;
 import com.google.common.base.Splitter;
@@ -70,10 +79,19 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.intellij.codeInsight.ExternalAnnotationsManager;
+import com.intellij.mock.MockProject;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.roots.LanguageLevelProjectExtension;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.vfs.StandardFileSystems;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.impl.file.impl.JavaFileManager;
 import com.intellij.util.lang.UrlClassLoader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -91,6 +109,12 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import javax.xml.parsers.ParserConfigurationException;
+import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCliJavaFileManagerImpl;
+import org.jetbrains.kotlin.cli.jvm.index.JavaRoot;
+import org.jetbrains.kotlin.cli.jvm.index.JvmDependenciesIndexImpl;
+import org.jetbrains.kotlin.cli.jvm.index.SingleJavaFileRootsIndex;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UExpression;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
 
@@ -325,12 +349,7 @@ public class LintCliClient extends LintClient {
         return mFileContents.computeIfAbsent(file, k -> readFile(file));
     }
 
-    @Override
-    public JavaParser getJavaParser(@Nullable Project project) {
-        return new EcjParser(this, project);
-    }
-
-    @Nullable
+    @NonNull
     @Override
     public UastParser getUastParser(@Nullable Project project) {
         return new LintCliUastParser(project);
@@ -350,7 +369,7 @@ public class LintCliClient extends LintClient {
         if (severity.isError()) {
             hasErrors = true;
             errorCount++;
-        } else {
+        } else if (severity == Severity.WARNING) { // Don't count informational as a warning
             warningCount++;
         }
 
@@ -451,6 +470,8 @@ public class LintCliClient extends LintClient {
         int end = indexOf(contents, '\n', offset);
         if (end == -1) {
             end = indexOf(contents, '\r', offset);
+        } else if (end > 0 && contents.charAt(end - 1) == '\r') {
+            end--;
         }
         return contents.subSequence(offset, end != -1 ? end : contents.length()).toString();
     }
@@ -473,11 +494,33 @@ public class LintCliClient extends LintClient {
     @NonNull
     @Override
     public CharSequence readFile(@NonNull File file) {
+        CharSequence contents;
         try {
-            return LintUtils.getEncodedString(this, file, false);
+            contents = LintUtils.getEncodedString(this, file, false);
         } catch (IOException e) {
-            return "";
+            contents = "";
         }
+
+        String path = file.getPath();
+        if ((path.endsWith(DOT_JAVA) || path.endsWith(DOT_KT) || path.endsWith(DOT_KTS)) &&
+                CharSequences.indexOf(contents, '\r') != -1) {
+            // Offsets in these files will be relative to PSI's text offsets (which may
+            // have converted line offsets); make sure we use the same offsets.
+            // (Can't just do this on Windows; what matters is whether the file contains
+            // CRLF's.)
+            VirtualFile vFile = StandardFileSystems.local().findFileByPath(path);
+            if (vFile != null) {
+                com.intellij.openapi.project.Project project = getIdeaProject();
+                if (project != null) {
+                    PsiFile psiFile = PsiManager.getInstance(project).findFile(vFile);
+                    if (psiFile != null) {
+                        contents = psiFile.getText();
+                    }
+                }
+            }
+        }
+
+        return contents;
     }
 
     boolean isCheckingSpecificIssues() {
@@ -720,14 +763,11 @@ public class LintCliClient extends LintClient {
     protected void reportNonExistingIssueId(@Nullable Project project, @NonNull String id) {
         String message = String.format("Unknown issue id \"%1$s\"", id);
 
-        if (driver != null && project != null) {
+        if (driver != null && project != null && !isSuppressed(IssueRegistry.LINT_ERROR)) {
             Location location = LintUtils.guessGradleLocation(this, project.getDir(), id);
-            if (!isSuppressed(IssueRegistry.LINT_ERROR)) {
-                report(new Context(driver, project, project, project.getDir(), ""),
-                        IssueRegistry.LINT_ERROR,
-                        project.getConfiguration(driver).getSeverity(IssueRegistry.LINT_ERROR),
-                        location, message, TextFormat.RAW, LintFix.create().data(id));
-            }
+            LintClient.Companion.report(this,IssueRegistry.LINT_ERROR,
+                    message, driver, project, location, LintFix.create().data(id));
+
         } else {
             log(Severity.ERROR, null, "Lint: %1$s", message);
         }
@@ -910,12 +950,18 @@ public class LintCliClient extends LintClient {
     }
 
 
+    @Nullable LintCoreProjectEnvironment projectEnvironment;
     @Nullable private com.intellij.openapi.project.Project ideaProject;
     @Nullable private Disposable projectDisposer;
 
     @Nullable
     public com.intellij.openapi.project.Project getIdeaProject() {
         return ideaProject;
+    }
+
+    @Nullable
+    public LintCoreProjectEnvironment getProjectEnvironment() {
+        return projectEnvironment;
     }
 
     @Override
@@ -928,7 +974,9 @@ public class LintCliClient extends LintClient {
 
         LintCoreProjectEnvironment projectEnvironment = LintCoreProjectEnvironment.create(
                 parentDisposable, appEnv);
-        ideaProject = projectEnvironment.getProject();
+        this.projectEnvironment = projectEnvironment;
+        MockProject mockProject = projectEnvironment.getProject();
+        ideaProject = mockProject;
 
         // knownProject only lists root projects, not dependencies
         Set<Project> allProjects = Sets.newIdentityHashSet();
@@ -937,13 +985,14 @@ public class LintCliClient extends LintClient {
             allProjects.addAll(project.getAllLibraries());
         }
 
-        List<File> files = Lists.newArrayListWithCapacity(50);
+        List<File> files = new ArrayList<>(50);
 
         for (Project project : allProjects) {
             // Note that there could be duplicates here since we're including multiple library
             // dependencies that could have the same dependencies (e.g. lib1 and lib2 both
             // referencing guava.jar)
             files.addAll(project.getJavaSourceFolders());
+            files.addAll(project.getTestSourceFolders());
             files.addAll(project.getGeneratedSourceFolders());
             files.addAll(project.getJavaLibraries(true));
             files.addAll(project.getTestLibraries());
@@ -956,24 +1005,7 @@ public class LintCliClient extends LintClient {
             // matches)
         }
 
-        IAndroidTarget buildTarget = null;
-        for (Project project : knownProjects) {
-            IAndroidTarget t = project.getBuildTarget();
-            if (t != null) {
-                if (buildTarget == null) {
-                    buildTarget = t;
-                } else if (buildTarget.getVersion().compareTo(t.getVersion()) > 0) {
-                    buildTarget = t;
-                }
-            }
-        }
-
-        if (buildTarget != null) {
-            File file = buildTarget.getFile(IAndroidTarget.ANDROID_JAR);
-            if (file != null) {
-                files.add(file);
-            }
-        }
+        addBootClassPath(knownProjects, files);
 
         projectEnvironment.registerPaths(files);
 
@@ -999,7 +1031,48 @@ public class LintCliClient extends LintClient {
             }
         }
 
+        KotlinCliJavaFileManagerImpl manager =
+                (KotlinCliJavaFileManagerImpl) ServiceManager.getService(mockProject, JavaFileManager.class);
+        List<JavaRoot> roots = new ArrayList<>();
+        for (File file : files) {
+            if (file.isDirectory()) {
+                VirtualFile vFile = StandardFileSystems.local().findFileByPath(file.getPath());
+                if (vFile != null) {
+                    roots.add(new JavaRoot(vFile, JavaRoot.RootType.SOURCE, null));
+                }
+            }
+        }
+
+        JvmDependenciesIndexImpl index = new JvmDependenciesIndexImpl(roots);
+        manager.initialize(index, Collections.emptyList(),
+                new SingleJavaFileRootsIndex(Collections.emptyList()), false);
+
         super.initializeProjects(knownProjects);
+    }
+
+    protected boolean addBootClassPath(@NonNull Collection<? extends Project> knownProjects,
+            List<File> files) {
+        IAndroidTarget buildTarget = null;
+        for (Project project : knownProjects) {
+            IAndroidTarget t = project.getBuildTarget();
+            if (t != null) {
+                if (buildTarget == null) {
+                    buildTarget = t;
+                } else if (buildTarget.getVersion().compareTo(t.getVersion()) > 0) {
+                    buildTarget = t;
+                }
+            }
+        }
+
+        if (buildTarget != null) {
+            File file = buildTarget.getFile(IAndroidTarget.ANDROID_JAR);
+            if (file != null) {
+                files.add(file);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     @Override
@@ -1017,22 +1090,28 @@ public class LintCliClient extends LintClient {
     @Override
     @Nullable
     public String getClientRevision() {
-        try {
-            File file = findResource("tools" + File.separator +
-                    "source.properties");
-            if (file != null && file.exists()) {
-                try (FileInputStream input = new FileInputStream(file)) {
-                    Properties properties = new Properties();
-                    properties.load(input);
-
-                    String revision = properties.getProperty("Pkg.Revision");
-                    if (revision != null && !revision.isEmpty()) {
-                        return revision;
-                    }
-                }
+        AndroidSdkHandler sdk = getSdk();
+        if (sdk != null) {
+            NullLogger empty = new NullLogger();
+            LoggerProgressIndicatorWrapper progress = new LoggerProgressIndicatorWrapper(empty);
+            LocalPackage pkg = sdk.getLocalPackage(FD_TOOLS, progress);
+            if (pkg != null) {
+                return pkg.getVersion().toShortString();
             }
-        } catch (Throwable ignore) {
-            // dev builds, tests, etc: fall through to unknown
+        }
+
+        File file = findResource(FD_TOOLS + File.separator + FN_SOURCE_PROP);
+        if (file != null && file.exists()) {
+            try (FileInputStream input = new FileInputStream(file)) {
+                Properties properties = new Properties();
+                properties.load(input);
+                String revision = properties.getProperty("Pkg.Revision");
+                if (revision != null && !revision.isEmpty()) {
+                    return revision;
+                }
+            } catch (Throwable ignore) {
+                // dev builds, tests, etc: fall through to unknown
+            }
         }
 
         return "unknown";
@@ -1078,9 +1157,11 @@ public class LintCliClient extends LintClient {
             ApiVersion targetSdkVersion = mergedFlavor.getTargetSdkVersion();
             ApiVersion minSdkVersion = mergedFlavor.getMinSdkVersion();
             if (targetSdkVersion != null || minSdkVersion != null) {
-                injectedXml.append(""
-                        + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
-                        + "    <uses-sdk");
+                injectedXml.append(
+                        ""
+                                + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
+                                + "    package=\"${packageName}\">\n"
+                                + "    <uses-sdk");
                 if (minSdkVersion != null) {
                     injectedXml.append(" android:minSdkVersion=\"")
                             .append(minSdkVersion.getApiString()).append("\"");
@@ -1172,6 +1253,8 @@ public class LintCliClient extends LintClient {
                     resolveMergeManifestSources(document, mergeReport.getActions());
                     return document;
                 }
+            } else {
+                log(Severity.WARNING, null, mergeReport.getReportString());
             }
         }
         catch (ManifestMerger2.MergeFailureException e) {
@@ -1187,21 +1270,78 @@ public class LintCliClient extends LintClient {
 
         public LintCliUastParser(Project project) {
             //noinspection ConstantConditions
-            super(project, LintCliClient.this.ideaProject);
+            super(project, ideaProject);
             this.project = project;
         }
 
+        @NonNull
         @Override
-        public boolean prepare(@NonNull final List<? extends JavaContext> contexts) {
+        protected DefaultJavaEvaluator createEvaluator(
+                @Nullable Project project,
+                @NonNull com.intellij.openapi.project.Project p) {
+            assert project != null;
+            return new DefaultJavaEvaluator(p, project) {
+                @NonNull
+                @Override
+                public Map<UExpression, PsiParameter> computeArgumentMapping(
+                        @NonNull UCallExpression call,
+                        @NonNull PsiMethod method) {
+
+                    if (method.getParameterList().getParametersCount() == 0) {
+                        return Collections.emptyMap();
+                    }
+
+                    Map<UExpression, PsiParameter> kotlinMap =
+                            LintKotlinUtils.computeKotlinArgumentMapping(call, method);
+                    if (kotlinMap != null) {
+                        return kotlinMap;
+                    }
+
+                    return super.computeArgumentMapping(call, method);
+                }
+            };
+        }
+
+        @Override
+        public boolean prepare(@NonNull List<? extends JavaContext> contexts,
+                @NonNull List<? extends JavaContext> testContexts) {
             // If we're using Kotlin, ensure we initialize the bridge
+            List<File> kotlinFiles = new ArrayList<>();
             for (JavaContext context : contexts) {
-                if (context.file.getPath().endsWith(SdkConstants.DOT_KT)) {
-                    LintCoreApplicationEnvironment.registerKotlinUastPlugin();
-                    break;
+                String path = context.file.getPath();
+                if (path.endsWith(DOT_KT) || path.endsWith(DOT_KTS)) {
+                    kotlinFiles.add(context.file);
+                }
+            }
+            for (JavaContext context : testContexts) {
+                String path = context.file.getPath();
+                if (path.endsWith(DOT_KT) || path.endsWith(DOT_KTS)) {
+                    kotlinFiles.add(context.file);
                 }
             }
 
-            boolean ok = super.prepare(contexts);
+            // We also need Kotlin files in dependencies; see issue
+            //  https://issuetracker.google.com/72032121
+            Project first = findProject(contexts, testContexts);
+            if (first != null) {
+                for (Project dependency : first.getAllLibraries()) {
+                    addKotlinFiles(kotlinFiles, dependency.getJavaSourceFolders());
+                    addKotlinFiles(kotlinFiles, dependency.getTestSourceFolders());
+                }
+            }
+
+            // We unconditionally invoke the KotlinLintAnalyzerFacade, even
+            // if kotlinFiles is empty -- without this, the machinery in
+            // the project (such as the CliLightClassGenerationSupport and
+            // the CoreFileManager) will throw exceptions at runtime even
+            // for plain class lookup
+            MockProject project = (MockProject) ideaProject;
+            if (project != null && projectEnvironment != null) {
+                List<File> paths = projectEnvironment.getPaths();
+                KotlinLintAnalyzerFacade.analyze(kotlinFiles, paths, project);
+            }
+
+            boolean ok = super.prepare(contexts, testContexts);
 
             if (project == null || contexts.isEmpty()) {
                 return ok;
@@ -1217,6 +1357,39 @@ public class LintCliClient extends LintClient {
             }
 
             return ok;
+        }
+
+        private void addKotlinFiles(List<File> kotlinFiles, List<File> sourceFolders) {
+            for (File dir : sourceFolders) {
+                addKotlinFiles(kotlinFiles, dir);
+            }
+        }
+
+        private void addKotlinFiles(List<File> kotlinFiles, File file) {
+            String path = file.getPath();
+            if (path.endsWith(DOT_KT)) {
+                kotlinFiles.add(file);
+            } else if (!path.endsWith(DOT_JAVA) && file.isDirectory()) {
+                File[] files = file.listFiles();
+                if (files != null) {
+                    for (File sub : files) {
+                        addKotlinFiles(kotlinFiles, sub);
+                    }
+                }
+            }
+        }
+
+        @Nullable
+        private Project findProject(
+                @NonNull List<? extends JavaContext> contexts,
+                @NonNull List<? extends JavaContext> testContexts) {
+            if (!contexts.isEmpty()) {
+                return contexts.get(0).getProject();
+            } else if (!testContexts.isEmpty()) {
+                return testContexts.get(0).getProject();
+            } else {
+                return null;
+            }
         }
     }
 }

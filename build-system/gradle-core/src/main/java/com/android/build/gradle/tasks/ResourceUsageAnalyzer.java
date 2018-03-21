@@ -35,13 +35,12 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.internal.incremental.ByteCodeUtils;
+import com.android.ide.common.resources.usage.ResourceUsageModel;
+import com.android.ide.common.resources.usage.ResourceUsageModel.Resource;
 import com.android.ide.common.xml.XmlPrettyPrinter;
 import com.android.resources.FolderTypeRelationship;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
-import com.android.tools.lint.checks.ResourceUsageModel;
-import com.android.tools.lint.checks.ResourceUsageModel.Resource;
-import com.android.tools.lint.checks.StringFormatDetector;
 import com.android.utils.Pair;
 import com.android.utils.XmlUtils;
 import com.google.common.base.Charsets;
@@ -60,6 +59,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -528,6 +528,20 @@ public class ResourceUsageAnalyzer {
         zos.closeEntry();
     }
 
+    /** Writes the whitelist string to whitelist file specified by destination */
+    public void emitWhitelist(Path destination) throws IOException {
+        File destinationFile = destination.toFile();
+        if (!destinationFile.exists()) {
+            destinationFile.getParentFile().mkdirs();
+            boolean success = destinationFile.createNewFile();
+            if (!success) {
+                throw new IOException("Could not create " + destination);
+            }
+        }
+        Files.write(mModel.dumpWhitelistedResources(), destinationFile, UTF_8);
+    }
+
+
     /**
      * Remove resources (already identified by {@link #analyze()}).
      *
@@ -910,6 +924,7 @@ public class ResourceUsageAnalyzer {
                                         + "matches string pool constant " + string);
                             }
                             ResourceUsageModel.markReachable(resource);
+                            mModel.addResourceToWhitelist(resource);
                         }
                     }
                 }
@@ -1035,12 +1050,37 @@ public class ResourceUsageAnalyzer {
         }
     }
 
+    // Copied from StringFormatDetector
+    // See java.util.Formatter docs
+    public static final Pattern FORMAT = Pattern.compile(
+            // Generic format:
+            //   %[argument_index$][flags][width][.precision]conversion
+            //
+            "%" +
+                    // Argument Index
+                    "(\\d+\\$)?" +
+                    // Flags
+                    "([-+#, 0(<]*)?" +
+                    // Width
+                    "(\\d+)?" +
+                    // Precision
+                    "(\\.\\d+)?" +
+                    // Conversion. These are all a single character, except date/time conversions
+                    // which take a prefix of t/T:
+                    "([tT])?" +
+                    // The current set of conversion characters are
+                    // b,h,s,c,d,o,x,e,f,g,a,t (as well as all those as upper-case characters), plus
+                    // n for newlines and % as a literal %. And then there are all the time/date
+                    // characters: HIKLm etc. Just match on all characters here since there should
+                    // be at least one.
+                    "([a-zA-Z%])");
+
     @VisibleForTesting
     static String convertFormatStringToRegexp(String formatString) {
         StringBuilder regexp = new StringBuilder();
         int from = 0;
         boolean hasEscapedLetters = false;
-        Matcher matcher = StringFormatDetector.FORMAT.matcher(formatString);
+        Matcher matcher = FORMAT.matcher(formatString);
         int length = formatString.length();
         while (matcher.find(from)) {
             int start = matcher.start();
@@ -1422,7 +1462,7 @@ public class ResourceUsageAnalyzer {
         }
     }
 
-    // TODO: Use Lombok/ECJ here
+    // TODO: Use PSI here
     private void parseResourceClass(File file) throws IOException {
         String s = Files.toString(file, UTF_8);
         // Simple parser which handles only aapt's special R output

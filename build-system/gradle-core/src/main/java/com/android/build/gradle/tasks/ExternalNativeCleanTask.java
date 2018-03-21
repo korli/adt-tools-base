@@ -19,13 +19,14 @@ package com.android.build.gradle.tasks;
 import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.android.annotations.NonNull;
-import com.android.build.gradle.external.gson.NativeBuildConfigValue;
-import com.android.build.gradle.external.gson.NativeLibraryValue;
 import com.android.build.gradle.internal.core.Abi;
+import com.android.build.gradle.internal.cxx.json.AndroidBuildGradleJsons;
+import com.android.build.gradle.internal.cxx.json.NativeBuildConfigValueMini;
+import com.android.build.gradle.internal.cxx.json.NativeLibraryValueMini;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.tasks.BaseTask;
+import com.android.build.gradle.internal.tasks.AndroidBuilderTask;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.builder.core.AndroidBuilder;
 import com.android.ide.common.process.ProcessException;
@@ -37,7 +38,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.io.File;
 import java.io.IOException;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,7 +49,7 @@ import org.gradle.api.tasks.TaskAction;
  * <p>It declares no inputs or outputs, as it's supposed to always run when invoked. Incrementality
  * is left to the underlying build system.
  */
-public class ExternalNativeCleanTask extends BaseTask {
+public class ExternalNativeCleanTask extends AndroidBuilderTask {
 
     private List<File> nativeBuildConfigurationsJsons;
 
@@ -74,23 +74,17 @@ public class ExternalNativeCleanTask extends BaseTask {
             }
         }
 
-        Collection<NativeBuildConfigValue> configValueList = ExternalNativeBuildTaskUtils
-                .getNativeBuildConfigValues(
-                        existingJsons, checkNotNull(getVariantName()));
+        List<NativeBuildConfigValueMini> configValueList =
+                AndroidBuildGradleJsons.getNativeBuildMiniConfigs(existingJsons, null);
         List<String> cleanCommands = Lists.newArrayList();
         List<String> targetNames = Lists.newArrayList();
-        for (NativeBuildConfigValue config : configValueList) {
-            if (config.libraries == null) {
-                continue;
+        for (NativeBuildConfigValueMini config : configValueList) {
+            cleanCommands.addAll(config.cleanCommands);
+            Set<String> targets = Sets.newHashSet();
+            for (NativeLibraryValueMini library : config.libraries.values()) {
+                targets.add(String.format("%s %s", library.artifactName, library.abi));
             }
-            if (config.cleanCommands != null) {
-                cleanCommands.addAll(config.cleanCommands);
-                Set<String> targets = Sets.newHashSet();
-                for (NativeLibraryValue library : config.libraries.values()) {
-                    targets.add(String.format("%s %s", library.artifactName, library.abi));
-                }
-                targetNames.add(Joiner.on(",").join(targets));
-            }
+            targetNames.add(Joiner.on(",").join(targets));
         }
         diagnostic("about to execute %s clean commands", cleanCommands.size());
         executeProcessBatch(cleanCommands, targetNames);
@@ -122,7 +116,7 @@ public class ExternalNativeCleanTask extends BaseTask {
             String command = commands.get(commandIndex);
             String target = targetNames.get(commandIndex);
             getLogger().lifecycle(String.format("Clean %s", target));
-            List<String> tokens = StringHelper.tokenizeString(command);
+            List<String> tokens = StringHelper.tokenizeCommandLineToEscaped(command);
             ProcessInfoBuilder processBuilder = new ProcessInfoBuilder();
             processBuilder.setExecutable(tokens.get(0));
             for (int i = 1; i < tokens.size(); ++i) {

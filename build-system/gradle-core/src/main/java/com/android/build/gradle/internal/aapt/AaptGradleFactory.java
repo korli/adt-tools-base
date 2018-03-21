@@ -21,25 +21,18 @@ import com.android.annotations.Nullable;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.internal.aapt.Aapt;
 import com.android.builder.internal.aapt.v1.AaptV1;
-import com.android.builder.internal.aapt.v2.AaptV2Jni;
-import com.android.builder.internal.aapt.v2.OutOfProcessAaptV2;
 import com.android.builder.internal.aapt.v2.QueueableAapt2;
 import com.android.builder.sdk.TargetInfo;
-import com.android.builder.utils.FileCache;
-import com.android.ide.common.internal.WaitableExecutor;
 import com.android.ide.common.process.LoggedProcessOutputHandler;
 import com.android.ide.common.process.ProcessOutputHandler;
-import com.android.ide.common.process.TeeProcessOutputHandler;
 import com.android.sdklib.BuildToolInfo;
 import com.android.utils.ILogger;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import java.io.File;
-import java.io.IOException;
 import java.util.List;
 import java.util.regex.Pattern;
-import org.gradle.api.Project;
 
 /**
  * Factory that creates instances of {@link com.android.builder.internal.aapt.Aapt} by looking
@@ -55,7 +48,6 @@ public final class AaptGradleFactory {
      * @param aaptGeneration which aapt to use
      * @param builder the android builder project model
      * @param outputHandler the output handler to use
-     * @param fileCache the cache to use for AAPT2 jni.
      * @param crunchPng should PNGs be crunched?
      * @param intermediateDir intermediate directory for aapt to use
      * @param cruncherProcesses the number of cruncher processes to use, if cruncher processes are
@@ -67,47 +59,32 @@ public final class AaptGradleFactory {
             @NonNull AaptGeneration aaptGeneration,
             @NonNull AndroidBuilder builder,
             @Nullable ProcessOutputHandler outputHandler,
-            @Nullable FileCache fileCache,
             boolean crunchPng,
             @NonNull File intermediateDir,
-            int cruncherProcesses)
-            throws IOException {
+            int cruncherProcesses) {
         TargetInfo target = builder.getTargetInfo();
         Preconditions.checkNotNull(target, "target == null");
         BuildToolInfo buildTools = target.getBuildTools();
 
-        ProcessOutputHandler teeOutputHandler =
-                new TeeProcessOutputHandler(
-                        outputHandler,
-                        new LoggedProcessOutputHandler(new FilteringLogger(builder.getLogger())));
+        if (outputHandler == null) {
+            // If we weren't passed any output handlers, use a logged process output handler.
+            outputHandler =
+                    new LoggedProcessOutputHandler(new FilteringLogger(builder.getLogger()));
+        }
 
         switch (aaptGeneration) {
             case AAPT_V1:
                 return new AaptV1(
                         builder.getProcessExecutor(),
-                        teeOutputHandler,
+                        outputHandler,
                         buildTools,
                         new FilteringLogger(builder.getLogger()),
                         crunchPng ? AaptV1.PngProcessMode.ALL : AaptV1.PngProcessMode.NO_CRUNCH,
                         cruncherProcesses);
-            case AAPT_V2:
-                return new OutOfProcessAaptV2(
-                        builder.getProcessExecutor(),
-                        teeOutputHandler,
-                        buildTools,
-                        intermediateDir,
-                        new FilteringLogger(builder.getLogger()));
-            case AAPT_V2_JNI:
-                return new AaptV2Jni(
-                        intermediateDir,
-                        WaitableExecutor.useGlobalSharedThreadPool(),
-                        teeOutputHandler,
-                        fileCache);
             case AAPT_V2_DAEMON_MODE:
                 return new QueueableAapt2(
-                        teeOutputHandler,
+                        outputHandler,
                         buildTools,
-                        intermediateDir,
                         new FilteringLogger(builder.getLogger()),
                         0 /* use default */);
             default:

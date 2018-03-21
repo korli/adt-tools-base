@@ -21,9 +21,17 @@ import com.android.annotations.VisibleForTesting;
 import com.android.build.api.transform.Transform;
 import com.android.build.gradle.internal.core.Abi;
 import com.android.build.gradle.internal.dsl.Splits;
+import com.android.build.gradle.internal.scope.CodeShrinker;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.IntegerOption;
+import com.android.build.gradle.options.LongOption;
+import com.android.build.gradle.options.OptionalBooleanOption;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.StringOption;
 import com.android.builder.dexing.DexMergerTool;
 import com.android.builder.dexing.DexerTool;
+import com.android.builder.model.TestOptions;
 import com.android.resources.Density;
 import com.android.sdklib.AndroidVersion;
 import com.android.tools.build.gradle.internal.profile.GradleTaskExecutionType;
@@ -34,6 +42,9 @@ import com.google.wireless.android.sdk.stats.ApiVersion;
 import com.google.wireless.android.sdk.stats.DeviceInfo;
 import com.google.wireless.android.sdk.stats.GradleBuildSplits;
 import com.google.wireless.android.sdk.stats.GradleBuildVariant;
+import com.google.wireless.android.sdk.stats.GradleIntegerOptionEntry;
+import com.google.wireless.android.sdk.stats.GradleProjectOptionsSettings;
+import com.google.wireless.android.sdk.stats.TestRun;
 import java.util.Locale;
 
 /**
@@ -121,7 +132,9 @@ public class AnalyticsUtil {
         if (splits.getLanguage().isEnable()) {
             builder.setLanguageEnabled(true);
             builder.setLanguageAuto(splits.getLanguage().isAuto());
-            builder.addAllLanguageIncludes(splits.getLanguage().getInclude());
+            for (String split : splits.getLanguage().getApplicationFilters()) {
+                builder.addLanguageIncludes(split != null ? split : "null");
+            }
         }
 
         if (splits.getAbi().isEnable()) {
@@ -144,10 +157,10 @@ public class AnalyticsUtil {
         switch (type) {
             case RETROLAMBDA:
                 return GradleBuildVariant.Java8LangSupport.RETROLAMBDA;
-            case DEXGUARD:
-                return GradleBuildVariant.Java8LangSupport.DEXGUARD;
             case DESUGAR:
                 return GradleBuildVariant.Java8LangSupport.INTERNAL;
+            case D8:
+                return GradleBuildVariant.Java8LangSupport.D8;
             case INVALID:
                 // fall through
             case UNUSED:
@@ -179,7 +192,29 @@ public class AnalyticsUtil {
     }
 
     @NonNull
-    private static DeviceInfo.ApplicationBinaryInterface getAbi(@NonNull String name) {
+    public static GradleBuildVariant.CodeShrinkerTool toProto(@NonNull CodeShrinker codeShrinker) {
+        switch (codeShrinker) {
+            case PROGUARD:
+                return GradleBuildVariant.CodeShrinkerTool.PROGUARD;
+            case ANDROID_GRADLE:
+                return GradleBuildVariant.CodeShrinkerTool.ANDROID_GRADLE_SHRINKER;
+        }
+        throw new AssertionError("Unrecognized type " + codeShrinker);
+    }
+
+    @NonNull
+    public static TestRun.TestExecution toProto(@NonNull TestOptions.Execution execution) {
+        switch (execution) {
+            case HOST:
+                return TestRun.TestExecution.HOST;
+            case ANDROID_TEST_ORCHESTRATOR:
+                return TestRun.TestExecution.ANDROID_TEST_ORCHESTRATOR;
+        }
+        throw new AssertionError("Unrecognized type " + execution);
+    }
+
+    @NonNull
+    public static DeviceInfo.ApplicationBinaryInterface getAbi(@NonNull String name) {
         Abi abi = Abi.getByName(name);
         if (abi == null) {
             return DeviceInfo.ApplicationBinaryInterface.UNKNOWN_ABI;
@@ -219,5 +254,115 @@ public class AnalyticsUtil {
             default:
                 return GradleBuildSplits.CompatibleScreenSize.UNKNOWN_SCREEN_SIZE;
         }
+    }
+
+    @VisibleForTesting
+    @NonNull
+    static com.android.tools.build.gradle.internal.profile.BooleanOption toProto(
+            @NonNull BooleanOption option) {
+        try {
+            return com.android.tools.build.gradle.internal.profile.BooleanOption.valueOf(
+                    option.name());
+        } catch (IllegalArgumentException e) {
+            return com.android.tools.build.gradle.internal.profile.BooleanOption
+                    .UNKNOWN_BOOLEAN_OPTION;
+        }
+    }
+
+    @VisibleForTesting
+    @NonNull
+    static com.android.tools.build.gradle.internal.profile.OptionalBooleanOption toProto(
+            @NonNull OptionalBooleanOption option) {
+        try {
+            return com.android.tools.build.gradle.internal.profile.OptionalBooleanOption.valueOf(
+                    option.name());
+        } catch (IllegalArgumentException e) {
+            return com.android.tools.build.gradle.internal.profile.OptionalBooleanOption
+                    .UNKNOWN_OPTIONAL_BOOLEAN_OPTION;
+        }
+    }
+
+    @VisibleForTesting
+    @NonNull
+    static com.android.tools.build.gradle.internal.profile.IntegerOption toProto(
+            @NonNull IntegerOption option) {
+        try {
+            return com.android.tools.build.gradle.internal.profile.IntegerOption.valueOf(
+                    option.name());
+        } catch (IllegalArgumentException e) {
+            return com.android.tools.build.gradle.internal.profile.IntegerOption
+                    .UNKNOWN_INTEGER_OPTION;
+        }
+    }
+
+    @VisibleForTesting
+    @NonNull
+    static com.android.tools.build.gradle.internal.profile.LongOption toProto(
+            @NonNull LongOption option) {
+        try {
+            return com.android.tools.build.gradle.internal.profile.LongOption.valueOf(
+                    option.name());
+        } catch (IllegalArgumentException e) {
+            return com.android.tools.build.gradle.internal.profile.LongOption.UNKNOWN_LONG_OPTION;
+        }
+    }
+
+    @VisibleForTesting
+    @NonNull
+    static com.android.tools.build.gradle.internal.profile.StringOption toProto(
+            @NonNull StringOption option) {
+        try {
+            return com.android.tools.build.gradle.internal.profile.StringOption.valueOf(
+                    option.name());
+        } catch (IllegalArgumentException e) {
+            return com.android.tools.build.gradle.internal.profile.StringOption
+                    .UNKNOWN_STRING_OPTION;
+        }
+    }
+
+    @NonNull
+    public static GradleProjectOptionsSettings toProto(@NonNull ProjectOptions projectOptions) {
+        GradleProjectOptionsSettings.Builder builder = GradleProjectOptionsSettings.newBuilder();
+        projectOptions
+                .getExplicitlySetBooleanOptions()
+                .forEach(
+                        (BooleanOption option, Boolean value) -> {
+                            if (value) {
+                                builder.addTrueBooleanOptions(toProto(option).getNumber());
+                            } else {
+                                builder.addFalseBooleanOptions(toProto(option).getNumber());
+                            }
+                        });
+
+        projectOptions
+                .getExplicitlySetOptionalBooleanOptions()
+                .forEach(
+                        (OptionalBooleanOption option, Boolean value) -> {
+                            if (value) {
+                                builder.addTrueOptionalBooleanOptions(toProto(option).getNumber());
+                            } else {
+                                builder.addFalseOptionalBooleanOptions(toProto(option).getNumber());
+                            }
+                        });
+
+        projectOptions
+                .getExplicitlySetIntegerOptions()
+                .forEach(
+                        (IntegerOption option, Integer value) -> {
+                            builder.addIntegerOptionValues(
+                                    GradleIntegerOptionEntry.newBuilder()
+                                            .setIntegerOption(toProto(option).getNumber())
+                                            .setIntegerOptionValue(value));
+                        });
+
+        for (LongOption longOption : projectOptions.getExplicitlySetLongOptions().keySet()) {
+            builder.addLongOptions(toProto(longOption).getNumber());
+        }
+
+        for (StringOption stringOption : projectOptions.getExplicitlySetStringOptions().keySet()) {
+            builder.addStringOptions(toProto(stringOption).getNumber());
+        }
+
+        return builder.build();
     }
 }

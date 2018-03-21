@@ -78,6 +78,9 @@ public final class SdkConstants {
 
     /** An SDK Project's AndroidManifest.xml file */
     public static final String FN_ANDROID_MANIFEST_XML = "AndroidManifest.xml"; //$NON-NLS-1$
+
+    public static final String FN_SHARED_LIBRARY_ANDROID_MANIFEST_XML =
+            "SharedLibraryAndroidManifest.xml"; // $NON-NLS-1$
     /** pre-dex jar filename. i.e. "classes.jar" */
     public static final String FN_CLASSES_JAR = "classes.jar"; //$NON-NLS-1$
     /** Dex filename inside the APK. i.e. "classes.dex" */
@@ -91,13 +94,18 @@ public final class SdkConstants {
 
     /** list of splits for a variant */
     public static final String FN_SPLIT_LIST = "split-list.gson";                     //$NON-NLS-1$
+    public static final String FN_APK_LIST = "apk-list.gson"; //$NON-NLS-1$
 
     /** An SDK Project's build.xml file */
     public static final String FN_BUILD_XML = "build.xml"; //$NON-NLS-1$
     /** An SDK Project's build.gradle file */
     public static final String FN_BUILD_GRADLE = "build.gradle"; //$NON-NLS-1$
+    /** An SDK Project's build.gradle Kotlin script file */
+    public static final String FN_BUILD_GRADLE_KTS = "build.gradle.kts"; //$NON-NLS-1$
     /** An SDK Project's settings.gradle file */
     public static final String FN_SETTINGS_GRADLE = "settings.gradle"; //$NON-NLS-1$
+    /** An SDK Project's settings.gradle Kotlin script file */
+    public static final String FN_SETTINGS_GRADLE_KTS = "settings.gradle.kts"; //$NON-NLS-1$
     /** An SDK Project's gradle.properties file */
     public static final String FN_GRADLE_PROPERTIES = "gradle.properties"; //$NON-NLS-1$
     /** An SDK Project's gradle daemon executable */
@@ -259,6 +267,8 @@ public final class SdkConstants {
     public static final String FN_JACK_COVERAGE_PLUGIN = "jack-coverage-plugin.jar"; //$NON-NLS-1$
     /** jack-jacoco-report.jar */
     public static final String FN_JACK_JACOCO_REPORTER = "jack-jacoco-reporter.jar"; //$NON-NLS-1$
+    /** core-lambda-stubs.jar necessary for lambda compilation. */
+    public static final String FN_CORE_LAMBDA_STUBS = "core-lambda-stubs.jar"; // $NON-NLS-1$
 
     /** split-select */
     public static final String FN_SPLIT_SELECT = "split-select" + ext(".exe", "");
@@ -293,6 +303,8 @@ public final class SdkConstants {
     public static final String FN_PROJECT_PROGUARD_FILE = "proguard-project.txt"; //$NON-NLS-1$
     /** File holding a list of advanced features */
     public static final String FN_ADVANCED_FEATURES = "advancedFeatures.ini";
+    /** File holding a list of advanced features when user is on canary channel */
+    public static final String FN_ADVANCED_FEATURES_CANARY = "advancedFeaturesCanary.ini";
 
     /* Folder Names for Android Projects . */
 
@@ -667,6 +679,9 @@ public final class SdkConstants {
     /** SDK property: default skin */
     public static final String PROP_SDK_DEFAULT_SKIN = "sdk.skin.default"; //$NON-NLS-1$
 
+    /** LLDB SDK package major.minor revision compatible with the current version of Studio */
+    public static final String LLDB_PINNED_REVISION = "3.1";
+
     /* Android Class Constants */
     public static final String CLASS_ACTIVITY = "android.app.Activity"; //$NON-NLS-1$
     public static final String CLASS_APPLICATION = "android.app.Application"; //$NON-NLS-1$
@@ -730,6 +745,8 @@ public final class SdkConstants {
             "android.support.design.widget.CoordinatorLayout"; //$NON-NLS-1$
     public static final String CLASS_APP_BAR_LAYOUT =
             "android.support.design.widget.AppBarLayout"; //$NON-NLS-1$
+    public static final String CLASS_BOTTOM_NAVIGATION_VIEW =
+            "android.support.design.widget.BottomNavigationView"; //$NON-NLS-1$
     public static final String CLASS_FLOATING_ACTION_BUTTON =
             "android.support.design.widget.FloatingActionButton"; //$NON-NLS-1$
     public static final String CLASS_COLLAPSING_TOOLBAR_LAYOUT =
@@ -756,6 +773,8 @@ public final class SdkConstants {
     public static final String CLASS_TOOLBAR_V7 = "android.support.v7.widget.Toolbar"; //$NON-NLS-1$
     public static final String CLASS_RECYCLER_VIEW =
             "android.support.v7.widget.RecyclerView"; //$NON-NLS-1$
+    public static final String CLASS_RECYCLER_VIEW_LAYOUT_MANAGER =
+            "android.support.v7.widget.RecyclerView.LayoutManager"; //$NON-NLS-1$
     public static final String CLASS_CARD_VIEW = "android.support.v7.widget.CardView"; //$NON-NLS-1$
     public static final String CLASS_ACTION_MENU_VIEW =
             "android.support.v7.widget.ActionMenuView"; //$NON-NLS-1$
@@ -775,10 +794,14 @@ public final class SdkConstants {
             "android.support.percent.PercentRelativeLayout"; //$NON-NLS-1$
     public static final String CLASS_PERCENT_FRAME_LAYOUT =
             "android.support.percent.PercentFrameLayout"; //$NON-NLS-1$
+    public static final String SUPPORT_MULTI_DEX_APPLICATION =
+            "android.support.multidex.MultiDexApplication";
 
     /* Android ConstraintLayout Constants */
     public static final String CLASS_CONSTRAINT_LAYOUT =
             "android.support.constraint.ConstraintLayout"; //$NON-NLS-1$
+    public static final String CLASS_TRANSITION_LAYOUT =
+      "android.support.constraint.TransitionLayout"; //$NON-NLS-1$
     public static final String CLASS_CONSTRAINT_LAYOUT_HELPER =
             "android.support.constraint.ConstraintHelper"; //$NON-NLS-1$
     public static final String CLASS_CONSTRAINT_LAYOUT_BARRIER =
@@ -899,8 +922,10 @@ public final class SdkConstants {
     public static final String FD_RES_LAYOUT = "layout"; //$NON-NLS-1$
     /** Default menu resource folder name, i.e. "menu" */
     public static final String FD_RES_MENU = "menu"; //$NON-NLS-1$
-    /** Default menu resource folder name, i.e. "mipmap" */
+    /** Default mipmap resource folder name, i.e. "mipmap" */
     public static final String FD_RES_MIPMAP = "mipmap"; //$NON-NLS-1$
+    /** Default navigation resource folder name, i.e. "navigation" */
+    public static final String FD_RES_NAVIGATION = "navigation"; //$NON-NLS-1$
     /** Default values resource folder name, i.e. "values" */
     public static final String FD_RES_VALUES = "values"; //$NON-NLS-1$
     /** Default xml resource folder name, i.e. "xml" */
@@ -1045,6 +1070,10 @@ public final class SdkConstants {
     public static final String REQUEST_FOCUS = "requestFocus"; //$NON-NLS-1$
     public static final String TAG = "tag"; //$NON-NLS-1$
 
+    // Tags: Navigation
+    public static final String TAG_INCLUDE = "include";
+    public static final String TAG_DEEPLINK = "deeplink";
+
     public static final String VIEW = "View"; //$NON-NLS-1$
     public static final String VIEW_GROUP = "ViewGroup"; //$NON-NLS-1$
     public static final String FRAME_LAYOUT = "FrameLayout"; //$NON-NLS-1$
@@ -1106,6 +1135,7 @@ public final class SdkConstants {
     /* Android Support Tag Constants */
     public static final String COORDINATOR_LAYOUT = CLASS_COORDINATOR_LAYOUT;
     public static final String APP_BAR_LAYOUT = CLASS_APP_BAR_LAYOUT;
+    public static final String BOTTOM_NAVIGATION_VIEW = CLASS_BOTTOM_NAVIGATION_VIEW;
     public static final String FLOATING_ACTION_BUTTON = CLASS_FLOATING_ACTION_BUTTON;
     public static final String COLLAPSING_TOOLBAR_LAYOUT = CLASS_COLLAPSING_TOOLBAR_LAYOUT;
     public static final String NAVIGATION_VIEW = CLASS_NAVIGATION_VIEW;
@@ -1132,6 +1162,7 @@ public final class SdkConstants {
 
     /* Android ConstraintLayout Tag Constants */
     public static final String CONSTRAINT_LAYOUT = CLASS_CONSTRAINT_LAYOUT;
+    public static final String TRANSITION_LAYOUT = CLASS_TRANSITION_LAYOUT;
     public static final String TABLE_CONSTRAINT_LAYOUT = CLASS_TABLE_CONSTRAINT_LAYOUT;
     public static final String CONSTRAINT_LAYOUT_GUIDELINE = CLASS_CONSTRAINT_LAYOUT_GUIDELINE;
     public static final String CONSTRAINT_LAYOUT_BARRIER = CLASS_CONSTRAINT_LAYOUT_BARRIER;
@@ -1190,6 +1221,7 @@ public final class SdkConstants {
     public static final String ATTR_SPLIT_NAME = "splitName";
     public static final String ATTR_FEATURE_SPLIT = "featureSplit";
     public static final String ATTR_TARGET_SANDBOX_VERSION = "targetSandboxVersion";
+    public static final String ATTR_REQUIRED = "required";
 
     // Attributes: Resources
     public static final String ATTR_ATTR = "attr";
@@ -1237,6 +1269,10 @@ public final class SdkConstants {
     public static final String ATTR_BACKGROUND = "background"; //$NON-NLS-1$
     public static final String ATTR_ORIENTATION = "orientation"; //$NON-NLS-1$
     public static final String ATTR_BARRIER_DIRECTION = "barrierDirection"; //$NON-NLS-1$
+    public static final String ATTR_TRANSITION = "transition"; //$NON-NLS-1$
+    public static final String ATTR_TRANSITION_SHOW_PATHS = "showPaths"; //$NON-NLS-1$
+    public static final String ATTR_TRANSITION_STATE = "transitionState"; //$NON-NLS-1$
+    public static final String ATTR_TRANSITION_POSITION = "transitionPosition"; //$NON-NLS-1$
     public static final String ATTR_LAYOUT = "layout"; //$NON-NLS-1$
     public static final String ATTR_ROW_COUNT = "rowCount"; //$NON-NLS-1$
     public static final String ATTR_COLUMN_COUNT = "columnCount"; //$NON-NLS-1$
@@ -1288,6 +1324,11 @@ public final class SdkConstants {
     public static final String ATTR_PARENT_TAG = "parentTag"; //$NON-NLS-1$
     public static final String ATTR_WIDTH = "width"; //$NON-NLS-1$
     public static final String ATTR_HEIGHT = "height"; //$NON-NLS-1$
+
+    // Attributes: Navigation
+    public static final String ATTR_GRAPH = "graph";
+    public static final String ATTR_URI = "uri";
+    public static final String ATTR_AUTO_VERIFY = "autoVerify";
 
     // TextView attributes
     public static final String ATTR_TEXT_APPEARANCE = "textAppearance"; //$NON-NLS-1$
@@ -1581,6 +1622,7 @@ public final class SdkConstants {
     public static final String ATTR_TAB_INDICATOR_COLOR = "tabIndicatorColor"; //$NON-NLS-1$
     public static final String ATTR_TAB_SELECTED_TEXT_COLOR = "tabSelectedTextColor"; //$NON-NLS-1$
     public static final String ATTR_TAB_TEXT_APPEARANCE = "tabTextAppearance"; //$NON-NLS-1$
+    public static final String ATTR_LAYOUT_MANAGER = "layoutManager"; //$NON-NLS-1$
 
     // Values: Manifest
     public static final String VALUE_SPLIT_ACTION_BAR_WHEN_NARROW =
@@ -1647,6 +1689,7 @@ public final class SdkConstants {
     public static final String DOT_9PNG = ".9.png"; //$NON-NLS-1$
     public static final String DOT_JAVA = ".java"; //$NON-NLS-1$
     public static final String DOT_KT = ".kt"; //$NON-NLS-1$
+    public static final String DOT_KTS = ".kts"; //$NON-NLS-1$
     public static final String DOT_CLASS = ".class"; //$NON-NLS-1$
     public static final String DOT_JAR = ".jar"; //$NON-NLS-1$
     public static final String DOT_GRADLE = ".gradle"; //$NON-NLS-1$
@@ -1756,6 +1799,12 @@ public final class SdkConstants {
     public static final String FN_RESOURCE_TEXT = FN_RESOURCE_BASE + DOT_TXT;
     /** Filename for public resources in AAR archives */
     public static final String FN_PUBLIC_TXT = "public.txt";
+    /** Resource static library */
+    public static final String FN_RESOURCE_STATIC_LIBRARY = "res.apk";
+    /** Resource shared library */
+    public static final String FN_RESOURCE_SHARED_STATIC_LIBRARY = "shared.apk";
+    /** R class jar, used for resource static library */
+    public static final String FN_R_CLASS_JAR = "R.jar";
     /** Generated manifest class name */
     public static final String FN_MANIFEST_BASE = "Manifest"; //$NON-NLS-1$
     /** Generated BuildConfig class name */
@@ -1795,6 +1844,7 @@ public final class SdkConstants {
     public static final String FONT_PREFIX = "@font/"; //$NON-NLS-1$
     public static final String AAPT_ATTR_PREFIX = "@aapt:_aapt/";
     public static final String SAMPLE_PREFIX = "@sample/";
+    public static final String NAVIGATION_PREFIX = "@navigation/"; //$NON-NLS-1$
 
     public static final String TOOLS_SAMPLE_PREFIX = "@tools:sample/";
 
@@ -1854,6 +1904,7 @@ public final class SdkConstants {
     public static final String FQCN_SUPPRESS_LINT =
             "android.annotation." + SUPPRESS_LINT; //$NON-NLS-1$
     public static final String FQCN_TARGET_API = "android.annotation." + TARGET_API; //$NON-NLS-1$
+    public static final String KOTLIN_SUPPRESS = "kotlin.Suppress";
 
     // Class Names
     public static final String CONSTRUCTOR_NAME = "<init>"; //$NON-NLS-1$
@@ -1950,6 +2001,20 @@ public final class SdkConstants {
     public static final String ATTR_MOCKUP_POSITION = "mockup_crop"; //$NON-NLS-1$
     public static final String ATTR_MOCKUP_OPACITY = "mockup_opacity"; //$NON-NLS-1$
 
+    // Baselines
+    /**
+     * Root tag in baseline files (which can be the XML output report files from lint, or a
+     * subset of these
+     */
+    @SuppressWarnings("unused") // used from IDE
+    public static final String TAG_ISSUES = "issues";
+    public static final String TAG_ISSUE = "issue";
+    public static final String TAG_LOCATION = "location";
+    public static final String ATTR_MESSAGE = "message";
+    public static final String ATTR_FILE = "file";
+    public static final String ATTR_LINE = "line";
+    public static final String ATTR_COLUMN = "column";
+
     public static final class ImageViewAttributes {
         public static final String TINT = "tint";
     }
@@ -1963,6 +2028,7 @@ public final class SdkConstants {
         public static final String PREFERENCE_SCREEN = "PreferenceScreen";
         public static final String RINGTONE_PREFERENCE = "RingtonePreference";
         public static final String SWITCH_PREFERENCE = "SwitchPreference";
+        public static final String INTENT = "intent";
     }
 
     public static final class PreferenceAttributes {
@@ -2011,6 +2077,8 @@ public final class SdkConstants {
     /** The top level android package as a prefix, "android.". */
     public static final String ANDROID_SUPPORT_PKG_PREFIX =
             ANDROID_PKG_PREFIX + "support."; //$NON-NLS-1$
+    /** Architecture component package prefix */
+    public static final String ANDROID_ARCH_PKG_PREFIX = ANDROID_PKG_PREFIX + "arch.";
 
     /** The android.view. package prefix */
     public static final String ANDROID_VIEW_PKG = ANDROID_PKG_PREFIX + "view."; //$NON-NLS-1$
@@ -2167,21 +2235,23 @@ public final class SdkConstants {
     public static final String GRADLE_PLUGIN_NAME = "com.android.tools.build:gradle:";
     public static final String GRADLE_EXPERIMENTAL_PLUGIN_NAME =
             "com.android.tools.build:gradle-experimental:";
-    public static final String GRADLE_MINIMUM_VERSION = "4.1";
+    public static final String GRADLE_MINIMUM_VERSION = "4.4";
     public static final String GRADLE_LATEST_VERSION = GRADLE_MINIMUM_VERSION;
     public static final String GRADLE_PLUGIN_MINIMUM_VERSION = "1.0.0";
-    // Always update GRADLE_PLUGIN_RECOMMENDED_VERSION and GRADLE_EXPERIMENTAL_PLUGIN_RECOMMENDED_VERSION together.
-    public static final String GRADLE_PLUGIN_RECOMMENDED_VERSION = "2.3.2";
-    public static final String GRADLE_EXPERIMENTAL_PLUGIN_RECOMMENDED_VERSION = "0.9.0";
+    public static final String GRADLE_PLUGIN_RECOMMENDED_VERSION = "3.1.0";
     // Temporary - can be removed once the recommended version supports AIA (with splits).
     public static final String GRADLE_PLUGIN_LATEST_VERSION = GRADLE_PLUGIN_RECOMMENDED_VERSION;
-    public static final String GRADLE_EXPERIMENTAL_PLUGIN_LATEST_VERSION =
-            GRADLE_EXPERIMENTAL_PLUGIN_RECOMMENDED_VERSION;
-    public static final String GRADLE_COMPILE_CONFIGURATION = "compile";
-    public static final String GRADLE_TEST_COMPILE_CONFIGURATION = "testCompile";
+
+    /** use api or implementation */
+    @Deprecated public static final String GRADLE_COMPILE_CONFIGURATION = "compile";
+    /** use api or implementation */
+    @Deprecated public static final String GRADLE_TEST_COMPILE_CONFIGURATION = "testCompile";
+    /** use api or implementation */
+    @Deprecated
     public static final String GRADLE_ANDROID_TEST_COMPILE_CONFIGURATION = "androidTestCompile";
+
     public static final String GRADLE_ANDROID_TEST_UTIL_CONFIGURATION = "androidTestUtil";
-    public static final String CURRENT_BUILD_TOOLS_VERSION = "26.0.2";
+    public static final String CURRENT_BUILD_TOOLS_VERSION = "27.0.3";
     public static final String SUPPORT_LIB_GROUP_ID = "com.android.support";
     public static final String SUPPORT_LIB_ARTIFACT = "com.android.support:support-v4";
     public static final String DESIGN_LIB_ARTIFACT = "com.android.support:design";
@@ -2199,6 +2269,7 @@ public final class SdkConstants {
     // Annotations
     public static final String SUPPORT_ANNOTATIONS_PREFIX = "android.support.annotation.";
     public static final String INT_DEF_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "IntDef";
+    public static final String LONG_DEF_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "LongDef";
     public static final String STRING_DEF_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "StringDef";
     public static final String TYPE_DEF_VALUE_ATTRIBUTE = "value";
     public static final String TYPE_DEF_FLAG_ATTRIBUTE = "flag";

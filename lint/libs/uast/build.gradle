@@ -5,8 +5,9 @@ archivesBaseName = 'uast'
 version = rootProject.ext.baseVersion
 
 jar {
-    from zipTree("../../../../../prebuilts/tools/common/uast/1.0/uast-common-1.0.jar")
-    from zipTree("../../../../../prebuilts/tools/common/uast/1.0/uast-java-1.0.jar")
+    from zipTree("../../../../../prebuilts/tools/common/lint-psi/uast/uast-common.jar")
+    from zipTree("../../../../../prebuilts/tools/common/lint-psi/uast/uast-java.jar")
+    from zipTree("../../../../../prebuilts/tools/common/lint-psi/uast/uast-kotlin.jar")
 }
 
 project.ext.pomName = 'Unified AST'

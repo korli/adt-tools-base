@@ -17,7 +17,8 @@
 package com.android.builder.dexing;
 
 import static com.android.builder.dexing.DexArchiveTestUtil.PACKAGE;
-import static com.android.testutils.truth.MoreTruth.assertThat;
+import static com.android.testutils.truth.DexSubject.assertThat;
+import static com.android.testutils.truth.PathSubject.assertThat;
 import static org.junit.Assert.fail;
 import static org.objectweb.asm.Opcodes.V1_6;
 
@@ -158,7 +159,8 @@ public class DexArchiveMergerTest {
             if (dexMerger == DexMergerTool.DX) {
                 exepectedMessage = "method ID not in";
             } else {
-                exepectedMessage = "Cannot fit requested classes in a single dex file";
+                exepectedMessage =
+                        "The number of method references in a .dex file cannot exceed 64K";
             }
             Truth.assertThat(Throwables.getStackTraceAsString(e)).contains(exepectedMessage);
         }

@@ -32,14 +32,16 @@ import com.intellij.openapi.vfs.StandardFileSystems;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileSystem;
 import com.intellij.psi.PsiManager;
-import com.intellij.psi.impl.PsiModificationTrackerImpl;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public class LintExternalAnnotationsManager extends BaseExternalAnnotationsManager {
+    public static final String SDK_ANNOTATIONS_PATH = "annotations.zip";
+    public static final String FN_ANNOTATIONS_XML = "annotations.xml";
 
     private final List<VirtualFile> roots = Lists.newArrayList();
 
@@ -84,7 +86,7 @@ public class LintExternalAnnotationsManager extends BaseExternalAnnotationsManag
             }
         }
 
-        File sdkAnnotations = client.findResource(ExternalAnnotationRepository.SDK_ANNOTATIONS_PATH);
+        File sdkAnnotations = client.findResource(SDK_ANNOTATIONS_PATH);
         if (sdkAnnotations == null) {
             // Until the SDK annotations are bundled in platform tools, provide
             // a fallback for Gradle builds to point to a locally installed version
@@ -100,7 +102,7 @@ public class LintExternalAnnotationsManager extends BaseExternalAnnotationsManag
             files.add(sdkAnnotations);
         }
 
-        List<VirtualFile> newRoots = Lists.newArrayListWithCapacity(files.size());
+        List<VirtualFile> newRoots = new ArrayList<>(files.size());
 
         VirtualFileSystem local = StandardFileSystems.local();
         VirtualFileSystem jar = StandardFileSystems.jar();
@@ -119,9 +121,6 @@ public class LintExternalAnnotationsManager extends BaseExternalAnnotationsManag
                 } else {
                     virtualFile = local.findFileByPath(file.getAbsolutePath());
                 }
-                if (virtualFile == null) {
-                    System.out.println("WTF?");
-                }
             }
             if (virtualFile != null) {
                 newRoots.add(virtualFile);
@@ -137,7 +136,10 @@ public class LintExternalAnnotationsManager extends BaseExternalAnnotationsManag
 
         roots.addAll(newRoots);
         dropCache(); // TODO: Find out if I need to drop cache for pure additions
-        ((PsiModificationTrackerImpl)myPsiManager.getModificationTracker()).incCounter();
+
+        // TODO
+        //ApplicationManager.getApplication().runWriteAction(
+        //    () -> ((PsiModificationTrackerImpl)myPsiManager.getModificationTracker()).incCounter());
     }
 
     private static void addLibraries(

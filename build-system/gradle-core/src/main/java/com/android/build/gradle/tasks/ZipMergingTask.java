@@ -21,7 +21,7 @@ import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.TaskOutputHolder.TaskOutputType;
 import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.tasks.DefaultAndroidTask;
+import com.android.build.gradle.internal.tasks.AndroidVariantTask;
 import com.google.common.collect.Sets;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -41,9 +41,7 @@ import org.gradle.api.tasks.TaskAction;
 
 /** Task to merge the res/classes intermediate jars from a library into a single one */
 @CacheableTask
-public class ZipMergingTask extends DefaultAndroidTask {
-
-    private final byte[] buffer = new byte[8192];
+public class ZipMergingTask extends AndroidVariantTask {
 
     private FileCollection inputFiles;
 
@@ -63,6 +61,7 @@ public class ZipMergingTask extends DefaultAndroidTask {
 
     @TaskAction
     public void merge() throws IOException {
+        byte[] buffer = new byte[8192];
         try (FileOutputStream fos = new FileOutputStream(outputFile);
                 BufferedOutputStream bos = new BufferedOutputStream(fos);
                 ZipOutputStream zos = new ZipOutputStream(bos)) {

@@ -16,6 +16,7 @@
 package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.GRADLE_PLUGIN_MINIMUM_VERSION;
+import static com.android.SdkConstants.GRADLE_PLUGIN_RECOMMENDED_VERSION;
 import static com.android.ide.common.repository.GoogleMavenRepository.MAVEN_GOOGLE_CACHE_DIR_KEY;
 import static com.android.sdklib.SdkVersionInfo.LOWEST_ACTIVE_API;
 import static com.android.tools.lint.checks.GradleDetector.ACCIDENTAL_OCTAL;
@@ -56,6 +57,7 @@ import com.android.tools.lint.detector.api.DefaultPosition;
 import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
@@ -125,11 +127,15 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 + "<metadata>\n"
                 + "  <com.android.tools.build/>"
                 + "</metadata>");
-        task.networkData("https://maven.google.com/com/android/tools/build/group-index.xml", ""
-                + "<?xml version='1.0' encoding='UTF-8'?>\n"
-                + "<com.android.tools.build>\n"
-                + "  <gradle versions=\"2.3.3,3.0.0-alpha1\"/>\n"
-                + "</com.android.tools.build>");
+        task.networkData(
+                "https://maven.google.com/com/android/tools/build/group-index.xml",
+                ""
+                        + "<?xml version='1.0' encoding='UTF-8'?>\n"
+                        + "<com.android.tools.build>\n"
+                        + "  <gradle versions=\"3.0.0-alpha1,3.0.0-alpha2,3.0.0-alpha3,3.0.0-alpha4,3.0.0-alpha5,3.0.0-alpha6,3.0.0-alpha7,3.0.0-alpha8,3.0.0-alpha9,3.0.0-beta1,3.0.0-beta2,3.0.0-beta3,3.0.0-beta4,3.0.0-beta5,3.0.0-beta6,3.0.0-beta7,3.0.0-rc1,3.0.0-rc2,3.0.0,"
+                        + "3.1.0-alpha01,3.1.0-alpha02,3.1.0-alpha03,3.1.0-alpha04,3.1.0-alpha05,3.1.0-alpha06,3.1.0-alpha07,3.1.0-alpha08,3.1.0-alpha09,3.1.0-beta1,3.1.0-beta2,3.1.0-beta3,3.1.0-beta4,3.1.0-rc1,3.1.0,"
+                        + "3.2.0-alpha01,3.2.0-alpha02,3.2.0-alpha03\"/>\n"
+                        + "</com.android.tools.build>");
 
         // Also ensure we don't have a stale cache on disk.
         File cacheDir = new TestLintClient().getCacheDir(MAVEN_GOOGLE_CACHE_DIR_KEY, true);
@@ -258,7 +264,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
         }
     }
 
-    public void testBasic() throws Exception {
+    public void testBasic() {
         String expected = ""
                 + "build.gradle:25: Error: This support library should not use a different version (13) than the compileSdkVersion (19) [GradleCompatible]\n"
                 + "    compile 'com.android.support:appcompat-v7:13.0.0'\n"
@@ -332,57 +338,60 @@ public class GradleDetectorTest extends AbstractCheckTest {
     }
 
     public void testVersionsFromGradleCache() {
-        String expected = ""
-                + "build.gradle:6: Warning: A newer version of com.android.tools.build:gradle than 2.4.0-alpha3 is available: 3.0.0-alpha1 [GradleDependency]\n"
-                + "        classpath 'com.android.tools.build:gradle:2.4.0-alpha3'\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "build.gradle:10: Warning: A newer version of org.apache.httpcomponents:httpcomponents-core than 4.2 is available: 4.4 [GradleDependency]\n"
-                + "    compile 'org.apache.httpcomponents:httpcomponents-core:4.2'\n"
-                + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "build.gradle:11: Warning: A newer version of com.android.support:recyclerview-v7 than 25.0.0 is available: 26.0.0 [GradleDependency]\n"
-                + "    compile 'com.android.support:recyclerview-v7:25.0.0'\n"
-                + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "build.gradle:12: Warning: A newer version of com.google.firebase:firebase-messaging than 10.2.1 is available: 11.0.0 [GradleDependency]\n"
-                + "    compile 'com.google.firebase:firebase-messaging:10.2.1'\n"
-                + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 4 warnings\n";
+        String expected =
+                ""
+                        + "build.gradle:6: Warning: A newer version of com.android.tools.build:gradle than 2.4.0-alpha3 is available: 3.2.0-alpha03 [GradleDependency]\n"
+                        + "        classpath 'com.android.tools.build:gradle:2.4.0-alpha3'\n"
+                        + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "build.gradle:10: Warning: A newer version of org.apache.httpcomponents:httpcomponents-core than 4.2 is available: 4.4 [GradleDependency]\n"
+                        + "    compile 'org.apache.httpcomponents:httpcomponents-core:4.2'\n"
+                        + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "build.gradle:11: Warning: A newer version of com.android.support:recyclerview-v7 than 25.0.0 is available: 26.0.0 [GradleDependency]\n"
+                        + "    compile 'com.android.support:recyclerview-v7:25.0.0'\n"
+                        + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "build.gradle:12: Warning: A newer version of com.google.firebase:firebase-messaging than 10.2.1 is available: 11.0.0 [GradleDependency]\n"
+                        + "    compile 'com.google.firebase:firebase-messaging:10.2.1'\n"
+                        + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "0 errors, 4 warnings\n";
 
         lint().files(
-                gradle(""
-                        + "buildscript {\n"
-                        + "    repositories {\n"
-                        + "        jcenter()\n"
-                        + "    }\n"
-                        + "    dependencies {\n"
-                        + "        classpath 'com.android.tools.build:gradle:2.4.0-alpha3'\n"
-                        + "    }\n"
-                        + "}\n"
-                        + "dependencies {\n"
-                        + "    compile 'org.apache.httpcomponents:httpcomponents-core:4.2'\n"
-                        + "    compile 'com.android.support:recyclerview-v7:25.0.0'\n"
-                        + "    compile 'com.google.firebase:firebase-messaging:10.2.1'\n"
-                        + "}\n"))
+                        gradle(
+                                ""
+                                        + "buildscript {\n"
+                                        + "    repositories {\n"
+                                        + "        jcenter()\n"
+                                        + "    }\n"
+                                        + "    dependencies {\n"
+                                        + "        classpath 'com.android.tools.build:gradle:2.4.0-alpha3'\n"
+                                        + "    }\n"
+                                        + "}\n"
+                                        + "dependencies {\n"
+                                        + "    compile 'org.apache.httpcomponents:httpcomponents-core:4.2'\n"
+                                        + "    compile 'com.android.support:recyclerview-v7:25.0.0'\n"
+                                        + "    compile 'com.google.firebase:firebase-messaging:10.2.1'\n"
+                                        + "}\n"))
                 .issues(DEPENDENCY)
                 .sdkHome(getMockSupportLibraryInstallation())
                 .run()
                 .expect(expected)
-                .expectFixDiffs(""
-                        + "Fix for build.gradle line 5: Change to 3.0.0-alpha1:\n"
-                        + "@@ -6 +6\n"
-                        + "-         classpath 'com.android.tools.build:gradle:2.4.0-alpha3'\n"
-                        + "+         classpath 'com.android.tools.build:gradle:3.0.0-alpha1'\n"
-                        + "Fix for build.gradle line 9: Change to 4.4:\n"
-                        + "@@ -10 +10\n"
-                        + "-     compile 'org.apache.httpcomponents:httpcomponents-core:4.2'\n"
-                        + "+     compile 'org.apache.httpcomponents:httpcomponents-core:4.4'\n"
-                        + "Fix for build.gradle line 10: Change to 26.0.0:\n"
-                        + "@@ -11 +11\n"
-                        + "-     compile 'com.android.support:recyclerview-v7:25.0.0'\n"
-                        + "+     compile 'com.android.support:recyclerview-v7:26.0.0'\n"
-                        + "Fix for build.gradle line 11: Change to 11.0.0:\n"
-                        + "@@ -12 +12\n"
-                        + "-     compile 'com.google.firebase:firebase-messaging:10.2.1'\n"
-                        + "+     compile 'com.google.firebase:firebase-messaging:11.0.0'\n");
+                .expectFixDiffs(
+                        ""
+                                + "Fix for build.gradle line 5: Change to 3.2.0-alpha03:\n"
+                                + "@@ -6 +6\n"
+                                + "-         classpath 'com.android.tools.build:gradle:2.4.0-alpha3'\n"
+                                + "+         classpath 'com.android.tools.build:gradle:3.2.0-alpha03'\n"
+                                + "Fix for build.gradle line 9: Change to 4.4:\n"
+                                + "@@ -10 +10\n"
+                                + "-     compile 'org.apache.httpcomponents:httpcomponents-core:4.2'\n"
+                                + "+     compile 'org.apache.httpcomponents:httpcomponents-core:4.4'\n"
+                                + "Fix for build.gradle line 10: Change to 26.0.0:\n"
+                                + "@@ -11 +11\n"
+                                + "-     compile 'com.android.support:recyclerview-v7:25.0.0'\n"
+                                + "+     compile 'com.android.support:recyclerview-v7:26.0.0'\n"
+                                + "Fix for build.gradle line 11: Change to 11.0.0:\n"
+                                + "@@ -12 +12\n"
+                                + "-     compile 'com.google.firebase:firebase-messaging:10.2.1'\n"
+                                + "+     compile 'com.google.firebase:firebase-messaging:11.0.0'\n");
     }
 
     public void testVersionFromIDE() {
@@ -411,15 +420,12 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testCompatibility() throws Exception {
+    public void testCompatibility() {
         String expected = ""
                 + "build.gradle:4: Error: The compileSdkVersion (18) should not be lower than the targetSdkVersion (19) [GradleCompatible]\n"
                 + "    compileSdkVersion 18\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~\n"
-                + "build.gradle:16: Error: This support library should not use a lower version (18) than the targetSdkVersion (19) [GradleCompatible]\n"
-                + "    compile 'com.android.support:support-v4:18.0.0'\n"
-                + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "2 errors, 0 warnings\n";
+                + "1 errors, 0 warnings\n";
 
         lint().files(
                 gradle(""
@@ -458,7 +464,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+     compileSdkVersion 19\n");
     }
 
-    public void testMinSdkVersion() throws Exception {
+    public void testMinSdkVersion() {
         String expectedNewVersion = String.valueOf(LOWEST_ACTIVE_API);
         String expected = ""
                 + "build.gradle:8: Warning: The value of minSdkVersion is too low. It can be incremented\n"
@@ -493,10 +499,10 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+         minSdkVersion " + expectedNewVersion + "\n");
     }
 
-    public void testIncompatiblePlugin() throws Exception {
+    public void testIncompatiblePlugin() {
         String expected = ""
                 + "build.gradle:6: Error: You must use a newer version of the Android Gradle plugin. The minimum supported version is "
-                + GRADLE_PLUGIN_MINIMUM_VERSION + " and the recommended version is 2.3.3 [GradlePluginVersion]\n"
+                + GRADLE_PLUGIN_MINIMUM_VERSION + " and the recommended version is " + GRADLE_PLUGIN_RECOMMENDED_VERSION + " [GradlePluginVersion]\n"
                 + "    classpath 'com.android.tools.build:gradle:0.1.0'\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "1 errors, 0 warnings\n";
@@ -524,7 +530,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
 
     }
 
-    public void testSetter() throws Exception {
+    public void testSetter() {
         String expected = ""
                 + "build.gradle:18: Error: Bad method name: pick a unique method name which does not conflict with the implicit getters for the defaultConfig properties. For example, try using the prefix compute- instead of get-. [GradleGetter]\n"
                 + "        versionCode getVersionCode\n"
@@ -565,7 +571,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testDependencies() throws Exception {
+    public void testDependencies() {
         String expected = ""
                 + "build.gradle:5: Warning: Old buildToolsVersion 19.0.0; recommended version is 19.1 or later [GradleDependency]\n"
                 + "    buildToolsVersion \"19.0.0\"\n"
@@ -595,7 +601,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testLongHandDependencies() throws Exception {
+    public void testLongHandDependencies() {
         String expected = ""
                 + "build.gradle:9: Warning: A newer version of com.android.support:support-v4 than 19.0 is available: 21.0.2 [GradleDependency]\n"
                 + "    compile group: 'com.android.support', name: 'support-v4', version: '19.0'\n"
@@ -622,7 +628,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
 
     }
 
-    public void testDependenciesMinSdkVersion() throws Exception {
+    public void testDependenciesMinSdkVersion() {
         String expected = ""
                 + "build.gradle:13: Warning: Using the appcompat library when minSdkVersion >= 14 and compileSdkVersion < 21 is not necessary [GradleDependency]\n"
                 + "    compile 'com.android.support:appcompat-v7:+'\n"
@@ -652,7 +658,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testNoWarningFromUnknownSupportLibrary() throws Exception {
+    public void testNoWarningFromUnknownSupportLibrary() {
         //noinspection all // Sample code
         lint().files(
                 gradle(""
@@ -677,7 +683,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testDependenciesMinSdkVersionLollipop() throws Exception {
+    public void testDependenciesMinSdkVersionLollipop() {
         //noinspection all // Sample code
         lint().files(
                 gradle(""
@@ -701,7 +707,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testDependenciesNoMicroVersion() throws Exception {
+    public void testDependenciesNoMicroVersion() {
         // Regression test for https://code.google.com/p/android/issues/detail?id=77594
         String expected = ""
                 + "build.gradle:13: Warning: A newer version of com.google.code.gson:gson than 2.2 is available: 2.8.0 [GradleDependency]\n"
@@ -732,7 +738,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testPaths() throws Exception {
+    public void testPaths() {
         String expected = ""
                 + "build.gradle:4: Warning: Do not use Windows file separators in .gradle files; use / instead [GradlePath]\n"
                 + "    compile files('my\\\\libs\\\\http.jar')\n"
@@ -758,7 +764,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testIdSuffix() throws Exception {
+    public void testIdSuffix() {
         String expected = ""
                 + "build.gradle:6: Warning: Application ID suffix should probably start with a \".\" [GradlePath]\n"
                 + "            applicationIdSuffix \"debug\"\n"
@@ -783,7 +789,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testPackage() throws Exception {
+    public void testPackage() {
         String expected = ""
                 + "build.gradle:5: Warning: Deprecated: Replace 'packageName' with 'applicationId' [GradleDeprecated]\n"
                 + "        packageName 'my.pkg'\n"
@@ -823,7 +829,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+             applicationIdSuffix \".debug\"\n");
     }
 
-    public void testPlus() throws Exception {
+    public void testPlus() {
         String expected = ""
                 + "build.gradle:9: Warning: Avoid using + in version numbers; can lead to unpredictable and unrepeatable builds (com.android.support:appcompat-v7:+) [GradleDynamicVersion]\n"
                 + "    compile 'com.android.support:appcompat-v7:+'\n"
@@ -858,7 +864,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
 
     }
 
-    public void testStringInt() throws Exception {
+    public void testStringInt() {
         String expected = ""
                 + "build.gradle:4: Error: Use an integer rather than a string here (replace '19' with just 19) [StringShouldBeInt]\n"
                 + "    compileSdkVersion '19'\n"
@@ -903,7 +909,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+         targetSdkVersion 16\n");
     }
 
-    public void testSuppressLine2() throws Exception {
+    public void testSuppressLine2() {
         //noinspection all // Sample code
         lint().files(
                 gradle(""
@@ -917,7 +923,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testDeprecatedPluginId() throws Exception {
+    public void testDeprecatedPluginId() {
         String expected = ""
                 + "build.gradle:4: Warning: 'android' is deprecated; use 'com.android.application' instead [GradleDeprecated]\n"
                 + "apply plugin: 'android'\n"
@@ -954,7 +960,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+ apply plugin: 'com.android.library'\n");
     }
 
-    public void testIgnoresGStringsInDependencies() throws Exception {
+    public void testIgnoresGStringsInDependencies() {
         //noinspection all // Sample code
         lint().files(
                 gradle(""
@@ -970,7 +976,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testAccidentalOctal() throws Exception {
+    public void testAccidentalOctal() {
         String expected = ""
                 + "build.gradle:13: Error: The leading 0 turns this number into octal which is probably not what was intended (interpreted as 8) [AccidentalOctal]\n"
                 + "        versionCode 010\n"
@@ -1004,7 +1010,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testBadPlayServicesVersion() throws Exception {
+    public void testBadPlayServicesVersion() {
         String expected = ""
                 + "build.gradle:5: Error: Version 5.2.08 should not be used; the app can not be published with this version. Use version 6.1.71 instead. [GradleCompatible]\n"
                 + "    compile 'com.google.android.gms:play-services:5.2.08'\n"
@@ -1031,7 +1037,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+     compile 'com.google.android.gms:play-services:6.1.71'\n");
     }
 
-    public void testRemoteVersions() throws Exception {
+    public void testRemoteVersions() {
         String expected = ""
                 + "build.gradle:9: Warning: A newer version of joda-time:joda-time than 2.1 is available: 2.9.9 [NewerVersionAvailable]\n"
                 + "    compile 'joda-time:joda-time:2.1'\n"
@@ -1093,11 +1099,11 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testRemoteVersionsWithPreviews() throws Exception {
+    public void testRemoteVersionsWithPreviews() {
         // If the most recent version is a rc version, query for all versions
         //noinspection all // Sample code
         String expected = ""
-                + "build.gradle:9: Warning: A newer version of com.google.guava:guava than 11.0.2 is available: 17.0 [NewerVersionAvailable]\n"
+                + "build.gradle:9: Warning: A newer version of com.google.guava:guava than 11.0.2 is available: 23.6-android [NewerVersionAvailable]\n"
                 + "    compile 'com.google.guava:guava:11.0.2'\n"
                 + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "build.gradle:10: Warning: A newer version of com.google.guava:guava than 16.0-rc1 is available: 18.0-rc1 [NewerVersionAvailable]\n"
@@ -1122,23 +1128,28 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .networkData("http://search.maven.org/solrsearch/select?q=g:%22com.google.guava%22+AND+a:%22guava%22&core=gav&rows=1&wt=json",
                         "{\"responseHeader\":{\"status\":0,\"QTime\":0,\"params\":{\"fl\":\"id,g,a,v,p,ec,timestamp,tags\",\"sort\":\"score desc,timestamp desc,g asc,a asc,v desc\",\"indent\":\"off\",\"q\":\"g:\\\"com.google.guava\\\" AND a:\\\"guava\\\"\",\"core\":\"gav\",\"wt\":\"json\",\"rows\":\"1\",\"version\":\"2.2\"}},\"response\":{\"numFound\":38,\"start\":0,\"docs\":[{\"id\":\"com.google.guava:guava:18.0-rc1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"18.0-rc1\",\"p\":\"bundle\",\"timestamp\":1407266204000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]}]}}")
                 .networkData("http://search.maven.org/solrsearch/select?q=g:%22com.google.guava%22+AND+a:%22guava%22&core=gav&wt=json",
-                        "{\"responseHeader\":{\"status\":0,\"QTime\":1,\"params\":{\"fl\":\"id,g,a,v,p,ec,timestamp,tags\",\"sort\":\"score desc,timestamp desc,g asc,a asc,v desc\",\"indent\":\"off\",\"q\":\"g:\\\"com.google.guava\\\" AND a:\\\"guava\\\"\",\"core\":\"gav\",\"wt\":\"json\",\"version\":\"2.2\"}},\"response\":{\"numFound\":38,\"start\":0,\"docs\":[{\"id\":\"com.google.guava:guava:18.0-rc1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"18.0-rc1\",\"p\":\"bundle\",\"timestamp\":1407266204000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:17.0\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"17.0\",\"p\":\"bundle\",\"timestamp\":1398199666000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:17.0-rc2\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"17.0-rc2\",\"p\":\"bundle\",\"timestamp\":1397162341000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:17.0-rc1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"17.0-rc1\",\"p\":\"bundle\",\"timestamp\":1396985408000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:16.0.1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"16.0.1\",\"p\":\"bundle\",\"timestamp\":1391467528000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:16.0\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"16.0\",\"p\":\"bundle\",\"timestamp\":1389995088000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:16.0-rc1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"16.0-rc1\",\"p\":\"bundle\",\"timestamp\":1387495574000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"dependency\",\"that\",\"more\",\"utility\",\"guava\",\"javax\",\"only\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:15.0\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"15.0\",\"p\":\"bundle\",\"timestamp\":1378497169000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"inject\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"that\",\"more\",\"utility\",\"guava\",\"dependencies\",\"javax\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\",\"-cdi1.0.jar\"]},{\"id\":\"com.google.guava:guava:15.0-rc1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"15.0-rc1\",\"p\":\"bundle\",\"timestamp\":1377542588000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"inject\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"that\",\"more\",\"utility\",\"guava\",\"dependencies\",\"javax\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]},{\"id\":\"com.google.guava:guava:14.0.1\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"14.0.1\",\"p\":\"bundle\",\"timestamp\":1363305439000,\"tags\":[\"spec\",\"libraries\",\"classes\",\"google\",\"inject\",\"code\",\"expanded\",\"much\",\"include\",\"annotation\",\"that\",\"more\",\"utility\",\"guava\",\"dependencies\",\"javax\",\"core\",\"suite\",\"collections\"],\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\"-site.jar\",\".pom\"]}]}}")
+                        "{\"responseHeader\":{\"status\":0,\"QTime\":0,\"params\":{\"q\":\"g:\\\"com.google.guava\\\" AND a:\\\"guava\\\"\",\"core\":\"gav\",\"indent\":\"off\",\"fl\":\"id,g,a,v,p,ec,timestamp,tags\",\"sort\":\"score desc,timestamp desc,g asc,a asc,v desc\",\"wt\":\"json\",\"version\":\"2.2\"}},\"response\":{\"numFound\":68,\"start\":0,\"docs\":[{\"id\":\"com.google.guava:guava:23.6-jre\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.6-jre\",\"p\":\"bundle\",\"timestamp\":1513818220000,\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.6-android\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.6-android\",\"p\":\"bundle\",\"timestamp\":1513817611000,\"ec\":[\"-javadoc.jar\",\"-sources.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.5-jre\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.5-jre\",\"p\":\"bundle\",\"timestamp\":1511382806000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.5-android\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.5-android\",\"p\":\"bundle\",\"timestamp\":1511382148000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.4-jre\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.4-jre\",\"p\":\"bundle\",\"timestamp\":1510248931000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.4-android\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.4-android\",\"p\":\"bundle\",\"timestamp\":1510248248000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.3-jre\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.3-jre\",\"p\":\"bundle\",\"timestamp\":1509048371000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.3-android\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.3-android\",\"p\":\"bundle\",\"timestamp\":1509047759000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.2-jre\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.2-jre\",\"p\":\"bundle\",\"timestamp\":1507762486000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]},{\"id\":\"com.google.guava:guava:23.2-android\",\"g\":\"com.google.guava\",\"a\":\"guava\",\"v\":\"23.2-android\",\"p\":\"bundle\",\"timestamp\":1507761822000,\"ec\":[\"-sources.jar\",\"-javadoc.jar\",\".jar\",\".pom\"],\"tags\":[\"libraries\",\"classes\",\"google\",\"expanded\",\"much\",\"include\",\"that\",\"more\",\"utility\",\"guava\",\"core\",\"suite\",\"collections\"]}]}}")
                 .run()
                 .expect(expected);
     }
 
-    public void testPreviewVersions() throws Exception {
-        String expected = ""
-                + "build.gradle:6: Error: You must use a newer version of the Android Gradle plugin. The minimum supported version is 1.0.0 and the recommended version is 2.3.3 [GradlePluginVersion]\n"
-                + "        classpath 'com.android.tools.build:gradle:1.0.0-rc8'\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "build.gradle:7: Warning: A newer version of com.android.tools.build:gradle than 1.0.0 is available: 2.3.3 [GradleDependency]\n"
-                + "        classpath 'com.android.tools.build:gradle:1.0.0'\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "build.gradle:8: Warning: A newer version of com.android.tools.build:gradle than 2.0.0-alpha4 is available: 3.0.0-alpha1 [GradleDependency]\n"
-                + "        classpath 'com.android.tools.build:gradle:2.0.0-alpha4'\n"
-                + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "1 errors, 2 warnings\n";
+    public void testPreviewVersions() {
+        String expected =
+                ""
+                        + "build.gradle:6: Error: You must use a newer version of the Android Gradle plugin. The minimum supported version is 1.0.0 and the recommended version is "
+                        + GRADLE_PLUGIN_RECOMMENDED_VERSION
+                        + " [GradlePluginVersion]\n"
+                        + "        classpath 'com.android.tools.build:gradle:1.0.0-rc8'\n"
+                        + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "build.gradle:7: Warning: A newer version of com.android.tools.build:gradle than 1.0.0 is available: "
+                        + GRADLE_PLUGIN_RECOMMENDED_VERSION
+                        + " [GradleDependency]\n"
+                        + "        classpath 'com.android.tools.build:gradle:1.0.0'\n"
+                        + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "build.gradle:8: Warning: A newer version of com.android.tools.build:gradle than 2.0.0-alpha4 is available: 3.2.0-alpha03 [GradleDependency]\n"
+                        + "        classpath 'com.android.tools.build:gradle:2.0.0-alpha4'\n"
+                        + "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                        + "1 errors, 2 warnings\n";
 
         //noinspection all // Sample code
         lint().files(
@@ -1216,7 +1227,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testSupportLibraryConsistency() throws Exception {
+    public void testSupportLibraryConsistency() {
         String expected = ""
                 + "build.gradle:4: Error: All com.android.support libraries must use the exact same version specification (mixing versions can lead to runtime crashes). Found versions 25.0-SNAPSHOT, 24.2, 24.1. Examples include com.android.support:preference-v7:25.0-SNAPSHOT and com.android.support:animated-vector-drawable:24.2 [GradleCompatible]\n"
                 + "    compile \"com.android.support:appcompat-v7:24.2\"\n"
@@ -1240,7 +1251,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testSupportLibraryConsistencyWithDataBinding() throws Exception {
+    public void testSupportLibraryConsistencyWithDataBinding() {
         String expected = ""
                 + "build.gradle:3: Error: All com.android.support libraries must use the exact "
                 + "same version specification (mixing versions can lead to runtime crashes). "
@@ -1374,7 +1385,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testSupportLibraryConsistencyNonIncremental() throws Exception {
+    public void testSupportLibraryConsistencyNonIncremental() {
         String expected = ""
                 + "build.gradle:6: Error: All com.android.support libraries must use the exact same version specification (mixing versions can lead to runtime crashes). Found versions 25.0-SNAPSHOT, 24.2, 24.1. Examples include com.android.support:preference-v7:25.0-SNAPSHOT and com.android.support:animated-vector-drawable:24.2 [GradleCompatible]\n"
                 + "    compile \"com.android.support:preference-v7:25.0-SNAPSHOT\"\n"
@@ -1398,7 +1409,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testSupportLibraryNotFatal() throws Exception {
+    public void testSupportLibraryNotFatal() {
         // In fatal-only issue mode should not be reporting these
         lint().files(
                 gradle(""
@@ -1419,7 +1430,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testPlayServiceConsistencyNonIncremental() throws Exception {
+    public void testPlayServiceConsistencyNonIncremental() {
         String expected = ""
                 + "build.gradle:4: Error: All gms/firebase libraries must use the exact same version specification (mixing versions can lead to runtime crashes). Found versions 7.5.0, 7.3.0. Examples include com.google.android.gms:play-services-wearable:7.5.0 and com.google.android.gms:play-services-location:7.3.0 [GradleCompatible]\n"
                 + "    compile 'com.google.android.gms:play-services-wearable:7.5.0'\n"
@@ -1441,7 +1452,22 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testWrongQuotes() throws Exception {
+    public void testPlayServiceInconsistentVersionsVersion14() {
+        lint().files(
+                gradle(""
+                        + "apply plugin: 'android'\n"
+                        + "\n"
+                        + "dependencies {\n"
+                        + "    compile 'com.google.android.gms:play-services-wearable:14.0.0'\n"
+                        + "    compile 'com.google.android.gms:play-services-location:15.0.1'\n"
+                        + "}\n"))
+                .issues(COMPATIBILITY)
+                .sdkHome(getMockSupportLibraryInstallation())
+                .run()
+                .expectClean();
+    }
+
+    public void testWrongQuotes() {
         String expected = ""
                 + "build.gradle:5: Error: It looks like you are trying to substitute a version variable, but using single quotes ('). For Groovy string interpolation you must use double quotes (\"). [NotInterpolated]\n"
                 + "    compile 'com.android.support:design:${supportLibVersion}'\n"
@@ -1469,7 +1495,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+     compile \"com.android.support:design:${supportLibVersion}\"\n");
     }
 
-    public void testOldFabric() throws Exception {
+    public void testOldFabric() {
         // This version of Fabric created a unique string for every build which results in
         // Hotswaps getting disabled due to resource changes
         String expected = ""
@@ -1513,7 +1539,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+     classpath 'io.fabric.tools:gradle:1.22.1'\n");
     }
 
-    public void testOldBugSnag() throws Exception {
+    public void testOldBugSnag() {
         // This version of BugSnag triggered instant run full rebuilds
         String expected = ""
                 + "build.gradle:3: Warning: Use BugSnag Gradle plugin version 2.1.2 or later to improve Instant Run performance (was 2.1.0) [GradleDependency]\n"
@@ -1564,7 +1590,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+     classpath 'com.bugsnag:bugsnag-android-gradle-plugin:2.4.1'\n");
     }
 
-    public void testDeprecatedAppIndexingDependency() throws Exception {
+    public void testDeprecatedAppIndexingDependency() {
         String expected = ""
                 + "build.gradle:9: Warning: Deprecated: Replace 'com.google.android.gms:play-services-appindexing:9.8.0' with 'com.google.firebase:firebase-appindexing:10.0.0' or above. More info: http://firebase.google.com/docs/app-indexing/android/migrate [GradleDeprecated]\n"
                 + "compile 'com.google.android.gms:play-services-appindexing:9.8.0'\n"
@@ -1594,7 +1620,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "+ compile 'com.google.firebase:firebase-appindexing:10.2.1'\n");
     }
 
-    public void testBadBuildTools() throws Exception {
+    public void testBadBuildTools() {
         // Warn about build tools 23.0.0 which is known to be a bad version
         String expected = ""
                 + "build.gradle:7: Error: Build Tools 23.0.0 should not be used; it has some known serious bugs. Use version 23.0.3 instead. [GradleCompatible]\n"
@@ -1646,7 +1672,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
         ));
     }
 
-    public void testSupportAnnotations() throws Exception {
+    public void testSupportAnnotations() {
         lint().files(
                 gradle(""
                         + "apply plugin: 'com.android.application'\n"
@@ -1665,7 +1691,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testBundledGmsDependency() throws Exception {
+    public void testBundledGmsDependency() {
         lint().files(
                 gradle(""
                         + "dependencies {\n"
@@ -1681,7 +1707,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         + "0 errors, 1 warnings\n");
     }
 
-    public void testUnbundledGmsDependency() throws Exception {
+    public void testUnbundledGmsDependency() {
         lint().files(
                 gradle(""
                         + "dependencies {\n"
@@ -1693,7 +1719,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testHighAppVersionCode() throws Exception {
+    public void testHighAppVersionCode() {
         String expected = ""
                 + "build.gradle:5: Error: The 'versionCode' is very high and close to the max allowed value [HighAppVersionCode]\n"
                 + "        versionCode 2146435071\n"
@@ -2079,6 +2105,62 @@ public class GradleDetectorTest extends AbstractCheckTest {
                         "-         version: '4.5.3'\n");
     }
 
+    public void testKtsSupport() {
+        lint().files(
+                // https://github.com/gradle/kotlin-dsl/blob/master/samples/hello-android/build.gradle.kts
+                kts("" +
+                        "plugins {\n" +
+                        "    id(\"com.android.application\") version \"2.3.3\"\n" +
+                        "    kotlin(\"android\") version \"1.1.51\"\n" +
+                        "}\n" +
+                        "\n" +
+                        "android {\n" +
+                        "    buildToolsVersion(\"25.0.0\")\n" +
+                        "    compileSdkVersion(23)\n" +
+                        "\n" +
+                        "    defaultConfig {\n" +
+                        "        minSdkVersion(7)\n" +
+                        "        targetSdkVersion(23)\n" +
+                        "\n" +
+                        "        applicationId = \"com.example.kotlingradle\"\n" +
+                        "        versionCode = 1\n" +
+                        "        versionName = \"1.0\"\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    buildTypes {\n" +
+                        "        getByName(\"release\") {\n" +
+                        "            isMinifyEnabled = false\n" +
+                        "            proguardFiles(\"proguard-rules.pro\")\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "dependencies {\n" +
+                        "    compile(\"com.android.support:appcompat-v7:23.4.0\")\n" +
+                        "    compile(\"com.android.support.constraint:constraint-layout:1.0.0-alpha8\")\n" +
+                        "    compile(kotlin(\"stdlib\", \"1.1.51\"))\n" +
+                        "}\n" +
+                        "\n" +
+                        "repositories {\n" +
+                        "    jcenter()\n" +
+                        "}"))
+                .sdkHome(getMockSupportLibraryInstallation())
+                .issues(DEPENDENCY,
+                        MIN_SDK_TOO_LOW)
+                .run()
+                .expect("build.gradle.kts:7: Warning: Old buildToolsVersion 25.0.0; recommended version is 25.0.2 or later [GradleDependency]\n" +
+                        "    buildToolsVersion(\"25.0.0\")\n" +
+                        "                       ~~~~~~\n" +
+                        "build.gradle.kts:29: Warning: A newer version of com.android.support.constraint:constraint-layout than 1.0.0-alpha8 is available: 1.0.3-alpha8 [GradleDependency]\n" +
+                        "    compile(\"com.android.support.constraint:constraint-layout:1.0.0-alpha8\")\n" +
+                        "             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                        "build.gradle.kts:11: Warning: The value of minSdkVersion is too low. It can be incremented\n" +
+                        "without noticeably reducing the number of supported devices. [MinSdkTooLow]\n" +
+                        "        minSdkVersion(7)\n" +
+                        "                      ~\n" +
+                        "0 errors, 3 warnings");
+    }
+
     // -------------------------------------------------------------------------------------------
     // Test infrastructure below here
     // -------------------------------------------------------------------------------------------
@@ -2134,9 +2216,14 @@ public class GradleDetectorTest extends AbstractCheckTest {
         }
 
         @Override
-        public void visitBuildScript(@NonNull final Context context, Map<String, Object> sharedData) {
+        public void visitBuildScript(@NonNull final Context context) {
             try {
-                visitQuietly(context, sharedData);
+                if (context instanceof JavaContext) {
+                    handleGradleKotlinScript((JavaContext)context);
+                    return;
+                }
+
+                visitQuietly(context);
             } catch (Throwable t) {
                 // ignore
                 // Parsing the build script can involve class loading that we sometimes can't
@@ -2150,8 +2237,7 @@ public class GradleDetectorTest extends AbstractCheckTest {
             }
         }
 
-        private void visitQuietly(@NonNull final Context context,
-                @SuppressWarnings("UnusedParameters") Map<String, Object> sharedData) {
+        private void visitQuietly(@NonNull final Context context) {
             final CharSequence contents = context.getContents();
             if (contents == null) {
                 return;
@@ -2324,6 +2410,11 @@ public class GradleDetectorTest extends AbstractCheckTest {
 
         @Override
         protected int getStartOffset(@NonNull Context context, @NonNull Object cookie) {
+            int startOffset = super.getStartOffset(context, cookie);
+            if (startOffset != -1) {
+                return startOffset;
+            }
+
             ASTNode node = (ASTNode) cookie;
             Pair<Integer, Integer> offsets = getOffsets(node, context);
             return offsets.getFirst();
@@ -2331,6 +2422,11 @@ public class GradleDetectorTest extends AbstractCheckTest {
 
         @Override
         protected Location createLocation(@NonNull Context context, @NonNull Object cookie) {
+            Location location = super.createLocation(context, cookie);
+            if (location != null) {
+                return location;
+            }
+
             ASTNode node = (ASTNode) cookie;
             Pair<Integer, Integer> offsets = getOffsets(node, context);
             int fromLine = node.getLineNumber() - 1;

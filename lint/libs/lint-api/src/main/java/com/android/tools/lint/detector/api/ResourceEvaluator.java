@@ -24,6 +24,7 @@ import static com.android.SdkConstants.CLASS_V4_FRAGMENT;
 import static com.android.SdkConstants.CLS_TYPED_ARRAY;
 import static com.android.SdkConstants.R_CLASS;
 import static com.android.SdkConstants.SUPPORT_ANNOTATIONS_PREFIX;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -105,6 +106,7 @@ public class ResourceEvaluator {
     public static final String STYLE_RES_ANNOTATION = "android.support.annotation.StyleRes";
     public static final String TRANSITION_RES_ANNOTATION = "android.support.annotation.TransitionRes";
     public static final String XML_RES_ANNOTATION = "android.support.annotation.XmlRes";
+    public static final String NAVIGATION_RES_ANNOTATION = "android.support.annotation.NavigationRes";
 
     private final JavaEvaluator evaluator;
 
@@ -222,7 +224,7 @@ public class ResourceEvaluator {
             PsiClass containingClass = UastUtils.getContainingClass(function);
             if (function != null && containingClass != null) {
                 String qualifiedName = containingClass.getQualifiedName();
-                String name = call.getMethodName();
+                String name = getMethodName(call);
                 if ((CLASS_RESOURCES.equals(qualifiedName)
                                 || CLASS_CONTEXT.equals(qualifiedName)
                                 || CLASS_FRAGMENT.equals(qualifiedName)
@@ -620,6 +622,8 @@ public class ResourceEvaluator {
                 return ResourceType.LAYOUT;
             case MENU_RES_ANNOTATION:
                 return ResourceType.MENU;
+            case NAVIGATION_RES_ANNOTATION:
+                return ResourceType.NAVIGATION;
             case PLURALS_RES_ANNOTATION:
                 return ResourceType.PLURALS;
             case RAW_RES_ANNOTATION:

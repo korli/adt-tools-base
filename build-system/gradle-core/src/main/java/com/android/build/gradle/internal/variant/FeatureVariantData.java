@@ -21,9 +21,9 @@ import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.scope.GlobalScope;
-import com.android.builder.core.ErrorReporter;
 import com.android.builder.core.VariantType;
 import com.android.builder.profile.Recorder;
+import com.android.utils.StringHelper;
 import com.google.common.collect.Maps;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -45,9 +45,8 @@ public class FeatureVariantData extends ApkVariantData implements TestedVariantD
             @NonNull AndroidConfig androidConfig,
             @NonNull TaskManager taskManager,
             @NonNull GradleVariantConfiguration config,
-            @NonNull ErrorReporter errorReporter,
             @NonNull Recorder recorder) {
-        super(globalScope, androidConfig, taskManager, config, errorReporter, recorder);
+        super(globalScope, androidConfig, taskManager, config, recorder);
         testVariants = Maps.newEnumMap(VariantType.class);
 
         // Compute the split value name for the manifest.
@@ -64,12 +63,17 @@ public class FeatureVariantData extends ApkVariantData implements TestedVariantD
     @Override
     @NonNull
     public String getDescription() {
-        if (getVariantConfiguration().hasFlavors()) {
-            return String.format(
-                    "%s feature split build for flavor %s",
-                    getCapitalizedBuildTypeName(), getCapitalizedFlavorName());
+        final GradleVariantConfiguration config = getVariantConfiguration();
+
+        if (config.hasFlavors()) {
+            StringBuilder sb = new StringBuilder(50);
+            StringHelper.appendCapitalized(sb, config.getBuildType().getName());
+            sb.append(" feature split build for flavor ");
+            StringHelper.appendCapitalized(sb, config.getFlavorName());
+            return sb.toString();
         } else {
-            return String.format("%s feature split build", getCapitalizedBuildTypeName());
+            return StringHelper.capitalizeWithSuffix(
+                    config.getBuildType().getName(), " feature split build");
         }
     }
 

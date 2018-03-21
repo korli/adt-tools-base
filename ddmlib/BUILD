@@ -23,8 +23,10 @@ iml_module(
         "//tools/idea/.idea/libraries:easymock-tools[test]",
         "//tools/idea/.idea/libraries:JUnit4[test]",
         "//tools/base/testutils:studio.testutils[module, test]",
+        "//tools/idea/.idea/libraries:mockito[test]",
         "//tools/idea/.idea/libraries:truth[test]",
         "//tools/base/fakeadbserver:studio.fakeadbserver[module, test]",
+        "//tools/idea/.idea/libraries:KotlinJavaRuntime",
     ],
 )
 
@@ -66,5 +68,6 @@ java_test(
         "//tools/base/third_party:com.google.truth_truth",
         "//tools/base/third_party:junit_junit",
         "//tools/base/third_party:org.easymock_easymock",
+        "//tools/base/third_party:org.mockito_mockito-core",
     ],
 )

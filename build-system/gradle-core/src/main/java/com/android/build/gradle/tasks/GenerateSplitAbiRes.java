@@ -28,27 +28,28 @@ import com.android.annotations.VisibleForTesting;
 import com.android.build.OutputFile;
 import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.aapt.AaptGradleFactory;
+import com.android.build.gradle.internal.core.VariantConfiguration;
 import com.android.build.gradle.internal.dsl.AaptOptions;
 import com.android.build.gradle.internal.dsl.AbiSplitOptions;
 import com.android.build.gradle.internal.dsl.DslAdaptersKt;
+import com.android.build.gradle.internal.scope.BuildElements;
+import com.android.build.gradle.internal.scope.BuildOutput;
 import com.android.build.gradle.internal.scope.OutputFactory;
-import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
+import com.android.build.gradle.internal.tasks.AndroidBuilderTask;
 import com.android.build.gradle.internal.tasks.ApplicationId;
-import com.android.build.gradle.internal.tasks.BaseTask;
 import com.android.build.gradle.internal.variant.FeatureVariantData;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.VariantConfiguration;
 import com.android.builder.core.VariantType;
 import com.android.builder.internal.aapt.Aapt;
 import com.android.builder.internal.aapt.AaptPackageConfig;
-import com.android.builder.utils.FileCache;
 import com.android.ide.common.build.ApkData;
 import com.android.ide.common.process.LoggedProcessOutputHandler;
 import com.android.ide.common.process.ProcessException;
 import com.android.utils.FileUtils;
 import com.google.common.base.CharMatcher;
+import com.google.common.collect.ImmutableList;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -63,10 +64,8 @@ import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
 
-/**
- * Generates all metadata (like AndroidManifest.xml) necessary for a ABI dimension split APK.
- */
-public class GenerateSplitAbiRes extends BaseTask {
+/** Generates all metadata (like AndroidManifest.xml) necessary for a ABI dimension split APK. */
+public class GenerateSplitAbiRes extends AndroidBuilderTask {
 
     private String applicationId;
     private String outputBaseName;
@@ -83,11 +82,9 @@ public class GenerateSplitAbiRes extends BaseTask {
     private File outputDirectory;
     private boolean debuggable;
     private AaptOptions aaptOptions;
-    private OutputScope outputScope;
     private OutputFactory outputFactory;
     private VariantType variantType;
     private VariantScope variantScope;
-    private FileCache fileCache;
     @Nullable private String featureName;
     @Nullable private FileCollection applicationIdOverride;
 
@@ -154,7 +151,7 @@ public class GenerateSplitAbiRes extends BaseTask {
     @TaskAction
     protected void doFullTaskAction() throws IOException, InterruptedException, ProcessException {
 
-        outputScope.deleteAllEntries(VariantScope.TaskOutputType.ABI_PROCESSED_SPLIT_RES);
+        ImmutableList.Builder<BuildOutput> buildOutputs = ImmutableList.builder();
         for (String split : getSplits()) {
             File resPackageFile = getOutputFileForSplit(split);
 
@@ -178,7 +175,6 @@ public class GenerateSplitAbiRes extends BaseTask {
                             builder,
                             new LoggedProcessOutputHandler(
                                     new AaptGradleFactory.FilteringLogger(builder.getLogger())),
-                            fileCache,
                             true,
                             FileUtils.mkdirs(
                                     new File(
@@ -201,13 +197,14 @@ public class GenerateSplitAbiRes extends BaseTask {
                 getBuilder().processResources(aapt, aaptConfig);
             }
 
-            outputScope.addOutputForSplit(
-                    VariantScope.TaskOutputType.ABI_PROCESSED_SPLIT_RES,
-                    abiApkData,
-                    resPackageFile);
+            buildOutputs.add(
+                    new BuildOutput(
+                            VariantScope.TaskOutputType.ABI_PROCESSED_SPLIT_RES,
+                            abiApkData,
+                            resPackageFile));
         }
 
-        outputScope.save(VariantScope.TaskOutputType.ABI_PROCESSED_SPLIT_RES, outputDirectory);
+        new BuildElements(buildOutputs.build()).save(outputDirectory);
     }
 
     @VisibleForTesting
@@ -326,7 +323,6 @@ public class GenerateSplitAbiRes extends BaseTask {
             generateSplitAbiRes.versionName = config.getVersionName();
             generateSplitAbiRes.aaptGeneration =
                     AaptGeneration.fromProjectOptions(scope.getGlobalScope().getProjectOptions());
-            generateSplitAbiRes.fileCache = scope.getGlobalScope().getBuildCache();
 
             generateSplitAbiRes.variantScope = scope;
             generateSplitAbiRes.variantType = config.getType();
@@ -339,7 +335,6 @@ public class GenerateSplitAbiRes extends BaseTask {
             generateSplitAbiRes.debuggable = config.getBuildType().isDebuggable();
             generateSplitAbiRes.aaptOptions =
                     scope.getGlobalScope().getExtension().getAaptOptions();
-            generateSplitAbiRes.outputScope = scope.getOutputScope();
             generateSplitAbiRes.outputFactory = scope.getVariantData().getOutputFactory();
 
             if (scope.getVariantData().getType() == VariantType.FEATURE) {

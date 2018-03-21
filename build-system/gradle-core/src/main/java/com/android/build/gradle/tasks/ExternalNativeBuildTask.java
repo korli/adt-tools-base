@@ -21,18 +21,19 @@ import static com.google.common.base.Preconditions.checkState;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.external.gson.NativeBuildConfigValue;
-import com.android.build.gradle.external.gson.NativeLibraryValue;
 import com.android.build.gradle.internal.core.Abi;
+import com.android.build.gradle.internal.cxx.json.AndroidBuildGradleJsons;
+import com.android.build.gradle.internal.cxx.json.NativeBuildConfigValueMini;
+import com.android.build.gradle.internal.cxx.json.NativeLibraryValueMini;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeBuildOptions;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeCmakeOptions;
 import com.android.build.gradle.internal.dsl.CoreExternalNativeNdkBuildOptions;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.VariantScope;
-import com.android.build.gradle.internal.tasks.BaseTask;
+import com.android.build.gradle.internal.tasks.AndroidBuilderTask;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.model.SyncIssue;
+import com.android.builder.errors.EvalIssueReporter;
 import com.android.ide.common.process.BuildCommandException;
 import com.android.ide.common.process.ProcessInfoBuilder;
 import com.android.utils.FileUtils;
@@ -43,10 +44,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
+import com.google.wireless.android.sdk.stats.GradleBuildVariant;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,7 +61,7 @@ import org.gradle.api.tasks.TaskAction;
  * <p>It declares no inputs or outputs, as it's supposed to always run when invoked. Incrementality
  * is left to the underlying build system.
  */
-public class ExternalNativeBuildTask extends BaseTask {
+public class ExternalNativeBuildTask extends AndroidBuilderTask {
 
     private List<File> nativeBuildConfigurationsJsons;
 
@@ -72,6 +73,8 @@ public class ExternalNativeBuildTask extends BaseTask {
 
     private Map<Abi, File> stlSharedObjectFiles;
 
+    @NonNull private GradleBuildVariant.Builder stats;
+
     /** Log low level diagnostic information. */
     protected void diagnostic(String format, Object... args) {
         getLogger().info(String.format(getName() + ": " + format, args));
@@ -82,13 +85,11 @@ public class ExternalNativeBuildTask extends BaseTask {
         diagnostic("starting build");
         checkNotNull(getVariantName());
         diagnostic("reading expected JSONs");
-        Collection<NativeBuildConfigValue> configValueList = ExternalNativeBuildTaskUtils
-                .getNativeBuildConfigValues(
-                        nativeBuildConfigurationsJsons, getVariantName());
+        List<NativeBuildConfigValueMini> miniConfigs = getNativeBuildConfigValueMinis();
         diagnostic("done reading expected JSONs");
+
         List<String> buildCommands = Lists.newArrayList();
         List<String> libraryNames = Lists.newArrayList();
-
         if (targets.isEmpty()) {
             diagnostic(
                     "executing build commands for targets that produce .so files or executables");
@@ -101,11 +102,8 @@ public class ExternalNativeBuildTask extends BaseTask {
             // Search libraries for matching targets.
             Set<String> matchingTargets = Sets.newHashSet();
             Set<String> unmatchedTargets = Sets.newHashSet();
-            for (NativeBuildConfigValue config : configValueList) {
-                if (config.libraries == null) {
-                    continue;
-                }
-                for (NativeLibraryValue libraryValue : config.libraries.values()) {
+            for (NativeBuildConfigValueMini config : miniConfigs) {
+                for (NativeLibraryValueMini libraryValue : config.libraries.values()) {
                     if (targets.contains(libraryValue.artifactName)) {
                         matchingTargets.add(libraryValue.artifactName);
                     } else {
@@ -124,17 +122,19 @@ public class ExternalNativeBuildTask extends BaseTask {
             }
         }
 
-
-
-        for (NativeBuildConfigValue config : configValueList) {
-            if (config.libraries == null) {
+        for (NativeBuildConfigValueMini config : miniConfigs) {
+            diagnostic("evaluate miniconfig");
+            if (config.libraries.isEmpty()) {
+                diagnostic("no libraries");
                 continue;
             }
             for (String libraryName : config.libraries.keySet()) {
-                NativeLibraryValue libraryValue = config.libraries.get(libraryName);
+                diagnostic("evaluate library %s", libraryName);
+                NativeLibraryValueMini libraryValue = config.libraries.get(libraryName);
                 if (!targets.isEmpty() && !targets.contains(libraryValue.artifactName)) {
-                    diagnostic("not building target %s because it isn't in targets set",
-                      libraryValue.artifactName);
+                    diagnostic(
+                            "not building target %s because it isn't in targets set",
+                            libraryValue.artifactName);
                     continue;
                 }
                 if (Strings.isNullOrEmpty(libraryValue.buildCommand)) {
@@ -146,8 +146,9 @@ public class ExternalNativeBuildTask extends BaseTask {
                 }
                 if (targets.isEmpty()) {
                     if (libraryValue.output == null) {
-                        diagnostic("not building target %s because no targets are specified and "
-                                + "library build output file is null",
+                        diagnostic(
+                                "not building target %s because no targets are specified and "
+                                        + "library build output file is null",
                                 libraryValue.artifactName);
                         continue;
                     }
@@ -184,12 +185,9 @@ public class ExternalNativeBuildTask extends BaseTask {
         executeProcessBatch(libraryNames, buildCommands);
 
         diagnostic("check expected build outputs");
-        for (NativeBuildConfigValue config : configValueList) {
-            if (config.libraries == null) {
-                continue;
-            }
+        for (NativeBuildConfigValueMini config : miniConfigs) {
             for (String library : config.libraries.keySet()) {
-                NativeLibraryValue libraryValue = config.libraries.get(library);
+                NativeLibraryValueMini libraryValue = config.libraries.get(library);
                 String libraryName = libraryValue.artifactName + " " + libraryValue.abi;
                 checkNotNull(libraryValue);
                 checkNotNull(libraryValue.output);
@@ -203,8 +201,9 @@ public class ExternalNativeBuildTask extends BaseTask {
                 }
                 if (!libraryValue.output.exists()) {
                     throw new GradleException(
-                            String.format("Expected output file at %s for target %s"
-                                    + " but there was none",
+                            String.format(
+                                    "Expected output file at %s for target %s"
+                                            + " but there was none",
                                     libraryValue.output, libraryValue.artifactName));
                 }
                 if (libraryValue.abi == null) {
@@ -267,12 +266,28 @@ public class ExternalNativeBuildTask extends BaseTask {
     }
 
     /**
+     * Get native build config minis. Also gather stats if they haven't already been gathered for
+     * this variant
+     *
+     * @return the mini configs
+     */
+    private List<NativeBuildConfigValueMini> getNativeBuildConfigValueMinis() throws IOException {
+        // Gather stats only if they haven't been gathered during model build
+        if (stats.getNativeBuildConfigCount() == 0) {
+            return AndroidBuildGradleJsons.getNativeBuildMiniConfigs(
+                    nativeBuildConfigurationsJsons, stats);
+        }
+        return AndroidBuildGradleJsons.getNativeBuildMiniConfigs(
+                nativeBuildConfigurationsJsons, null);
+    }
+
+    /**
      * Given a list of build commands, execute each. If there is a failure, processing is stopped at
      * that point.
      */
-    protected void executeProcessBatch(
-            @NonNull List<String> libraryNames,
-            @NonNull List<String> commands) throws BuildCommandException, IOException {
+    private void executeProcessBatch(
+            @NonNull List<String> libraryNames, @NonNull List<String> commands)
+            throws BuildCommandException, IOException {
         // Order of building doesn't matter to final result but building in reverse order causes
         // the dependencies to be built first for CMake and ndk-build. This gives better progress
         // visibility to the user because they will see "building XXXXX.a" before
@@ -282,7 +297,7 @@ public class ExternalNativeBuildTask extends BaseTask {
             String libraryName = libraryNames.get(library);
             getLogger().lifecycle(String.format("Build %s", libraryName));
             String command = commands.get(library);
-            List<String> tokens = StringHelper.tokenizeString(command);
+            List<String> tokens = StringHelper.tokenizeCommandLineToEscaped(command);
             ProcessInfoBuilder processBuilder = new ProcessInfoBuilder();
             processBuilder.setExecutable(tokens.get(0));
             for (int i = 1; i < tokens.size(); ++i) {
@@ -331,8 +346,7 @@ public class ExternalNativeBuildTask extends BaseTask {
         this.nativeBuildConfigurationsJsons = nativeBuildConfigurationsJsons;
     }
 
-    public void setStlSharedObjectFiles(
-            Map<Abi, File> stlSharedObjectFiles) {
+    private void setStlSharedObjectFiles(Map<Abi, File> stlSharedObjectFiles) {
         this.stlSharedObjectFiles = stlSharedObjectFiles;
     }
 
@@ -397,6 +411,7 @@ public class ExternalNativeBuildTask extends BaseTask {
             task.setVariantName(variantData.getName());
             task.setSoFolder(generator.getSoFolder());
             task.setObjFolder(generator.getObjFolder());
+            task.stats = generator.stats;
             if (Strings.isNullOrEmpty(buildTargetAbi)) {
                 task.setNativeBuildConfigurationsJsons(
                         generator.getNativeBuildConfigurationsJsons());
@@ -409,22 +424,30 @@ public class ExternalNativeBuildTask extends BaseTask {
                 //
                 // It is possible for multiple ABIs to be passed through buildTargetAbi. In this
                 // case, take the first. It is preferred.
-                List<File> expectedJson = ExternalNativeBuildTaskUtils.getOutputJsons(
-                            generator.getJsonFolder(),
-                            Arrays.asList(buildTargetAbi.split(",")));
+                List<File> expectedJson =
+                        ExternalNativeBuildTaskUtils.getOutputJsons(
+                                generator.getJsonFolder(),
+                                Arrays.asList(buildTargetAbi.split(",")));
                 // Remove JSONs that won't be created by the generator.
                 expectedJson.retainAll(generator.getNativeBuildConfigurationsJsons());
                 // If no JSONs remain then issue a warning and proceed with no-op build.
                 if (expectedJson.isEmpty()) {
-                    androidBuilder.getErrorReporter().handleSyncWarning(
-                            scope.getFullVariantName(),
-                            SyncIssue.TYPE_EXTERNAL_NATIVE_BUILD_CONFIGURATION,
-                            String.format("Targeted device ABI or comma-delimited ABIs [%s] is not"
-                                    + " one of [%s]. Nothing to build.",
-                                    buildTargetAbi,
-                                    Joiner.on(", ").join(generator.getAbis().stream()
-                                            .map(Abi::getName)
-                                            .collect(Collectors.toList()))));
+                    androidBuilder
+                            .getIssueReporter()
+                            .reportWarning(
+                                    EvalIssueReporter.Type.EXTERNAL_NATIVE_BUILD_CONFIGURATION,
+                                    String.format(
+                                            "Targeted device ABI or comma-delimited ABIs [%s] is not"
+                                                    + " one of [%s]. Nothing to build.",
+                                            buildTargetAbi,
+                                            Joiner.on(", ")
+                                                    .join(
+                                                            generator
+                                                                    .getAbis()
+                                                                    .stream()
+                                                                    .map(Abi::getName)
+                                                                    .collect(Collectors.toList()))),
+                                    scope.getFullVariantName());
                     task.setNativeBuildConfigurationsJsons(ImmutableList.of());
                 } else {
                     // Take the first JSON that matched the build configuration

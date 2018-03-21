@@ -1,26 +1,10 @@
 load("//tools/base/bazel:bazel.bzl", "iml_module")
+load("//tools/base/bazel:kotlin.bzl", "kotlin_library", "kotlin_test")
 load(
     "//tools/base/bazel:maven.bzl",
     "maven_java_import",
-    "maven_java_library",
     "maven_pom",
-)
-
-iml_module(
-    name = "studio.builder-test-api",
-    srcs = ["builder-test-api/src/main/java"],
-    iml_files = ["builder-test-api/builder-test-api.iml"],
-    tags = ["managed"],
-    test_srcs = ["builder-test-api/src/test/java"],
-    visibility = ["//visibility:public"],
-    # do not sort: must match IML order
-    exports = ["//tools/base/ddmlib:studio.ddmlib"],
-    # do not sort: must match IML order
-    deps = [
-        "//tools/base/ddmlib:studio.ddmlib[module]",
-        "//tools/idea/.idea/libraries:Guava",
-        "//tools/idea/.idea/libraries:JUnit4[test]",
-    ],
+    "maven_repo",
 )
 
 iml_module(
@@ -41,65 +25,33 @@ iml_module(
         "//tools/base/third_party:com.google.truth_truth[test]",
         "//tools/base/sdk-common:studio.sdk-common[module]",
         "//tools/base/testutils:studio.testutils[module, test]",
+        "//tools/idea/.idea/libraries:truth[test]",
+        "//tools/idea/.idea/libraries:KotlinJavaRuntime",
     ],
 )
 
 filegroup(
     name = "gradle-distrib",
-    srcs = ["//tools/external/gradle:gradle-distrib-4.1"],
+    srcs = ["//tools/external/gradle:gradle-distrib-4.4"],
     visibility = ["//visibility:public"],
 )
 
 java_import(
     name = "gradle-api_neverlink",
-    jars = ["//tools/external/gradle:gradle-api-4.1-jar"],
+    jars = ["//tools/external/gradle:gradle-api-4.4-jar"],
     neverlink = 1,
     visibility = ["//visibility:public"],
 )
 
 java_import(
     name = "gradle-api",
-    jars = ["//tools/external/gradle:gradle-api-4.1-jar"],
+    jars = ["//tools/external/gradle:gradle-api-4.4-jar"],
     visibility = ["//visibility:public"],
 )
 
-# TODO(bendowski): Move this to the right directory.
-maven_java_library(
-    name = "tools.builder-test-api",
-    srcs = glob(["builder-test-api/src/main/java/**"]),
-    pom = ":builder-test-api.pom",
-    visibility = ["//visibility:public"],
-    deps = [
-        "//tools/base/annotations",
-        "//tools/base/common:tools.common",
-        "//tools/base/ddmlib:tools.ddmlib",
-        "//tools/base/third_party:com.google.guava_guava",
-    ],
-)
-
-maven_pom(
-    name = "builder-test-api.pom",
-    artifact = "builder-test-api",
-    group = "com.android.tools.build",
-    source = "//tools/buildSrc/base:build_version",
-)
-
-java_test(
-    name = "tools.builder-test-api_tests",
-    srcs = glob(["builder-test-api/src/test/java/**"]),
-    jvm_flags = ["-Dtest.suite.jar=tools.builder-test-api_tests.jar"],
-    test_class = "com.android.testutils.JarTestSuite",
-    runtime_deps = ["//tools/base/testutils:tools.testutils"],
-    deps = [
-        ":tools.builder-test-api",
-        "//tools/base/third_party:com.google.guava_guava",
-        "//tools/base/third_party:junit_junit",
-    ],
-)
-
-maven_java_library(
+kotlin_library(
     name = "tools.manifest-merger",
-    srcs = glob(["manifest-merger/src/main/java/**"]),
+    srcs = ["manifest-merger/src/main/java"],
     javacopts = ["-Xep:MissingCasesInEnumSwitch:WARN"],
     pom = ":manifest-merger.pom",
     visibility = ["//visibility:public"],
@@ -111,6 +63,7 @@ maven_java_library(
         "//tools/base/sdklib:tools.sdklib",
         "//tools/base/third_party:com.google.code.gson_gson",
         "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
     ],
 )
 
@@ -121,14 +74,17 @@ maven_pom(
     source = "//tools/buildSrc/base:build_version",
 )
 
-java_test(
+kotlin_test(
     name = "tools.manifest-merger_tests",
     # TODO: Why are the xml files not under resources?
-    srcs = glob(["manifest-merger/src/test/java/**/*.java"]),
+    srcs = ["manifest-merger/src/test/java"],
     jvm_flags = ["-Dtest.suite.jar=tools.manifest-merger_tests.jar"],
     resources = glob(
         include = ["manifest-merger/src/test/java/**"],
-        exclude = ["manifest-merger/src/test/java/**/*.java"],
+        exclude = [
+            "manifest-merger/src/test/java/**/*.java",
+            "manifest-merger/src/test/java/**/*.kt",
+        ],
     ),
     test_class = "com.android.testutils.JarTestSuite",
     runtime_deps = ["//tools/base/testutils:tools.testutils"],
@@ -143,13 +99,14 @@ java_test(
         "//tools/base/third_party:com.google.guava_guava",
         "//tools/base/third_party:com.google.truth_truth",
         "//tools/base/third_party:junit_junit",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
         "//tools/base/third_party:org.mockito_mockito-core",
     ],
 )
 
 maven_java_import(
     name = "tools.apksig",
-    jars = ["//tools/apksig:libapksig.jar"],
+    jars = ["//tools/apksig:libapksig-all.jar"],
     pom = ":apksig.pom",
     visibility = ["//visibility:public"],
 )
@@ -159,4 +116,47 @@ maven_pom(
     artifact = "apksig",
     group = "com.android.tools.build",
     source = "//tools/buildSrc/base:build_version",
+)
+
+# repos for the gradle plugin and the offline repo packaged inside Studio
+
+# m2 repository to run the Gradle plugin minus the data-binding dependency.
+# When running the gradle plugin, prefer this one to gradle_plugin_repo if you don't
+# need data-binding. Data-binding requires much more work/dependencies, as it builds
+# the data-binding runtime library with the Gradle plugin.
+
+GRADLE_PLUGIN_NO_DATABINDING_ARTIFACTS = [
+    "//tools/base/build-system/gradle",
+    "//tools/base/lint:tools.lint-gradle",
+    "//prebuilts/tools/common/m2/repository/com/google/errorprone/error_prone_annotations/2.0.18:jar",
+]
+
+maven_repo(
+    name = "gradle_plugin_no_databinding_repo",
+    artifacts = GRADLE_PLUGIN_NO_DATABINDING_ARTIFACTS,
+    include_sources = True,
+    visibility = ["//visibility:public"],
+)
+
+# Full m2 repository to run the Gradle plugin.
+# Only use if you need data-binding, otherwise use gradle_plugin_no_databinding_repo
+GRADLE_PLUGIN_ARTIFACTS = GRADLE_PLUGIN_NO_DATABINDING_ARTIFACTS + [
+    "//tools/data-binding:tools.compiler",
+]
+
+maven_repo(
+    name = "gradle_plugin_repo",
+    artifacts = GRADLE_PLUGIN_ARTIFACTS,
+    include_sources = True,
+    visibility = ["//visibility:public"],
+)
+
+# m2 repository packaged inside studio.
+maven_repo(
+    name = "studio_repo",
+    artifacts = GRADLE_PLUGIN_ARTIFACTS + [
+        "//tools/base/build-system/java-lib-plugin/java-lib-model-builder",
+    ],
+    include_sources = True,
+    visibility = ["//visibility:public"],
 )

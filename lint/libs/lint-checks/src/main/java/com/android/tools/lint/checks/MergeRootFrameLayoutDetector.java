@@ -21,8 +21,17 @@ import static com.android.SdkConstants.ATTR_BACKGROUND;
 import static com.android.SdkConstants.ATTR_FOREGROUND;
 import static com.android.SdkConstants.ATTR_LAYOUT;
 import static com.android.SdkConstants.ATTR_LAYOUT_GRAVITY;
+import static com.android.SdkConstants.ATTR_LAYOUT_HEIGHT;
+import static com.android.SdkConstants.ATTR_LAYOUT_WIDTH;
+import static com.android.SdkConstants.ATTR_PADDING;
+import static com.android.SdkConstants.ATTR_PADDING_BOTTOM;
+import static com.android.SdkConstants.ATTR_PADDING_LEFT;
+import static com.android.SdkConstants.ATTR_PADDING_RIGHT;
+import static com.android.SdkConstants.ATTR_PADDING_TOP;
 import static com.android.SdkConstants.FRAME_LAYOUT;
 import static com.android.SdkConstants.LAYOUT_RESOURCE_PREFIX;
+import static com.android.SdkConstants.VALUE_FILL_PARENT;
+import static com.android.SdkConstants.VALUE_MATCH_PARENT;
 import static com.android.SdkConstants.VIEW_INCLUDE;
 
 import com.android.annotations.NonNull;
@@ -30,7 +39,6 @@ import com.android.resources.ResourceType;
 import com.android.tools.lint.client.api.ResourceReference;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -40,6 +48,7 @@ import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Location.Handle;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.UastLintUtils;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.Pair;
@@ -60,7 +69,7 @@ import org.w3c.dom.Node;
 /**
  * Checks whether a root FrameLayout can be replaced with a {@code <merge>} tag.
  */
-public class MergeRootFrameLayoutDetector extends LayoutDetector implements UastScanner {
+public class MergeRootFrameLayoutDetector extends LayoutDetector implements SourceCodeScanner {
     /**
      * Set of layouts that we want to enable the warning for. We only warn for
      * {@code <FrameLayout>}'s that are the root of a layout included from
@@ -173,7 +182,7 @@ public class MergeRootFrameLayoutDetector extends LayoutDetector implements Uast
         mWhitelistedLayouts.add(layout);
     }
 
-    // Implements UastScanner
+    // implements SourceCodeScanner
 
     @Override
     public List<String> getApplicableMethodNames() {
@@ -192,5 +201,27 @@ public class MergeRootFrameLayoutDetector extends LayoutDetector implements Uast
                 whiteListLayout(reference.getName());
             }
         }
+    }
+
+
+    private static boolean isFillParent(@NonNull Element element, @NonNull String dimension) {
+        String width = element.getAttributeNS(ANDROID_URI, dimension);
+        return width.equals(VALUE_MATCH_PARENT) || width.equals(VALUE_FILL_PARENT);
+    }
+
+    protected static boolean isWidthFillParent(@NonNull Element element) {
+        return isFillParent(element, ATTR_LAYOUT_WIDTH);
+    }
+
+    protected static boolean isHeightFillParent(@NonNull Element element) {
+        return isFillParent(element, ATTR_LAYOUT_HEIGHT);
+    }
+
+    protected static boolean hasPadding(@NonNull Element root) {
+        return root.hasAttributeNS(ANDROID_URI, ATTR_PADDING)
+                || root.hasAttributeNS(ANDROID_URI, ATTR_PADDING_LEFT)
+                || root.hasAttributeNS(ANDROID_URI, ATTR_PADDING_RIGHT)
+                || root.hasAttributeNS(ANDROID_URI, ATTR_PADDING_TOP)
+                || root.hasAttributeNS(ANDROID_URI, ATTR_PADDING_BOTTOM);
     }
 }

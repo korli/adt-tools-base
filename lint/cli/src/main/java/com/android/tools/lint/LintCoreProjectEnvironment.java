@@ -19,20 +19,27 @@ package com.android.tools.lint;
 import com.android.annotations.NonNull;
 import com.google.common.collect.Sets;
 import com.intellij.core.CoreApplicationEnvironment;
+import com.intellij.core.CoreJavaFileManager;
 import com.intellij.core.JavaCoreApplicationEnvironment;
 import com.intellij.core.JavaCoreProjectEnvironment;
+import com.intellij.mock.MockProject;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.extensions.Extensions;
 import com.intellij.openapi.extensions.ExtensionsArea;
 import com.intellij.openapi.vfs.StandardFileSystems;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileSystem;
 import com.intellij.psi.PsiElementFinder;
-import com.intellij.psi.impl.PsiTreeChangePreprocessor;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.impl.PsiElementFinderImpl;
 import com.intellij.psi.impl.file.impl.JavaFileManager;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCliJavaFileManagerImpl;
+import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment;
 
 public class LintCoreProjectEnvironment extends JavaCoreProjectEnvironment {
     @NonNull
@@ -45,30 +52,44 @@ public class LintCoreProjectEnvironment extends JavaCoreProjectEnvironment {
     @Override
     protected void preregisterServices() {
         super.preregisterServices();
+        KotlinCoreEnvironment.registerProjectExtensionPoints(Extensions.getArea(getProject()));
+    }
 
-        ExtensionsArea area = Extensions.getArea(getProject());
-        CoreApplicationEnvironment.registerExtensionPoint(area,
-                PsiTreeChangePreprocessor.EP_NAME, PsiTreeChangePreprocessor.class);
-        CoreApplicationEnvironment.registerExtensionPoint(area,
-                PsiElementFinder.EP_NAME, PsiElementFinder.class);
+    @Override
+    protected void registerJavaPsiFacade() {
+        MockProject project = getProject();
+        ExtensionsArea area = Extensions.getArea(project);
+
+        project.registerService(CoreJavaFileManager.class,
+                (CoreJavaFileManager) ServiceManager.getService(project, JavaFileManager.class));
+
+        area.getExtensionPoint(PsiElementFinder.EP_NAME).registerExtension(
+                new PsiElementFinderImpl(
+                        project, ServiceManager.getService(project, JavaFileManager.class)));
+
+
+        super.registerJavaPsiFacade();
     }
 
     public LintCoreProjectEnvironment(Disposable parentDisposable,
             CoreApplicationEnvironment applicationEnvironment) {
         super(parentDisposable, applicationEnvironment);
 
-        ExtensionsArea area = Extensions.getArea(getProject());
+        MockProject project = getProject();
+        ExtensionsArea area = Extensions.getArea(project);
         LintCoreApplicationEnvironment.registerProjectExtensionPoints(area);
-        LintCoreApplicationEnvironment.registerProjectServicesForCLI(this);
         LintCoreApplicationEnvironment.registerProjectServices(this);
     }
 
-    @Override
-    protected JavaFileManager createCoreFileManager() {
-        return super.createCoreFileManager();
+    private List<File> myPaths = new ArrayList<>();
+
+    public List<File> getPaths() {
+        return myPaths;
     }
 
     public void registerPaths(@NonNull List<File> classpath) {
+        myPaths.addAll(classpath);
+
         int expectedSize = classpath.size();
         Set<File> files = Sets.newHashSetWithExpectedSize(expectedSize);
 
@@ -82,6 +103,13 @@ public class LintCoreProjectEnvironment extends JavaCoreProjectEnvironment {
 
             if (path.exists()) {
                 if (path.isFile()) {
+                    // Make sure these paths are absolute - nested jar file systems
+                    // do not work correctly with relative paths (for example
+                    // JavaPsiFacade.findClass will not find classes in these jar
+                    // file systems.)
+                    if (!path.isAbsolute()) {
+                        path = path.getAbsoluteFile();
+                    }
                     addJarToClassPath(path);
                 } else if (path.isDirectory()) {
                     VirtualFile virtualFile = local.findFileByPath(path.getPath());
@@ -91,5 +119,11 @@ public class LintCoreProjectEnvironment extends JavaCoreProjectEnvironment {
                 }
             }
         }
+    }
+
+    @Override
+    protected JavaFileManager createCoreFileManager() {
+        PsiManager psiManager = PsiManager.getInstance(getProject());
+        return new KotlinCliJavaFileManagerImpl(psiManager);
     }
 }

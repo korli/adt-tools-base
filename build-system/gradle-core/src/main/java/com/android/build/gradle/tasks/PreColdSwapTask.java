@@ -19,11 +19,10 @@ package com.android.build.gradle.tasks;
 import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.incremental.InstantRunBuildMode;
-import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.InstantRunVariantScope;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.TransformVariantScope;
-import com.android.build.gradle.internal.tasks.DefaultAndroidTask;
+import com.android.build.gradle.internal.tasks.AndroidVariantTask;
 import java.io.IOException;
 import org.gradle.api.Task;
 import org.gradle.api.logging.Logger;
@@ -41,7 +40,7 @@ import org.gradle.api.tasks.TaskAction;
  * cold swap is triggered, the main APK must be rebuilt (even if the resources were changed in a
  * previous build).
  */
-public class PreColdSwapTask extends DefaultAndroidTask {
+public class PreColdSwapTask extends AndroidVariantTask {
 
     private static final Logger LOG = Logging.getLogger(PreColdSwapTask.class);
 
@@ -69,7 +68,7 @@ public class PreColdSwapTask extends DefaultAndroidTask {
         }
     }
 
-    private <T extends Task> void disableTask(AndroidTask<T> task) {
+    private void disableTask(Task task) {
         LOG.info("Disabling task {}", task.getName());
         transformVariantScope.getGlobalScope().getProject().getTasks().getByName(task.getName())
                 .setEnabled(false);

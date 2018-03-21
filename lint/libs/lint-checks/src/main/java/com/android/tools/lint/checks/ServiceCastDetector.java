@@ -20,13 +20,13 @@ import static com.android.SdkConstants.CLASS_ACTIVITY;
 import static com.android.SdkConstants.CLASS_APPLICATION;
 import static com.android.SdkConstants.CLASS_CONTEXT;
 import static com.android.SdkConstants.CLASS_VIEW;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -34,6 +34,7 @@ import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.UastLintUtils;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
@@ -62,7 +63,7 @@ import org.jetbrains.uast.util.UastExpressionUtils;
  * class, and the value attribute will map back to the expected constant. This should let us
  * get rid of the hardcoded lookup table below.
  */
-public class ServiceCastDetector extends Detector implements UastScanner {
+public class ServiceCastDetector extends Detector implements SourceCodeScanner {
     public static final Implementation IMPLEMENTATION = new Implementation(
         ServiceCastDetector.class,
         Scope.JAVA_FILE_SCOPE);
@@ -78,7 +79,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
 
             Category.CORRECTNESS,
             6,
-            Severity.FATAL,
+            Severity.ERROR,
             IMPLEMENTATION);
 
     /** Using wifi manager from the wrong context */
@@ -93,7 +94,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
 
             Category.CORRECTNESS,
             6,
-            Severity.FATAL,
+            Severity.ERROR,
             IMPLEMENTATION);
 
     /** Using wifi manager from the wrong context: unknown Context origin */
@@ -107,7 +108,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
             "\n" +
             "In many cases, it's not obvious from the code where the `Context` is " +
             "coming from (e.g. it might be a parameter to a method, or a field initialized " +
-            "from various method calls.)  It's possible that the context being passed in " +
+            "from various method calls). It's possible that the context being passed in " +
             "is the application context, but to be on the safe side, you should consider " +
             "changing `context.getSystemService(...)` to " +
             "`context.getApplicationContext().getSystemService(...)`.",
@@ -124,7 +125,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
     public ServiceCastDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     public List<String> getApplicableMethodNames() {
@@ -180,7 +181,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
      * Checks that the given call to {@code Context#getSystemService(WIFI_SERVICE)} is
      * using the application context
      */
-    private static void checkWifiService(@NonNull JavaContext context,
+    private void checkWifiService(@NonNull JavaContext context,
             @NonNull UCallExpression call) {
         JavaEvaluator evaluator = context.getEvaluator();
         UExpression qualifier = call.getReceiver();
@@ -213,7 +214,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
      * @param element the reference to be checked
      * @param call    the original getSystemService call to report an error against
      */
-    private static boolean checkContextReference(
+    private boolean checkContextReference(
             @NonNull JavaContext context,
             @Nullable UElement element,
             @NonNull UCallExpression call) {
@@ -272,7 +273,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
      * <p>
      * Returns true if it finds and reports a problem.
      */
-    private static boolean checkWifiContextType(@NonNull JavaContext context,
+    private boolean checkWifiContextType(@NonNull JavaContext context,
             @NonNull UCallExpression call, @NonNull PsiType type,
             boolean flagPlainContext) {
         JavaEvaluator evaluator = context.getEvaluator();
@@ -294,7 +295,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
         return true;
     }
 
-    private static void reportWifiServiceLeak(@NonNull Issue issue, @NonNull JavaContext context,
+    private void reportWifiServiceLeak(@NonNull Issue issue, @NonNull JavaContext context,
             @NonNull UCallExpression call) {
         if (context.getMainProject().getMinSdk() >= 24) {
             // Bug is fixed in Nougat
@@ -314,7 +315,7 @@ public class ServiceCastDetector extends Detector implements UastScanner {
                     .replace().text(qualifier).with(qualifier + ".getApplicationContext()")
                     .build();
         } else {
-            String qualifier = call.getMethodName();
+            String qualifier = getMethodName(call);
             message += String.format("Try changing `%1$s` to `getApplicationContext().%1$s`",
                     qualifier);
             fix = fix()

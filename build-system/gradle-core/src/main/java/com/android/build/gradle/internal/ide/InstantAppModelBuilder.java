@@ -41,7 +41,6 @@ import com.android.build.gradle.internal.variant.TaskContainer;
 import com.android.build.gradle.options.BooleanOption;
 import com.android.build.gradle.options.ProjectOptions;
 import com.android.build.gradle.options.SyncOptions;
-import com.android.builder.Version;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.BuildTypeContainer;
@@ -52,17 +51,22 @@ import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.SyncIssue;
 import com.android.builder.model.Variant;
+import com.android.builder.model.Version;
 import com.android.builder.model.level2.DependencyGraphs;
 import com.android.ide.common.build.ApkInfo;
 import com.android.utils.Pair;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.io.File;
+import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
@@ -91,14 +95,14 @@ public class InstantAppModelBuilder implements ToolingModelBuilder {
     }
 
     @Override
-    public boolean canBuild(String modelName) {
+    public boolean canBuild(@NonNull String modelName) {
         // FIXME: We should not return an AndroidProject here.
         return modelName.equals(AndroidProject.class.getName())
                 || modelName.equals(InstantAppProjectBuildOutput.class.getName());
     }
 
     @Override
-    public Object buildAll(String modelName, Project project) {
+    public Object buildAll(@NonNull String modelName, @NonNull Project project) {
         if (modelName.equals(AndroidProject.class.getName())) {
             return buildAndroidProject(project);
         }
@@ -118,7 +122,8 @@ public class InstantAppModelBuilder implements ToolingModelBuilder {
         }
 
         if (modelLevel < AndroidProject.MODEL_LEVEL_3_VARIANT_OUTPUT_POST_BUILD) {
-            throw new RuntimeException("This Gradle plugin requires Studio 3.0 minimum");
+            throw new RuntimeException(
+                    "This Gradle plugin requires a newer IDE able to request IDE model level 3. For Android Studio this means version 3.0+");
         }
 
         modelWithFullDependency =
@@ -130,7 +135,7 @@ public class InstantAppModelBuilder implements ToolingModelBuilder {
                         extraModelInfo.getExtraFlavorSourceProviders(
                                 variantManager.getDefaultConfig().getProductFlavor().getName()));
 
-        syncIssues.addAll(extraModelInfo.getSyncIssues().values());
+        syncIssues.addAll(extraModelInfo.getSyncIssueHandler().getSyncIssues());
 
         List<String> flavorDimensionList =
                 config.getFlavorDimensionList() != null
@@ -193,8 +198,13 @@ public class InstantAppModelBuilder implements ToolingModelBuilder {
                 ImmutableList.builder();
 
         for (VariantScope variantScope : variantManager.getVariantScopes()) {
-            InstantAppOutputScope instantAppOutputScope =
-                    InstantAppOutputScope.load(variantScope.getApkLocation());
+            InstantAppOutputScope instantAppOutputScope = null;
+            try {
+                instantAppOutputScope = InstantAppOutputScope.load(variantScope.getApkLocation());
+            } catch (IOException e) {
+                Logger.getAnonymousLogger().log(
+                        Level.SEVERE, "Error while loading output.json", e);
+            }
             if (instantAppOutputScope != null) {
                 variantsOutput.add(
                         new DefaultInstantAppVariantBuildOutput(
@@ -225,10 +235,14 @@ public class InstantAppModelBuilder implements ToolingModelBuilder {
     @NonNull
     private VariantImpl createVariant(@NonNull BaseVariantData variantData) {
         VariantScope variantScope = variantData.getScope();
+        ImmutableMap<String, String> buildMapping =
+                ModelBuilder.computeBuildMapping(
+                        variantScope.getGlobalScope().getProject().getGradle());
         GradleVariantConfiguration variantConfiguration = variantData.getVariantConfiguration();
         Pair<Dependencies, DependencyGraphs> dependencies =
                 ModelBuilder.getDependencies(
                         variantScope,
+                        buildMapping,
                         extraModelInfo,
                         syncIssues,
                         modelLevel,
@@ -269,20 +283,20 @@ public class InstantAppModelBuilder implements ToolingModelBuilder {
                         new InstantRunImpl(
                                 BuildInfoWriterTask.ConfigAction.getBuildInfoFile(variantScope),
                                 variantConfiguration.getInstantRunSupportStatus()),
-                        (BuildOutputSupplier<Collection<BuildOutput>>)
+                        (BuildOutputSupplier<Collection<EarlySyncBuildOutput>>)
                                 () ->
                                         ImmutableList.of(
-                                                new BuildOutput(
+                                                new EarlySyncBuildOutput(
                                                         TaskOutputHolder.TaskOutputType
                                                                 .INSTANTAPP_BUNDLE,
-                                                        ApkInfo.of(
-                                                                OutputFile.OutputType.MAIN,
-                                                                ImmutableList.of(),
-                                                                -1),
+                                                        OutputFile.OutputType.MAIN,
+                                                        ImmutableList.of(),
+                                                        -1,
                                                         new File(
                                                                 outputLocation,
                                                                 baseName + SdkConstants.DOT_ZIP))),
                         new BuildOutputsSupplier(ImmutableList.of(), ImmutableList.of()),
+                        null,
                         null);
 
         return new VariantImpl(

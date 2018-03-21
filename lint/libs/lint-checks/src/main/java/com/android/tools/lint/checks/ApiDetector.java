@@ -19,6 +19,7 @@ package com.android.tools.lint.checks;
 import static com.android.SdkConstants.ANDROID_PREFIX;
 import static com.android.SdkConstants.ANDROID_THEME_PREFIX;
 import static com.android.SdkConstants.ANDROID_URI;
+import static com.android.SdkConstants.APPCOMPAT_LIB_ARTIFACT;
 import static com.android.SdkConstants.ATTR_CLASS;
 import static com.android.SdkConstants.ATTR_FULL_BACKUP_CONTENT;
 import static com.android.SdkConstants.ATTR_HEIGHT;
@@ -34,6 +35,7 @@ import static com.android.SdkConstants.ATTR_TEXT_IS_SELECTABLE;
 import static com.android.SdkConstants.ATTR_THEME;
 import static com.android.SdkConstants.ATTR_VALUE;
 import static com.android.SdkConstants.ATTR_WIDTH;
+import static com.android.SdkConstants.AUTO_URI;
 import static com.android.SdkConstants.BUTTON;
 import static com.android.SdkConstants.CHECK_BOX;
 import static com.android.SdkConstants.CONSTRUCTOR_NAME;
@@ -49,6 +51,8 @@ import static com.android.SdkConstants.TARGET_API;
 import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.SdkConstants.VIEW_INCLUDE;
 import static com.android.SdkConstants.VIEW_TAG;
+import static com.android.tools.lint.checks.ApiLookup.equivalentName;
+import static com.android.tools.lint.checks.ApiLookup.startsWithEquivalentPrefix;
 import static com.android.tools.lint.checks.RtlDetector.ATTR_SUPPORTS_RTL;
 import static com.android.tools.lint.checks.VersionChecks.SDK_INT;
 import static com.android.tools.lint.checks.VersionChecks.codeNameToApi;
@@ -57,24 +61,22 @@ import static com.android.tools.lint.checks.VersionChecks.isVersionCheckConditio
 import static com.android.tools.lint.checks.VersionChecks.isWithinVersionCheckConditional;
 import static com.android.tools.lint.detector.api.ClassContext.getFqcn;
 import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
-import static com.android.utils.CharSequences.indexOf;
+import static com.android.tools.lint.detector.api.UastLintUtils.getLongAttribute;
 import static com.android.utils.SdkUtils.getResourceFieldName;
 import static com.intellij.pom.java.LanguageLevel.JDK_1_7;
 import static com.intellij.pom.java.LanguageLevel.JDK_1_8;
+import static java.lang.Boolean.TRUE;
 
-import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.repository.GradleVersion;
 import com.android.ide.common.resources.configuration.FolderConfiguration;
 import com.android.repository.Revision;
-import com.android.repository.api.LocalPackage;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.BuildToolInfo;
 import com.android.sdklib.SdkVersionInfo;
-import com.android.sdklib.repository.AndroidSdkHandler;
 import com.android.tools.lint.client.api.IssueRegistry;
 import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.client.api.LintDriver;
@@ -82,9 +84,6 @@ import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.DefaultPosition;
-import com.android.tools.lint.detector.api.Detector.ResourceFolderScanner;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -92,12 +91,16 @@ import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Position;
+import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.ResourceContext;
+import com.android.tools.lint.detector.api.ResourceFolderScanner;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.UastLintUtils;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.utils.XmlUtils;
 import com.intellij.psi.CommonClassNames;
 import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiAnnotationMemberValue;
@@ -172,8 +175,7 @@ import org.w3c.dom.NodeList;
  * by this application (according to its minimum API requirement in the manifest).
  */
 public class ApiDetector extends ResourceXmlDetector
-        implements UastScanner, ResourceFolderScanner {
-
+        implements SourceCodeScanner, ResourceFolderScanner {
     public static final String REQUIRES_API_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "RequiresApi";
     public static final String SDK_SUPPRESS_ANNOTATION = "android.support.test.filters.SdkSuppress";
 
@@ -226,8 +228,8 @@ public class ApiDetector extends ResourceXmlDetector
             "the value is available even when running on older devices. In some " +
             "cases that's fine, and in other cases it can result in a runtime " +
             "crash or incorrect behavior. It depends on the context, so consider " +
-            "the code carefully and device whether it's safe and can be suppressed " +
-            "or whether the code needs tbe guarded.\n" +
+            "the code carefully and decide whether it's safe and can be suppressed " +
+            "or whether the code needs to be guarded.\n" +
             "\n" +
             "If you really want to use this API and don't need to support older devices just " +
             "set the `minSdkVersion` in your `build.gradle` or `AndroidManifest.xml` files." +
@@ -347,62 +349,6 @@ public class ApiDetector extends ResourceXmlDetector
                 mWarnedMissingDb = true;
                 context.report(IssueRegistry.LINT_ERROR, Location.create(context.file),
                         "Can't find API database; API check not performed");
-            } else {
-                if (mApiDatabase == null || mApiDatabase.getTarget() != null) {
-                    // Don't warn about compileSdk/platform-tools mismatch if the API database
-                    // corresponds to an SDK platform
-                    return;
-                }
-
-                // See if you don't have at least version 23.0.1 of platform tools installed
-                AndroidSdkHandler sdk = context.getClient().getSdk();
-                if (sdk == null) {
-                    return;
-                }
-                LocalPackage pkgInfo = sdk.getLocalPackage(SdkConstants.FD_PLATFORM_TOOLS,
-                        context.getClient().getRepositoryLogger());
-                if (pkgInfo == null) {
-                    return;
-                }
-                Revision revision = pkgInfo.getVersion();
-
-                // The platform tools must be at at least the same revision
-                // as the compileSdkVersion!
-                // And as a special case, for 23, they must be at 23.0.1
-                // because 23.0.0 accidentally shipped without Android M APIs.
-                int compileSdkVersion = context.getProject().getBuildSdk();
-                if (compileSdkVersion == 23) {
-                    if (revision.getMajor() > 23 || revision.getMajor() == 23
-                      && (revision.getMinor() > 0 || revision.getMicro() > 0)) {
-                        return;
-                    }
-                } else if (compileSdkVersion <= revision.getMajor()) {
-                    return;
-                }
-
-                // Pick a location: when incrementally linting in the IDE, tie
-                // it to the current file
-                List<File> currentFiles = context.getProject().getSubset();
-                Location location;
-                if (currentFiles != null && currentFiles.size() == 1) {
-                    File file = currentFiles.get(0);
-                    CharSequence contents = context.getClient().readFile(file);
-                    int firstLineEnd = indexOf(contents, '\n');
-                    if (firstLineEnd == -1) {
-                        firstLineEnd = contents.length();
-                    }
-                    location = Location.create(file,
-                        new DefaultPosition(0, 0, 0), new
-                        DefaultPosition(0, firstLineEnd, firstLineEnd));
-                } else {
-                    location = Location.create(context.file);
-                }
-                context.report(UNSUPPORTED,
-                        location,
-                        String.format("The SDK platform-tools version (%1$s) is too old "
-                                        + "to check APIs compiled with API %2$d; please update",
-                                revision.toShortString(),
-                                compileSdkVersion));
             }
         }
     }
@@ -433,8 +379,8 @@ public class ApiDetector extends ResourceXmlDetector
         int attributeApiLevel = -1;
         if (ANDROID_URI.equals(attribute.getNamespaceURI())) {
             String name = attribute.getLocalName();
-            if (!(name.equals(ATTR_LAYOUT_WIDTH) && !(name.equals(ATTR_LAYOUT_HEIGHT)) &&
-                !(name.equals(ATTR_ID)))) {
+            if (!name.equals(ATTR_LAYOUT_WIDTH) && !name.equals(ATTR_LAYOUT_HEIGHT)
+                    && !isSupportedByAppcompat(name, context) && !name.equals(ATTR_ID)) {
                 String owner = "android/R$attr";
                 attributeApiLevel = mApiDatabase.getFieldVersion(owner, name);
                 int minSdk = getMinSdk(context);
@@ -484,10 +430,22 @@ public class ApiDetector extends ResourceXmlDetector
                         }
                     } else {
                         Location location = context.getLocation(attribute);
+                        String localName = attribute.getLocalName();
                         String message = String.format(
                                 "Attribute `%1$s` is only used in API level %2$d and higher "
                                         + "(current min is %3$d)",
-                                attribute.getLocalName(), attributeApiLevel, minSdk);
+                                localName, attributeApiLevel, minSdk);
+
+                        // Supported by appcompat
+                        if ("fontFamily".equals(localName)) {
+                            Project mainProject = context.getMainProject();
+                            Boolean appCompat = mainProject.dependsOn(APPCOMPAT_LIB_ARTIFACT);
+                            if (appCompat != null && appCompat) {
+                                String prefix = XmlUtils.lookupNamespacePrefix(attribute,
+                                        AUTO_URI, "app", false);
+                                message += " Did you mean `" + prefix + ":fontFamily` ?";
+                            }
+                        }
                         context.report(UNUSED, attribute, location, message,
                                 apiLevelFix(attributeApiLevel));
                     }
@@ -561,9 +519,8 @@ public class ApiDetector extends ResourceXmlDetector
         if (owner == null) {
             // Convert @android:type/foo into android/R$type and "foo"
             int index = value.indexOf('/', prefix.length());
-            if (index != -1) {
-                owner = "android/R$"
-                        + value.substring(prefix.length(), index);
+            if (index >= 0) {
+                owner = "android/R$" + value.substring(prefix.length(), index);
                 name = getResourceFieldName(value.substring(index + 1));
             } else if (value.startsWith(ANDROID_THEME_PREFIX)) {
                 owner = "android/R$attr";
@@ -607,9 +564,14 @@ public class ApiDetector extends ResourceXmlDetector
         }
     }
 
+    private static boolean isSupportedByAppcompat(String name, XmlContext context) {
+        return name.equals("fillType")
+                && TRUE.equals(context.getProject().dependsOn(APPCOMPAT_LIB_ARTIFACT));
+    }
+
     @NonNull
     private static LintFix apiLevelFix(int api) {
-        return fix().data(api);
+        return LintFix.create().data(api);
     }
 
     /**
@@ -956,7 +918,7 @@ public class ApiDetector extends ResourceXmlDetector
         return false;
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Nullable
     @Override
@@ -1003,16 +965,16 @@ public class ApiDetector extends ResourceXmlDetector
             @Nullable UElement node,
             @NonNull String name,
             @NonNull String owner) {
-        if (owner.equals("android/os/Build$VERSION_CODES")) {
+        if (equivalentName(owner, "android/os/Build$VERSION_CODES")) {
             // These constants are required for compilation, not execution
             // and valid code checks it even on older platforms
             return true;
         }
-        if (owner.equals("android/view/ViewGroup$LayoutParams")
+        if (equivalentName(owner, "android/view/ViewGroup$LayoutParams")
                 && name.equals("MATCH_PARENT")) {
             return true;
         }
-        if (owner.equals("android/widget/AbsListView")
+        if (equivalentName(owner, "android/widget/AbsListView")
                 && ((name.equals("CHOICE_MODE_NONE")
                 || name.equals("CHOICE_MODE_MULTIPLE")
                 || name.equals("CHOICE_MODE_SINGLE")))) {
@@ -1027,7 +989,7 @@ public class ApiDetector extends ResourceXmlDetector
         // Gravity#START and Gravity#END are okay; these were specifically written to
         // be backwards compatible (by using the same lower bits for START as LEFT and
         // for END as RIGHT)
-        if ("android/view/Gravity".equals(owner)
+        if (equivalentName(owner, "android/view/Gravity")
                 && ("START".equals(name) || "END".equals(name))) {
             return true;
         }
@@ -1102,7 +1064,7 @@ public class ApiDetector extends ResourceXmlDetector
                 return;
             }
             JavaEvaluator evaluator = mContext.getEvaluator();
-            String owner = evaluator.getInternalName(containingClass);
+            String owner = evaluator.getQualifiedName(containingClass);
             if (owner == null) {
                 return; // Couldn't resolve type
             }
@@ -1111,14 +1073,14 @@ public class ApiDetector extends ResourceXmlDetector
             }
 
             String name = LintUtils.getInternalMethodName(method);
-            String desc = evaluator.getInternalDescription(method, false, false);
+            String desc = evaluator.getMethodDescription(method, false, false);
             if (desc == null) {
                 // Couldn't compute description of method for some reason; probably
                 // failure to resolve parameter types
                 return;
             }
 
-            int api = mApiDatabase.getCallVersion(owner, name, desc);
+            int api = mApiDatabase.getMethodVersion(owner, name, desc);
             if (api == -1) {
                 return;
             }
@@ -1139,6 +1101,14 @@ public class ApiDetector extends ResourceXmlDetector
         public void visitBinaryExpressionWithType(@NonNull UBinaryExpressionWithType node) {
             if (UastExpressionUtils.isTypeCast(node)) {
                 visitTypeCastExpression(node);
+            } else if (UastExpressionUtils.isInstanceCheck(node)) {
+                UTypeReferenceExpression typeReference = node.getTypeReference();
+                if (typeReference != null){
+                    PsiType type = typeReference.getType();
+                    if (type instanceof PsiClassType) {
+                        checkClassReference(typeReference, (PsiClassType) type);
+                    }
+                }
             }
         }
 
@@ -1157,7 +1127,42 @@ public class ApiDetector extends ResourceXmlDetector
             }
             PsiClassType classType = (PsiClassType)operandType;
             PsiClassType interfaceType = (PsiClassType)castType;
+
+            UTypeReferenceExpression typeReference = expression.getTypeReference();
+            if (typeReference != null) {
+                if (!checkClassReference(typeReference, interfaceType)) {
+                    // Found problem with cast type itself: don't bother also warning
+                    // about problem with LHS
+                    return;
+                }
+            }
+
             checkCast(expression, classType, interfaceType);
+        }
+
+        private boolean checkClassReference(@NonNull UElement node,
+                @NonNull PsiClassType classType) {
+            JavaEvaluator evaluator = mContext.getEvaluator();
+            String expressionOwner = evaluator.getQualifiedName(classType);
+            if (expressionOwner == null) {
+                return true;
+            }
+            int api = mApiDatabase.getClassVersion(expressionOwner);
+            if (api == -1) {
+                return true;
+            }
+            int minSdk = getMinSdk(mContext);
+            if (isSuppressed(mContext, api, node, minSdk)) {
+                return true;
+            }
+
+            String message = String.format(
+                    "Class requires API level %1$d (current min is %2$d): %3$s", api,
+                    Math.max(minSdk, getTargetApi(node)), expressionOwner);
+
+            Location location = mContext.getLocation(node);
+            mContext.report(UNSUPPORTED, node, location, message, apiLevelFix(api));
+            return false;
         }
 
         private void checkCast(
@@ -1168,12 +1173,12 @@ public class ApiDetector extends ResourceXmlDetector
                 return;
             }
             JavaEvaluator evaluator = mContext.getEvaluator();
-            String classTypeInternal = evaluator.getInternalName(classType);
-            String interfaceTypeInternal = evaluator.getInternalName(interfaceType);
+            String classTypeInternal = evaluator.getQualifiedName(classType);
+            String interfaceTypeInternal = evaluator.getQualifiedName(interfaceType);
             if (interfaceTypeInternal == null || classTypeInternal == null) {
                 return;
             }
-            if ("java/lang/Object".equals(interfaceTypeInternal)) {
+            if (equivalentName(interfaceTypeInternal, "java/lang/Object")) {
                 return;
             }
 
@@ -1192,10 +1197,18 @@ public class ApiDetector extends ResourceXmlDetector
             }
 
             Location location = mContext.getLocation(node);
-            String message = String.format("Cast from %1$s to %2$s requires API level %3$d "
-                            + "(current min is %4$d)",
-                    classType.getClassName(),
-                    interfaceType.getClassName(), api, Math.max(minSdk, getTargetApi(node)));
+            String message;
+            String to = interfaceType.getClassName();
+            String from = classType.getClassName();
+            int min = Math.max(minSdk, getTargetApi(node));
+            if (interfaceTypeInternal.equals(classTypeInternal)) {
+                message = String.format("Cast to %1$s requires API level %2$d "
+                        + "(current min is %3$d)", to, api, min);
+            } else {
+                message = String.format("Cast from %1$s to %2$s requires API level %3$d "
+                        + "(current min is %4$d)", from, to, api, min);
+            }
+
             mContext.report(UNSUPPORTED, node, location, message, apiLevelFix(api));
         }
 
@@ -1218,7 +1231,7 @@ public class ApiDetector extends ResourceXmlDetector
                         String message = String.format("%1$s method requires API level %2$d "
                                         + "(current min is %3$d)",
                                 methodModifierList.hasExplicitModifier(PsiModifier.DEFAULT)
-                                        ? "Default" : "Static interface ",
+                                        ? "Default" : "Static interface",
                                 api,
                                 Math.max(minSdk, getTargetApi(method)));
                         mContext.report(UNSUPPORTED, method, location, message, apiLevelFix(api));
@@ -1243,13 +1256,13 @@ public class ApiDetector extends ResourceXmlDetector
                         || fqcn.startsWith("java.")
                             && !fqcn.equals(CommonClassNames.JAVA_LANG_OBJECT)
                         || fqcn.startsWith("javax.")) {
-                    String desc = evaluator.getInternalDescription(superMethod, false, false);
+                    String desc = evaluator.getMethodDescription(superMethod, false, false);
                     if (desc != null) {
-                        String owner = evaluator.getInternalName(cls);
+                        String owner = evaluator.getQualifiedName(cls);
                         if (owner == null) {
                             return;
                         }
-                        int api = mApiDatabase.getCallVersion(owner, name, desc);
+                        int api = mApiDatabase.getMethodVersion(owner, name, desc);
                         if (api > buildSdk && buildSdk != -1) {
                             if (mContext.getDriver().isSuppressed(mContext, OVERRIDE,
                                     (UElement)method)) {
@@ -1361,7 +1374,7 @@ public class ApiDetector extends ResourceXmlDetector
                 @NonNull UElement element,
                 @NonNull PsiClassType classType,
                 @Nullable String descriptor) {
-            String owner = mContext.getEvaluator().getInternalName(classType);
+            String owner = mContext.getEvaluator().getQualifiedName(classType);
             String fqcn = classType.getCanonicalText();
             if (owner != null) {
                 checkClass(element, descriptor, owner, fqcn);
@@ -1371,7 +1384,7 @@ public class ApiDetector extends ResourceXmlDetector
         private void checkClass(
                 @NonNull UElement element,
                 @NonNull PsiClass cls) {
-            String owner = mContext.getEvaluator().getInternalName(cls);
+            String owner = mContext.getEvaluator().getQualifiedName(cls);
             if (owner == null) {
                 return;
             }
@@ -1437,7 +1450,7 @@ public class ApiDetector extends ResourceXmlDetector
             JavaEvaluator evaluator = mContext.getEvaluator();
             PsiType type = value.getExpressionType();
             if (type instanceof PsiClassType) {
-                String expressionOwner = evaluator.getInternalName((PsiClassType)type);
+                String expressionOwner = evaluator.getQualifiedName((PsiClassType)type);
                 if (expressionOwner == null) {
                     return;
                 }
@@ -1525,13 +1538,13 @@ public class ApiDetector extends ResourceXmlDetector
             }
 
             JavaEvaluator evaluator = mContext.getEvaluator();
-            String owner = evaluator.getInternalName(containingClass);
+            String owner = evaluator.getQualifiedName(containingClass);
             if (owner == null) {
                 return; // Couldn't resolve type
             }
 
             // Support library: we can do compile time resolution
-            if (owner.startsWith("android/support/")) {
+            if (startsWithEquivalentPrefix(owner, "android/support/")) {
                 return;
             }
             if (!mApiDatabase.containsClass(owner)) {
@@ -1539,19 +1552,19 @@ public class ApiDetector extends ResourceXmlDetector
             }
 
             String name = LintUtils.getInternalMethodName(method);
-            String desc = evaluator.getInternalDescription(method, false, false);
+            String desc = evaluator.getMethodDescription(method, false, false);
             if (desc == null) {
                 // Couldn't compute description of method for some reason; probably
                 // failure to resolve parameter types
                 return;
             }
 
-            if (owner.equals("java/text/SimpleDateFormat") &&
+            if (startsWithEquivalentPrefix(owner, "java/text/SimpleDateFormat") &&
                     name.equals(CONSTRUCTOR_NAME) && !desc.equals("()V")) {
                 checkSimpleDateFormat(mContext, expression, getMinSdk(mContext));
             }
 
-            int api = mApiDatabase.getCallVersion(owner, name, desc);
+            int api = mApiDatabase.getMethodVersion(owner, name, desc);
             if (api == -1) {
                 return;
             }
@@ -1602,12 +1615,11 @@ public class ApiDetector extends ResourceXmlDetector
                                 (PsiClassType) receiverType, containingType);
                         if (inheritanceChain != null) {
                             for (PsiClassType type : inheritanceChain) {
-                                String expressionOwner = evaluator.getInternalName(type);
+                                String expressionOwner = evaluator.getQualifiedName(type);
                                 if (expressionOwner != null && !expressionOwner.equals(owner)) {
-                                    int specificApi =
-                                            mApiDatabase.getCallVersion(expressionOwner, name, desc);
+                                    int specificApi = mApiDatabase.getMethodVersion(expressionOwner, name, desc);
                                     if (specificApi == -1) {
-                                        if (ApiLookup.isRelevantOwner(expressionOwner)) {
+                                        if (mApiDatabase.isRelevantOwner(expressionOwner)) {
                                             return;
                                         }
                                     } else if (specificApi <= minSdk) {
@@ -1685,14 +1697,15 @@ public class ApiDetector extends ResourceXmlDetector
                                 break;
                             }
                         }
-                        String expressionOwner = evaluator.getInternalName(cls);
-                        if (expressionOwner == null || "java/lang/Object".equals(expressionOwner)) {
+                        String expressionOwner = evaluator.getQualifiedName(cls);
+                        if (expressionOwner == null
+                                || equivalentName(expressionOwner, "java/lang/Object")) {
                             break;
                         }
-                        int specificApi = mApiDatabase.getCallVersion(expressionOwner, name, desc);
+                        int specificApi = mApiDatabase.getMethodVersion(expressionOwner, name, desc);
                         if (specificApi == -1) {
-                            if (ApiLookup.isRelevantOwner(expressionOwner)) {
-                                return;
+                            if (mApiDatabase.isRelevantOwner(expressionOwner)) {
+                                break;
                             }
                         } else if (specificApi <= minSdk) {
                             return;
@@ -1737,9 +1750,9 @@ public class ApiDetector extends ResourceXmlDetector
                             if (!method.equals(m)) {
                                 PsiClass provider = m.getContainingClass();
                                 if (provider != null) {
-                                    String methodOwner = evaluator.getInternalName(provider);
+                                    String methodOwner = evaluator.getQualifiedName(provider);
                                     if (methodOwner != null) {
-                                        int methodApi = mApiDatabase.getCallVersion(methodOwner, name, desc);
+                                        int methodApi = mApiDatabase.getMethodVersion(methodOwner, name, desc);
                                         if (methodApi == -1 || methodApi <= minSdk) {
                                             // Yes, we found another call that doesn't have an API requirement
                                             return;
@@ -1777,12 +1790,41 @@ public class ApiDetector extends ResourceXmlDetector
 
             // Desugar rewrites compare calls (see b/36390874)
             if (name.equals("compare") && api == 19
-                    && owner.startsWith("java/lang/") && desc.length() == 4
+                    && startsWithEquivalentPrefix(owner, "java/lang/") && desc.length() == 4
                     && isUsingDesugar(mContext, expression)
                     && (desc.equals("(JJ)") || desc.equals("(ZZ)") || desc.equals("(BB)")
                     || desc.equals("(CC)") || desc.equals("(II)") || desc.equals("(JJ)")
                     || desc.equals("(SS)"))) {
                 return;
+            }
+
+            // Desugar rewrites Objects.requireNonNull calls (see b/32446315)
+            if (name.equals("requireNonNull") && api == 19
+                    && owner.equals("java.util.Objects") && desc.equals("(Ljava.lang.Object;)")
+                    && isUsingDesugar(mContext, expression)) {
+                return;
+            }
+
+            if (name.equals("addSuppressed") && api == 19
+                    && owner.equals("java.lang.Throwable") && desc.equals("(Ljava.lang.Throwable;)")
+                    && isUsingDesugar(mContext, expression)) {
+                return;
+            }
+
+            if (name.equals("forEach")) {
+                List<UExpression> arguments = expression.getValueArguments();
+                if (arguments.size() == 1) {
+                    PsiType expressionType = arguments.get(0).getExpressionType();
+                    if (expressionType != null &&
+                            expressionType.getCanonicalText().startsWith("kotlin.")) {
+                        // Workaround for 69534659: The resolve method returns the wrong call.
+                        // See if it looks like this is the case: the error is on
+                        // a forEach call on java.lang.Iterable (which takes a
+                        // java.util.function.Consumer as an argument), but here we're
+                        // passing in a kotlin.jvm.functions.Function1
+                        return;
+                    }
+                }
             }
 
             String signature;
@@ -1797,7 +1839,8 @@ public class ApiDetector extends ResourceXmlDetector
             Location location;
             if (UastExpressionUtils.isConstructorCall(expression)
                     && expression.getClassReference() != null) {
-                location = mContext.getRangeLocation(expression, 0, expression.getClassReference(), 0);
+                location = mContext.getRangeLocation(
+                        expression, 0, expression.getClassReference(), 0);
             } else if (nameIdentifier != null) {
                 location = mContext.getLocation(nameIdentifier);
             } else {
@@ -1816,11 +1859,11 @@ public class ApiDetector extends ResourceXmlDetector
             for (PsiAnnotation annotation : modifierList.getAnnotations()) {
                 if (REQUIRES_API_ANNOTATION.equals(annotation.getQualifiedName())) {
                     UAnnotation wrapped = JavaUAnnotation.wrap(annotation);
-                    int api = (int) SupportAnnotationDetector.getLongAttribute(mContext,
+                    int api = (int) getLongAttribute(mContext,
                             wrapped, ATTR_VALUE, -1);
                     if (api <= 1) {
                         // @RequiresApi has two aliasing attributes: api and value
-                        api = (int) SupportAnnotationDetector.getLongAttribute(mContext,
+                        api = (int) getLongAttribute(mContext,
                                 wrapped, "api", -1);
                     }
                     int minSdk = getMinSdk(mContext);
@@ -1828,7 +1871,7 @@ public class ApiDetector extends ResourceXmlDetector
                         int target = getTargetApi(expression);
                         if (target == -1 || api > target) {
                             if (isWithinVersionCheckConditional(
-                                    expression, api)) {
+                                    mContext.getEvaluator(), expression, api)) {
                                 return true;
                             }
                             if (isPrecededByVersionCheckExit(
@@ -1969,7 +2012,7 @@ public class ApiDetector extends ResourceXmlDetector
                 resolved = ((PsiClassType) type).resolve();
             }
             if (resolved != null) {
-                String signature = mContext.getEvaluator().getInternalName(resolved);
+                String signature = mContext.getEvaluator().getQualifiedName(resolved);
                 if (signature == null) {
                     return;
                 }
@@ -2025,7 +2068,7 @@ public class ApiDetector extends ResourceXmlDetector
             if (containingClass == null || name == null) {
                 return;
             }
-            String owner = mContext.getEvaluator().getInternalName(containingClass);
+            String owner = mContext.getEvaluator().getQualifiedName(containingClass);
             if (owner == null) {
                 return;
             }
@@ -2166,7 +2209,7 @@ public class ApiDetector extends ResourceXmlDetector
         LintDriver driver = context.getDriver();
         return driver.isSuppressed(context, UNSUPPORTED, element)
                 || driver.isSuppressed(context, INLINED, element)
-                || isWithinVersionCheckConditional(element, api)
+                || isWithinVersionCheckConditional(context.getEvaluator(), element, api)
                 || isPrecededByVersionCheckExit(element, api);
 
     }
@@ -2175,7 +2218,11 @@ public class ApiDetector extends ResourceXmlDetector
         // Desugar runs if the Gradle plugin is 2.4.0 alpha 8 or higher...
         GradleVersion version = context.getProject().getGradleModelVersion();
         if (version == null) {
-            return false;
+            // We don't really know if you're using desugar if it's some other
+            // build system invoked from the command line, but might as well
+            // return true here since the main clients I'm aware of are
+            // already using desugar.
+            return true;
         }
         if (!version.isAtLeast(2, 4, 0, "alpha", 8, true)) {
             return false;

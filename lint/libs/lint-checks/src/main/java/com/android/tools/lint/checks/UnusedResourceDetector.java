@@ -41,15 +41,14 @@ import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.SourceProvider;
 import com.android.builder.model.Variant;
+import com.android.ide.common.resources.usage.ResourceUsageModel;
+import com.android.ide.common.resources.usage.ResourceUsageModel.Resource;
 import com.android.resources.ResourceFolderType;
 import com.android.resources.ResourceType;
-import com.android.tools.lint.checks.ResourceUsageModel.Resource;
 import com.android.tools.lint.client.api.UElementHandler;
+import com.android.tools.lint.detector.api.BinaryResourceScanner;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.BinaryResourceScanner;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
-import com.android.tools.lint.detector.api.Detector.XmlScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -61,7 +60,9 @@ import com.android.tools.lint.detector.api.ResourceContext;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.tools.lint.detector.api.XmlScanner;
 import com.android.utils.XmlUtils;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
@@ -71,7 +72,6 @@ import com.google.common.io.Files;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -90,7 +90,7 @@ import org.w3c.dom.Node;
 /**
  * Finds unused resources.
  */
-public class UnusedResourceDetector extends ResourceXmlDetector implements UastScanner,
+public class UnusedResourceDetector extends ResourceXmlDetector implements SourceCodeScanner,
         BinaryResourceScanner, XmlScanner {
 
     private static final Implementation IMPLEMENTATION = new Implementation(
@@ -173,7 +173,7 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
                     // doesn't yet have this ResourceType in its enum.
                     continue;
                 }
-                Resource resource = model.declareResource(type, name, null);
+                LintResource resource = (LintResource) model.declareResource(type, name, null);
                 resource.recordLocation(location);
             }
         }
@@ -246,7 +246,8 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
                 }
 
                 // Fill in locations for files that we didn't encounter in other ways
-                for (Resource resource : unused) {
+                for (Resource r : unused) {
+                    LintResource resource = (LintResource) r;
                     Location location = resource.locations;
                     //noinspection VariableNotUsedInsideIf
                     if (location != null) {
@@ -300,7 +301,7 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
                 Boolean skippedLibraries = null;
 
                 for (Resource resource : sorted) {
-                    Location location = resource.locations;
+                    Location location = ((LintResource)resource).locations;
                     if (location != null) {
                         // We were prepending locations, but we want to prefer the base folders
                         location = Location.reverse(location);
@@ -397,7 +398,7 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
                     recordInactiveJavaReferences(file);
                 } else if (file.getName().endsWith(DOT_JAVA)) {
                     try {
-                        String java = Files.toString(file, UTF_8);
+                        String java = Files.asCharSource(file, UTF_8).read();
                         model.tokenizeJavaCode(java);
                     } catch (Throwable ignore) {
                         // Tolerate parsing errors etc in these files; they're user
@@ -432,7 +433,7 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
                 boolean isXml = endsWithIgnoreCase(path, DOT_XML);
                 try {
                     if (isXml) {
-                        String xml = Files.toString(file, UTF_8);
+                        String xml = Files.asCharSource(file, UTF_8).read();
                         Document document = XmlUtils.parseDocument(xml, true);
                         model.visitXmlDocument(file, folderType, document);
                     } else {
@@ -549,7 +550,7 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
         return Character.toTitleCase(ch) + string.substring(1);
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     public boolean appliesToResourceRefs() {
@@ -600,6 +601,24 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
         };
     }
 
+    private static class LintResource
+            extends Resource {
+        /** Chained list of declaration locations */
+        public Location locations;
+
+        public LintResource(ResourceType type, String name, int value) {
+            super(type, name, value);
+        }
+
+        public void recordLocation(@NonNull Location location) {
+            Location oldLocation = this.locations;
+            if (oldLocation != null) {
+                location.setSecondary(oldLocation);
+            }
+            this.locations = location;
+        }
+    }
+
     private static class UnusedResourceDetectorUsageModel extends ResourceUsageModel {
         public XmlContext xmlContext;
         public Context context;
@@ -607,20 +626,23 @@ public class UnusedResourceDetector extends ResourceXmlDetector implements UastS
 
         @NonNull
         @Override
+        protected Resource createResource(@NonNull ResourceType type,
+                @NonNull String name, int realValue) {
+            return new LintResource(type, name, realValue);
+        }
+
+        @NonNull
+        @Override
         protected String readText(@NonNull File file) {
             if (context != null) {
                 return context.getClient().readFile(file).toString();
             }
-            try {
-                return Files.toString(file, UTF_8);
-            } catch (IOException e) {
-                return ""; // Lint API
-            }
+            return super.readText(file);
         }
 
         @Override
         protected Resource declareResource(ResourceType type, String name, Node node) {
-            Resource resource = super.declareResource(type, name, node);
+            LintResource resource = (LintResource) super.declareResource(type, name, node);
             if (context != null) {
                 resource.setDeclared(context.getProject().getReportIssues());
                 if (context.getPhase() == 2 && unused.contains(resource)) {

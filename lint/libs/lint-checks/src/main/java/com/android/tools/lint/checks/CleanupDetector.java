@@ -18,6 +18,7 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.CLASS_CONTENTPROVIDER;
 import static com.android.SdkConstants.CLASS_CONTEXT;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 import static org.jetbrains.uast.UastUtils.getOutermostQualified;
 import static org.jetbrains.uast.UastUtils.getParentOfType;
@@ -36,6 +37,7 @@ import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.google.common.collect.Lists;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
@@ -51,11 +53,14 @@ import java.util.Arrays;
 import java.util.List;
 import org.jetbrains.uast.UBinaryExpression;
 import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UDeclarationsExpression;
 import org.jetbrains.uast.UDoWhileExpression;
 import org.jetbrains.uast.UElement;
 import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UExpressionList;
 import org.jetbrains.uast.UField;
 import org.jetbrains.uast.UIfExpression;
+import org.jetbrains.uast.ULambdaExpression;
 import org.jetbrains.uast.ULocalVariable;
 import org.jetbrains.uast.UMethod;
 import org.jetbrains.uast.UPolyadicExpression;
@@ -66,6 +71,7 @@ import org.jetbrains.uast.UUnaryExpression;
 import org.jetbrains.uast.UVariable;
 import org.jetbrains.uast.UWhileExpression;
 import org.jetbrains.uast.UastCallKind;
+import org.jetbrains.uast.UastSpecialExpressionKind;
 import org.jetbrains.uast.UastUtils;
 import org.jetbrains.uast.util.UastExpressionUtils;
 import org.jetbrains.uast.visitor.AbstractUastVisitor;
@@ -74,7 +80,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor;
  * Checks for missing {@code recycle} calls on resources that encourage it, and
  * for missing {@code commit} calls on FragmentTransactions, etc.
  */
-public class CleanupDetector extends Detector implements Detector.UastScanner {
+public class CleanupDetector extends Detector implements SourceCodeScanner {
 
     private static final Implementation IMPLEMENTATION = new Implementation(
             CleanupDetector.class,
@@ -195,7 +201,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
     public CleanupDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Nullable
     @Override
@@ -340,7 +346,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
         FinishVisitor visitor = new FinishVisitor(context, boundVariable) {
             @Override
             protected boolean isCleanupCall(@NonNull UCallExpression call) {
-                String methodName = call.getMethodName();
+                String methodName = getMethodName(call);
 
                 if ("use".equals(methodName) && CLOSE.equals(recycleName)) {
                     // Kotlin: "use" calls close; see issue 62377185
@@ -484,25 +490,15 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
         //    getFragmentManager().beginTransaction().addToBackStack("test")
         //            .disallowAddToBackStack().hide(mFragment2).setBreadCrumbShortTitle("test")
         //            .show(mFragment2).setCustomAnimations(0, 0).commit();
-        List<UExpression> chain = getQualifiedChain(getOutermostQualified(node));
-        if (!chain.isEmpty()) {
-            UExpression lastExpression = chain.get(chain.size() - 1);
-            if (lastExpression instanceof UCallExpression) {
-                UCallExpression methodInvocation = (UCallExpression) lastExpression;
-                if (isTransactionCommitMethodCall(context, methodInvocation)
-                        || isShowFragmentMethodCall(context, methodInvocation)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        CommitCallChecker checker = (c,call) -> isTransactionCommitMethodCall(c, call)
+                || isShowFragmentMethodCall(c, call);
+        return isCommittedInChainedCalls(context, node, checker);
     }
 
     private static boolean isTransactionCommitMethodCall(@NonNull JavaContext context,
             @NonNull UCallExpression call) {
 
-        String methodName = call.getMethodName();
+        String methodName = getMethodName(call);
         return (COMMIT.equals(methodName)
                     || COMMIT_ALLOWING_LOSS.equals(methodName)
                     || COMMIT_NOW_ALLOWING_LOSS.equals(methodName)
@@ -515,7 +511,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
 
     private static boolean isShowFragmentMethodCall(@NonNull JavaContext context,
             @NonNull UCallExpression call) {
-        String methodName = call.getMethodName();
+        String methodName = getMethodName(call);
         return SHOW.equals(methodName)
                 && isMethodOnFragmentClass(context, call,
                 DIALOG_FRAGMENT, DIALOG_V4_FRAGMENT, true);
@@ -540,7 +536,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
         }
     }
 
-    private static void checkEditorApplied(@NonNull JavaContext context,
+    private void checkEditorApplied(@NonNull JavaContext context,
             @NonNull UCallExpression node, @NonNull PsiMethod calledMethod) {
         if (isSharedEditorCreation(context, calledMethod)) {
             PsiVariable boundVariable = getVariableElement(node, true, true);
@@ -626,15 +622,37 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
 
     private static boolean isEditorCommittedInChainedCalls(@NonNull JavaContext context,
             @NonNull UCallExpression node) {
+        CommitCallChecker checker = (c,call) -> isEditorCommitMethodCall(c, call)
+                || isEditorApplyMethodCall(c, call);
+        return isCommittedInChainedCalls(context, node, checker);
+    }
+
+    private static boolean isCommittedInChainedCalls(@NonNull JavaContext context,
+            @NonNull UCallExpression node, CommitCallChecker checker) {
         List<UExpression> chain = getQualifiedChain(getOutermostQualified(node));
         if (!chain.isEmpty()) {
             UExpression lastExpression = chain.get(chain.size() - 1);
             if (lastExpression instanceof UCallExpression) {
-                UCallExpression methodInvocation = (UCallExpression) lastExpression;
-                if (isEditorCommitMethodCall(context, methodInvocation)
-                        || isEditorApplyMethodCall(context, methodInvocation)) {
+                UCallExpression call = (UCallExpression) lastExpression;
+                if (checker.isCommitCall(context, call)) {
                     return true;
                 }
+
+                // with, run, let, apply, etc chained to the end of this call
+                if (CommitCallVisitor.lastArgCallsCommit(context, call, checker)) {
+                    return true;
+                }
+            }
+        }
+
+        // Surrounding with-call?
+        UCallExpression parentCall = UastUtils.getParentOfType(node, UCallExpression.class, true);
+        if (parentCall != null) {
+            String methodName = getMethodName(parentCall);
+            if ("with".equals(methodName)) {
+                List<UExpression> args = parentCall.getValueArguments();
+                return args.size() == 2 &&
+                        CommitCallVisitor.lastArgCallsCommit(context, parentCall, checker);
             }
         }
 
@@ -643,7 +661,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
 
     private static boolean isEditorCommitMethodCall(@NonNull JavaContext context,
             @NonNull UCallExpression call) {
-        String methodName = call.getMethodName();
+        String methodName = getMethodName(call);
         if (COMMIT.equals(methodName)) {
             PsiMethod method = call.resolve();
             if (method != null) {
@@ -654,6 +672,10 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
                     suggestApplyIfApplicable(context, call);
                     return true;
                 }
+            } else //noinspection RedundantIfStatement
+                if (call.getValueArgumentCount() == 0) {
+                // Couldn't find method but it *looks* like an apply call
+                return true;
             }
         }
 
@@ -662,7 +684,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
 
     private static boolean isEditorApplyMethodCall(@NonNull JavaContext context,
             @NonNull UCallExpression call) {
-        String methodName = call.getMethodName();
+        String methodName = getMethodName(call);
         if (APPLY.equals(methodName)) {
             PsiMethod method = call.resolve();
             if (method != null) {
@@ -670,6 +692,10 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
                 JavaEvaluator evaluator = context.getEvaluator();
                 return evaluator.extendsClass(containingClass,
                         ANDROID_CONTENT_SHARED_PREFERENCES_EDITOR, false);
+            } else //noinspection RedundantIfStatement
+                if (call.getValueArgumentCount() == 0) {
+                // Couldn't find method but it *looks* like an apply call
+                return true;
             }
         }
 
@@ -712,7 +738,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
                         + "its data to persistent storage immediately, whereas "
                         + "`apply` will handle it in the background";
                 Location location = context.getLocation(node);
-                LintFix fix = fix().name("Replace commit() with apply()").replace()
+                LintFix fix = LintFix.create().name("Replace commit() with apply()").replace()
                         .pattern("(commit)\\s*\\(").with("apply").build();
                 context.report(APPLY_SHARED_PREF, node, location, message, fix);
             }
@@ -767,6 +793,24 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
             }
         } else if (parent instanceof UVariable
                 && (allowFields || !(parent instanceof UField))) {
+            // Handle elvis operators in Kotlin. A statement like this:
+            //   val transaction = f.beginTransaction() ?: return
+            // is turned into
+            //   var transaction: android.app.FragmentTransaction = elvis {
+            //       @org.jetbrains.annotations.NotNull var var8633f9d5: android.app.FragmentTransaction = f.beginTransaction()
+            //       if (var8633f9d5 != null) var8633f9d5 else return
+            //   }
+            // and here we want to record "transaction", not "var8633f9d5", as the variable
+            // to track.
+            if (parent.getUastParent() instanceof UDeclarationsExpression &&
+                    parent.getUastParent().getUastParent() instanceof UExpressionList) {
+                UExpressionList exp = (UExpressionList) parent.getUastParent().getUastParent();
+                UastSpecialExpressionKind kind = exp.getKind();
+                if (kind.getName().equals("elvis") && exp.getUastParent() instanceof UVariable) {
+                    parent = exp.getUastParent();
+                }
+            }
+
             return ((UVariable) parent).getPsi();
         }
 
@@ -848,7 +892,7 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
                             // Special case: MotionEvent.obtain(MotionEvent): passing in an
                             // event here does not recycle the event, and we also know it
                             // doesn't escape
-                            if (OBTAIN.equals(call.getMethodName())) {
+                            if (OBTAIN.equals(getMethodName(call))) {
                                 PsiMethod method = call.resolve();
                                 if (mContext.getEvaluator().
                                         isMemberInClass(method, MOTION_EVENT_CLS)) {
@@ -934,6 +978,60 @@ public class CleanupDetector extends Detector implements Detector.UastScanner {
             }
 
             return super.visitReturnExpression(node);
+        }
+    }
+
+    private interface CommitCallChecker {
+        boolean isCommitCall(@NonNull JavaContext context, @NonNull UCallExpression node);
+    }
+
+    private static class CommitCallVisitor extends AbstractUastVisitor {
+        private JavaContext context;
+        private boolean found;
+        private CommitCallChecker checker;
+
+        public CommitCallVisitor(
+                @NonNull JavaContext context,
+                @NonNull CommitCallChecker checker) {
+            this.context = context;
+            this.checker = checker;
+        }
+
+        @Override
+        public boolean visitCallExpression(UCallExpression node) {
+            if (checker.isCommitCall(context, node)) {
+                found = true;
+            }
+            return super.visitCallExpression(node);
+        }
+
+        public boolean isFound() {
+            return found;
+        }
+
+        private static boolean callsCommit(
+                @NonNull JavaContext context,
+                @NonNull UElement node,
+                @NonNull CommitCallChecker checker) {
+            CommitCallVisitor visitor = new CommitCallVisitor(context, checker);
+            node.accept(visitor);
+            return visitor.isFound();
+        }
+
+        private static boolean lastArgCallsCommit(
+                @NonNull JavaContext context,
+                @NonNull UCallExpression methodInvocation,
+                @NonNull CommitCallChecker checker) {
+            List<UExpression> args = methodInvocation.getValueArguments();
+            if (!args.isEmpty()) {
+                UExpression last = args.get(args.size() - 1);
+                if (last instanceof ULambdaExpression) {
+                    UExpression body = ((ULambdaExpression) last).getBody();
+                    return callsCommit(context, body, checker);
+                }
+            }
+
+            return false;
         }
     }
 }

@@ -16,6 +16,7 @@
 
 package com.android.tools.profiler;
 
+import com.android.tools.profiler.io.IoAdapter;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -40,7 +41,15 @@ public final class ProfilerTransform implements BiConsumer<InputStream, OutputSt
 
     private static final Properties PROPERTIES = loadTransformProperties();
     private static final boolean OKHTTP_PROFILING_ENABLED =
-            "true".equals(PROPERTIES.getProperty("android.profiler.okhttp.enabled"));
+        "true".equals(PROPERTIES.getProperty("android.profiler.okhttp.enabled"));
+    private static final boolean IO_PROFILING_ENABLED = "true"
+        .equals(PROPERTIES.getProperty("android.profiler.io.enabled"));
+
+    // Flag that controls whether to track network request body, should be the same as
+    // StudioFlags.PROFILER_NETWORK_REQUEST_PAYLOAD.getId().
+    private static final String NETWORK_REQUEST_PAYLOAD = "profiler.network.request.payload";
+    public static final boolean NETWORK_REQUEST_PAYLOAD_ENABLED =
+            "true".equals(PROPERTIES.getProperty(NETWORK_REQUEST_PAYLOAD));
 
     private static Logger getLog() {
         return Logger.getLogger(ProfilerTransform.class.getName());
@@ -48,12 +57,15 @@ public final class ProfilerTransform implements BiConsumer<InputStream, OutputSt
 
     @Override
     public void accept(InputStream in, OutputStream out) {
-        ClassWriter writer = new ClassWriter(0);
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         ClassVisitor visitor = writer;
         visitor = new InitializerAdapter(visitor);
         visitor = new HttpURLAdapter(visitor);
         if (OKHTTP_PROFILING_ENABLED) {
             visitor = new OkHttpAdapter(visitor);
+        }
+        if (IO_PROFILING_ENABLED) {
+            visitor = IoAdapter.addIoAdapters(visitor);
         }
 
         try {

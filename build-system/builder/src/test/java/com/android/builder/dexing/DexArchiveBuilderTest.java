@@ -19,6 +19,7 @@ package com.android.builder.dexing;
 import static com.android.builder.dexing.DexArchiveTestUtil.PACKAGE;
 import static com.android.testutils.TestClassesGenerator.rewriteToVersion;
 import static com.android.testutils.truth.MoreTruth.assertThat;
+import static com.android.testutils.truth.PathSubject.assertThat;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
@@ -295,6 +296,7 @@ public class DexArchiveBuilderTest {
     public void checkStaticAndDefaultInterfaceMethods() throws Exception {
         Assume.assumeTrue(inputFormat == ClassesInputFormat.DIR);
         Assume.assumeTrue(outputFormat == DexArchiveFormat.DIR);
+        Assume.assumeFalse(dexerTool == DexerTool.D8);
 
         Path classesDir = temporaryFolder.getRoot().toPath().resolve("classes");
         String path =
@@ -315,15 +317,14 @@ public class DexArchiveBuilderTest {
         Dex dex = new Dex(dexFile);
         assertThat(dex).containsClass(dexClassName);
 
+        // D8 has desugaring enabled by default, so we check this behavior only for DX
+        Assume.assumeTrue(dexerTool == DexerTool.DX);
         try {
             DexArchiveTestUtil.convertClassesToDexArchive(classesDir, output, dexerTool);
             fail("Default and static interface method should require min sdk 24.");
         } catch (DexArchiveBuilderException ignored) {
-            String expectedMessage =
-                    dexerTool == DexerTool.DX
-                            ? "default or static interface method used without --min-sdk-version"
-                            : "Static interface methods are only supported";
-            assertThat(Throwables.getStackTraceAsString(ignored)).contains(expectedMessage);
+            assertThat(Throwables.getStackTraceAsString(ignored))
+                    .contains("strictly requires --min-sdk-version >= 24");
         }
     }
 

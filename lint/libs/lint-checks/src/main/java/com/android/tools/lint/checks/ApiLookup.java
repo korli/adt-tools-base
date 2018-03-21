@@ -13,12 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.tools.lint.checks;
 
-import static com.android.SdkConstants.ANDROID_PKG;
 import static com.android.SdkConstants.DOT_XML;
-import static com.android.tools.lint.detector.api.LintUtils.assertionsEnabled;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
@@ -45,6 +42,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 /**
@@ -68,7 +66,7 @@ import java.util.Set;
  * When creating the memory data structure it performs a few other steps to help memory:
  * <ul>
  * <li> It stores the strings as single bytes, since all the JVM signatures are in ASCII
- * <li> It strips out the method return types (which takes the binary size down from
+ * <li> It strips out the method return types (which takes the biLnary size down from
  *      about 4.7M to 4.0M)
  * <li> It strips out all APIs that have since=1, since the lookup only needs to find
  *      classes, methods and fields that have an API level *higher* than 1. This drops
@@ -80,7 +78,7 @@ public class ApiLookup {
     /** Database moved from platform-tools to SDK in API level 26 */
     public static final int SDK_DATABASE_MIN_VERSION = 26;
     private static final String FILE_HEADER = "API database used by Android lint\000";
-    private static final int BINARY_FORMAT_VERSION = 11;
+    private static final int BINARY_FORMAT_VERSION = 14;
     private static final boolean DEBUG_SEARCH = false;
     private static final boolean WRITE_STATS = false;
 
@@ -101,7 +99,7 @@ public class ApiLookup {
 
     private static final Map<AndroidVersion, WeakReference<ApiLookup>> instances = new HashMap<>();
 
-    private int packageCount;
+    private int containerCount;
     private final IAndroidTarget target;
 
     /**
@@ -264,20 +262,24 @@ public class ApiLookup {
     private static boolean createCache(LintClient client, File xmlFile, File binaryData) {
         long begin = WRITE_STATS ? System.currentTimeMillis() : 0;
 
-        Api info = Api.parseApi(xmlFile);
+        Api info;
+        try {
+            info = Api.parseApi(xmlFile);
+        } catch (RuntimeException e) {
+            client.log(e, "Can't read API file " + xmlFile.getAbsolutePath());
+            return false;
+        }
 
         if (WRITE_STATS) {
             long end = System.currentTimeMillis();
             System.out.println("Reading XML data structures took " + (end - begin) + " ms");
         }
 
-        if (info != null) {
-            try {
-                writeDatabase(binaryData, info);
-                return true;
-            } catch (IOException e) {
-                client.log(e, "Can't write API cache file");
-            }
+        try {
+            writeDatabase(binaryData, info);
+            return true;
+        } catch (IOException e) {
+            client.log(e, "Can't write API cache file");
         }
 
         return false;
@@ -314,11 +316,12 @@ public class ApiLookup {
      * 3. The index table. When the data file is read, this is used to initialize the
      *    {@link #mIndices} array. The index table is built up like this:
      *    a. The number of index entries (e.g. number of elements in the {@link #mIndices} array)
-     *        [1 4-byte int]
-     *    b. The number of java/javax packages [1 4 byte int]
-     *    c. Offsets to the package entries, one for each package, and each offset is 4 bytes.
-     *    d. Offsets to the class entries, one for each class, and each offset is 4 bytes.
-     *    e. Offsets to the member entries, one for each member, and each offset is 4 bytes.
+     *        [a 4-byte integer]
+     *    b. The number of java/javax packages [a 4-byte integer]
+     *    c. Offsets to the container entries, one for each package or a class containing inner
+     *       classes [a 4-byte integer].
+     *    d. Offsets to the class entries, one for each class [a 4-byte integer].
+     *    e. Offsets to the member entries, one for each member [a 4-byte integer].
      *
      * 4. The member entries -- one for each member. A given class entry will point to the
      *    first and last members in the index table above, and the offset of a given member
@@ -342,23 +345,25 @@ public class ApiLookup {
      *    b. The name of the class (just the base name, not the package), as encoded as a
      *       UTF-8 string. [n bytes]
      *    c. A terminating 0 [1 byte].
-     *    d. The index in the index table (3) of the first member in the class [a 3 byte integer.]
-     *    e. The number of members in the class [a 2 byte integer].
+     *    d. The index in the index table (3) of the first member in the class [a 3-byte integer.]
+     *    e. The number of members in the class [a 2-byte integer].
      *    f. One, two or three bytes representing the API levels when the class was introduced,
      *       deprecated, and removed, respectively. The third byte is present only if the class
      *       was removed. The second byte is present only if the class was deprecated or removed.
      *       All bytes except the last one have the top bit ({@link #HAS_EXTRA_BYTE_FLAG}) set.
      *    g. The number of new super classes and interfaces [1 byte]. This counts only
      *       super classes and interfaces added after the original API level of the class.
-     *    h. For each super class or interface counted in h,
-     *       I. The index of the class [a 3 byte integer]
+     *    h. For each super class or interface counted in g,
+     *       I. The index of the class [a 3-byte integer]
      *       II. The API level the class/interface was added [1 byte]
      *
-     * 6. The package entries -- one for each package.
-     *    a. The name of the package as encoded as a UTF-8 string. [n bytes]
-     *    b. A terminating 0 [1 byte].
-     *    c. The index in the index table (3) of the first class in the package [a 3 byte integer.]
-     *    d. The number of classes in the package [a 2 byte integer].
+     * 6. The container entries -- one for each package and for each class containing inner classes.
+     *    a. The name of the package or the outer class [n bytes].
+     *    b. A terminating 0 for packages, or 1 for outer classes [1 byte].
+     *    c. The index in the index table (3) of the first class in the package or the first inner
+     *       class [a 3-byte integer.]
+     *    d. The number of classes in the package or the number of inner classes in the outer class
+     *       [a 2-byte integer].
      * </pre>
      */
     private void readData(
@@ -382,9 +387,9 @@ public class ApiLookup {
                 }
             }
 
-            // Read in the format number
+            // Read in the format number.
             if (b[offset++] != BINARY_FORMAT_VERSION) {
-                // Force regeneration of new binary data with up to date format
+                // Force regeneration of new binary data with up to date format.
                 if (createCache(client, xmlFile, binaryFile)) {
                     readData(client, xmlFile, binaryFile); // Recurse
                 }
@@ -394,7 +399,7 @@ public class ApiLookup {
 
             int indexCount = get4ByteInt(b, offset);
             offset += 4;
-            packageCount = get4ByteInt(b, offset);
+            containerCount = get4ByteInt(b, offset);
             offset += 4;
 
             mIndices = new int[indexCount];
@@ -430,51 +435,26 @@ public class ApiLookup {
     private static void writeDatabase(File file, Api info) throws IOException {
         Map<String, ApiClass> classMap = info.getClasses();
 
-        List<ApiPackage> packages = new ArrayList<>(info.getPackages().values());
-        Collections.sort(packages);
+        List<ApiClassOwner> containers = new ArrayList<>(info.getContainers().values());
+        Collections.sort(containers);
 
         // Compute members of each class that must be included in the database; we can
         // skip those that have the same since-level as the containing class. And we
-        // also need to keep those entries that are marked deprecated.
+        // also need to keep those entries that are marked deprecated or removed.
         int estimatedSize = 0;
-        for (ApiPackage pkg : packages) {
+        for (ApiClassOwner container : containers) {
             estimatedSize += 4; // offset entry
-            estimatedSize += pkg.getName().length() + 20; // package entry
+            estimatedSize += container.getName().length() + 20; // Container entry.
 
-            if (assertionsEnabled() && !isRelevantOwner(pkg.getName() + "/") &&
-                    !pkg.getName().startsWith("android/support")) {
-                System.out.println("Warning: isRelevantOwner fails for " + pkg.getName() + "/");
-            }
-
-            for (ApiClass cls : pkg.getClasses()) {
+            for (ApiClass cls : container.getClasses()) {
                 estimatedSize += 4; // offset entry
-                estimatedSize += cls.getName().length() + 20; // class entry
+                estimatedSize += cls.getName().length() + 20; // Class entry.
 
                 Set<String> allMethods = cls.getAllMethods(info);
                 Set<String> allFields = cls.getAllFields(info);
-                // Strip out all members that have have the same lifecycle as the class itself.
-                // This makes the database *much* leaner (down from about 4M to about
-                // 1.7M), and this just fills the table with entries that ultimately
-                // don't help the API checker since it just needs to know if something
-                // requires a version *higher* than the minimum. If in the future the
-                // database needs to answer queries about whether a method is public
-                // or not, then we'd need to put this data back in.
                 List<String> members = new ArrayList<>(allMethods.size() + allFields.size());
-                for (String member : allMethods) {
-                    if (cls.getMethod(member, info) != cls.getSince()
-                            || cls.getMemberDeprecatedIn(member, info) != cls.getDeprecatedIn()
-                            || cls.getMemberRemovedIn(member, info) != cls.getRemovedIn()) {
-                        members.add(member);
-                    }
-                }
-
-                for (String member : allFields) {
-                    if (cls.getField(member, info) != cls.getSince()
-                            || cls.getMemberDeprecatedIn(member, info) != cls.getDeprecatedIn()
-                            || cls.getMemberRemovedIn(member, info) != cls.getRemovedIn()) {
-                        members.add(member);
-                    }
-                }
+                members.addAll(allMethods);
+                members.addAll(allFields);
 
                 estimatedSize += 2 + 4 * (cls.getInterfaces().size());
                 if (cls.getSuperClasses().size() > 1) {
@@ -491,7 +471,7 @@ public class ApiLookup {
             }
 
             // Ensure that the classes are sorted.
-            Collections.sort(pkg.getClasses());
+            Collections.sort(container.getClasses());
         }
 
         // Write header
@@ -505,20 +485,20 @@ public class ApiLookup {
 
         buffer.putInt(0); // placeholder
 
-        // Write the number of packages in the package index
-        buffer.putInt(packages.size());
+        // Write the number of containers in the containers index.
+        buffer.putInt(containers.size());
 
-        // Write package index
+        // Write container index.
         int newIndex = buffer.position();
-        for (ApiPackage pkg : packages) {
-            pkg.indexOffset = newIndex;
+        for (ApiClassOwner container : containers) {
+            container.indexOffset = newIndex;
             newIndex += 4;
             indexCount++;
         }
 
-        // Write class index
-        for (ApiPackage pkg : packages) {
-            for (ApiClass cls : pkg.getClasses()) {
+        // Write class index.
+        for (ApiClassOwner container : containers) {
+            for (ApiClass cls : container.getClasses()) {
                 cls.indexOffset = newIndex;
                 cls.index = indexCount;
                 newIndex += 4;
@@ -526,9 +506,9 @@ public class ApiLookup {
             }
         }
 
-        // Write member indices
-        for (ApiPackage pkg : packages) {
-            for (ApiClass cls : pkg.getClasses()) {
+        // Write member indices.
+        for (ApiClassOwner container : containers) {
+            for (ApiClass cls : container.getClasses()) {
                 if (cls.members != null && !cls.members.isEmpty()) {
                     cls.memberOffsetBegin = newIndex;
                     cls.memberIndexStart = indexCount;
@@ -547,14 +527,14 @@ public class ApiLookup {
             }
         }
 
-        // Fill in the earlier index count
+        // Fill in the earlier index count.
         buffer.position(indexCountOffset);
         buffer.putInt(indexCount);
         buffer.position(newIndex);
 
-        // Write member entries
-        for (ApiPackage pkg : packages) {
-            for (ApiClass apiClass : pkg.getClasses()) {
+        // Write member entries.
+        for (ApiClassOwner container : containers) {
+            for (ApiClass apiClass : container.getClasses()) {
                 String cls = apiClass.getName();
                 int index = apiClass.memberOffsetBegin;
                 for (String member : apiClass.members) {
@@ -566,7 +546,7 @@ public class ApiLookup {
                     buffer.position(start);
 
                     int since;
-                    if (member.indexOf('(') != -1) {
+                    if (member.indexOf('(') >= 0) {
                         since = apiClass.getMethod(member, info);
                     } else {
                         since = apiClass.getField(member, info);
@@ -603,14 +583,18 @@ public class ApiLookup {
         // being spread out among the member entries, in order to have
         // reference locality (search that a binary search through the classes
         // are likely to look at entries near each other.)
-        for (ApiPackage pkg : packages) {
-            List<ApiClass> classes = pkg.getClasses();
+        for (ApiClassOwner container : containers) {
+            List<ApiClass> classes = container.getClasses();
             for (ApiClass cls : classes) {
                 int index = buffer.position();
                 buffer.position(cls.indexOffset);
                 buffer.putInt(index);
                 buffer.position(index);
                 String name = cls.getSimpleName();
+                int pos = name.lastIndexOf('$');
+                if (pos > 0) {
+                    name = name.substring(pos + 1);
+                }
 
                 byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
                 assert nameBytes.length < 254 : name;
@@ -672,17 +656,17 @@ public class ApiLookup {
             }
         }
 
-        for (ApiPackage pkg : packages) {
+        for (ApiClassOwner container : containers) {
             int index = buffer.position();
-            buffer.position(pkg.indexOffset);
+            buffer.position(container.indexOffset);
             buffer.putInt(index);
             buffer.position(index);
 
-            byte[] bytes = pkg.getName().getBytes(StandardCharsets.UTF_8);
+            byte[] bytes = container.getName().getBytes(StandardCharsets.UTF_8);
             buffer.put(bytes);
-            buffer.put((byte)0);
+            buffer.put(container.isClass() ? (byte) 1 : (byte) 0);
 
-            List<ApiClass> classes = pkg.getClasses();
+            List<ApiClass> classes = container.getClasses();
             if (classes.isEmpty()) {
                 put3ByteInt(buffer, 0);
                 put2ByteInt(buffer, 0);
@@ -713,8 +697,16 @@ public class ApiLookup {
             boolean deleted = file.delete();
             assert deleted : file;
         }
-        ByteSink sink = Files.asByteSink(file);
-        sink.write(b);
+
+        // Write to a different file and swap it in last minute.
+        // This helps in scenarios where multiple simultaneous Gradle
+        // threads are attempting to access the file before it's ready.
+        File tmp = new File(file.getPath() + "." + new Random().nextInt());
+        Files.asByteSink(tmp).write(b);
+        if (!tmp.renameTo(file)) {
+            //noinspection ResultOfMethodCallIgnored
+            tmp.delete();
+        }
     }
 
     private static void writeSinceDeprecatedInRemovedIn(
@@ -746,10 +738,11 @@ public class ApiLookup {
         if (DEBUG_SEARCH) {
             StringBuilder sb = new StringBuilder(200);
             for (int i = offset; i < mData.length; i++) {
-                if (mData[i] == 0) {
+                byte b = mData[i];
+                if (b == 0 || b == 1) {
                     break;
                 }
-                char c = (char) Byte.toUnsignedInt(mData[i]);
+                char c = (char) Byte.toUnsignedInt(b);
                 sb.append(c);
             }
 
@@ -766,11 +759,11 @@ public class ApiLookup {
         for (; j < max; i++, j++) {
             byte b = data[i];
             char c = s.charAt(j);
-            if (c == '.') {
-                c = '/';
+            if (c == '.' && (b == '/' || b == '$')) { // '.' matches both '/' and '$'.
+                continue;
             }
-            // TODO: Check somewhere that the strings are purely in the ASCII range; if not
-            // they're not a match in the database
+            // TODO: Check somewhere that the strings are purely in the ASCII range.
+            // If not, they will not match the database.
             byte cb = (byte) c;
             int delta = b - cb;
             if (delta != 0) {
@@ -778,7 +771,11 @@ public class ApiLookup {
             }
         }
 
-        return data[i] - terminator;
+        byte b = data[i];
+        if (terminator == 1 && b == 0) { // Terminator 1 matches both 0 and 1.
+            return 0;
+        }
+        return b - terminator;
     }
 
     /**
@@ -807,10 +804,10 @@ public class ApiLookup {
     }
 
     private int getClassVersion(int classNumber) {
-        if (classNumber != -1) {
+        if (classNumber >= 0) {
             int offset = seekClassData(classNumber, CLASS_HEADER_API);
             int api = Byte.toUnsignedInt(mData[offset]) & API_MASK;
-            return api > 1 ? api : -1;
+            return api > 0 ? api : -1;
         }
         return -1;
     }
@@ -818,7 +815,9 @@ public class ApiLookup {
     /**
      * Returns the API version required to perform the given cast, or -1 if this is valid for all
      * versions of the class (or, if these are not known classes or if the cast is not valid at
-     * all.) <p> Note also that this method should only be called for interfaces that are actually
+     * all.)
+     *
+     * <p>Note also that this method should only be called for interfaces that are actually
      * implemented by this class or extending the given super class (check elsewhere); it doesn't
      * distinguish between interfaces implemented in the initial version of the class and interfaces
      * not implemented at all.
@@ -832,9 +831,9 @@ public class ApiLookup {
             @NonNull String destinationClass) {
         if (mData != null) {
             int classNumber = findClass(sourceClass);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int interfaceNumber = findClass(destinationClass);
-                if (interfaceNumber != -1) {
+                if (interfaceNumber >= 0) {
                     int offset = seekClassData(classNumber, CLASS_HEADER_INTERFACES);
                     int interfaceCount = mData[offset++];
                     for (int i = 0; i < interfaceCount; i++) {
@@ -875,13 +874,13 @@ public class ApiLookup {
     public int getClassDeprecatedIn(@NonNull String className) {
         if (mData != null) {
             int classNumber = findClass(className);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int offset = seekClassData(classNumber, CLASS_HEADER_DEPRECATED);
-                if (offset == -1) {
+                if (offset < 0) {
                     // Not deprecated
                     return -1;
                 }
-                int deprecatedIn = Byte.toUnsignedInt(mData[offset]);
+                int deprecatedIn = Byte.toUnsignedInt(mData[offset]) & API_MASK;;
                 return deprecatedIn != 0 ? deprecatedIn : -1;
             }
         }  else if (mInfo != null) {
@@ -905,13 +904,13 @@ public class ApiLookup {
     public int getClassRemovedIn(@NonNull String className) {
         if (mData != null) {
             int classNumber = findClass(className);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int offset = seekClassData(classNumber, CLASS_HEADER_REMOVED);
-                if (offset == -1) {
+                if (offset < 0) {
                     // Not removed
                     return -1;
                 }
-                int removedIn = Byte.toUnsignedInt(mData[offset]);
+                int removedIn = Byte.toUnsignedInt(mData[offset]) & API_MASK;
                 return removedIn != 0 ? removedIn : -1;
             }
         } else if (mInfo != null) {
@@ -935,7 +934,7 @@ public class ApiLookup {
     public boolean containsClass(@NonNull String className) {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
-            return findClass(className) != -1;
+            return findClass(className) >= 0;
         }  else if (mInfo != null) {
             return mInfo.getClass(className) != null;
         }
@@ -955,14 +954,14 @@ public class ApiLookup {
      * @param desc the method's descriptor - see {@link org.objectweb.asm.Type}
      * @return the minimum API version the method is supported for, or -1 if it's unknown
      */
-    public int getCallVersion(@NonNull String owner, @NonNull String name, @NonNull String desc) {
+    public int getMethodVersion(@NonNull String owner, @NonNull String name, @NonNull String desc) {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int api = findMember(classNumber, name, desc);
-                if (api == -1) {
-                    return getClassVersion(classNumber);
+                if (api < 0) {
+                    return -1;
                 }
                 return api;
             }
@@ -991,12 +990,12 @@ public class ApiLookup {
      * @param desc the method's descriptor - see {@link org.objectweb.asm.Type}
      * @return the API version the API was deprecated in, or -1 if the method is not deprecated
      */
-    public int getCallDeprecatedIn(
+    public int getMethodDeprecatedIn(
             @NonNull String owner, @NonNull String name, @NonNull String desc) {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int deprecatedIn = findMemberDeprecatedIn(classNumber, name, desc);
                 return deprecatedIn == 0 ? -1 : deprecatedIn;
             }
@@ -1021,11 +1020,12 @@ public class ApiLookup {
      * @param desc the method's descriptor - see {@link org.objectweb.asm.Type}
      * @return the API version the API was removed in, or -1 if the method was not removed
      */
-    public int getCallRemovedIn(@NonNull String owner, @NonNull String name, @NonNull String desc) {
+    public int getMethodRemovedIn(@NonNull String owner, @NonNull String name,
+            @NonNull String desc) {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int removedIn = findMemberRemovedIn(classNumber, name, desc);
                 return removedIn == 0 ? -1 : removedIn;
             }
@@ -1052,7 +1052,7 @@ public class ApiLookup {
     public Collection<ApiMember> getRemovedFields(@NonNull String owner) {
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 return getRemovedMembers(classNumber, false);
             }
         } else if (mInfo != null) {
@@ -1072,10 +1072,10 @@ public class ApiLookup {
      * @return the removed methods, or null if the owner class was not found
      */
     @Nullable
-    public Collection<ApiMember> getRemovedCalls(@NonNull String owner) {
+    public Collection<ApiMember> getRemovedMethods(@NonNull String owner) {
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 return getRemovedMembers(classNumber, true);
             }
         } else if (mInfo != null) {
@@ -1169,10 +1169,10 @@ public class ApiLookup {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int api = findMember(classNumber, name, null);
-                if (api == -1) {
-                    return getClassVersion(classNumber);
+                if (api < 0) {
+                    return -1;
                 }
                 return api;
             }
@@ -1203,7 +1203,7 @@ public class ApiLookup {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int deprecatedIn = findMemberDeprecatedIn(classNumber, name, null);
                 return deprecatedIn == 0 ? -1 : deprecatedIn;
             }
@@ -1230,7 +1230,7 @@ public class ApiLookup {
         //noinspection VariableNotUsedInsideIf
         if (mData != null) {
             int classNumber = findClass(owner);
-            if (classNumber != -1) {
+            if (classNumber >= 0) {
                 int removedIn = findMemberRemovedIn(classNumber, name, null);
                 return removedIn == 0 ? -1 : removedIn;
             }
@@ -1253,75 +1253,52 @@ public class ApiLookup {
      * @param owner the owner to look up
      * @return true if the owner might be relevant to the API database
      */
-    public static boolean isRelevantOwner(@NonNull String owner) {
-        if (owner.startsWith("java")) {                    // includes javax/
-            return true;
-        }
-        if (owner.startsWith(ANDROID_PKG)) {
-            return !owner.startsWith("/support/", 7);
-        } else if (owner.startsWith("org/")) {
-            if (owner.startsWith("xml", 4)
-                    || owner.startsWith("w3c/", 4)
-                    || owner.startsWith("json/", 4)
-                    || owner.startsWith("apache/", 4)) {
-                return true;
-            }
-        } else if (owner.startsWith("com/")) {
-            if (owner.startsWith("google/", 4)
-                    || owner.startsWith("android/", 4)) {
-                return true;
-            }
-        } else if (owner.startsWith("junit")
-                    || owner.startsWith("dalvik")) {
-            return true;
-        }
-
-        return false;
+    public boolean isRelevantOwner(@NonNull String owner) {
+        return findClass(owner) >= 0;
     }
 
     /**
-     * Returns true if the given owner (in VM format) is a valid Java package supported
-     * in any version of Android.
+     * Returns true if the given package is a valid Java package supported in any version of
+     * Android.
      *
-     * @param owner the package, in VM format
+     * @param classOrPackageName the name of a package or a class
+     * @param packageNameLength the length of the package part of the name
      * @return true if the package is included in one or more versions of Android
      */
-    public boolean isValidJavaPackage(@NonNull String owner) {
-        return findPackage(owner) != -1;
+    public boolean isValidJavaPackage(@NonNull String classOrPackageName, int packageNameLength) {
+        return findContainer(classOrPackageName, packageNameLength, true) >= 0;
     }
 
-    /** Returns the package index of the given class, or -1 if it is unknown */
-    private int findPackage(@NonNull String owner) {
+    /** Returns the container index of the given package or class, or -1 if it is unknown. */
+    private int findContainer(@NonNull String packageOrClassName, int containerNameLength,
+            boolean packageOnly) {
         // The index array contains class indexes from 0 to classCount and
         // member indices from classCount to mIndices.length.
         int low = 0;
-        int high = packageCount;
-        // Compare the api info at the given index.
-        int packageNameLength = lastIndexOfDotOrSlash(owner);
-        if (packageNameLength < 0) {
-            packageNameLength = 0;
-        }
+        int high = containerCount;
         while (low < high) {
             int middle = (low + high) >>> 1;
             int offset = mIndices[middle];
 
             if (DEBUG_SEARCH) {
-                System.out.println("Comparing string \"" + owner.substring(0, packageNameLength)
+                System.out.println("Comparing string \""
+                        + packageOrClassName.substring(0, containerNameLength)
                         + "\" with entry at " + offset + ": " + dumpEntry(offset));
             }
 
-            int compare = compare(mData, offset, (byte) 0, owner, 0, packageNameLength);
-            if (compare == 0) {
+            byte terminator = packageOnly ? (byte) 0 : (byte) 1;
+            int c = compare(mData, offset, terminator, packageOrClassName, 0, containerNameLength);
+            if (c == 0) {
                 if (DEBUG_SEARCH) {
                     System.out.println("Found " + dumpEntry(offset));
                 }
                 return middle;
             }
 
-            if (compare < 0) {
+            if (c < 0) {
                 low = middle + 1;
             } else {
-                assert compare > 0;
+                assert c > 0;
                 high = middle;
             }
         }
@@ -1374,51 +1351,52 @@ public class ApiLookup {
         return (b1 & 0xFF) << 8 | (b2 & 0xFF);
     }
 
-    /** Returns the class number of the given class, or -1 if it is unknown */
-    private int findClass(@NonNull String owner) {
-        int packageNumber = findPackage(owner);
-        if (packageNumber == -1) {
+    /** Returns the class number of the given class, or -1 if it is unknown. */
+    private int findClass(@NonNull String className) {
+        int lastSeparator = lastIndexOfDotOrSlashOrDollar(className);
+        int containerNameLength = lastSeparator >= 0 ? lastSeparator : 0;
+        int containerNumber = findContainer(className, containerNameLength, false);
+        if (containerNumber < 0) {
             return -1;
         }
-        int curr = mIndices[packageNumber];
-        while (mData[curr] != 0) {
+        int classNameLength = className.length();
+        int classNameOffset = lastSeparator + 1;
+
+        int curr = mIndices[containerNumber];
+        // Skip the name of the container.
+        while ((mData[curr] & ~1) != 0) {  // Iterate until encountering 0 or 1.
             curr++;
         }
         curr++;
 
-        // 3 bytes for first offset
+        // 3 bytes for first offset.
         int low = get3ByteInt(mData, curr);
         curr += 3;
 
         int length = get2ByteInt(mData, curr);
-        if (length == 0) {
-            return -1;
-        }
         int high = low + length;
-        int index = lastIndexOfDotOrSlash(owner);
-        int classNameLength = owner.length();
         while (low < high) {
             int middle = (low + high) >>> 1;
             int offset = mIndices[middle];
-            offset++; // skip the byte which points to the metadata after the name
+            offset++; // Skip the byte which points to the metadata after the name.
 
             if (DEBUG_SEARCH) {
-                System.out.println("Comparing string " + owner.substring(0, classNameLength)
+                System.out.println("Comparing string " + className.substring(0, classNameLength)
                         + " with entry at " + offset + ": " + dumpEntry(offset));
             }
 
-            int compare = compare(mData, offset, (byte) 0, owner, index + 1, classNameLength);
-            if (compare == 0) {
+            int c = compare(mData, offset, (byte) 0, className, classNameOffset, classNameLength);
+            if (c == 0) {
                 if (DEBUG_SEARCH) {
                     System.out.println("Found " + dumpEntry(offset));
                 }
                 return middle;
             }
 
-            if (compare < 0) {
+            if (c < 0) {
                 low = middle + 1;
             } else {
-                assert compare > 0;
+                assert c > 0;
                 high = middle;
             }
         }
@@ -1426,14 +1404,69 @@ public class ApiLookup {
         return -1;
     }
 
-    private int lastIndexOfDotOrSlash(@NonNull String name) {
-        for (int i = name.length(); --i >= 0;) {
-            char c = name.charAt(i);
-            if (c == '.' || c == '/') {
+    private static int lastIndexOfDotOrSlashOrDollar(@NonNull String className) {
+        for (int i = className.length(); --i >= 0;) {
+            char c = className.charAt(i);
+            if (c == '.' || c == '/' || c == '$') {
                 return i;
             }
         }
         return -1;
+    }
+
+    /**
+     * Checks if the two given class or package names are equal or differ only by separators.
+     * Separators '.', '/', and '$' are considered equivalent.
+     */
+    public static boolean equivalentName(@NonNull String name1, @NonNull String name2) {
+        int len1 = name1.length();
+        int len2 = name2.length();
+        if (len1 != len2) {
+            return false;
+        }
+        for (int i = 0; i < len1; i++) {
+            if (normalizeSeparator(name1.charAt(i)) != normalizeSeparator(name2.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Checks if the beginning part of the given class or package name is equal to the given prefix,
+     * or differs only by separators. Separators '.', '/', and '$' are considered equivalent.
+     */
+    public static boolean startsWithEquivalentPrefix(@NonNull String classOrPackageName,
+            @NonNull String prefix) {
+        return equivalentFragmentAtOffset(classOrPackageName, 0, prefix);
+    }
+
+
+    /**
+     * Checks if the substring of the given class or package name at the given offset is equal to
+     * the given fragment or differs only by separators. Separators '.', '/', and '$' are considered
+     * equivalent.
+     */
+    public static boolean equivalentFragmentAtOffset(@NonNull String classOrPackageName,
+            int offset, @NonNull String fragment) {
+        int prefixLength = fragment.length();
+        if (offset < 0 || offset > classOrPackageName.length() - prefixLength) {
+            return false;
+        }
+        for (int prefixOffset = 0; prefixOffset < prefixLength; prefixOffset++) {
+            if (normalizeSeparator(classOrPackageName.charAt(offset++)) !=
+                    normalizeSeparator(fragment.charAt(prefixOffset))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static char normalizeSeparator(char c) {
+        if (c == '/' || c == '$') {
+            c = '.';
+        }
+        return c;
     }
 
     private int findMember(int classNumber, @NonNull String name, @Nullable String desc) {

@@ -25,7 +25,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
         return new ViewTypeDetector();
     }
 
-    public void test() throws Exception {
+    public void test() {
         String expected = ""
                 + "src/test/pkg/WrongCastActivity.java:13: Error: Unexpected cast to ToggleButton: layout tag was Button [WrongViewCast]\n"
                 + "        ToggleButton toggleButton = (ToggleButton) findViewById(R.id.button);\n"
@@ -40,7 +40,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void test2() throws Exception {
+    public void test2() {
         String expected = ""
                 + "src/test/pkg/WrongCastActivity.java:13: Error: Unexpected cast to ToggleButton: layout tag was Button|RadioButton [WrongViewCast]\n"
                 + "        ToggleButton toggleButton = (ToggleButton) findViewById(R.id.button);\n"
@@ -75,7 +75,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void test3() throws Exception {
+    public void test3() {
         //noinspection all // Sample code
         lint().files(
                 casts,
@@ -105,7 +105,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void test27441() throws Exception {
+    public void test27441() {
         //noinspection all // Sample code
         lint().files(
                 casts2,
@@ -137,7 +137,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testCheckable() throws Exception {
+    public void testCheckable() {
         //noinspection all // Sample code
         lint().files(
                 casts2,
@@ -164,7 +164,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
-    public void testIncremental() throws Exception {
+    public void testIncremental() {
         String expected = ""
                 + "src/test/pkg/WrongCastActivity.java:13: Error: Unexpected cast to ToggleButton: layout tag was Button [WrongViewCast]\n"
                 + "        ToggleButton toggleButton = (ToggleButton) findViewById(R.id.button);\n"
@@ -181,7 +181,7 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void test34968488() throws Exception {
+    public void test34968488() {
         // Regression test for 34968488:
         // Casting to ProgressBar is valid for a SeekBar: it's an ancestor class
         //noinspection all // Sample code
@@ -400,6 +400,51 @@ public class ViewTypeDetectorTest extends AbstractCheckTest {
                         + "@@ -9 +9\n"
                         + "-         checkNotNull1(findViewById(R.id.textView)).setAlpha(0.5f); // WARN\n"
                         + "+         checkNotNull1((android.view.View)findViewById(R.id.textView)).setAlpha(0.5f); // WARN\n");
+    }
+
+    public void testFindViewByIdNotCastDirectly() {
+        // Regression test for issue 68280786
+
+        //noinspection all // Sample code
+        lint().files(
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.content.Context;\n" +
+                        "import android.widget.ImageButton;\n" +
+                        "import android.widget.RelativeLayout;\n" +
+                        "\n" +
+                        "public class A extends RelativeLayout {\n" +
+                        "\n" +
+                        "    public A(Context context) {\n" +
+                        "        super(context);\n" +
+                        "        LayoutParams lp1 = (LayoutParams) findViewById(R.id.some_view).getLayoutParams();\n" +
+                        "        LayoutParams lp2 = (LayoutParams) this.findViewById(R.id.some_view).getLayoutParams();\n" +
+                        "    }\n" +
+                        "}"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "public final class R {\n"
+                        + "    public static final class id {\n"
+                        + "        public static final int some_view = 0x7f0a0000;\n"
+                        + "    }\n"
+                        + "}\n"),
+                xml("res/layout/test.xml", "" +
+                        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                        "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                        "    android:layout_width=\"match_parent\"\n" +
+                        "    android:layout_height=\"match_parent\"\n" +
+                        "    android:orientation=\"vertical\">\n" +
+                        "\n" +
+                        "    <TextView\n" +
+                        "        android:id=\"@+id/some_view\"\n" +
+                        "        android:layout_width=\"wrap_content\"\n" +
+                        "        android:layout_height=\"wrap_content\"\n" +
+                        "        android:text=\"Hello World!\" />\n" +
+                        "\n" +
+                        "</LinearLayout>"))
+                .run()
+                .expectClean();
     }
 
     public void test62445968() {

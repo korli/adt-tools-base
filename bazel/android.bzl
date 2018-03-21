@@ -12,7 +12,7 @@ def _jni_library_impl(ctx):
   # If two targets in deps share the same files (e.g. in the data attribute)
   # they would be included mulitple times in the same path in the zip, so
   # dedupe the files.
-  deduped_inputs = set(inputs)
+  deduped_inputs = depset(inputs)
   zipper_args = ["c", ctx.outputs.zip.path]
   for cpu, file in deduped_inputs:
     # "lib/" is the JNI directory looked for in android
@@ -96,11 +96,15 @@ def select_android(android, default):
         "//conditions:default": default,
         })
 
-def dex_library(name, jars=[], visibility=[]):
+def dex_library(name, jars=[], output=None, visibility=[]):
+  if output == None:
+    outs = [name + ".jar"]
+  else:
+    outs = [output]
   native.genrule(
     name = name,
     srcs = jars,
-    outs = [name + ".jar"],
+    outs = outs,
     cmd = "$(location //prebuilts/studio/sdk:dx-preview) --dex --output=./$@ ./$<",
     tools = ["//prebuilts/studio/sdk:dx-preview"],
   )

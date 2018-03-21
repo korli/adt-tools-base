@@ -37,7 +37,6 @@ import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Severity;
 import java.io.File;
 import org.intellij.lang.annotations.Language;
-import org.junit.Ignore;
 
 public class ApiDetectorTest extends AbstractCheckTest {
 
@@ -108,7 +107,7 @@ public class ApiDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    public void testTag() {
+    public void testTagWarnings() {
         String expected = ""
                 + "res/layout/tag.xml:12: Warning: <tag> is only used in API level 21 and higher (current min is 1) [UnusedAttribute]\n"
                 + "        <tag id=\"@+id/test\" />\n"
@@ -2363,27 +2362,39 @@ public class ApiDetectorTest extends AbstractCheckTest {
 
     public void testTryWithResources() {
         String expected = ""
-                + "src/test/pkg/MultiCatch.java:10: Error: Multi-catch with these reflection exceptions requires API level 19 (current min is 1) because they get compiled to the common but new super type ReflectiveOperationException. As a workaround either create individual catch statements, or catch Exception. [NewApi]\n"
+                + "src/main/java/test/pkg/MultiCatch.java:10: Error: Multi-catch with these reflection exceptions requires API level 19 (current min is 1) because they get compiled to the common but new super type ReflectiveOperationException. As a workaround either create individual catch statements, or catch Exception. [NewApi]\n"
                 + "        } catch (IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {\n"
                 + "                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TryWithResources.java:9: Error: Try-with-resources requires API level 19 (current min is 1) [NewApi]\n"
+                + "src/main/java/test/pkg/TryWithResources.java:9: Error: Try-with-resources requires API level 19 (current min is 1) [NewApi]\n"
                 + "        try (BufferedReader br = new BufferedReader(new FileReader(path))) {\n"
                 + "             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "2 errors, 0 warnings\n";
         lint().files(
                 manifest().minSdk(1),
                 tryWithResources,
-                multiCatch)
+                multiCatch,
+                gradleVersion231)
                 .checkMessage(this::checkReportedError)
                 .run()
                 .expect(expected);
     }
 
-    public void testTryWithResourcesOk() {
+    public void testTryWithResourcesOkDueToCompileSdk() {
         lint().files(
                 manifest().minSdk(19),
                 tryWithResources,
-                multiCatch)
+                multiCatch,
+                gradleVersion231)
+                .run()
+                .expectClean();
+    }
+
+    public void testTryWithResourcesOkDueToDesugar() {
+        lint().files(
+                manifest().minSdk(19),
+                tryWithResources,
+                multiCatch,
+                gradleVersion24_language18)
                 .run()
                 .expectClean();
     }
@@ -2446,17 +2457,17 @@ public class ApiDetectorTest extends AbstractCheckTest {
 
         // Default methods require minSdkVersion >= N
         String expected = ""
-                + "src/test/pkg/InterfaceMethodTest.java:6: Error: Default method requires API level 24 (current min is 15) [NewApi]\n"
+                + "src/main/java/test/pkg/InterfaceMethodTest.java:6: Error: Default method requires API level 24 (current min is 15) [NewApi]\n"
                 + "    default void method2() {\n"
                 + "    ^\n"
-                + "src/test/pkg/InterfaceMethodTest.java:9: Error: Static interface  method requires API level 24 (current min is 15) [NewApi]\n"
+                + "src/main/java/test/pkg/InterfaceMethodTest.java:9: Error: Static interface method requires API level 24 (current min is 15) [NewApi]\n"
                 + "    static void method3() {\n"
                 + "    ^\n"
                 + "2 errors, 0 warnings\n";
         //noinspection all // Sample code
         lint().files(
                 manifest().minSdk(15),
-                java("src/test/pkg/InterfaceMethodTest.java", ""
+                java("src/main/java/test/pkg/InterfaceMethodTest.java", ""
                         + "package test.pkg;\n"
                         + "\n"
                         + "@SuppressWarnings(\"unused\")\n"
@@ -2469,7 +2480,8 @@ public class ApiDetectorTest extends AbstractCheckTest {
                         + "    static void method3() {\n"
                         + "        System.out.println(\"test\");\n"
                         + "    }\n"
-                        + "}"))
+                        + "}"),
+                gradleVersion231)
                 .checkMessage(this::checkReportedError)
                 .run()
                 .expect(expected);
@@ -2495,6 +2507,35 @@ public class ApiDetectorTest extends AbstractCheckTest {
                         + "}"))
                 .run()
                 .expectClean();
+    }
+
+    public void testDesugarMethods() {
+        // Desugar inlines Objects.requireNonNull(foo) so don't flag this if using Desugar
+        // Ditto for Throwable.addSuppressed.
+
+        //noinspection all // Sample code
+        lint().files(
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import java.util.Objects;\n" +
+                        "\n" +
+                        "public class DesugarTest {\n" +
+                        "    public void testRequireNull(Object foo) {\n" +
+                        "        Objects.requireNonNull(foo); // Desugared, should not generate warning\n" +
+                        "        Objects.requireNonNull(foo, \"message\"); // Should generate API warning\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    public void addThrowable(Throwable t1, Throwable t2) {\n" +
+                        "        t1.addSuppressed(t2); // Desugared, should not generate warning\n" +
+                        "    }\n" +
+                        "}\n"),
+                gradleVersion24_language18)
+                .run()
+                .expect("src/main/java/test/pkg/DesugarTest.java:8: Error: Call requires API level 19 (current min is 1): java.util.Objects#requireNonNull [NewApi]\n" +
+                        "        Objects.requireNonNull(foo, \"message\"); // Should generate API warning\n" +
+                        "                ~~~~~~~~~~~~~~\n" +
+                        "1 errors, 0 warnings\n");
     }
 
     public void testDefaultMethodsDesugar() {
@@ -2528,14 +2569,14 @@ public class ApiDetectorTest extends AbstractCheckTest {
 
         // Repeatable annotations require minSdkVersion >= N
         String expected = ""
-                + "src/test/pkg/MyAnnotation.java:5: Error: Repeatable annotation requires API level 24 (current min is 15) [NewApi]\n"
+                + "src/main/java/test/pkg/MyAnnotation.java:5: Error: Repeatable annotation requires API level 24 (current min is 15) [NewApi]\n"
                 + "@Repeatable(android.annotation.SuppressLint.class)\n"
                 + "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                 + "1 errors, 0 warnings\n";
         //noinspection all // Sample code
         lint().files(
                 manifest().minSdk(15),
-                java("src/test/pkg/MyAnnotation.java", ""
+                java("src/main/java/test/pkg/MyAnnotation.java", ""
                         + "package test.pkg;\n"
                         + "\n"
                         + "import java.lang.annotation.Repeatable;\n"
@@ -2543,7 +2584,8 @@ public class ApiDetectorTest extends AbstractCheckTest {
                         + "@Repeatable(android.annotation.SuppressLint.class)\n"
                         + "public @interface MyAnnotation {\n"
                         + "    int test() default 1;\n"
-                        + "}"))
+                        + "}"),
+                gradleVersion231)
                 .allowCompilationErrors(true)
                 .allowSystemErrors(false)
                 .checkMessage(this::checkReportedError)
@@ -2551,20 +2593,28 @@ public class ApiDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    /* Disabled for now while we investigate test failure when switching to API 24 as stable */
     @SuppressWarnings("OnDemandImport")
-    public void ignored_testTypeAnnotations() {
+    public void testTypeAnnotations() {
         if (createClient().getHighestKnownApiLevel() < 24) {
             // This test only works if you have at least Android N installed
             return;
         }
 
         // Type annotations are not supported
-        String expected = ""
-                + "src/test/pkg/MyAnnotation2.java:9: Error: Type annotations are not supported in Android: TYPE_PARAMETER [NewApi]\n"
-                + "@Target(TYPE_PARAMETER)\n"
-                + "        ~~~~~~~~~~~~~~\n"
-                + "1 errors, 0 warnings\n";
+        String expected = "" +
+                "src/test/pkg/MyAnnotation.java:9: Error: Field requires API level 26 (current min is 15): java.lang.annotation.ElementType#TYPE_PARAMETER [NewApi]\n" +
+                "@Target({METHOD, PARAMETER, FIELD, LOCAL_VARIABLE, TYPE_PARAMETER, TYPE_USE})\n" +
+                "                                                   ~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/MyAnnotation.java:9: Error: Field requires API level 26 (current min is 15): java.lang.annotation.ElementType#TYPE_USE [NewApi]\n" +
+                "@Target({METHOD, PARAMETER, FIELD, LOCAL_VARIABLE, TYPE_PARAMETER, TYPE_USE})\n" +
+                "                                                                   ~~~~~~~~\n" +
+                "src/test/pkg/MyAnnotation2.java:9: Error: Field requires API level 26 (current min is 15): java.lang.annotation.ElementType#TYPE_PARAMETER [NewApi]\n" +
+                "@Target(TYPE_PARAMETER)\n" +
+                "        ~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/MyAnnotation4.java:8: Error: Field requires API level 26 (current min is 15): java.lang.annotation.ElementType#TYPE_PARAMETER [NewApi]\n" +
+                "@Target(TYPE_PARAMETER)\n" +
+                "        ~~~~~~~~~~~~~~\n" +
+                "4 errors, 0 warnings";
         //noinspection all // Sample code
         lint().files(
                 manifest().minSdk(15),
@@ -2820,14 +2870,10 @@ public class ApiDetectorTest extends AbstractCheckTest {
 
     public void testKotlinVirtualDispatch() {
         // Regression test for https://issuetracker.google.com/64528052
-        if (skipKotlinTests()) {
-            return;
-        }
-
         //noinspection all // Sample code
         lint().files(
                 manifest().minSdk(1),
-                kotlin("", "" +
+                kotlin("" +
                         "package test.pkg\n" +
                         "\n" +
                         "import android.os.Bundle\n" +
@@ -2923,27 +2969,6 @@ public class ApiDetectorTest extends AbstractCheckTest {
                 .checkMessage(this::checkReportedError)
                 .run()
                 .expectClean();
-    }
-
-    @Ignore("http://b.android.com/266795")
-    public void ignore_testMissingApiDatabase() {
-        ApiLookup.dispose();
-        //noinspection all // Sample code
-        String expected = ""
-                + "testMissingApiDatabase: Error: Can't find API database; API check not performed [LintError]\n"
-                + "1 errors, 0 warnings\n";
-        lint().files(manifest().minSdk(1), mLayout, mThemes, mThemes2, mApiCallTest)
-                .allowCompilationErrors(false)
-                .allowSystemErrors(true)
-                .client(new com.android.tools.lint.checks.infrastructure.TestLintClient() {
-                    @Override
-                    public File findResource(@NonNull String relativePath) {
-                        return null;
-                    }
-                })
-                .checkMessage(this::checkReportedError)
-                .run()
-                .expect(expected);
     }
 
     public void testRipple() {
@@ -3586,47 +3611,20 @@ public class ApiDetectorTest extends AbstractCheckTest {
                 .expect(expected);
     }
 
-    @Ignore("http://b.android.com/266795")
-    public void ignore_testHigherCompileSdkVersionThanPlatformTools() {
-        // Warn if the platform tools are too old on the system
-        lint().files(
-                manifest().minSdk(14),
-                projectProperties().compileSdk(400), // in the future
-                mApiCallTest12)
-                .checkMessage(this::checkReportedError)
-                .run()
-                .expectMatches(""
-                        + "Error: The SDK platform-tools version \\([^)]+\\) is too old to check APIs compiled with API 400; please update");
-    }
-
-    @Ignore("http://b.android.com/266795")
-    public void ignore_testHigherCompileSdkVersionThanPlatformToolsInEditor() {
-        // When editing a file we place the error on the first line of the file instead
-        lint().files(
-                manifest().minSdk(14),
-                projectProperties().compileSdk(400), // in the future
-                mApiCallTest12)
-                .incremental("src/test/pkg/ApiCallTest12.java")
-                .checkMessage(this::checkReportedError)
-                .run()
-                .expectMatches(""
-                        + "src/test/pkg/ApiCallTest12.java:1: Error: The SDK platform-tools version \\([^)]+\\) is too old to check APIs compiled with API 400; please update");
-    }
-
     @SuppressWarnings({"MethodMayBeStatic", "ConstantConditions", "ClassNameDiffersFromFileName"})
     public void testCastChecks() {
         // When editing a file we place the error on the first line of the file instead
-        String expected = ""
-                + "src/test/pkg/CastTest.java:15: Error: Cast from Cursor to Closeable requires API level 16 (current min is 14) [NewApi]\n"
-                + "        Closeable closeable = (Closeable) cursor; // Requires 16\n"
-                + "                              ~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/CastTest.java:21: Error: Cast from KeyCharacterMap to Parcelable requires API level 16 (current min is 14) [NewApi]\n"
-                + "        Parcelable parcelable2 = (Parcelable)map; // Requires API 16\n"
-                + "                                 ~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/CastTest.java:27: Error: Cast from AnimatorListenerAdapter to AnimatorPauseListener requires API level 19 (current min is 14) [NewApi]\n"
-                + "        AnimatorPauseListener listener = (AnimatorPauseListener)adapter;\n"
-                + "                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "3 errors, 0 warnings\n";
+        String expected = "" +
+                "src/test/pkg/CastTest.java:15: Error: Cast from Cursor to Closeable requires API level 16 (current min is 14) [NewApi]\n" +
+                "        Closeable closeable = (Closeable) cursor; // Requires 16\n" +
+                "                              ~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/CastTest.java:21: Error: Cast from KeyCharacterMap to Parcelable requires API level 16 (current min is 14) [NewApi]\n" +
+                "        Parcelable parcelable2 = (Parcelable)map; // Requires API 16\n" +
+                "                                 ~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/CastTest.java:27: Error: Class requires API level 19 (current min is 14): android.animation.Animator.AnimatorPauseListener [NewApi]\n" +
+                "        AnimatorPauseListener listener = (AnimatorPauseListener)adapter;\n" +
+                "                                          ~~~~~~~~~~~~~~~~~~~~~\n" +
+                "3 errors, 0 warnings\n";
         //noinspection all // Sample code
         lint().files(
                 java("src/test/pkg/CastTest.java", ""
@@ -4150,6 +4148,33 @@ public class ApiDetectorTest extends AbstractCheckTest {
                 .expectClean();
     }
 
+    public void testFontFamilyWithAppCompat() {
+        lint().files(
+                manifest().minSdk(1),
+                xml("res/layout/foo.xml", "" +
+                        "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                        "    xmlns:tools=\"http://schemas.android.com/tools\"\n" +
+                        "    android:id=\"@+id/LinearLayout1\"\n" +
+                        "    android:layout_width=\"match_parent\"\n" +
+                        "    android:layout_height=\"match_parent\"\n" +
+                        "    android:orientation=\"vertical\" >\n" +
+                        "    <TextView\n" +
+                        "        android:fontFamily=\"@font/my_font\"\n" +
+                        "        android:layout_width=\"wrap_content\"\n" +
+                        "        android:layout_height=\"wrap_content\"/>\n" +
+                        "</LinearLayout>\n"),
+                gradle("apply plugin: 'com.android.application'\n" +
+                        "dependencies {\n" +
+                        "    compile 'com.android.support:appcompat-v7:+'\n" +
+                        "}\n"))
+                .checkMessage(this::checkReportedError)
+                .run()
+                .expect("res/layout/foo.xml:8: Warning: Attribute fontFamily is only used in API level 16 and higher (current min is 1) Did you mean app:fontFamily ? [UnusedAttribute]\n" +
+                        "        android:fontFamily=\"@font/my_font\"\n" +
+                        "        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                        "0 errors, 1 warnings");
+    }
+
     @SuppressWarnings("all") // sample code
     public void testInlinedConstantConditional() {
         // Regression test for https://code.google.com/p/android/issues/detail?id=205925
@@ -4279,7 +4304,7 @@ public class ApiDetectorTest extends AbstractCheckTest {
     @SuppressWarnings("all") // Sample code
     public void testConcurrentHashMapUsage() {
         ApiLookup lookup = ApiLookup.get(createClient());
-        int version = lookup.getCallVersion("java/util/concurrent/ConcurrentHashMap", "keySet",
+        int version = lookup.getMethodVersion("java/util/concurrent/ConcurrentHashMap", "keySet",
                 "(Ljava/lang/Object;)");
         if (version == -1) {
             // This test machine doesn't have the right version of Nougat yet
@@ -4327,35 +4352,41 @@ public class ApiDetectorTest extends AbstractCheckTest {
 
     @SuppressWarnings("all") // sample code
     public void testObsoleteVersionCheck() {
-        String expected = ""
-                + "src/test/pkg/TestVersionCheck.java:7: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT >= 21) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:8: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT > 21) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:9: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT < 21) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:10: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT <= 21) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:13: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT >= 22) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:14: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT > 22) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:15: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT < 22) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:16: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT <= 22) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "src/test/pkg/TestVersionCheck.java:21: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n"
-                + "        if (Build.VERSION.SDK_INT < 23) { }\n"
-                + "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-                + "0 errors, 9 warnings\n";
+        String expected = "" +
+                "src/test/pkg/TestVersionCheck.java:7: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT >= 21) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:8: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT > 21) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:9: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT < 21) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:10: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT <= 21) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:11: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT == 21) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:13: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT >= 22) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:14: Warning: Unnecessary; SDK_INT is always >= 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT > 22) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:15: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT < 22) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:16: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT <= 22) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:17: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT == 22) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/test/pkg/TestVersionCheck.java:21: Warning: Unnecessary; SDK_INT is never < 23 [ObsoleteSdkInt]\n" +
+                "        if (Build.VERSION.SDK_INT < 23) { }\n" +
+                "            ~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                "0 errors, 11 warnings";
         //noinspection all // Sample code
         lint().files(
                 manifest().minSdk(23),
@@ -4611,14 +4642,11 @@ public class ApiDetectorTest extends AbstractCheckTest {
     }
 
     public void testKotlinPropertySyntax() {
-        if (skipKotlinTests()) {
-            return;
-        }
-
+        //noinspection all // Sample code
         lint().files(
                 manifest().minSdk(1),
                 kotlin("package test.pkg\n" +
-                        "\n" +
+                        "@Suppress(\"UsePropertyAccessSyntax\")\n" +
                         "fun testApiCheck(calendar: java.util.Calendar) {\n" +
                         "    calendar.weekYear\n" +
                         "    calendar.getWeekYear()\n" +
@@ -4630,6 +4658,260 @@ public class ApiDetectorTest extends AbstractCheckTest {
                         "src/test/pkg/test.kt:5: Error: Call requires API level 24 (current min is 1): java.util.Calendar#getWeekYear [NewApi]\n" +
                         "    calendar.getWeekYear()\n" +
                         "             ~~~~~~~~~~~\n" +
+                        "2 errors, 0 warnings\n");
+    }
+
+    public void test69534659() {
+        // Regression test for issue 69534659
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(15),
+                kotlin("package test.pkg\n" +
+                        "\n" +
+                        "import android.view.View\n" +
+                        "\n" +
+                        "class Foo {\n" +
+                        "    var <T : View> Iterable<T>.visibility: Int\n" +
+                        "    set(value) = forEach { it.visibility = value }\n" +
+                        "    get() = throw RuntimeException(\"Not supported\")\n" +
+                        "\n" +
+                        "}\n" +
+                        "\n" +
+                        "abstract class MyIterable : Iterable<String> {\n" +
+                        "    fun test() {\n" +
+                        "        forEach { println(it[0]) }\n" +
+                        "    }\n" +
+                        "}"),
+                kotlin("" +
+                        "import android.util.Log\n" +
+                        "import io.realm.Realm\n" +
+                        "import io.realm.RealmModel\n" +
+                        "import io.realm.kotlin.where\n" +
+                        "\n" +
+                        "class Test {\n" +
+                        "    fun method(realm: Realm) {\n" +
+                        "        realm.where<RealmModel>()\n" +
+                        "                .findAll()\n" +
+                        "                .forEach {\n" +
+                        "                    Log.i(\"tag\", it.toString())\n" +
+                        "                }\n" +
+                        "    }\n" +
+                        "}"))
+                .run()
+                .expectClean();
+    }
+
+    public void testForEach2() {
+        // Regression test for 70965444: False positives for Map#forEach
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(21),
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import java.util.List;\n" +
+                        "import java.util.function.Consumer;\n" +
+                        "\n" +
+                        "public class JavaForEach {\n" +
+                        "    public void test(List<String> list) {\n" +
+                        "        list.forEach(new Consumer<String>() {\n" +
+                        "            @Override\n" +
+                        "            public void accept(String s) {\n" +
+                        "                System.out.println(s);\n" +
+                        "            }\n" +
+                        "        });\n" +
+                        "    }\n" +
+                        "}\n"),
+                kotlin("" +
+                        "import android.webkit.WebResourceRequest\n" +
+                        "import android.webkit.WebResourceResponse\n" +
+                        "import android.webkit.WebView\n" +
+                        "import android.webkit.WebViewClient\n" +
+                        "\n" +
+                        "class MyWebViewClient() : WebViewClient() {\n" +
+                        "    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {\n" +
+                        "        val header: Map<String, String> = request.requestHeaders\n" +
+                        "        // Lint reports this Map.forEach as java.util.Map's but it's kotlin.collections.Map's!\n" +
+                        "        header.forEach { (key, value) ->\n" +
+                        "            TODO(\"addHeader(key, value)\")\n" +
+                        "        }\n" +
+                        "\n" +
+                        "        return TODO(\"Somethi9ng\")\n" +
+                        "    }\n" +
+                        "}"))
+                .run()
+                .expect("src/test/pkg/JavaForEach.java:8: Error: Call requires API level 24 (current min is 21): java.lang.Iterable#forEach [NewApi]\n" +
+                        "        list.forEach(new Consumer<String>() {\n" +
+                        "             ~~~~~~~\n" +
+                        "1 errors, 0 warnings");
+    }
+
+    public void testCastsToSelf() {
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(15),
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import java.util.List;\n" +
+                        "import java.util.function.Function;\n" +
+                        "import java.util.stream.Collectors;\n" +
+                        "\n" +
+                        "public class Used {\n" +
+                        "    List<Object> test(List<String> list) {\n" +
+                        "        return list.stream().map((Function<String, Object>) s -> \n" +
+                        "                fromNullable(s)).collect(Collectors.toList());\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    void tes2t(List<String> list) {\n" +
+                        "        list.stream().map(new Function<String, Object>() {\n" +
+                        "            @Override\n" +
+                        "            public Object apply(String s) {\n" +
+                        "                return fromNullable(s);\n" +
+                        "            }\n" +
+                        "        });\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    private static String fromNullable(String o) {\n" +
+                        "        return o;\n" +
+                        "    }\n" +
+                        "}\n"))
+                .run()
+                .expect("src/test/pkg/Used.java:9: Error: Call requires API level 24 (current min is 15): java.util.Collection#stream [NewApi]\n" +
+                        "        return list.stream().map((Function<String, Object>) s -> \n" +
+                        "                    ~~~~~~\n" +
+                        "src/test/pkg/Used.java:9: Error: Call requires API level 24 (current min is 15): java.util.stream.Stream#map [NewApi]\n" +
+                        "        return list.stream().map((Function<String, Object>) s -> \n" +
+                        "                             ~~~\n" +
+                        "src/test/pkg/Used.java:9: Error: Cast to Function requires API level 24 (current min is 15) [NewApi]\n" +
+                        "        return list.stream().map((Function<String, Object>) s -> \n" +
+                        "                                 ^\n" +
+                        "src/test/pkg/Used.java:10: Error: Call requires API level 24 (current min is 15): java.util.stream.Collectors#toList [NewApi]\n" +
+                        "                fromNullable(s)).collect(Collectors.toList());\n" +
+                        "                                                    ~~~~~~\n" +
+                        "src/test/pkg/Used.java:10: Error: Call requires API level 24 (current min is 15): java.util.stream.Stream#collect [NewApi]\n" +
+                        "                fromNullable(s)).collect(Collectors.toList());\n" +
+                        "                                 ~~~~~~~\n" +
+                        "src/test/pkg/Used.java:10: Error: Cast to Collector requires API level 24 (current min is 15) [NewApi]\n" +
+                        "                fromNullable(s)).collect(Collectors.toList());\n" +
+                        "                                         ~~~~~~~~~~~~~~~~~~~\n" +
+                        "src/test/pkg/Used.java:14: Error: Call requires API level 24 (current min is 15): java.util.Collection#stream [NewApi]\n" +
+                        "        list.stream().map(new Function<String, Object>() {\n" +
+                        "             ~~~~~~\n" +
+                        "src/test/pkg/Used.java:14: Error: Call requires API level 24 (current min is 15): java.util.stream.Stream#map [NewApi]\n" +
+                        "        list.stream().map(new Function<String, Object>() {\n" +
+                        "                      ~~~\n" +
+                        "8 errors, 0 warnings");
+    }
+
+    public void testKotlinArgumentsInConstructorDelegation() {
+        // Regression test for https://issuetracker.google.com/69948867
+        // NewApi doesn't work for calls in arguments of constructor delegation
+        lint().files(
+                manifest().minSdk(15),
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.content.Context\n" +
+                        "import android.graphics.drawable.Drawable\n" +
+                        "import android.text.style.ImageSpan\n" +
+                        "\n" +
+                        "class SomeClass(val drawable: Drawable) {\n" +
+                        "    constructor(context: Context, resourceId: Int) : this(context.getDrawable(resourceId)) {\n" +
+                        "        SomeClass(context.getDrawable(resourceId))\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "class AnotherClass(context: Context, id: Int): ImageSpan(context.getDrawable(id)) {\n" +
+                        "    init {\n" +
+                        "        val x = context.getDrawable(id)\n" +
+                        "    }\n" +
+                        "}\n"))
+                .run()
+                .expect("src/test/pkg/SomeClass.kt:8: Error: Call requires API level 21 (current min is 15): android.content.Context#getDrawable [NewApi]\n" +
+                        "    constructor(context: Context, resourceId: Int) : this(context.getDrawable(resourceId)) {\n" +
+                        "                                                                  ~~~~~~~~~~~\n" +
+                        "src/test/pkg/SomeClass.kt:9: Error: Call requires API level 21 (current min is 15): android.content.Context#getDrawable [NewApi]\n" +
+                        "        SomeClass(context.getDrawable(resourceId))\n" +
+                        "                          ~~~~~~~~~~~\n" +
+                        "src/test/pkg/SomeClass.kt:13: Error: Call requires API level 21 (current min is 15): android.content.Context#getDrawable [NewApi]\n" +
+                        "class AnotherClass(context: Context, id: Int): ImageSpan(context.getDrawable(id)) {\n" +
+                        "                                                                 ~~~~~~~~~~~\n" +
+                        "src/test/pkg/SomeClass.kt:15: Error: Call requires API level 21 (current min is 15): android.content.Context#getDrawable [NewApi]\n" +
+                        "        val x = context.getDrawable(id)\n" +
+                        "                        ~~~~~~~~~~~\n" +
+                        "4 errors, 0 warnings");
+    }
+
+    public void testInstanceOf() {
+        // 69736645: "NewApi" not detected in instanceof
+        lint().files(
+                manifest().minSdk(15),
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.security.keystore.KeyPermanentlyInvalidatedException;\n" +
+                        "\n" +
+                        "/** @noinspection ConstantConditions, UnnecessaryReturnStatement, ClassNameDiffersFromFileName */ " +
+                        "public class ApiTest {\n" +
+                        "    public static void test(Throwable throwable) {\n" +
+                        "        if (throwable instanceof KeyPermanentlyInvalidatedException) {\n" +
+                        "            return;\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "}\n"),
+                kotlin("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.security.keystore.KeyPermanentlyInvalidatedException\n" +
+                        "\n" +
+                        "fun test(throwable: Throwable) {\n" +
+                        "    if (throwable is KeyPermanentlyInvalidatedException) {\n" +
+                        "        return\n" +
+                        "    }\n" +
+                        "}\n"))
+                .run()
+                .expect("src/test/pkg/ApiTest.java:7: Error: Class requires API level 23 (current min is 15): android.security.keystore.KeyPermanentlyInvalidatedException [NewApi]\n" +
+                        "        if (throwable instanceof KeyPermanentlyInvalidatedException) {\n" +
+                        "                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                        "src/test/pkg/test.kt:6: Error: Class requires API level 23 (current min is 15): android.security.keystore.KeyPermanentlyInvalidatedException [NewApi]\n" +
+                        "    if (throwable is KeyPermanentlyInvalidatedException) {\n" +
+                        "                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                        "2 errors, 0 warnings");
+    }
+
+    public void testLazyProperties() {
+        // Regression test for https://issuetracker.google.com/65728903
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(1),
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.app.Activity\n" +
+                        "import com.example.lint.library.myapplication.R\n" +
+                        "\n" +
+                        "class MainActivity2 : Activity() {\n" +
+                        "    val illegalColor1 by lazy {\n" +
+                        "        resources.getColor(R.color.primary_text_default_material_light, theme)\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    val illegalColor2 = resources.getColor(R.color.primary_text_default_material_light, theme)\n" +
+                        "}\n"),
+                java(""
+                        + "package test.pkg;\n"
+                        + "public class R {\n"
+                        + "    public static class color {\n"
+                        + "        public static final int primary_text_default_material_light = 0x7f070031;\n"
+                        + "    }\n"
+                        + "}\n"))
+                .run()
+                .expect("src/test/pkg/MainActivity2.kt:8: Error: Call requires API level 23 (current min is 1): android.content.res.Resources#getColor [NewApi]\n" +
+                        "        resources.getColor(R.color.primary_text_default_material_light, theme)\n" +
+                        "                  ~~~~~~~~\n" +
+                        "src/test/pkg/MainActivity2.kt:11: Error: Call requires API level 23 (current min is 1): android.content.res.Resources#getColor [NewApi]\n" +
+                        "    val illegalColor2 = resources.getColor(R.color.primary_text_default_material_light, theme)\n" +
+                        "                                  ~~~~~~~~\n" +
                         "2 errors, 0 warnings\n");
     }
 
@@ -4696,6 +4978,131 @@ public class ApiDetectorTest extends AbstractCheckTest {
                 .checkMessage(this::checkReportedError)
                 .run()
                 .expect(expected);
+    }
+
+    public void testBrokenVirtualDispatch() {
+        // Regression test for 65549795: NewApi violations not detected on android.view.View
+        String expected = "" +
+                "src/com/google/android/apps/common/testing/sanity/lint/BrokenNewApi.java:11: Error: Call requires API level 25 (current min is 4): android.view.View#setRevealOnFocusHint [NewApi]\n" +
+                "    setRevealOnFocusHint(true); // API 25\n" +
+                "    ~~~~~~~~~~~~~~~~~~~~\n" +
+                "src/com/google/android/apps/common/testing/sanity/lint/BrokenNewApi.java:12: Error: Call requires API level 11 (current min is 4): android.view.View#setPivotY [NewApi]\n" +
+                "    setPivotY(1.0f); // api 11\n" +
+                "    ~~~~~~~~~\n" +
+                "2 errors, 0 warnings\n";
+
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(4),
+                java("" +
+                        "package com.google.android.apps.common.testing.sanity.lint;\n" +
+                        "\n" +
+                        "import android.content.Context;\n" +
+                        "import android.view.View;\n" +
+                        "\n" +
+                        "public class BrokenNewApi extends View {\n" +
+                        "\n" +
+                        "  public BrokenNewApi(Context c) {\n" +
+                        "    super(c);\n" +
+                        "    // these should be picked up by lint but are not.\n" +
+                        "    setRevealOnFocusHint(true); // API 25\n" +
+                        "    setPivotY(1.0f); // api 11\n" +
+                        "  }\n" +
+                        "}"))
+                .checkMessage(this::checkReportedError)
+                .run()
+                .expect(expected);
+    }
+
+    public void testCastTypeCheck() {
+        // Regression test for 35381581:  Check Class API target
+        //noinspection all // Sample code
+        lint().files(
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.content.Context;\n" +
+                        "import android.os.UserManager;\n" +
+                        "\n" +
+                        "/** @noinspection ClassNameDiffersFromFileName, MethodMayBeStatic */ " +
+                        "public class Check {\n" +
+                        "    public void test(Context context) {\n" +
+                        "        UserManager userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n"))
+                .run()
+                .expect("src/test/pkg/Check.java:8: Warning: Field requires API level 17 (current min is 1): android.content.Context#USER_SERVICE [InlinedApi]\n" +
+                        "        UserManager userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);\n" +
+                        "                                                                         ~~~~~~~~~~~~~~~~~~~~\n" +
+                        "src/test/pkg/Check.java:8: Error: Class requires API level 17 (current min is 1): android.os.UserManager [NewApi]\n" +
+                        "        UserManager userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);\n" +
+                        "                                   ~~~~~~~~~~~\n" +
+                        "1 errors, 1 warnings\n");
+    }
+
+    public void test70784223() {
+        // Regression test for 70784223: Linter doesn't detect API level check correctly using Kotlin
+        //noinspection all // Sample code
+        lint().files(
+           kotlin("" +
+                   "package test.pkg\n" +
+                   "\n" +
+                   "import android.app.NotificationChannel\n" +
+                   "import android.app.NotificationManager\n" +
+                   "import android.content.Context\n" +
+                   "import android.os.Build\n" +
+                   "\n" +
+                   "fun test(context: Context) {\n" +
+                   "    val channelName = context.getString(R.string.app_name)\n" +
+                   "\n" +
+                   "    if (Build.VERSION.SDK_INT > 26) {\n" +
+                   "        val name = \"Something\"\n" +
+                   "        val channel = NotificationChannel(channelName, name, NotificationManager.IMPORTANCE_HIGH)\n" +
+                   "    }\n" +
+                   "}"))
+                .run()
+                .expectClean();
+    }
+
+    public void test69788053() {
+        // Regression test for issue 69788053:
+        // Lint NewApi check doesn't work with inner classes that extend another class
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(15),
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.app.Fragment;\n" +
+                        "import android.os.AsyncTask;\n" +
+                        "\n" +
+                        "public class MyFragment extends Fragment {\n" +
+                        "    class MyGoodClass {\n" +
+                        "        private void hello() {\n" +
+                        "            getContext(); // Expect warning from lint\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    class MyBadClass extends AsyncTask<Void, Void, Void> {\n" +
+                        "        private void hello() {\n" +
+                        "            getContext(); // Expects warning from lint\n" +
+                        "        }\n" +
+                        "\n" +
+                        "        @Override\n" +
+                        "        protected Void doInBackground(Void... voids) {\n" +
+                        "            return null;\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "}\n"))
+                .run()
+                .expect("src/test/pkg/MyFragment.java:9: Error: Call requires API level 23 (current min is 15): android.app.Fragment#getContext [NewApi]\n" +
+                        "            getContext(); // Expect warning from lint\n" +
+                        "            ~~~~~~~~~~\n" +
+                        "src/test/pkg/MyFragment.java:15: Error: Call requires API level 23 (current min is 15): android.app.Fragment#getContext [NewApi]\n" +
+                        "            getContext(); // Expects warning from lint\n" +
+                        "            ~~~~~~~~~~\n" +
+                        "2 errors, 0 warnings");
     }
 
     @Override

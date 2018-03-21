@@ -17,26 +17,23 @@
 package com.android.build.gradle.internal.pipeline;
 
 import android.databinding.tool.util.Preconditions;
-import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.CombinedInput;
-import com.android.build.gradle.internal.tasks.BaseTask;
+import com.android.build.gradle.internal.tasks.AndroidBuilderTask;
 import com.google.common.collect.Iterables;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitivity;
 
 /**
- * A base task with stream fields that properly use Gradle's input/output annotations to
- * return the stream's content as input/output.
+ * A base task with stream fields that properly use Gradle's input/output annotations to return the
+ * stream's content as input/output.
  */
-public class StreamBasedTask extends BaseTask {
+public class StreamBasedTask extends AndroidBuilderTask {
 
     /** Registered as task input in {@link #registerConsumedAndReferencedStreamInputs()}. */
     protected Collection<TransformStream> consumedInputStreams;
@@ -75,7 +72,11 @@ public class StreamBasedTask extends BaseTask {
                 new ArrayList<>(consumedInputStreams.size() + referencedInputStreams.size());
         for (TransformStream stream :
                 Iterables.concat(consumedInputStreams, referencedInputStreams)) {
-            getInputs().files(stream.getAsFileTree()).withPathSensitivity(PathSensitivity.RELATIVE);
+            // This cannot be PathSensitivity.RELATIVE, as transforms currently decide where to
+            // place outputs based on input names, which are lost by this input, but full file path
+            // is not a terrible approximation for this.
+            // See https://issuetracker.google.com/68144982
+            getInputs().files(stream.getAsFileTree()).withPathSensitivity(PathSensitivity.ABSOLUTE);
 
             inputNames.add(stream.getName());
         }
@@ -83,12 +84,5 @@ public class StreamBasedTask extends BaseTask {
         // See http://b/65585567.
         Collections.sort(inputNames);
         getInputs().property("transformInputNames", inputNames);
-    }
-
-    // Workaround for https://issuetracker.google.com/67418335
-    @Input
-    @NonNull
-    public String getCombinedInput() {
-        return new CombinedInput().add("streamOutputFolder", getStreamOutputFolder()).toString();
     }
 }

@@ -18,13 +18,14 @@ package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
 import com.android.build.gradle.internal.VariantManager;
-import com.android.builder.core.ErrorReporter;
+import com.android.build.gradle.internal.errors.DeprecationReporter;
 import com.android.builder.model.BaseConfig;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
+import javax.inject.Inject;
 import org.gradle.api.Project;
 import org.gradle.api.logging.Logger;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.api.model.ObjectFactory;
 
 /**
  * Encapsulates all product flavors properties for this project.
@@ -59,13 +60,14 @@ import org.gradle.internal.reflect.Instantiator;
  */
 public class ProductFlavor extends BaseFlavor {
 
+    @Inject
     public ProductFlavor(
             @NonNull String name,
             @NonNull Project project,
-            @NonNull Instantiator instantiator,
-            @NonNull Logger logger,
-            @NonNull ErrorReporter errorReporter) {
-        super(name, project, instantiator, logger, errorReporter);
+            @NonNull ObjectFactory objectFactory,
+            @NonNull DeprecationReporter deprecationReporter,
+            @NonNull Logger logger) {
+        super(name, project, objectFactory, deprecationReporter, logger);
     }
 
     private ImmutableList<String> matchingFallbacks;

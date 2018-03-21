@@ -19,8 +19,10 @@ package com.android.build.gradle.tasks;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.core.VariantConfiguration;
 import com.android.build.gradle.internal.dsl.CoreBuildType;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
+import com.android.build.gradle.internal.scope.BuildOutput;
 import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.TaskOutputHolder;
@@ -28,7 +30,6 @@ import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.TaskInputHelper;
 import com.android.build.gradle.internal.variant.TaskContainer;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.VariantConfiguration;
 import com.android.builder.model.ApiVersion;
 import com.android.builder.model.ProductFlavor;
 import com.android.manifmerger.ManifestMerger2;
@@ -75,6 +76,7 @@ public class ProcessManifest extends ManifestProcessorTask {
                                 getMainManifest(),
                                 getManifestOverlays(),
                                 Collections.emptyList(),
+                                getNavigationFiles(),
                                 null,
                                 getPackageOverride(),
                                 getVersionCode(),
@@ -100,22 +102,20 @@ public class ProcessManifest extends ManifestProcessorTask {
                                 "split", mergedXmlDocument.getSplitName())
                         : ImmutableMap.of();
 
-        outputScope.addOutputForSplit(
-                TaskOutputHolder.TaskOutputType.MERGED_MANIFESTS,
-                outputScope.getMainSplit(),
-                manifestOutputFile,
-                properties);
-        outputScope.addOutputForSplit(
-                TaskOutputHolder.TaskOutputType.AAPT_FRIENDLY_MERGED_MANIFESTS,
-                outputScope.getMainSplit(),
-                aaptFriendlyManifestOutputFile,
-                properties);
         try {
-            outputScope.save(
-                    TaskOutputHolder.TaskOutputType.MERGED_MANIFESTS, getManifestOutputDirectory());
-            outputScope.save(
-                    TaskOutputHolder.TaskOutputType.AAPT_FRIENDLY_MERGED_MANIFESTS,
-                    getAaptFriendlyManifestOutputDirectory());
+            new BuildOutput(
+                            TaskOutputHolder.TaskOutputType.MERGED_MANIFESTS,
+                            outputScope.getMainSplit(),
+                            manifestOutputFile,
+                            properties)
+                    .save(getManifestOutputDirectory());
+
+            new BuildOutput(
+                            TaskOutputHolder.TaskOutputType.AAPT_FRIENDLY_MERGED_MANIFESTS,
+                            outputScope.getMainSplit(),
+                            aaptFriendlyManifestOutputFile,
+                            properties)
+                    .save(getAaptFriendlyManifestOutputDirectory());
         } catch (IOException e) {
             throw new BuildException("Exception while saving build metadata : ", e);
         }
@@ -190,6 +190,12 @@ public class ProcessManifest extends ManifestProcessorTask {
         return variantConfiguration.getManifestOverlays();
     }
 
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public List<File> getNavigationFiles() {
+        return variantConfiguration.getNavigationFiles();
+    }
+
     /**
      * Returns a serialized version of our map of key value pairs for placeholder substitution.
      *
@@ -200,6 +206,13 @@ public class ProcessManifest extends ManifestProcessorTask {
     @Optional
     public String getManifestPlaceholders() {
         return serializeMap(variantConfiguration.getManifestPlaceholders());
+    }
+
+    @Input
+    public String getMainSplitFullName() {
+        // This information is written to the build output's metadata file, so it needs to be
+        // annotated as @Input
+        return outputScope.getMainSplit().getFullName();
     }
 
     public static class ConfigAction implements TaskConfigAction<ProcessManifest> {

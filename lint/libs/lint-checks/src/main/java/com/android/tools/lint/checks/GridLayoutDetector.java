@@ -144,7 +144,7 @@ public class GridLayoutDetector extends LayoutDetector {
         }
     }
 
-    private static void ensureAppNamespace(XmlContext context, Element element, String name) {
+    private void ensureAppNamespace(XmlContext context, Element element, String name) {
         Attr attribute = element.getAttributeNodeNS(ANDROID_URI, name);
         if (attribute != null) {
             String prefix = getNamespacePrefix(element.getOwnerDocument(), AUTO_URI);
@@ -158,7 +158,7 @@ public class GridLayoutDetector extends LayoutDetector {
                     .append(":").append(name);
             if (!haveNamespace) {
                 sb.append(" (and add `xmlns:app=\"").append(AUTO_URI)
-                        .append("\"` to your root element.)");
+                        .append("\"` to your root element)");
             }
             String message = sb.toString();
 

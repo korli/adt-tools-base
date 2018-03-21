@@ -26,6 +26,7 @@ import java.util.Map;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
@@ -33,8 +34,6 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.GeneratorAdapter;
 import org.objectweb.asm.commons.JSRInlinerAdapter;
 import org.objectweb.asm.commons.Method;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodNode;
 /**
  * Visitor for classes that have been changed since the initial push.
@@ -51,29 +50,30 @@ import org.objectweb.asm.tree.MethodNode;
  */
 public class IncrementalChangeVisitor extends IncrementalVisitor {
 
-    public static final VisitorBuilder VISITOR_BUILDER = new IncrementalVisitor.VisitorBuilder() {
-        @NonNull
-        @Override
-        public IncrementalVisitor build(@NonNull ClassNode classNode,
-                @NonNull List<ClassNode> parentNodes,
-                @NonNull ClassVisitor classVisitor,
-                @NonNull ILogger logger) {
-            return new IncrementalChangeVisitor(classNode, parentNodes, classVisitor, logger);
-        }
+    public static final VisitorBuilder VISITOR_BUILDER =
+            new IncrementalVisitor.VisitorBuilder() {
+                @NonNull
+                @Override
+                public IncrementalVisitor build(
+                        @NonNull AsmClassNode classNode,
+                        @NonNull ClassVisitor classVisitor,
+                        @NonNull ILogger logger) {
+                    return new IncrementalChangeVisitor(classNode, classVisitor, logger);
+                }
 
-        @NonNull
-        @Override
-        public String getMangledRelativeClassFilePath(@NonNull String path) {
-            // Remove .class (length 6) and replace with $override.class
-            return path.substring(0, path.length() - 6) + OVERRIDE_SUFFIX + ".class";
-        }
+                @NonNull
+                @Override
+                public String getMangledRelativeClassFilePath(@NonNull String path) {
+                    // Remove .class (length 6) and replace with $override.class
+                    return path.substring(0, path.length() - 6) + OVERRIDE_SUFFIX + ".class";
+                }
 
-        @NonNull
-        @Override
-        public OutputType getOutputType() {
-            return OutputType.OVERRIDE;
-        }
-    };
+                @NonNull
+                @Override
+                public OutputType getOutputType() {
+                    return OutputType.OVERRIDE;
+                }
+            };
 
     // todo : find a better way to specify logging and append to a log file.
     private static final boolean DEBUG = false;
@@ -98,11 +98,10 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
     }
 
     public IncrementalChangeVisitor(
-            @NonNull ClassNode classNode,
-            @NonNull List<ClassNode> parentNodes,
+            @NonNull AsmClassNode classNode,
             @NonNull ClassVisitor classVisitor,
             @NonNull ILogger logger) {
-        super(classNode, parentNodes, classVisitor, logger);
+        super(classNode, classVisitor, logger);
     }
 
     /**
@@ -203,8 +202,15 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
         // Do not carry on any access flags from the original method. For example synchronized
         // on the original method would translate into a static synchronized method here.
         access = Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
-        MethodNode method = getMethodByNameInClass(name, desc, classNode);
         if (name.equals(ByteCodeUtils.CONSTRUCTOR)) {
+            MethodNode method = getMethodByNameInClass(name, desc, classAndInterfaceNode);
+            if (method == null) {
+                logger.warning(
+                        "Cannot find {} method in class {}",
+                        name,
+                        classAndInterfaceNode.getClassNode().name);
+                return null;
+            }
             Constructor constructor = ConstructorBuilder.build(visitedClassName, method);
 
             MethodVisitor mv = createMethodAdapter(access, constructor.args.name,
@@ -315,13 +321,11 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
                 accessRight = AccessRight.PUBLIC;
             } else {
                 // check the field access bits.
-                FieldNode fieldNode = getFieldByName(name);
-                if (fieldNode == null) {
+                accessRight = getFieldAccessRightByName(name);
+                if (accessRight == null) {
                     // If this is an inherited field, we might not have had access to the parent
                     // bytecode. In such a case, treat it as private.
                     accessRight = AccessRight.PACKAGE_PRIVATE;
-                } else {
-                    accessRight = AccessRight.fromNodeAccess(fieldNode.access);
                 }
             }
 
@@ -552,18 +556,135 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
             }
         }
 
+        @Override
+        public void visitInvokeDynamicInsn(
+                String name, String desc, Handle bsm, Object... bsmArgs) {
+            // invokedynamic bytecode will look like :
+            // 23: invokedynamic #16,  0             // InvokeDynamic #2:apply:(I)Ljava/util/function/Function;
+
+            // #16 is the constant pool entry :
+            // #16 = InvokeDynamic      #2:#87        // #2:apply:(I)Ljava/util/function/Function;
+
+            // and #2 here is the pointer to bootstrap method entry :
+            // 2: #69 invokestatic java/lang/invoke/LambdaMetafactory.metafactory:
+            //                  (Ljava/lang/invoke/MethodHandles$Lookup;
+            //                   Ljava/lang/String;
+            //                   Ljava/lang/invoke/MethodType;
+            //                   Ljava/lang/invoke/MethodType;
+            //                   Ljava/lang/invoke/MethodHandle;
+            //                   Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;
+            // Method arguments:
+            // #70 (Ljava/lang/Object;)Ljava/lang/Object;
+            // #85 invokestatic com/java8/Java8FeaturesUser.lambda$contextualLambda$1:
+            //                  (ILjava/lang/Integer;)Ljava/lang/Integer;
+            // #86 (Ljava/lang/Integer;)Ljava/lang/Integer;
+
+            // A java8 boostrap methods are defined as follow :
+            //    public static CallSite bootstrap(
+            //              Lookup lookup,
+            //              String name,
+            //              MethodType type) throws Throwable
+
+            // the javac generated bootstrap method (which is not a real method but a few java
+            // bytecodes pointed to by a constant pool entry) is an invocation to the
+            //    java.lang.invoke.LambdaMetafactory.metafactory method
+
+            // the three argument types are as mentioned above :
+            // 1. method type of the functional interface, so any type is permitted.
+            //                Type.getType("(Ljava/lang/Object;)Ljava/lang/Object;"),
+            // 2. the invocation of the lambda function as a static.
+            // 3. the type of the lambda parameters and return type.
+
+            // now remember the boostrap method #2 above, will be translated in ASM to :
+            //
+            // mv.visitInvokeDynamicInsn("apply",
+            //        "(I)Ljava/util/function/Function;",
+            //        new Handle(Opcodes.H_INVOKESTATIC,
+            //                "java/lang/invoke/LambdaMetafactory",
+            //                "metafactory",
+            //                "(Ljava/lang/invoke/MethodHandles$Lookup;
+            //                  Ljava/lang/String;Ljava/lang/invoke/MethodType;
+            //                  Ljava/lang/invoke/MethodType;
+            //                  Ljava/lang/invoke/MethodHandle;
+            //                  Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"),
+            //        new Object[]{
+            //                Type.getType("(Ljava/lang/Object;)Ljava/lang/Object;"),
+            //                new Handle(Opcodes.H_INVOKESTATIC,
+            //                        "com/java8/Java8FeaturesUser",
+            //                        "lambda$contextualLambda$1",
+            //                        "(ILjava/lang/Integer;)Ljava/lang/Integer;"),
+            //                Type.getType("(Ljava/lang/Integer;)Ljava/lang/Integer;")});
+
+            // In InstantRun the second parameter to the bootstrap method cannot be the original
+            // lambda anymore but should be the updated in the $override class. So basically, we
+            // just need to swap the owner for the lambda invocation to the $override version.
+
+            // when the lambda is capturing "this", it is implemented as an instance function and
+            // and INVOKE_SPECIAL will be used in place of the INVOKE_STATIC. However during
+            // method instrumentation, all lambdas are transformed into static methods, therefore
+            // lambda signature and invocation will need to be adapted.
+
+            Object bsmArg = bsmArgs[1];
+            if (bsmArg instanceof Handle) {
+                bsmArgs[1] = rewriteHandleOwner((Handle) bsmArg);
+            }
+            super.visitInvokeDynamicInsn(name, desc, bsm, bsmArgs);
+        }
+
+        /**
+         * Rewrites a method handle owner to this $override class and optionally change the method
+         * lookup in case the lambda function was an instance method.
+         *
+         * @param handle the method handle to rewrite
+         * @return the new method handle to use.
+         */
+        private Handle rewriteHandleOwner(Handle handle) {
+
+            if (handle.getOwner().equals(visitedClassName)) {
+                // if the target lambda captured "this", it is not a static method,
+                // therefore, we need to change the method signature.
+                MethodNode lambdaMethod =
+                        getMethodByNameInClass(
+                                handle.getName(), handle.getDesc(), classAndInterfaceNode);
+                if (lambdaMethod == null) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Internal instant-run error while locating lambda %s"
+                                            + "in class %s, please file a bug",
+                                    handle.getName(), visitedClassName));
+                }
+                // if the original method was not static, it has now been transformed into a
+                // a static method during instrumentation, we should therefore adapt the
+                // lambda signature to include the receiver as the first parameter.
+                String desc =
+                        (lambdaMethod.access & Opcodes.ACC_STATIC) == 0
+                                ? "(L" + visitedClassName + ";" + handle.getDesc().substring(1)
+                                : handle.getDesc();
+
+                return new Handle(
+                        // no matter what the original invoke was, we now always invoke a static
+                        // method.
+                        Opcodes.H_INVOKESTATIC,
+                        visitedClassName + OVERRIDE_SUFFIX,
+                        handle.getName(),
+                        desc,
+                        false);
+            }
+            return handle;
+        }
+
         /**
          * Rewrites INVOKESPECIAL method calls:
+         *
          * <ul>
-         *  <li>calls to constructors are handled specially (see below)</li>
-         *  <li>calls to super methods are rewritten to call the 'access$super' trampoline we
-         *      injected into the original code</li>
-         *  <li>calls to methods in this class are rewritten to call the mathcin $override class
-         *  static method</li>
+         *   <li>calls to constructors are handled specially (see below)
+         *   <li>calls to super methods are rewritten to call the 'access$super' trampoline we
+         *       injected into the original code
+         *   <li>calls to methods in this class are rewritten to call the matching $override class
+         *       static method
          * </ul>
          */
-        private boolean handleSpecialOpcode(String owner, String name, String desc,
-                boolean itf) {
+        private boolean handleSpecialOpcode(String owner, String name, String desc, boolean itf) {
             if (name.equals("<init>")) {
                 return handleConstructor(owner, name, desc);
             }
@@ -582,7 +703,11 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
                             "Super Method : " + name + ":" + desc + ":" + itf + ":" + isStatic);
                 }
                 int arr = boxParametersToNewLocalArray(Type.getArgumentTypes(desc));
-                push(name + "." + desc);
+                if (itf) {
+                    push(owner + "." + name + "." + desc);
+                } else {
+                    push(name + "." + desc);
+                }
                 loadLocal(arr);
                 mv.visitMethodInsn(Opcodes.INVOKESTATIC, visitedClassName, "access$super",
                         instanceToStaticDescPrefix
@@ -793,43 +918,40 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
          * @return the {@link AccessRight} for that method.
          */
         private AccessRight getMethodAccessRight(String owner, String name, String desc) {
-            AccessRight accessRight;
             if (owner.equals(visitedClassName)) {
-                MethodNode methodByName = getMethodByName(name, desc);
-                if (methodByName == null) {
+                AccessRight accessRight = getMethodAccessRightByName(name, desc);
+                if (accessRight == null) {
                     // we did not find the method invoked on ourselves, which mean that it really
                     // is a parent class method invocation and we just don't have access to it.
                     // the most restrictive access right in that case is protected.
                     return AccessRight.PROTECTED;
                 }
-                accessRight = AccessRight.fromNodeAccess(methodByName.access);
+                return accessRight;
             } else {
                 // we are accessing another class method, and since we make all protected and
                 // package-private methods public, we can safely assume it is public.
-                accessRight = AccessRight.PUBLIC;
+                return AccessRight.PUBLIC;
             }
-            return accessRight;
         }
 
         /**
          * Push arguments necessary to invoke one of the method redirect function :
-         * <ul>{@link GenericInstantRuntime#invokeProtectedMethod(Object, Object[], Class[], String)}</ul>
-         * <ul>{@link GenericInstantRuntime#invokeProtectedStaticMethod(Object[], Class[], String, Class)}</ul>
          *
-         * This function will only push on the stack the three common arguments :
-         *      Object[] the boxed parameter values
-         *      Class[] the parameter types
-         *      String the original method name
+         * <ul>
+         *   GenericInstantRuntime#invokeProtectedMethod(Object, Object[], Class[], String)
+         * </ul>
          *
-         * Stack before :
-         *          <param1>
-         *          <param2>
-         *          ...
-         *          <paramN>
-         * Stack After :
-         *          <array of parameters>
-         *          <array of parameter types>
-         *          <method name>
+         * <ul>
+         *   GenericInstantRuntime#invokeProtectedStaticMethod(Object[], Class[], String, Class)
+         * </ul>
+         *
+         * This function will only push on the stack the three common arguments : Object[] the boxed
+         * parameter values Class[] the parameter types String the original method name
+         *
+         * <p>Stack before : /param1/ /param2/ ... /paramN/
+         *
+         * <p>Stack After : /array of parameters/ <array of parameter types> <method name>
+         *
          * @param name the original method name.
          * @param desc the original method signature.
          */
@@ -849,14 +971,13 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
 
         /**
          * Creates an array of {@link Class} objects with the same size of the array of the passed
-         * parameter types. For each parameter type, stores its {@link Class} object into the
-         * result array. For intrinsic types which are not present in the class constant pool, just
-         * push the actual {@link Type} object on the stack and let ASM do the rest. For non
-         * intrinsic type use a {@link MethodVisitor#visitLdcInsn(Object)} to ensure the
-         * referenced class's presence in this class constant pool.
+         * parameter types. For each parameter type, stores its {@link Class} object into the result
+         * array. For intrinsic types which are not present in the class constant pool, just push
+         * the actual {@link Type} object on the stack and let ASM do the rest. For non intrinsic
+         * type use a {@link MethodVisitor#visitLdcInsn(Object)} to ensure the referenced class's
+         * presence in this class constant pool.
          *
-         * Stack Before : nothing of interest
-         * Stack After : <array of {@link Class}>
+         * <p>Stack Before : nothing of interest Stack After : /array of {@link Class}/
          *
          * @param parameterTypes a method list of parameters.
          */
@@ -974,7 +1095,7 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
         // if invoked which should never happen.
         if (!instantRunDisabled) {
             //noinspection unchecked
-            allMethods.addAll(classNode.methods);
+            allMethods.addAll(classAndInterfaceNode.getClassNode().methods);
             allMethods.addAll(addedMethods);
         }
 
@@ -1053,27 +1174,10 @@ public class IncrementalChangeVisitor extends IncrementalVisitor {
         return getPackage(visitedClassName).equals(getPackage(type));
     }
 
-    /**
-     * @return the package of the given / separated class name.
-     */
-    private String getPackage(@NonNull String className) {
+    /** @return the package of the given / separated class name. */
+    private static String getPackage(@NonNull String className) {
         int i = className.lastIndexOf('/');
-        return i == -1 ? className : className.substring(0, i);
-    }
-
-    /**
-     * Returns true if the passed class name is an ancestor of the visited class.
-     *
-     * @param className a / separated class name
-     * @return true if it is an ancestor, false otherwise.
-     */
-    private boolean isAnAncestor(@NonNull String className) {
-        for (ClassNode parentNode : parentNodes) {
-            if (parentNode.name.equals(className)) {
-                return true;
-            }
-        }
-        return false;
+        return i == -1 ? "" : className.substring(0, i);
     }
 
     /**

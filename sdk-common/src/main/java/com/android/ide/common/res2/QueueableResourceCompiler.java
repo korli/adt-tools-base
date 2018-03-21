@@ -44,24 +44,23 @@ public interface QueueableResourceCompiler extends ResourceCompiler, Closeable {
                         throws Exception {
                     // Copy file instead of compiling.
                     File out = compileOutputFor(request);
-                    FileUtils.copyFile(request.getInput(), out);
+                    FileUtils.mkdirs(out.getParentFile());
+                    FileUtils.copyFile(request.getInputFile(), out);
                     return Futures.immediateFuture(out);
                 }
 
                 @NonNull
                 @Override
                 public File compileOutputFor(@NonNull CompileResourceRequest request) {
-                    File parentDir = new File(request.getOutput(), request.getFolderName());
-                    FileUtils.mkdirs(parentDir);
-                    return new File(parentDir, request.getInput().getName());
+                    File parentDir =
+                            new File(request.getOutputDirectory(), request.getInputDirectoryName());
+                    return new File(parentDir, request.getInputFile().getName());
                 }
             };
 
     /**
      * Obtains the file that will receive the compilation output of a given file. This method will
      * return a unique file in the output directory for each input file.
-     *
-     * <p>This method will also create any parent directories needed to hold the output file.
      *
      * @param request the compile resource request containing the input, output and folder name
      * @return the output file

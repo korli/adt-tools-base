@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <recipe>
-    <dependency mavenUrl="com.android.support:leanback-v17:${targetApi}.+" />
+    <dependency mavenUrl="com.android.support:leanback-v17:${buildApi}.+" />
     <mkdir at="${escapeXmlAttribute(srcOut)}" />
 
     <mkdir at="${escapeXmlAttribute(projectOut)}/libs" />
@@ -33,8 +33,5 @@
 
     <instantiate from="root/res/values/strings.xml.ftl"
                    to="${escapeXmlAttribute(resOut)}/values/strings.xml" />
-
-    <instantiate from="root/test/app_package/ApplicationTest.java.ftl"
-                   to="${escapeXmlAttribute(testOut)}/ApplicationTest.java" />
 
 </recipe>

@@ -38,10 +38,10 @@ import com.android.build.gradle.tasks.MergeSourceSetFolders;
 import com.android.build.gradle.tasks.NdkCompile;
 import com.android.build.gradle.tasks.RenderscriptCompile;
 import com.android.builder.core.AndroidBuilder;
+import com.android.builder.errors.EvalIssueReporter;
 import com.android.builder.model.BuildType;
 import com.android.builder.model.ProductFlavor;
 import com.android.builder.model.SourceProvider;
-import com.android.builder.model.SyncIssue;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.io.File;
@@ -170,10 +170,9 @@ public abstract class BaseVariantImpl implements BaseVariant {
                 return getVariantData().getJavaSources();
             default:
                 androidBuilder
-                        .getErrorReporter()
-                        .handleSyncError(
-                                null,
-                                SyncIssue.TYPE_GENERIC,
+                        .getIssueReporter()
+                        .reportError(
+                                EvalIssueReporter.Type.GENERIC,
                                 "Unknown SourceKind value: " + folderType);
         }
 
@@ -372,18 +371,6 @@ public abstract class BaseVariantImpl implements BaseVariant {
                         AndroidArtifacts.ConsumedConfigType.COMPILE_CLASSPATH,
                         AndroidArtifacts.ArtifactType.CLASSES,
                         generatorKey);
-    }
-
-    @NonNull
-    @Override
-    public FileCollection getDataBindingDependencyArtifacts() {
-        VariantScope scope = getVariantData().getScope();
-        if (scope.hasOutput(TaskOutputHolder.TaskOutputType.DATA_BINDING_DEPENDENCY_ARTIFACTS)) {
-            return scope.getOutput(
-                    TaskOutputHolder.TaskOutputType.DATA_BINDING_DEPENDENCY_ARTIFACTS);
-        }
-
-        return scope.getGlobalScope().getProject().files();
     }
 
     @Override

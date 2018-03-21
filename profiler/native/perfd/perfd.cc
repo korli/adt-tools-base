@@ -21,6 +21,7 @@
 #include "perfd/event/event_profiler_component.h"
 #include "perfd/generic_component.h"
 #include "perfd/graphics/graphics_profiler_component.h"
+#include "perfd/io/io_profiler_component.h"
 #include "perfd/memory/memory_profiler_component.h"
 #include "perfd/network/network_profiler_component.h"
 #include "utils/config.h"
@@ -31,15 +32,21 @@
 #include "utils/socket_utils.h"
 #include "utils/trace.h"
 
+// TODO: Move the flag to the agent config to be set by Studio.
+const bool is_io_profiling_enabled = false;
+const char* const kProfilerTest = "-profiler_test";
+
 int main(int argc, char** argv) {
   // If directed by command line argument, establish a communication channel
   // with the agent which is running a Unix socket server and send the arguments
   // over.  When this argument is used, the program is usually invoked by from
   // GenericComponent's ProfilerServiceImpl::AttachAgent().
   const char* config_path = profiler::kConfigFileDefaultPath;
+  bool is_testing_profiler = false;
   for (int i = 1; i < argc; i++) {
-    if (i + 1 < argc && strncmp(argv[i], profiler::kConnectCmdLineArg,
-                                strlen(profiler::kConnectCmdLineArg)) == 0) {
+    if (i + 1 < argc &&
+        strncmp(argv[i], profiler::kConnectCmdLineArg,
+                strlen(profiler::kConnectCmdLineArg)) == 0) {
       if (profiler::ConnectAndSendDataToPerfa(argv[i], argv[i + 1])) {
         return 0;
       } else {
@@ -56,19 +63,25 @@ int main(int argc, char** argv) {
           ((tokenized_word = strtok(nullptr, "=")) != nullptr)) {
         config_path = tokenized_word;
       }
+    } else if (strncmp(argv[i], kProfilerTest, strlen(kProfilerTest)) == 0) {
+      is_testing_profiler = true;
     }
   }
 
   profiler::Trace::Init();
-  profiler::Daemon daemon(config_path);
+  profiler::Daemon daemon(config_path, is_testing_profiler
+                                           ? getenv("TEST_TMPDIR")
+                                           : profiler::CurrentProcess::dir());
 
-  profiler::GenericComponent generic_component{&daemon.utilities()};
+  profiler::GenericComponent generic_component{&daemon.utilities(),
+                                               &daemon.sessions()};
   daemon.RegisterComponent(&generic_component);
 
   profiler::CpuProfilerComponent cpu_component{&daemon.utilities()};
   daemon.RegisterComponent(&cpu_component);
 
-  profiler::MemoryProfilerComponent memory_component{&daemon.utilities()};
+  profiler::MemoryProfilerComponent memory_component{daemon.sessions(),
+                                                     &daemon.utilities()};
   daemon.RegisterComponent(&memory_component);
 
   profiler::EventProfilerComponent event_component{daemon.utilities()};
@@ -79,6 +92,11 @@ int main(int argc, char** argv) {
 
   profiler::NetworkProfilerComponent network_component{&daemon.utilities()};
   daemon.RegisterComponent(&network_component);
+
+  profiler::IoProfilerComponent io_component;
+  if (is_io_profiling_enabled) {
+    daemon.RegisterComponent(&io_component);
+  }
 
   profiler::GraphicsProfilerComponent graphics_component{&daemon.utilities()};
   daemon.RegisterComponent(&graphics_component);
@@ -98,5 +116,6 @@ int main(int argc, char** argv) {
     // For legacy devices (Nougat or older), use an internet address.
     daemon.RunServer(agent_config.service_address());
   }
+
   return 0;
 }

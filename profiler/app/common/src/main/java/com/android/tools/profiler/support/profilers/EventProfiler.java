@@ -18,6 +18,7 @@ package com.android.tools.profiler.support.profilers;
 
 import android.app.Activity;
 import android.app.Application;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Display;
 import android.view.Window;
@@ -26,12 +27,14 @@ import android.view.inputmethod.InputMethodManager;
 import com.android.tools.profiler.support.event.InputConnectionWrapper;
 import com.android.tools.profiler.support.event.WindowProfilerCallback;
 import com.android.tools.profiler.support.util.StudioLog;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * EventProfiler class captures and reports all events that we track on an app. These events are
@@ -43,7 +46,6 @@ public class EventProfiler implements ProfilerComponent, Application.ActivityLif
     private static final int MAX_SLEEP_BACKOFF_MS = 500;
     private Set<Activity> myActivities = new HashSet<Activity>();
     private int myCurrentRotation = UNINITIALIZED_ROTATION;
-    private volatile boolean myInitialized = false;
 
     public EventProfiler() {
         initialize();
@@ -110,57 +112,21 @@ public class EventProfiler implements ProfilerComponent, Application.ActivityLif
         // Setting up the initializer as a thread, we need to do this because some applications
         // may have a delay in starting the application object. If this is the case then,
         // we need to poll for the object.
-        Thread initThread =
-                new Thread(
-                        new Runnable() {
-                            @Override
-                            public void run() {
-                                long sleepBackoffMs = 10;
-                                boolean logErrorOnce = false;
-                                while (!myInitialized) {
-                                    try {
-                                        Class activityThreadClass =
-                                                Class.forName("android.app.ActivityThread");
-                                        Application app =
-                                                (Application)
-                                                        activityThreadClass
-                                                                .getMethod("currentApplication")
-                                                                .invoke(null);
-                                        if (app != null) {
-                                            StudioLog.v("Acquiring Application for Events");
-                                            myInitialized = true;
-                                            app.registerActivityLifecycleCallbacks(profiler);
-                                            break;
-                                        } else if (!logErrorOnce) {
-                                            StudioLog.e("Failed to capture application");
-                                            logErrorOnce = true;
-                                        }
-                                    } catch (ClassNotFoundException ex) {
-                                        StudioLog.e("Failed to get ActivityThread class");
-                                    } catch (NoSuchMethodException ex) {
-                                        StudioLog.e("Failed to find currentApplication method");
-                                    } catch (IllegalAccessException ex) {
-                                        StudioLog.e(
-                                                "Insufficient privileges to get application handle");
-                                    } catch (InvocationTargetException ex) {
-                                        StudioLog.e(
-                                                "Failed to call static function currentApplication");
-                                    }
-
-                                    try {
-                                        Thread.sleep(sleepBackoffMs);
-                                        if (sleepBackoffMs < MAX_SLEEP_BACKOFF_MS) {
-                                            sleepBackoffMs *= 2;
-                                        } else {
-                                            sleepBackoffMs = MAX_SLEEP_BACKOFF_MS;
-                                        }
-                                    } catch (InterruptedException ex) {
-                                        // Do nothing.
-                                    }
-                                }
-                            }
-                        });
+        CountDownLatch latch = new CountDownLatch(1);
+        ActivityInitialization initializer = new ActivityInitialization(profiler, latch);
+        Thread initThread = new Thread(initializer);
         initThread.start();
+
+        // Due to a potential race condition we should wait for atleast one thread
+        // tick of our ActivityInitialization before we check the current state.
+        // this will ensure that if we have an Application we are listening for state changes
+        // before we check the current state.
+        try {
+            // wait untill latch counted down to 0
+            latch.await();
+        } catch (InterruptedException e) {
+            StudioLog.e("Failed to block for ActivityInitialization");
+        }
         captureCurrentActivityState();
     }
 
@@ -267,7 +233,9 @@ public class EventProfiler implements ProfilerComponent, Application.ActivityLif
     /**
      * Input connection handler is a threaded class that polls for an Inputconnection. An
      * InputConnection is only established if an editable (editorview) control is active, and the
-     * softkeyboard is active.
+     * softkeyboard is active. This means the thread cannot be torn down because the soft
+     * uplokeyboard state is transient and each time it is torndown the imm stops accepting text and
+     * can clean up internal state.
      */
     private class InputConnectionHandler implements Runnable {
         private static final int SLEEP_TIME = 100;
@@ -280,6 +248,7 @@ public class EventProfiler implements ProfilerComponent, Application.ActivityLif
                 Method instance = clazz.getMethod("getInstance");
                 instance.setAccessible(true);
                 InputMethodManager imm = (InputMethodManager) instance.invoke(null);
+                InputConnectionWrapper inputConnectionWrapper = new InputConnectionWrapper();
                 while (true) {
                     Thread.sleep(SLEEP_TIME);
                     // If we are accepting text that means we have an input connection
@@ -290,25 +259,56 @@ public class EventProfiler implements ProfilerComponent, Application.ActivityLif
                         wrapper.setAccessible(true);
                         Object connection = wrapper.get(imm);
 
+                        // This can happen in some cases with O/P devices
+                        if (connection == null) {
+                            continue;
+                        }
+
                         // Grab the lock and the input connection object
                         Class connectionWrapper = connection.getClass().getSuperclass();
-                        Field lock = connectionWrapper.getDeclaredField("mLock");
-                        lock.setAccessible(true);
-                        Object lockObject = lock.get(connection);
+                        Object lockObject = new Object();
+
+                        // For the marshmallow OS and before they don't have a lock field.
+                        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+                            Field lock = connectionWrapper.getDeclaredField("mLock");
+                            lock.setAccessible(true);
+                            lockObject = lock.get(connection);
+                        }
+
                         synchronized (lockObject) {
                             Field ic = connectionWrapper.getDeclaredField("mInputConnection");
                             ic.setAccessible(true);
-                            //Replace the object with a wrapper
+                            // Replace the object with a wrapper
                             Object input = ic.get(connection);
-                            if (!InputConnectionWrapper.class.isInstance(input)) {
-                                ic.set(
-                                        connection,
-                                        new InputConnectionWrapper((InputConnection) input));
+                            InputConnection inputConnection;
+                            boolean isWeakReference =
+                                    input.getClass().isAssignableFrom(WeakReference.class);
+                            if (isWeakReference) {
+                                inputConnection = ((WeakReference<InputConnection>) input).get();
+                            } else {
+                                inputConnection = (InputConnection) input;
+                            }
+                            if (!InputConnectionWrapper.class.isInstance(inputConnection)) {
+                                if (isWeakReference) {
+                                    // Store this instance of the wrapper on a thread local
+                                    // variable this prevents the wrapper from getting cleaned
+                                    // while still potentially in use. This thread does not get
+                                    // terminated until the application is terminated.
+                                    inputConnectionWrapper.setTarget(inputConnection);
+                                    ic.set(
+                                            connection,
+                                            new WeakReference<InputConnection>(
+                                                    inputConnectionWrapper));
+                                } else {
+                                    inputConnectionWrapper.setTarget((InputConnection) input);
+                                    ic.set(connection, inputConnectionWrapper);
+                                }
                             }
                             //Clean up and set state so we don't do this more than once.
                             ic.setAccessible(false);
                         }
-                        lock.setAccessible(false);
+                    } else {
+                        inputConnectionWrapper.setTarget(null);
                     }
                 }
             } catch (InterruptedException ex) {
@@ -321,6 +321,74 @@ public class EventProfiler implements ProfilerComponent, Application.ActivityLif
                 StudioLog.e("No Access", ex);
             } catch (InvocationTargetException ex) {
                 StudioLog.e("Invalid object", ex);
+            }
+        }
+    }
+    private class ActivityInitialization implements Runnable {
+        private boolean myInitialized = false;
+        private CountDownLatch myLatch;
+        private final EventProfiler myProfiler;
+
+        public ActivityInitialization(EventProfiler profiler, CountDownLatch latch) {
+            myProfiler = profiler;
+            myLatch = latch;
+        }
+
+        @Override
+        public void run() {
+            long sleepBackoffMs = 10;
+            boolean logErrorOnce = false;
+            while (!myInitialized) {
+                try {
+                    Class activityThreadClass =
+                            Class.forName("android.app.ActivityThread");
+                    Application app =
+                            (Application)
+                                    activityThreadClass
+                                            .getMethod("currentApplication")
+                                            .invoke(null);
+                    if (app != null) {
+                        StudioLog.v("Acquiring Application for Events");
+                        myInitialized = true;
+                        app.registerActivityLifecycleCallbacks(myProfiler);
+                    } else if (!logErrorOnce) {
+                        StudioLog.e("Failed to capture application");
+                        logErrorOnce = true;
+                    }
+                    // Only tick our latch once then null it out, as we only
+                    // care if we attempted to get the current application
+                    // the first time.
+                    if (myLatch != null) {
+                        myLatch.countDown();
+                        myLatch = null;
+                    }
+
+                    // If we are initialized then break the wait loop.
+                    if (myInitialized) {
+                        break;
+                    }
+                } catch (ClassNotFoundException ex) {
+                    StudioLog.e("Failed to get ActivityThread class");
+                } catch (NoSuchMethodException ex) {
+                    StudioLog.e("Failed to find currentApplication method");
+                } catch (IllegalAccessException ex) {
+                    StudioLog.e(
+                            "Insufficient privileges to get application handle");
+                } catch (InvocationTargetException ex) {
+                    StudioLog.e(
+                            "Failed to call static function currentApplication");
+                }
+
+                try {
+                    Thread.sleep(sleepBackoffMs);
+                    if (sleepBackoffMs < MAX_SLEEP_BACKOFF_MS) {
+                        sleepBackoffMs *= 2;
+                    } else {
+                        sleepBackoffMs = MAX_SLEEP_BACKOFF_MS;
+                    }
+                } catch (InterruptedException ex) {
+                    // Do nothing.
+                }
             }
         }
     }

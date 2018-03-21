@@ -24,7 +24,7 @@ import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
 import com.android.build.api.transform.TransformInvocation;
 import com.android.build.gradle.internal.pipeline.TransformManager;
-import com.android.build.gradle.tasks.annotations.TypedefRemover;
+import com.android.builder.packaging.TypedefRemover;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -35,6 +35,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.gradle.api.file.FileCollection;
 
 /**
  * A Transforms that takes the project/project local streams for CLASSES and RESOURCES,
@@ -52,7 +53,7 @@ public class LibraryAarJarsTransform extends LibraryBaseTransform {
     public LibraryAarJarsTransform(
             @NonNull File mainClassLocation,
             @NonNull File localJarsLocation,
-            @Nullable File typedefRecipe,
+            @Nullable FileCollection typedefRecipe,
             @NonNull String packageName,
             boolean packageBuildConfig) {
         super(mainClassLocation, localJarsLocation, typedefRecipe, packageName, packageBuildConfig);
@@ -90,7 +91,7 @@ public class LibraryAarJarsTransform extends LibraryBaseTransform {
         if (localJarsLocation != null) {
             FileUtils.deleteDirectoryContents(localJarsLocation);
         }
-        if (typedefRecipe != null && !typedefRecipe.exists()) {
+        if (typedefRecipe != null && !typedefRecipe.getSingleFile().exists()) {
             throw new IllegalStateException("Type def recipe not found: " + typedefRecipe);
         }
 
@@ -124,7 +125,9 @@ public class LibraryAarJarsTransform extends LibraryBaseTransform {
                 mainClassLocation,
                 false,
                 archivePath -> checkEntry(patterns, archivePath),
-                typedefRecipe != null ? new TypedefRemover().setTypedefFile(typedefRecipe) : null);
+                typedefRecipe != null
+                        ? new TypedefRemover().setTypedefFile(typedefRecipe.getSingleFile())
+                        : null);
 
         // process local scope
         FileUtils.deleteDirectoryContents(localJarsLocation);

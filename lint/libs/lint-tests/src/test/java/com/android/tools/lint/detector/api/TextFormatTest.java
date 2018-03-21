@@ -31,7 +31,7 @@ public class TextFormatTest extends TestCase {
         return RAW.convertTo(raw, to);
     }
 
-    public void testConvertMarkup() throws Exception {
+    public void testConvertMarkup() {
         assertEquals("", convertMarkup("", HTML));
 
         // Normal escapes
@@ -131,7 +131,17 @@ public class TextFormatTest extends TestCase {
         assertEquals("&lt;ignore path=\"*/test/*\" />n\"", convertMarkup("<ignore path=\\\"\\*/test/\\*\\\" />\\n\"", HTML));
     }
 
-    public void testConvertMarkup2() throws Exception {
+    public void testEndUrl() {
+        // Regression test for 65713835: Invalid link when click tooltip
+        assertEquals("If you are using Firebase API's (" +
+                        "<a href=\"http://firebase.google.com/docs/android/setup\">" +
+                        "http://firebase.google.com/docs/android/setup</a>), Android Studio ...",
+                convertMarkup("If you are using Firebase API's " +
+                        "(http://firebase.google.com/docs/android/setup), " +
+                        "Android Studio ...", HTML));
+    }
+
+    public void testConvertMarkup2() {
         // http at the end:
         // Explanation from ManifestDetector#TARGET_NEWER
         String explanation =
@@ -164,7 +174,7 @@ public class TextFormatTest extends TestCase {
             convertMarkup(explanation, HTML));
     }
 
-    public void testConvertMarkup3() throws Exception {
+    public void testConvertMarkup3() {
         // embedded http markup test
         // Explanation from NamespaceDetector#CUSTOMVIEW
         String explanation =
@@ -184,23 +194,23 @@ public class TextFormatTest extends TestCase {
             convertMarkup(explanation, HTML));
     }
 
-    public void testConvertMarkup4() throws Exception {
+    public void testConvertMarkup4() {
         // monospace test
         String explanation =
             "The manifest should contain a `<uses-sdk>` element which defines the " +
             "minimum minimum API Level required for the application to run, " +
             "as well as the target version (the highest API level you have tested " +
-            "the version for.)";
+            "the version for).";
 
         assertEquals(
             "The manifest should contain a <code>&lt;uses-sdk></code> element which defines the " +
             "minimum minimum API Level required for the application to run, " +
             "as well as the target version (the highest API level you have tested " +
-            "the version for.)",
+            "the version for).",
             convertMarkup(explanation, HTML));
     }
 
-    public void testConvertMarkup5() throws Exception {
+    public void testConvertMarkup5() {
         // monospace and bold test
         // From ManifestDetector#MULTIPLE_USES_SDK
         String explanation =
@@ -218,7 +228,7 @@ public class TextFormatTest extends TestCase {
             convertMarkup(explanation, HTML));
         }
 
-    public void testConvertMarkup6() throws Exception {
+    public void testConvertMarkup6() {
         // Embedded code next to attributes
         // From AlwaysShowActionDetector#ISSUE
         String explanation =
@@ -254,14 +264,14 @@ public class TextFormatTest extends TestCase {
             convertMarkup(explanation, HTML));
     }
 
-    public void testConvertSelf() throws Exception {
+    public void testConvertSelf() {
         // No changes
         assertEquals("`foo`<b>", RAW.convertTo("`foo`<b>", RAW));
         assertEquals("`foo`<b>", TEXT.convertTo("`foo`<b>", TEXT));
         assertEquals("`foo`<b>", HTML.convertTo("`foo`<b>", HTML));
     }
 
-    public void testConvertFromHtml() throws Exception {
+    public void testConvertFromHtml() {
         assertEquals(""
                         + "Line 1\n"
                         + "Line 2 <div>\n",
@@ -269,13 +279,13 @@ public class TextFormatTest extends TestCase {
                         TEXT));
     }
 
-    public void testEscapedNewlines() throws Exception {
-        assertEquals("Using reflection to access hidden/private Android APIs is not safe; it will often not work on devices from other vendors, and it may suddenly stop working (if the API is removed) or crash spectacularly (if the API behavior changes, since there are no guarantees for compatibility.)", PrivateApiDetector.ISSUE.getExplanation(TextFormat.HTML));
+    public void testEscapedNewlines() {
+        assertEquals("Using reflection to access hidden/private Android APIs is not safe; it will often not work on devices from other vendors, and it may suddenly stop working (if the API is removed) or crash spectacularly (if the API behavior changes, since there are no guarantees for compatibility).", PrivateApiDetector.ISSUE.getExplanation(TextFormat.HTML));
         // Ignore newlines if they are escaped; used for line wrapping
         assertEquals("abcd<br/>\nef", RAW.convertTo("ab\\\ncd\nef", HTML));
     }
 
-    public void testConvertFromHtml2() throws Exception {
+    public void testConvertFromHtml2() {
         assertEquals(""
                 + "Using showAsAction=\"always\" in menu XML, or\n"
                 + "MenuItem.SHOW_AS_ACTION_ALWAYS in Java code is usually a\n"
@@ -311,7 +321,7 @@ public class TextFormatTest extends TestCase {
                 TEXT));
     }
 
-    public void testConvertFromHtml3() throws Exception {
+    public void testConvertFromHtml3() {
         assertEquals(""
                 + "Paragraph 1\n"
                 + "Paragraph 2 \n"
@@ -334,17 +344,17 @@ public class TextFormatTest extends TestCase {
                         TEXT));
     }
 
-    public void testNbsp() throws Exception {
+    public void testNbsp() {
         assertEquals("&nbsp;&nbsp;text", RAW.convertTo("\u00a0\u00A0text", HTML));
     }
 
-    public void test181820() throws Exception {
+    public void test181820() {
         // Regression test for https://code.google.com/p/android/issues/detail?id=181820
         // Make sure we handle formatting characters at the end
         assertEquals("foo bar *", convertMarkup("foo bar *", HTML));
     }
 
-    public void testHttps() throws Exception {
+    public void testHttps() {
         assertEquals("Visit <a href=\"https://google.com\">https://google.com</a>.",
                 convertMarkup("Visit https://google.com.", HTML));
     }

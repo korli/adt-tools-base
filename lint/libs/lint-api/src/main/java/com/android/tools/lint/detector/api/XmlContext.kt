@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+@file:JvmName("XmlScannerKt")
+
 package com.android.tools.lint.detector.api
 
 import com.android.resources.ResourceFolderType
@@ -26,7 +28,10 @@ import org.w3c.dom.Node
 import java.io.File
 
 internal const val SUPPRESS_XML_COMMENT_PREFIX = "<!--suppress "
-internal const val SUPPRESS_JAVA_COMMENT_PREFIX = "//noinspection "
+/** The prefix is usually //noinspection but it can also be @noinspection
+ * (such as / ** @noinspection ClassNameDiffersFromFileName * /
+ * in a javadoc, so just use the basename as the prefix */
+internal const val SUPPRESS_JAVA_COMMENT_PREFIX = "noinspection "
 
 /**
  * A [Context] used when checking XML files.
@@ -191,6 +196,7 @@ open class XmlContext
     fun createLocationHandle(node: Node): Location.Handle =
             parser.createLocationHandle(this, node)
 
-    override fun getResourceFolder(): File? =
-            if (resourceFolderType != null) file.parentFile else null
+    override val resourceFolder: File?
+        // Like super, but for the parent folder instead of the context file
+        get() = if (resourceFolderType != null) file.parentFile else null
 }

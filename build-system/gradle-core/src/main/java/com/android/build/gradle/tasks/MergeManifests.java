@@ -24,30 +24,29 @@ import static com.android.build.gradle.internal.publishing.AndroidArtifacts.Arti
 import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.COMPILE_CLASSPATH;
 import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.METADATA_VALUES;
 import static com.android.build.gradle.internal.publishing.AndroidArtifacts.ConsumedConfigType.RUNTIME_CLASSPATH;
-import static com.android.build.gradle.options.BooleanOption.BUILD_ONLY_TARGET_ABI;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
+import com.android.build.gradle.internal.core.VariantConfiguration;
 import com.android.build.gradle.internal.dependency.ArtifactCollectionWithExtraArtifact.ExtraComponentIdentifier;
 import com.android.build.gradle.internal.dsl.CoreBuildType;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
+import com.android.build.gradle.internal.scope.BuildElements;
 import com.android.build.gradle.internal.scope.BuildOutput;
-import com.android.build.gradle.internal.scope.BuildOutputs;
+import com.android.build.gradle.internal.scope.ExistingBuildElements;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.OutputScope;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.ApplicationId;
 import com.android.build.gradle.internal.tasks.TaskInputHelper;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.FeatureVariantData;
 import com.android.build.gradle.internal.variant.TaskContainer;
-import com.android.build.gradle.options.ProjectOptions;
-import com.android.build.gradle.options.StringOption;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.core.VariantConfiguration;
 import com.android.builder.model.ApiVersion;
 import com.android.ide.common.build.ApkData;
 import com.android.manifmerger.ManifestMerger2;
@@ -61,7 +60,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import java.io.File;
 import java.io.IOException;
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -98,19 +96,17 @@ public class MergeManifests extends ManifestProcessorTask {
     private FileCollection microApkManifest;
     private FileCollection compatibleScreensManifest;
     private FileCollection packageManifest;
+    private FileCollection apkList;
     private List<Feature> optionalFeatures;
     private OutputScope outputScope;
 
-    private Set<String> supportedAbis;
-    private String buildTargetAbi;
-    private String buildTargetDensity;
     private String featureName;
 
     @Override
     protected void doFullTaskAction() throws IOException {
         // read the output of the compatible screen manifest.
-        Collection<BuildOutput> compatibleScreenManifests =
-                BuildOutputs.load(
+        BuildElements compatibleScreenManifests =
+                ExistingBuildElements.from(
                         VariantScope.TaskOutputType.COMPATIBLE_SCREEN_MANIFEST,
                         compatibleScreensManifest);
 
@@ -124,17 +120,14 @@ public class MergeManifests extends ManifestProcessorTask {
 
         @Nullable BuildOutput compatibleScreenManifestForSplit;
 
-        List<ApkData> splitsToGenerate =
-                ProcessAndroidResources.getApksToGenerate(
-                        outputScope, supportedAbis, buildTargetAbi, buildTargetDensity);
+        ImmutableList.Builder<BuildOutput> mergedManifestOutputs = ImmutableList.builder();
+        ImmutableList.Builder<BuildOutput> irMergedManifestOutputs = ImmutableList.builder();
 
         // FIX ME : multi threading.
-        for (ApkData apkData : splitsToGenerate) {
-            compatibleScreenManifestForSplit =
-                    OutputScope.getOutput(
-                            compatibleScreenManifests,
-                            VariantScope.TaskOutputType.COMPATIBLE_SCREEN_MANIFEST,
-                            apkData);
+        // TODO : LOAD the APK_LIST FILE .....
+        for (ApkData apkData : outputScope.getApkDatas()) {
+
+            compatibleScreenManifestForSplit = compatibleScreenManifests.element(apkData);
             File manifestOutputFile =
                     FileUtils.join(
                             getManifestOutputDirectory(),
@@ -151,6 +144,7 @@ public class MergeManifests extends ManifestProcessorTask {
                                     getMainManifest(),
                                     getManifestOverlays(),
                                     computeFullProviderList(compatibleScreenManifestForSplit),
+                                    getNavigationFiles(),
                                     getFeatureName(),
                                     packageOverride,
                                     apkData.getVersionCode(),
@@ -181,23 +175,22 @@ public class MergeManifests extends ManifestProcessorTask {
                                     mergedXmlDocument.getMinSdkVersion())
                             : ImmutableMap.of();
 
-            outputScope.addOutputForSplit(
-                    VariantScope.TaskOutputType.MERGED_MANIFESTS,
-                    apkData,
-                    manifestOutputFile,
-                    properties);
-            outputScope.addOutputForSplit(
-                    VariantScope.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
-                    apkData,
-                    instantRunManifestOutputFile,
-                    properties);
+            mergedManifestOutputs.add(
+                    new BuildOutput(
+                            VariantScope.TaskOutputType.MERGED_MANIFESTS,
+                            apkData,
+                            manifestOutputFile,
+                            properties));
+            irMergedManifestOutputs.add(
+                    new BuildOutput(
+                            VariantScope.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
+                            apkData,
+                            instantRunManifestOutputFile,
+                            properties));
         }
-        outputScope.save(
-                ImmutableList.of(VariantScope.TaskOutputType.MERGED_MANIFESTS),
-                getManifestOutputDirectory());
-        outputScope.save(
-                ImmutableList.of(VariantScope.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS),
-                getInstantRunManifestOutputDirectory());
+        new BuildElements(mergedManifestOutputs.build()).save(getManifestOutputDirectory());
+        new BuildElements(irMergedManifestOutputs.build())
+                .save(getInstantRunManifestOutputDirectory());
     }
 
     @Nullable
@@ -299,8 +292,9 @@ public class MergeManifests extends ManifestProcessorTask {
             for (ResolvedArtifactResult artifact : featureArtifacts) {
                 File directory = artifact.getFile();
 
-                Collection<BuildOutput> splitOutputs =
-                        BuildOutputs.load(VariantScope.TaskOutputType.MERGED_MANIFESTS, directory);
+                BuildElements splitOutputs =
+                        ExistingBuildElements.from(
+                                VariantScope.TaskOutputType.MERGED_MANIFESTS, directory);
                 if (splitOutputs.isEmpty()) {
                     throw new GradleException("Could not load manifest from " + directory);
                 }
@@ -385,6 +379,12 @@ public class MergeManifests extends ManifestProcessorTask {
     }
 
     @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public List<File> getNavigationFiles() {
+        return variantConfiguration.getNavigationFiles();
+    }
+
+    @InputFiles
     @Optional
     @PathSensitive(PathSensitivity.RELATIVE)
     public FileCollection getFeatureManifests() {
@@ -417,26 +417,14 @@ public class MergeManifests extends ManifestProcessorTask {
 
     @Input
     @Optional
-    public Set<String> getSupportedAbis() {
-        return supportedAbis;
-    }
-
-    @Input
-    @Optional
-    public String getBuildTargetAbi() {
-        return buildTargetAbi;
-    }
-
-    @Input
-    @Optional
-    public String getBuildTargetDensity() {
-        return buildTargetDensity;
-    }
-
-    @Input
-    @Optional
     public String getFeatureName() {
         return featureName;
+    }
+
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public FileCollection getApkList() {
+        return apkList;
     }
 
     public static class ConfigAction implements TaskConfigAction<MergeManifests> {
@@ -472,7 +460,6 @@ public class MergeManifests extends ManifestProcessorTask {
             final GradleVariantConfiguration config = variantData.getVariantConfiguration();
             GlobalScope globalScope = variantScope.getGlobalScope();
             AndroidBuilder androidBuilder = globalScope.getAndroidBuilder();
-            ProjectOptions projectOptions = variantScope.getGlobalScope().getProjectOptions();
 
             processManifestTask.setAndroidBuilder(androidBuilder);
             processManifestTask.setVariantName(config.getFullName());
@@ -522,20 +509,8 @@ public class MergeManifests extends ManifestProcessorTask {
             processManifestTask.setReportFile(reportFile);
             processManifestTask.optionalFeatures = optionalFeatures;
 
-            processManifestTask.supportedAbis =
-                    variantData.getVariantConfiguration().getSupportedAbis();
-            processManifestTask.buildTargetAbi =
-                    projectOptions.get(BUILD_ONLY_TARGET_ABI)
-                                    || variantScope
-                                            .getGlobalScope()
-                                            .getExtension()
-                                            .getSplits()
-                                            .getAbi()
-                                            .isEnable()
-                            ? projectOptions.get(StringOption.IDE_BUILD_TARGET_ABI)
-                            : null;
-            processManifestTask.buildTargetDensity =
-                    projectOptions.get(StringOption.IDE_BUILD_TARGET_DENSITY);
+            processManifestTask.apkList =
+                    variantScope.getOutput(TaskOutputHolder.TaskOutputType.APK_LIST);
 
             variantScope
                     .getVariantData()

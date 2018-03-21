@@ -26,15 +26,16 @@ import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LintFix;
+import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.TypeEvaluator;
 import com.android.tools.lint.detector.api.UastLintUtils;
 import com.google.common.collect.Sets;
@@ -68,7 +69,7 @@ import org.jetbrains.uast.UastUtils;
 /**
  * Looks for issues around ObjectAnimator usages
  */
-public class ObjectAnimatorDetector extends Detector implements UastScanner {
+public class ObjectAnimatorDetector extends Detector implements SourceCodeScanner {
     public static final String KEEP_ANNOTATION = SUPPORT_ANNOTATIONS_PREFIX + "Keep";
 
     private static final Implementation IMPLEMENTATION = new Implementation(
@@ -180,7 +181,7 @@ public class ObjectAnimatorDetector extends Detector implements UastScanner {
     private static String getExpectedType(
             @NonNull UCallExpression method,
             int evaluatorIndex) {
-        String methodName = method.getMethodName();
+        String methodName = LintUtils.getMethodName(method);
 
         if (methodName == null) {
             return null;
@@ -306,7 +307,7 @@ public class ObjectAnimatorDetector extends Detector implements UastScanner {
 
     private static boolean isHolderConstructionMethod(@NonNull JavaContext context,
             @NonNull UCallExpression callExpression) {
-        String referenceName = callExpression.getMethodName();
+        String referenceName = LintUtils.getMethodName(callExpression);
         if (referenceName != null && referenceName.startsWith("of")
                 // This will require more indirection; see unit test
                 && !referenceName.equals("ofKeyframe")) {
@@ -486,6 +487,12 @@ public class ObjectAnimatorDetector extends Detector implements UastScanner {
             @NonNull PsiElement element2) {
         UFile containingFile = UastUtils.getContainingFile(element1);
         PsiFile file = containingFile != null ? containingFile.getPsi() : null;
+        if (file == null) {
+            PsiElement psi = element1.getPsi();
+            if (psi != null) {
+                file = psi.getContainingFile();
+            }
+        }
         return Objects.equals(file, element2.getContainingFile());
     }
 

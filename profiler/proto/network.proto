@@ -19,7 +19,7 @@ package profiler.proto;
 option java_package = "com.android.tools.profiler.proto";
 option java_outer_classname = "NetworkProfiler";
 
-import "profiler.proto";
+import "common.proto";
 
 service NetworkService {
   // Requests profiler data from the app with ID being |process_id|, in the time range
@@ -53,7 +53,7 @@ service NetworkService {
 
 
 message NetworkProfilerData {
-  CommonData basic_info = 1;
+  int64 end_timestamp = 1;
   oneof data {
     SpeedData speed_data = 2;
     ConnectionData connection_data = 3;
@@ -111,11 +111,10 @@ message NetworkDataRequest {
     // Number of open connections.
     CONNECTIONS = 3;
   }
-  int32 process_id = 1;
-  Session session = 2;
-  int64 start_timestamp = 3;
-  int64 end_timestamp = 4;
-  Type type = 5;
+  Session session = 1;
+  int64 start_timestamp = 2;
+  int64 end_timestamp = 3;
+  Type type = 4;
 }
 
 message NetworkDataResponse {
@@ -123,8 +122,7 @@ message NetworkDataResponse {
 }
 
 message NetworkStartRequest {
-  int32 process_id = 1;
-  Session session = 2;
+  Session session = 1;
 }
 
 // TODO: Dig more about network collector start response.
@@ -132,8 +130,7 @@ message NetworkStartResponse {
 }
 
 message NetworkStopRequest {
-  int32 process_id = 1;
-  Session session = 2;
+  Session session = 1;
 }
 
 // TODO: Dig more about network collector stop response.
@@ -158,10 +155,9 @@ message NetworkStopResponse {
 // The time range match is inclusive, so requests ending on time |start| and
 // requests starting on time |end| will be included in the results.
 message HttpRangeRequest {
-  int32 process_id = 1;
-  Session session = 2;
-  int64 start_timestamp = 3;
-  int64 end_timestamp = 4;
+  Session session = 1;
+  int64 start_timestamp = 2;
+  int64 end_timestamp = 3;
 }
 
 // Thread information obtained from Java, which is different from the thread data we would obtain from a JNI context.
@@ -182,6 +178,8 @@ message HttpConnectionData {
   int64 conn_id = 1;
   // Always set. Time this network request was first opened.
   int64 start_timestamp = 2;
+  // If not 0, time when request body stream was closed and bytes were uploaded.
+  int64 uploaded_timestamp = 5;
   // If not 0, time when the first byte was received. Always > start.
   int64 downloading_timestamp = 3;
   // If not 0, time when request was closed. Always > start.
@@ -243,8 +241,9 @@ message HttpDetailsResponse {
     // Key/value pairs associated with the request
     string fields = 3;
 
-    // Code stack trace for where this request was generated
-    string trace = 4;
+    // ID to fetch a code stack trace for where this request was generated
+    // Use with |ProfilerService.GetBytes|
+    string trace_id = 4;
   }
 
   message Response {
@@ -267,6 +266,10 @@ message HttpDetailsResponse {
     //
     // Looks something like: "d652e629bcf87c998c614"
     string payload_id = 1;
+
+    // The size of the response payload.
+    // If the payload does not exist the length will be 0.
+    int32 payload_size = 2;
   }
 
   message AccessingThreads {

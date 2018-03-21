@@ -27,6 +27,7 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.internal.SdkHandler;
+import com.android.build.gradle.internal.errors.SyncIssueHandler;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.publishing.AndroidArtifacts;
 import com.android.build.gradle.options.ProjectOptions;
@@ -34,6 +35,7 @@ import com.android.builder.core.AndroidBuilder;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.OptionalCompilationStep;
 import com.android.builder.utils.FileCache;
+import com.android.ide.common.blame.MessageReceiver;
 import com.google.common.base.CharMatcher;
 import java.io.File;
 import java.util.Set;
@@ -237,6 +239,16 @@ public class GlobalScope extends TaskOutputHolderImpl
 
     public void setLintChecks(@NonNull Configuration lintChecks) {
         this.lintChecks = lintChecks;
+    }
+
+    @NonNull
+    public SyncIssueHandler getErrorHandler() {
+        return (SyncIssueHandler) androidBuilder.getIssueReporter();
+    }
+
+    @NonNull
+    public MessageReceiver getMessageReceiver() {
+        return androidBuilder.getMessageReceiver();
     }
 
     @NonNull

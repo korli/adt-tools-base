@@ -1531,6 +1531,7 @@ public class VersionChecksTest extends AbstractCheckTest {
                         + "        if (BuildCompat.isAtLeastNMR1()) { methodN_MR1(); } // OK\n"
                         + "        if (isAtLeastN()) { methodN(); } // OK\n"
                         + "        if (BuildCompat.isAtLeastNMR1()) { methodN(); } // OK\n"
+                        + "        if (BuildCompat.isAtLeastP()) { methodP(); } // OK\n"
                         + "    }\n"
                         + "\n"
                         + "    // Data-binding adds this method\n"
@@ -1565,18 +1566,27 @@ public class VersionChecksTest extends AbstractCheckTest {
                         + "    public boolean methodN_MR1() {\n"
                         + "        return true;\n"
                         + "    }\n"
+                        + "\n"
+                        + "    @RequiresApi(28)\n"
+                        + "    public boolean methodP() {\n"
+                        + "        return true;\n"
+                        + "    }\n"
                         + "}\n"),
                 jar("libs/build-compat.jar",
-                        base64gzip("android/support/v4/os/BuildCompat.class", ""
-                                + "H4sIAAAAAAAAAIWSy07CQBSG/ymFCpaLeANvCdGFurAhutMYFTUhcknAsHBj"
-                                + "Bmh0sLRNL7yPKzdudGPiwgfwoYynFZAYjbPoucz//T3tzPvH6xuAXawlICMb"
-                                + "xyzmFMwrWGCIHQhTeIcMkc2tFoNcsro6Q7oiTL3m99u6c8nbBnWyFavDjRZ3"
-                                + "RFAPm7J3K1yG9Qo3u44luprr27bleNpgT7Nc7cQXRrdk9W3u7TMkhHvsVXTu"
-                                + "erXwbVcMyabHO3dVbg/9kt+SaqNISNPynY5+LoLNzITdTo8PuIooYgpyKpax"
-                                + "wlD4dwjyCDjN4OaNVm/39I6nYJUhNyJH8o3WWaNZrtOcyjhTy6apOyWDu65O"
-                                + "36w0Ty+uy7VLBlYm358OKCBC/zpYEUjBoCAmPAQiKEa3X8CeKJEwRc8ERZBI"
-                                + "JlGcMvVLRP1pinGqk0ODYqgEUs+QMrl7KPID5Mjj2CkWkgmkQl5Sjxjh6d/x"
-                                + "/F94ahKXkAm3Z7AUOjO6P4vII/4Jinenz1gCAAA=")),
+                        base64gzip("android/support/v4/os/BuildCompat.class", "" +
+                                "H4sIAAAAAAAAAIWUS28SURTH/xemDODQYrWVhy9sVVq1Y2N3GCMCJqQ8GmhY" +
+                                "6MJc4KbeOszgzKXfx5UbN3ahiQs/gB/KeGagBUkJs7ivc87vf+45N/Pn76/f" +
+                                "AF7geRw6sjHcxh1/uBvFvTjuI6fjgY4thshLaUv1iiGc3+kwaCWnLxjWatIW" +
+                                "jdGgK9xj3rXoZL3m9LjV4a7095NDTX2UHsNWjdt915F90xsNh46rzLMD0/HM" +
+                                "NyNp9UvOYMhVgSEuvaKqCe6pRqD2jiHRVrz3qc6HE168LIau6HEl+gzp1shW" +
+                                "ciA60pNkLdq2o7iSjk2Km7VTfsZNi9sn5jSGRBJTkXprf1a0OWtszhmPaNN2" +
+                                "Rm5PvJV+IsmZ1Pd8KQNRxHQ8NJDHjoFdPGFgRzqeGniGPYbc0goQdJpzs3sq" +
+                                "ekqHyZC6iLxw3+5UWu1qk4qkX66Mqm0Lt2RxzxN0fb1dPvxQbRxTDlWGaKlZ" +
+                                "rjSK9YrfpalGW7nSPin8pzs+o66LzyNuEWkjX5vPquB3JjmfFXKI0EvyvwhC" +
+                                "fjVANQueGGVB88ruT7DvtAjhGo1xmoEMNGRh0MoYOyGBVZpjWEMS4QCwH3gC" +
+                                "q+cIJVNfoGtfoYW/XZIiQeRjXA/iQ8ZrumYQcGNivBkAN64GphcBD5YBN68G" +
+                                "ZhYBi8uAt64GZhcBG8uAKQKOm5CbAGPnCK9rP7Dis9gM6z05pAN+hkrpt4fR" +
+                                "32AbjxD7B/l3JZMrBAAA")),
                 mSupportJar)
                 .run().expect(""
                         + "src/test/pkg/VersionConditionals4.java:16: Error: Call requires API level 24 (current min is 4): methodN [NewApi]\n"
@@ -2000,10 +2010,6 @@ public class VersionChecksTest extends AbstractCheckTest {
     }
 
     public void testNestedChecksKotlin() {
-        if (skipKotlinTests()) {
-            return;
-        }
-
         // Kotlin version of testNestedChecks. There are several important changes here:
         // The version check utility method is now defined as an expression body, so there
         // is no explicit "return" keyword (which the code used to look for).
@@ -2075,6 +2081,275 @@ public class VersionChecksTest extends AbstractCheckTest {
                 "            get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.GINGERBREAD\n" +
                 "                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
                 "1 errors, 1 warnings\n");
+    }
+
+    public void testGetMinSdkVersionFromMethodName() {
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isAtLeastKitKat"));
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isKitKatSdk"));
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isKitKatSDK"));
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isRunningKitkatOrLater"));
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isKeyLimePieOrLater"));
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isKitKatOrHigher"));
+        assertEquals(19, VersionChecks.getMinSdkVersionFromMethodName("isKitKatOrNewer"));
+
+        assertEquals(17, VersionChecks.getMinSdkVersionFromMethodName("isRunningJellyBeanMR1OrLater"));
+        assertEquals(20, VersionChecks.getMinSdkVersionFromMethodName("isAtLeastKitKatWatch"));
+    }
+
+    public void testVersionNameFromMethodName() {
+        //noinspection all // Sample code
+        lint().files(
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.content.pm.ShortcutManager;\n" +
+                        "\n" +
+                        "public abstract class VersionCheck {\n" +
+                        "    public void test(ShortcutManager shortcutManager) {\n" +
+                        "        // this requires API 26\n" +
+                        "        if (isAtLeastOreo()) {\n" +
+                        "            shortcutManager.removeAllDynamicShortcuts();\n" +
+                        "        }\n" +
+                        "        if (isOreoOrLater()) {\n" +
+                        "            shortcutManager.removeAllDynamicShortcuts();\n" +
+                        "        }\n" +
+                        "        if (isOreoOrAbove()) {\n" +
+                        "            shortcutManager.removeAllDynamicShortcuts();\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    public abstract boolean isAtLeastOreo();\n" +
+                        "    public abstract boolean isOreoOrLater();\n" +
+                        "    public abstract boolean isOreoOrAbove();\n" +
+                        "}\n"))
+                .run()
+                .expectClean();
+    }
+
+    public void testKotlinWhenStatement() {
+        // Regression test for
+        //   67712955: Kotlin when statement fails if subject is Build.VERSION.SDK_INT
+
+        //noinspection all // Sample code
+        lint().files(
+                manifest().minSdk(4),
+                kotlin("" +
+                        "import android.os.Build.VERSION.SDK_INT\n" +
+                        "import android.os.Build.VERSION_CODES.N\n" +
+                        "import android.text.Html\n" +
+                        "\n" +
+                        "fun String.fromHtm() : String\n" +
+                        "{\n" +
+                        "    return when {\n" +
+                        "        false, SDK_INT >= N -> Html.fromHtml(this, Html.FROM_HTML_MODE_LEGACY)\n" +
+                        "        else -> Html.fromHtml(this)\n" +
+                        "    }.toString()\n" +
+                        "}"))
+                .run()
+                .expectClean();
+    }
+
+    public void testKotlinWhenStatement2() {
+        // Regression test for issue 69661204
+        lint().files(
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.os.Build\n" +
+                        "import android.support.annotation.RequiresApi\n" +
+                        "\n" +
+                        "@RequiresApi(21)\n" +
+                        "fun requires21() { }\n" +
+                        "\n" +
+                        "@RequiresApi(23)\n" +
+                        "fun requires23() { }\n" +
+                        "\n" +
+                        "fun requiresNothing() { }\n" +
+                        "\n" +
+                        "fun test() {\n" +
+                        "    when {\n" +
+                        "        Build.VERSION.SDK_INT >= 21 -> requires21()\n" +
+                        "        Build.VERSION.SDK_INT >= 23 -> requires23()\n" +
+                        "        else -> requiresNothing()\n" +
+                        "    }\n" +
+                        "}\n"),
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testKotlinHelper() {
+        // Regression test for issue 64550633
+        lint().files(
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.os.Build\n" +
+                        "import android.os.Build.VERSION_CODES.KITKAT\n" +
+                        "\n" +
+                        "inline fun fromApi(value: Int, action: () -> Unit) {\n" +
+                        "    if (Build.VERSION.SDK_INT >= value) {\n" +
+                        "        action()\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "fun fromApiNonInline(value: Int, action: () -> Unit) {\n" +
+                        "    if (Build.VERSION.SDK_INT >= value) {\n" +
+                        "        action()\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "inline fun notFromApi(value: Int, action: () -> Unit) {\n" +
+                        "    if (Build.VERSION.SDK_INT < value) {\n" +
+                        "        action()\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "fun test1() {\n" +
+                        "    fromApi(KITKAT) {\n" +
+                        "        // Example of a Java 7+ field\n" +
+                        "        val cjkExtensionC = Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C // OK\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "fun test2() {\n" +
+                        "    fromApiNonInline(KITKAT) {\n" +
+                        "        val cjkExtensionC = Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C // OK\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "fun test3() {\n" +
+                        "    notFromApi(KITKAT) {\n" +
+                        "        val cjkExtensionC = Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C // ERROR\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n"))
+                .run()
+                .expect("src/test/pkg/test.kt:39: Error: Field requires API level 19 (current min is 1): java.lang.Character.UnicodeBlock#CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C [NewApi]\n" +
+                        "        val cjkExtensionC = Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C // ERROR\n" +
+                        "                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                        "1 errors, 0 warnings");
+    }
+
+    public void testKotlinEarlyExit1() {
+        // Regression test for issue 71560541: Wrong API condition
+        // Root cause: https://youtrack.jetbrains.com/issue/IDEA-184544
+        lint().files(
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.app.NotificationChannel\n" +
+                        "import android.app.NotificationManager\n" +
+                        "import android.content.Context\n" +
+                        "import android.os.Build\n" +
+                        "\n" +
+                        "fun foo1(context: Context) {\n" +
+                        "    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager\n" +
+                        "    if (Build.VERSION.SDK_INT < 26 || notificationManager == null) {\n" +
+                        "        return\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    val channel = NotificationChannel(\"id\", \"Test\", NotificationManager.IMPORTANCE_DEFAULT)\n" +
+                        "    channel.description = \"test\"\n" +
+                        "}\n" +
+                        "\n"),
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testKotlinEarlyExit2() {
+        // Regression test for issue 71560541: Wrong API condition, part 2
+        lint().files(
+                kotlin("" +
+                        "package test.pkg\n" +
+                        "\n" +
+                        "import android.app.NotificationChannel\n" +
+                        "import android.app.NotificationManager\n" +
+                        "import android.content.Context\n" +
+                        "import android.os.Build\n" +
+                        "\n" +
+                        "fun foo2(context: Context) {\n" +
+                        "    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager\n" +
+                        "    \n" +
+                        "    val channel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {\n" +
+                        "        NotificationChannel(\"id\", \"Test\", NotificationManager.IMPORTANCE_DEFAULT)\n" +
+                        "    } else {\n" +
+                        "        return\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    channel.description = \"test\"\n" +
+                        "}"),
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testNestedIfs() {
+        // Regression test for issue 67553351
+        lint().files(
+                java("" +
+                        "package test.pkg;\n" +
+                        "\n" +
+                        "import android.os.Build;\n" +
+                        "import android.support.annotation.RequiresApi;\n" +
+                        "\n" +
+                        "@SuppressWarnings({\"unused\", ClassNameDiffersFromFileName})\n" +
+                        "public class NestedIfs {\n" +
+                        "    @RequiresApi(20)\n" +
+                        "    private void requires20() {\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    @RequiresApi(23)\n" +
+                        "    private void requires23() {\n" +
+                        "    }\n" +
+                        "\n" +
+                        "    void test() {\n" +
+                        "        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {\n" +
+                        "            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {\n" +
+                        "                requires23();\n" +
+                        "            } else {\n" +
+                        "                requires20();\n" +
+                        "            }\n" +
+                        "        }\n" +
+                        "    }\n" +
+                        "}\n"),
+                mSupportJar)
+                .run()
+                .expectClean();
+    }
+
+    public void testApplyBlock() {
+        // Regression test for 71809249: False positive when using lambdas and higher-order functions
+        lint().files(
+                kotlin("" +
+                        "package com.example.lintexample\n" +
+                        "\n" +
+                        "import android.app.NotificationChannel\n" +
+                        "import android.app.NotificationManager\n" +
+                        "import android.content.Context\n" +
+                        "import android.os.Build\n" +
+                        "import android.app.Activity\n" +
+                        "\n" +
+                        "class MainActivity : Activity() {\n" +
+                        "\n" +
+                        "    fun test(notificationChannel: NotificationChannel) {\n" +
+                        "        val notificationManager: NotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager\n" +
+                        "        notificationManager.applyForOreoOrAbove {\n" +
+                        "            createNotificationChannel(notificationChannel)\n" +
+                        "        }\n" +
+                        "\n" +
+                        "    }\n" +
+                        "}\n" +
+                        "\n" +
+                        "inline fun <T> T.applyForOreoOrAbove(block: T.() -> Unit): T {\n" +
+                        "    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {\n" +
+                        "        block()\n" +
+                        "    }\n" +
+                        "    return this\n" +
+                        "}\n"))
+                .run()
+                .expectClean();
     }
 
     @Override

@@ -21,13 +21,13 @@ import com.android.SdkConstants.SUPPORT_ANNOTATIONS_PREFIX
 import com.android.tools.lint.client.api.UElementHandler
 import com.android.tools.lint.detector.api.Category
 import com.android.tools.lint.detector.api.Detector
-import com.android.tools.lint.detector.api.Detector.UastScanner
 import com.android.tools.lint.detector.api.Implementation
 import com.android.tools.lint.detector.api.Issue
 import com.android.tools.lint.detector.api.JavaContext
 import com.android.tools.lint.detector.api.LintUtils.skipParentheses
 import com.android.tools.lint.detector.api.Scope
 import com.android.tools.lint.detector.api.Severity
+import com.android.tools.lint.detector.api.SourceCodeScanner
 import com.intellij.psi.PsiMethod
 import org.jetbrains.uast.UElement
 import org.jetbrains.uast.UMethod
@@ -38,7 +38,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor
 /**
  * Makes sure that methods call super when overriding methods.
  */
-class CallSuperDetector : Detector(), UastScanner {
+class CallSuperDetector : Detector(), SourceCodeScanner {
     companion object Issues {
         private val IMPLEMENTATION = Implementation(
                 CallSuperDetector::class.java,
@@ -69,12 +69,12 @@ implementation as part of your method.
 
     override fun createUastHandler(context: JavaContext): UElementHandler? =
             object : UElementHandler() {
-                override fun visitMethod(method: UMethod) {
-                    val superMethod = getRequiredSuperMethod(context, method) ?: return
-                    if (!callsSuper(method, superMethod)) {
-                        val message = "Overriding method should call `super.${method.name}`"
-                        val location = context.getNameLocation(method)
-                        context.report(ISSUE, method, location, message)
+                override fun visitMethod(node: UMethod) {
+                    val superMethod = getRequiredSuperMethod(context, node) ?: return
+                    if (!callsSuper(node, superMethod)) {
+                        val message = "Overriding method should call `super.${node.name}`"
+                        val location = context.getNameLocation(node)
+                        context.report(ISSUE, node, location, message)
                     }
                 }
             }
@@ -140,7 +140,9 @@ implementation as part of your method.
             val parent = skipParentheses(node.uastParent)
             if (parent is UReferenceExpression) {
                 val resolved = parent.resolve()
-                if (targetMethod == resolved) {
+                if (targetMethod == resolved
+                    // Avoid false positives when there are type resolution problems
+                    || resolved == null) {
                     callsSuper = true
                 }
             }

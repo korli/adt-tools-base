@@ -21,18 +21,22 @@ import static com.android.utils.CharSequences.regionMatches;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.builder.model.AndroidProject;
+import com.android.builder.model.BuildTypeContainer;
+import com.android.builder.model.Variant;
 import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
+import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
 import java.util.Collections;
 import java.util.List;
@@ -46,7 +50,7 @@ import org.w3c.dom.NodeList;
 /**
  * Looks for issues in Java comments
  */
-public class CommentDetector extends ResourceXmlDetector implements UastScanner {
+public class CommentDetector extends ResourceXmlDetector implements SourceCodeScanner {
     private static final String STOPSHIP_COMMENT = "STOPSHIP";
 
     private static final Implementation IMPLEMENTATION = new Implementation(
@@ -75,10 +79,11 @@ public class CommentDetector extends ResourceXmlDetector implements UastScanner 
 
             "Using the comment `// STOPSHIP` can be used to flag code that is incomplete but " +
             "checked in. This comment marker can be used to indicate that the code should not " +
-            "be shipped until the issue is addressed, and lint will look for these.",
+            "be shipped until the issue is addressed, and lint will look for these.  In Gradle " +
+            "projects, this is only checked for non-debug (release) builds.",
             Category.CORRECTNESS,
             10,
-            Severity.WARNING,
+            Severity.FATAL,
             IMPLEMENTATION)
             .setEnabledByDefault(false);
 
@@ -89,7 +94,7 @@ public class CommentDetector extends ResourceXmlDetector implements UastScanner 
     private static final String ESCAPE_STRING = "\\u002a\\u002f";
 
 
-    /** Constructs a new {@link CommentDetector} check */
+    /** Constructs a new {@linkplain CommentDetector} check */
     public CommentDetector() {
     }
 
@@ -121,8 +126,6 @@ public class CommentDetector extends ResourceXmlDetector implements UastScanner 
     }
 
     private static void checkJava(@NonNull JavaContext context) {
-        // Lombok does not generate comment nodes for block and line comments, only for
-        // javadoc comments!
         CharSequence source = context.getContents();
         if (source == null) {
             return;
@@ -219,7 +222,15 @@ public class CommentDetector extends ResourceXmlDetector implements UastScanner 
                 }
             } else if (prev == 'S' && c == 'T' &&
                     regionMatches(source, i - 1, STOPSHIP_COMMENT, 0, STOPSHIP_COMMENT.length())) {
-                // TODO: Only flag this issue in release mode??
+                // Only flag this issue in release mode?? (but in the IDE, always
+                // flag it)
+                if (!Scope.checkSingleFile(context.getDriver().getScope())) {
+                    Boolean releaseMode = getReleaseMode(context);
+                    if (releaseMode == Boolean.FALSE) {
+                        return;
+                    }
+                }
+
                 String message =
                         "`STOPSHIP` comment found; points to code which must be fixed prior " +
                         "to release";
@@ -238,6 +249,7 @@ public class CommentDetector extends ResourceXmlDetector implements UastScanner 
                     javaContext.report(STOP_SHIP, javaNode, location, message, fix);
                 } else {
                     assert xmlNode != null;
+
                     Location location = xmlContext.getLocation(xmlNode, i,
                             i + STOPSHIP_COMMENT.length());
                     LintFix fix = createRemoveStopShipFix();
@@ -250,10 +262,32 @@ public class CommentDetector extends ResourceXmlDetector implements UastScanner 
     @NonNull
     private static LintFix createRemoveStopShipFix() {
         // TODO: Remove comment if that's all that remains
-        return fix()
+        return LintFix.create()
                 .name("Remove STOPSHIP").replace().pattern("(\\s*STOPSHIP)")
                 .with("")
                 .build();
+    }
+
+    /**
+     * Returns true iff the current variant is a release build.
+     * Returns null if we don't know (e.g. it's not a Gradle project, or we could not
+     * obtain a Gradle model.)
+     */
+    @Nullable
+    private static Boolean getReleaseMode(@NonNull Context context) {
+        Project project = context.getMainProject();
+        AndroidProject model = project.getGradleProjectModel();
+        Variant variant = project.getCurrentVariant();
+        if (model != null && variant != null) {
+            String buildType = variant.getBuildType();
+            for (BuildTypeContainer container : model.getBuildTypes()) {
+                if (buildType.equals(container.getBuildType().getName())) {
+                    return !container.getBuildType().isDebuggable();
+                }
+            }
+        }
+
+        return null;
     }
 
     private static class CommentChecker extends UElementHandler {

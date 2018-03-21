@@ -15,6 +15,7 @@
  */
 package com.android.ide.common.vectordrawable;
 
+import com.android.annotations.NonNull;
 import java.awt.geom.AffineTransform;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -29,9 +30,6 @@ import org.w3c.dom.Node;
  * are clipped by the path.
  */
 public class SvgClipPathNode extends SvgGroupNode {
-    private static final Logger logger = Logger.getLogger(SvgLeafNode.class.getSimpleName());
-    private static final String INDENT_LEVEL = "    ";
-
     private final ArrayList<SvgNode> mAffectedNodes = new ArrayList<>();
 
     public SvgClipPathNode(SvgTree svgTree, Node docNode, String name) {
@@ -82,7 +80,7 @@ public class SvgClipPathNode extends SvgGroupNode {
                 && ((mStackedTransform.getType() & AffineTransform.TYPE_MASK_SCALE) != 0)) {
             getTree()
                     .logErrorLine(
-                            "We don't scale the stroke width!",
+                            "Scaling of the stroke width is ignored",
                             getDocumentNode(),
                             SvgTree.SvgLogLevel.WARNING);
         }
@@ -95,27 +93,26 @@ public class SvgClipPathNode extends SvgGroupNode {
         }
     }
 
-    /**
-     * Writes the XML for a group containing a clip-path and its affected elements. Concatenates
-     * path data of children into one path for the clip-path. Affected nodes are contained in the
-     * same group as the clip-path.
-     *
-     * @param writer
-     * @param inClipPath boolean to flag whether the pathData should be apart of clip-path or not
-     * @throws IOException
-     */
     @Override
-    public void writeXML(OutputStreamWriter writer, boolean inClipPath) throws IOException {
-        writer.write("    <group>\n");
-        writer.write("        <clip-path android:pathData=\"");
+    public void writeXML(@NonNull OutputStreamWriter writer, boolean inClipPath,
+            @NonNull String indent) throws IOException {
+        writer.write(indent);
+        writer.write("<group>");
+        writer.write(System.lineSeparator());
+        writer.write(indent);
+        writer.write(INDENT_UNIT);
+        writer.write("<clip-path android:pathData=\"");
         for (SvgNode node : mChildren) {
-            node.writeXML(writer, true);
+            node.writeXML(writer, true, indent + INDENT_UNIT);
         }
-        writer.write("\" />\n");
+        writer.write("\"/>");
+        writer.write(System.lineSeparator());
         for (SvgNode node : mAffectedNodes) {
-            node.writeXML(writer, false);
+            node.writeXML(writer, false, indent + INDENT_UNIT);
         }
-        writer.write("    </group>\n");
+        writer.write(indent);
+        writer.write("</group>");
+        writer.write(System.lineSeparator());
     }
 
     /**

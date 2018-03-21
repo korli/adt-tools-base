@@ -13,27 +13,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.common.vectordrawable;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.ide.common.blame.SourcePosition;
+import com.android.utils.Pair;
 import com.android.utils.PositionXmlParser;
-import com.google.common.base.Strings;
 import java.awt.geom.AffineTransform;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.text.DecimalFormat;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import com.google.common.base.Preconditions;
+import org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
 
 /**
- * Represent the SVG file in an internal data structure as a tree.
+ * Represents the SVG file in an internal data structure as a tree.
  */
 class SvgTree {
     private static final Logger logger = Logger.getLogger(SvgTree.class.getSimpleName());
@@ -51,12 +54,11 @@ class SvgTree {
     private SvgGroupNode mRoot;
     private String mFileName;
 
-    private final ArrayList<String> mErrorLines = new ArrayList<>();
+    private final ArrayList<LogMessage> mLogMessages = new ArrayList<>();
 
-    private boolean mHasLeafNode = false;
+    private boolean mHasLeafNode;
 
-    private boolean mHasGradient = false;
-
+    private boolean mHasGradient;
 
     public float getWidth() { return w; }
     public float getHeight() { return h; }
@@ -79,7 +81,7 @@ class SvgTree {
 
     // Key is SvgNode that references a clipPath. Value is SvgGroupNode that is the parent of that
     // SvgNode.
-    private final HashMap<SvgNode, SvgGroupNode> mClipPathAffectedNodes = new HashMap<>();
+    private final Map<SvgNode, Pair<SvgGroupNode, String>> mClipPathAffectedNodes = new HashMap<>();
 
     // Key is String that is the id of a style class.
     // Value is set of SvgNodes referencing that class.
@@ -97,6 +99,44 @@ class SvgTree {
     public enum SvgLogLevel {
         ERROR,
         WARNING
+    }
+
+    private static class LogMessage implements Comparable<LogMessage> {
+        final SvgLogLevel level;
+        final int line;
+        final String message;
+
+        /**
+         * Initializes a log message.
+         *
+         * @param level the severity level
+         * @param line the line number of the SVG file the message applies to,
+         *     or zero if the message applies to the whole file
+         * @param message the text of the message
+         */
+        LogMessage(@NonNull SvgLogLevel level, int line, @NonNull String message) {
+            this.level = level;
+            this.line = line;
+            this.message = message;
+        }
+
+        @NonNull
+        String getFormattedMessage() {
+            return level.name() + (line == 0 ? "" : " @ line " + line) + ' ' + message;
+        }
+
+        @Override
+        public int compareTo(@NotNull LogMessage other) {
+            int cmp = level.compareTo(other.level);
+            if (cmp != 0) {
+                return cmp;
+            }
+            cmp = Integer.compare(line, other.line);
+            if (cmp != 0) {
+                return cmp;
+            }
+            return message.compareTo(other.message);
+        }
     }
 
     public Document parse(File f) throws Exception {
@@ -130,31 +170,28 @@ class SvgTree {
         return mRoot;
     }
 
-    public void logErrorLine(String s, Node node, SvgLogLevel level) {
-        if (!Strings.isNullOrEmpty(s)) {
-            if (node != null) {
-                SourcePosition position = getPosition(node);
-                mErrorLines.add(level.name() + "@ line " + (position.getStartLine() + 1) +
-                                " " + s + "\n");
-            } else {
-                mErrorLines.add(s);
-            }
-        }
+    public void logErrorLine(@NonNull String s, @Nullable Node node, @NonNull SvgLogLevel level) {
+        Preconditions.checkArgument(!s.isEmpty());
+        int line = node == null ? 0 : getPosition(node).getStartLine() + 1;
+        mLogMessages.add(new LogMessage(level, line, s));
     }
 
     /**
-     * @return Error log. Empty string if there are no errors.
+     * Returns the error log. Empty string if there are no errors.
      */
     @NonNull
     public String getErrorLog() {
-        StringBuilder errorBuilder = new StringBuilder();
-        if (!mErrorLines.isEmpty()) {
-            errorBuilder.append("In ").append(mFileName).append(":\n");
+        if (mLogMessages.isEmpty()) {
+            return "";
         }
-        for (String log : mErrorLines) {
-            errorBuilder.append(log);
+        Collections.sort(mLogMessages); // Sort by severity and line number.
+        StringBuilder result = new StringBuilder();
+        result.append("In ").append(mFileName).append(':');
+        for (LogMessage message : mLogMessages) {
+            result.append('\n');
+            result.append(message.getFormattedMessage());
         }
-        return errorBuilder.toString();
+        return result.toString();
     }
 
     /**
@@ -236,11 +273,12 @@ class SvgTree {
         }
     }
 
-    public void addIdToMap(String id, SvgNode svgNode) {
+    public void addIdToMap(@NonNull String id, @NonNull SvgNode svgNode) {
         mIdMap.put(id, svgNode);
     }
 
-    public SvgNode getSvgNodeFromId(String id) {
+    @Nullable
+    public SvgNode getSvgNodeFromId(@NonNull String id) {
         return mIdMap.get(id);
     }
 
@@ -252,11 +290,14 @@ class SvgTree {
         return mUseGroupSet;
     }
 
-    public void addClipPathAffectedNode(SvgNode child, SvgGroupNode currentGroup) {
-        mClipPathAffectedNodes.put(child, currentGroup);
+    public void addClipPathAffectedNode(
+            @NonNull SvgNode child,
+            @NonNull SvgGroupNode currentGroup,
+            @NonNull String clipPathName) {
+        mClipPathAffectedNodes.put(child, Pair.of(currentGroup, clipPathName));
     }
 
-    public Set<Map.Entry<SvgNode, SvgGroupNode>> getClipPathAffectedNodesSet() {
+    public Set<Map.Entry<SvgNode, Pair<SvgGroupNode, String>>> getClipPathAffectedNodesSet() {
         return mClipPathAffectedNodes.entrySet();
     }
 
@@ -287,4 +328,24 @@ class SvgTree {
         return mStyleAffectedNodes.entrySet();
     }
 
+    /**
+     * Finds the parent node of the input node.
+     *
+     * @return the parent node, or null if node is not in the tree.
+     */
+    @Nullable
+    public SvgGroupNode findParent(@NonNull SvgNode node) {
+        return mRoot.findParent(node);
+    }
+
+    /**
+     * Returns a {@link DecimalFormat] of sufficient precision to use for formatting coordinate
+     * values within the viewport.
+     */
+    @NonNull
+    public DecimalFormat getCoordinateFormat() {
+        float viewportWidth = getViewportWidth();
+        float viewportHeight = getViewportHeight();
+        return VdUtil.getCoordinateFormat(Math.max(viewportHeight, viewportWidth));
+    }
 }

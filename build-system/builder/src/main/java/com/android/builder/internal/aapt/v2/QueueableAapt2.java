@@ -26,8 +26,6 @@ import com.android.ide.common.internal.ResourceCompilationException;
 import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.sdklib.BuildToolInfo;
-import com.android.tools.aapt2.Aapt2Exception;
-import com.android.tools.aapt2.Aapt2RenamingConventions;
 import com.android.utils.ILogger;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -52,7 +50,6 @@ public class QueueableAapt2 extends AbstractAapt {
 
     @NonNull private final Aapt2QueuedResourceProcessor aapt;
     @NonNull private final Executor executor;
-    @NonNull private final File intermediateDir;
     @NonNull private final Integer requestKey;
     @Nullable private final ProcessOutputHandler processOutputHandler;
 
@@ -61,19 +58,16 @@ public class QueueableAapt2 extends AbstractAapt {
      *
      * @param processOutputHandler the handler to process the executed process' output
      * @param buildToolInfo the build tools to use
-     * @param intermediateDir directory where to store intermediate files
      * @param logger logger to use
      */
     public QueueableAapt2(
             @Nullable ProcessOutputHandler processOutputHandler,
             @NonNull BuildToolInfo buildToolInfo,
-            @NonNull File intermediateDir,
             @NonNull ILogger logger,
             int numberOfProcesses) {
         this(
                 processOutputHandler,
                 getAapt2ExecutablePath(buildToolInfo),
-                intermediateDir,
                 logger,
                 numberOfProcesses);
     }
@@ -82,15 +76,8 @@ public class QueueableAapt2 extends AbstractAapt {
     QueueableAapt2(
             @Nullable ProcessOutputHandler processOutputHandler,
             @NonNull String aapt2ExecutablePath,
-            @NonNull File intermediateDir,
             @NonNull ILogger logger,
             int numberOfProcesses) {
-        Preconditions.checkArgument(
-                intermediateDir.isDirectory(),
-                "Intermediate directory needs to be a directory.\nintermediateDir: %s",
-                intermediateDir.getAbsolutePath());
-
-        this.intermediateDir = intermediateDir;
         this.processOutputHandler = processOutputHandler;
 
         this.executor =
@@ -125,13 +112,13 @@ public class QueueableAapt2 extends AbstractAapt {
     public Future<File> compile(@NonNull CompileResourceRequest request) throws Exception {
         // TODO(imorlowska): move verification to CompileResourceRequest.
         Preconditions.checkArgument(
-                request.getInput().isFile(),
+                request.getInputFile().isFile(),
                 "Input file needs to be a normal file.\nInput file: %s",
-                request.getInput().getAbsolutePath());
+                request.getInputFile().getAbsolutePath());
         Preconditions.checkArgument(
-                request.getOutput().isDirectory(),
+                request.getOutputDirectory().isDirectory(),
                 "Output for resource compilation needs to be a directory.\nOutput: %s",
-                request.getOutput().getAbsolutePath());
+                request.getOutputDirectory().getAbsolutePath());
 
         SettableFuture<File> actualResult = SettableFuture.create();
         ListenableFuture<File> futureResult;
@@ -140,7 +127,7 @@ public class QueueableAapt2 extends AbstractAapt {
             futureResult = aapt.compile(requestKey, request, processOutputHandler);
         } catch (ResourceCompilationException e) {
             throw new Aapt2Exception(
-                    String.format("Failed to compile file %s", request.getInput()), e);
+                    String.format("Failed to compile file %s", request.getInputFile()), e);
         }
 
         futureResult.addListener(
@@ -167,7 +154,7 @@ public class QueueableAapt2 extends AbstractAapt {
         ListenableFuture<File> futureResult;
 
         try {
-            futureResult = aapt.link(requestKey, config, intermediateDir, processOutputHandler);
+            futureResult = aapt.link(requestKey, config, processOutputHandler);
         } catch (Exception e) {
             throw new AaptException("Failed to link", e);
         }
@@ -194,8 +181,8 @@ public class QueueableAapt2 extends AbstractAapt {
     @NonNull
     public File compileOutputFor(@NonNull CompileResourceRequest request) {
         return new File(
-                request.getOutput(),
-                Aapt2RenamingConventions.compilationRename(request.getInput()));
+                request.getOutputDirectory(),
+                Aapt2RenamingConventions.compilationRename(request.getInputFile()));
     }
 
     private static String getAapt2ExecutablePath(BuildToolInfo buildToolInfo) {

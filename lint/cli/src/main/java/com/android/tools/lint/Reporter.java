@@ -17,11 +17,8 @@
 package com.android.tools.lint;
 
 import static com.android.SdkConstants.CURRENT_PLATFORM;
-import static com.android.SdkConstants.DOT_9PNG;
-import static com.android.SdkConstants.DOT_PNG;
 import static com.android.SdkConstants.PLATFORM_LINUX;
 import static com.android.SdkConstants.UTF_8;
-import static com.android.tools.lint.detector.api.LintUtils.endsWith;
 import static java.io.File.separatorChar;
 
 import com.android.annotations.NonNull;
@@ -33,58 +30,70 @@ import com.android.tools.lint.checks.AndroidTvDetector;
 import com.android.tools.lint.checks.AnnotationDetector;
 import com.android.tools.lint.checks.ApiDetector;
 import com.android.tools.lint.checks.AppCompatCallDetector;
+import com.android.tools.lint.checks.AppCompatCustomViewDetector;
+import com.android.tools.lint.checks.AppCompatResourceDetector;
 import com.android.tools.lint.checks.AppIndexingApiDetector;
+import com.android.tools.lint.checks.AppLinksValidDetector;
 import com.android.tools.lint.checks.ByteOrderMarkDetector;
+import com.android.tools.lint.checks.CheckResultDetector;
+import com.android.tools.lint.checks.ChromeOsDetector;
 import com.android.tools.lint.checks.CleanupDetector;
 import com.android.tools.lint.checks.CommentDetector;
 import com.android.tools.lint.checks.DetectMissingPrefix;
 import com.android.tools.lint.checks.DuplicateResourceDetector;
+import com.android.tools.lint.checks.EllipsizeMaxLinesDetector;
+import com.android.tools.lint.checks.FontDetector;
 import com.android.tools.lint.checks.GradleDetector;
 import com.android.tools.lint.checks.GridLayoutDetector;
 import com.android.tools.lint.checks.IconDetector;
 import com.android.tools.lint.checks.IncludeDetector;
 import com.android.tools.lint.checks.InefficientWeightDetector;
 import com.android.tools.lint.checks.JavaPerformanceDetector;
+import com.android.tools.lint.checks.KeyboardNavigationDetector;
+import com.android.tools.lint.checks.LabelForDetector;
 import com.android.tools.lint.checks.ManifestDetector;
 import com.android.tools.lint.checks.MissingClassDetector;
 import com.android.tools.lint.checks.MissingIdDetector;
 import com.android.tools.lint.checks.NamespaceDetector;
+import com.android.tools.lint.checks.NetworkSecurityConfigDetector;
+import com.android.tools.lint.checks.ObjectAnimatorDetector;
 import com.android.tools.lint.checks.ObsoleteLayoutParamsDetector;
 import com.android.tools.lint.checks.ParcelDetector;
+import com.android.tools.lint.checks.PermissionDetector;
 import com.android.tools.lint.checks.PropertyFileDetector;
 import com.android.tools.lint.checks.PxUsageDetector;
 import com.android.tools.lint.checks.ReadParcelableDetector;
 import com.android.tools.lint.checks.RtlDetector;
 import com.android.tools.lint.checks.ScrollViewChildDetector;
 import com.android.tools.lint.checks.SecurityDetector;
+import com.android.tools.lint.checks.ServiceCastDetector;
 import com.android.tools.lint.checks.SignatureOrSystemDetector;
-import com.android.tools.lint.checks.SupportAnnotationDetector;
 import com.android.tools.lint.checks.TextFieldDetector;
 import com.android.tools.lint.checks.TextViewDetector;
 import com.android.tools.lint.checks.TitleDetector;
 import com.android.tools.lint.checks.TypoDetector;
 import com.android.tools.lint.checks.TypographyDetector;
+import com.android.tools.lint.checks.UnpackedNativeCodeDetector;
+import com.android.tools.lint.checks.UnsafeBroadcastReceiverDetector;
 import com.android.tools.lint.checks.UnusedResourceDetector;
 import com.android.tools.lint.checks.UselessViewDetector;
 import com.android.tools.lint.checks.Utf8Detector;
+import com.android.tools.lint.checks.VectorPathDetector;
+import com.android.tools.lint.checks.ViewTypeDetector;
+import com.android.tools.lint.checks.WakelockDetector;
+import com.android.tools.lint.checks.WearStandaloneAppDetector;
 import com.android.tools.lint.checks.WrongCallDetector;
 import com.android.tools.lint.checks.WrongCaseDetector;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.utils.SdkUtils;
 import com.google.common.annotations.Beta;
 import com.google.common.collect.Sets;
-import com.google.common.io.ByteStreams;
-import com.google.common.io.Files;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
 import java.net.MalformedURLException;
-import java.net.URL;
 import java.net.URLEncoder;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -97,19 +106,10 @@ import java.util.Set;
  */
 @Beta
 public abstract class Reporter {
-
-    public static final String NEW_FORMAT_PROPERTY = "lint.old-html-style";
-    public static final boolean USE_MATERIAL_HTML_STYLE = !Boolean.getBoolean(NEW_FORMAT_PROPERTY);
-
     protected final LintCliClient client;
     protected final File output;
     protected String title = "Lint Report";
-    protected boolean simpleFormat;
-    protected boolean bundleResources;
     protected Map<String, String> urlMap;
-    protected File resources;
-    protected final Map<File, String> resourceUrl = new HashMap<>();
-    protected final Map<String, File> nameToFile = new HashMap<>();
     protected boolean displayEmpty = true;
 
     /**
@@ -118,23 +118,14 @@ public abstract class Reporter {
      * @param client       the associated client
      * @param output       the output file
      * @param flags        the command line flags
-     * @param simpleFormat if true, use simple HTML format
      * @throws IOException if an error occurs
      */
     @NonNull
     public static Reporter createHtmlReporter(
             @NonNull LintCliClient client,
             @NonNull File output,
-            @NonNull LintCliFlags flags,
-            boolean simpleFormat) throws IOException {
-        if (USE_MATERIAL_HTML_STYLE) {
-            return new MaterialHtmlReporter(client, output, flags);
-        }
-        HtmlReporter reporter = new HtmlReporter(client, output, flags);
-        if (simpleFormat) {
-            reporter.setSimpleFormat(true);
-        }
-        return reporter;
+            @NonNull LintCliFlags flags) throws IOException {
+        return new HtmlReporter(client, output, flags);
     }
 
     /**
@@ -147,7 +138,7 @@ public abstract class Reporter {
      * @param close whether the writer should be closed when done
      */
     @NonNull
-    public static Reporter createTextReporter(
+    public static TextReporter createTextReporter(
             @NonNull LintCliClient client,
             @NonNull LintCliFlags flags,
             @Nullable File file,
@@ -209,47 +200,7 @@ public abstract class Reporter {
         return title;
     }
 
-    /**
-     * Sets whether the report should bundle up resources along with the HTML report.
-     * This implies a non-simple format (see {@link #setSimpleFormat(boolean)}).
-     *
-     * @param bundleResources if true, copy images into a directory relative to
-     *            the report
-     */
-    public void setBundleResources(boolean bundleResources) {
-        this.bundleResources = bundleResources;
-        simpleFormat = false;
-    }
-
-    /**
-     * Sets whether the report should use simple formatting (meaning no JavaScript,
-     * embedded images, etc).
-     *
-     * @param simpleFormat whether the formatting should be simple
-     */
-    public void setSimpleFormat(boolean simpleFormat) {
-        this.simpleFormat = simpleFormat;
-    }
-
-    /**
-     * Returns whether the report should use simple formatting (meaning no JavaScript,
-     * embedded images, etc).
-     *
-     * @return whether the report should use simple formatting
-     */
-    public boolean isSimpleFormat() {
-        return simpleFormat;
-    }
-
-
     String getUrl(File file) {
-        if (bundleResources && !simpleFormat) {
-            String url = getRelativeResourceUrl(file);
-            if (url != null) {
-                return url;
-            }
-        }
-
         if (urlMap != null) {
             String path = file.getAbsolutePath();
             // Perform the comparison using URLs such that we properly escape spaces etc.
@@ -294,95 +245,6 @@ public abstract class Reporter {
     /** Set mapping of path prefixes to corresponding URLs in the HTML report */
     public void setUrlMap(@Nullable Map<String, String> urlMap) {
         this.urlMap = urlMap;
-    }
-
-    /** Gets a pointer to the local resource directory, if any */
-    File getResourceDir() {
-        if (resources == null && bundleResources) {
-            resources = computeResourceDir();
-            if (resources == null) {
-                bundleResources = false;
-            }
-        }
-
-        return resources;
-    }
-
-    /** Finds/creates the local resource directory, if possible */
-    File computeResourceDir() {
-        String fileName = output.getName();
-        int dot = fileName.indexOf('.');
-        if (dot != -1) {
-            fileName = fileName.substring(0, dot);
-        }
-
-        File resources = new File(output.getParentFile(), fileName + "_files");
-        if (!resources.exists() && !resources.mkdir()) {
-            resources = null;
-        }
-
-        return resources;
-    }
-
-    /** Returns a URL to a local copy of the given file, or null */
-    protected String getRelativeResourceUrl(File file) {
-        String resource = resourceUrl.get(file);
-        if (resource != null) {
-            return resource;
-        }
-
-        String name = file.getName();
-        if (!endsWith(name, DOT_PNG) || endsWith(name, DOT_9PNG)) {
-            return null;
-        }
-
-        // Attempt to make local copy
-        File resourceDir = getResourceDir();
-        if (resourceDir != null) {
-            String base = file.getName();
-
-            File path = nameToFile.get(base);
-            if (path != null && !path.equals(file)) {
-                // That filename already exists and is associated with a different path:
-                // make a new unique version
-                for (int i = 0; i < 100; i++) {
-                    base = '_' + base;
-                    path = nameToFile.get(base);
-                    if (path == null || path.equals(file)) {
-                        break;
-                    }
-                }
-            }
-
-            File target = new File(resourceDir, base);
-            try {
-                Files.copy(file, target);
-            } catch (IOException e) {
-                return null;
-            }
-            return resourceDir.getName() + '/' + encodeUrl(base);
-        }
-        return null;
-    }
-
-    /** Returns a URL to a local copy of the given resource, or null. There is
-     * no filename conflict resolution. */
-    protected String addLocalResources(URL url) throws IOException {
-        // Attempt to make local copy
-        File resourceDir = computeResourceDir();
-        if (resourceDir != null) {
-            String base = url.getFile();
-            base = base.substring(base.lastIndexOf('/') + 1);
-            nameToFile.put(base, new File(url.toExternalForm()));
-
-            File target = new File(resourceDir, base);
-            try (FileOutputStream output = new FileOutputStream(target);
-                 InputStream input = url.openStream()) {
-                ByteStreams.copy(input, output);
-            }
-            return resourceDir.getName() + '/' + encodeUrl(base);
-        }
-        return null;
     }
 
     // Based on similar code in com.intellij.openapi.util.io.FileUtilRt
@@ -471,7 +333,66 @@ public abstract class Reporter {
      */
     public static boolean hasAutoFix(Issue issue) {
         // List generated by AndroidLintInspectionToolProviderTest in tools/adt/idea;
-        // set LIST_ISSUES_WITH_QUICK_FIXES to true
+        // set LIST_ISSUES_WITH_QUICK_FIXES to true; that gives the quickfixes that
+        // have class registrations on the IDE side. In tools/base itself many lint
+        // fixes provide a fix when reporting. We collect these by inserting this
+        // into LintDriver.LintClientWrapper.report:
+        //    if (fix != null) {
+        //        println("HAS-FIX: ${issue.id}: ${guessField(issue)}")
+        //    }
+        // which uses this helper code to map from an issue back to the
+        // declaring class and field:
+        //        private fun guessField(issue: Issue): String {
+        //            val detectorClass = issue.implementation.detectorClass
+        //            val field = findIssueFromClass(issue, detectorClass) ?: return "\"${issue.id}\""
+        //            return "${field.declaringClass.name}.${field.name}"
+        //        }
+        //
+        //        private fun findIssueFromClass(issue: Issue, detectorClass: Class<*>): Field? {
+        //            var match = findIssueFromFields(issue, detectorClass.fields)
+        //            if (match != null) {
+        //                return match
+        //            }
+        //
+        //            // Use getDeclaredFields to also pick up private fields (e.g. backing fields
+        //            // for Kotlin properties); we can't *only* use getDeclaredFields since we
+        //            // also want to pick up inherited fields (for example used in the GradleDetector
+        //            // subclasses.)
+        //            match = findIssueFromFields(issue, detectorClass.declaredFields)
+        //            if (match != null) {
+        //                return match
+        //            }
+        //
+        //            if (!detectorClass.name.endsWith("Kt")) {
+        //                try {
+        //                    return findIssueFromClass(issue, Class.forName(detectorClass.name + "Kt"))
+        //                } catch (ignore: ClassNotFoundException) {
+        //                }
+        //            }
+        //
+        //            return null
+        //        }
+        //
+        //        private fun findIssueFromFields(issue: Issue, fields: Array<Field>): Field? {
+        //            for (field in fields) {
+        //                if (field.modifiers and Modifier.STATIC != 0
+        //                        && !field.name.startsWith("_")
+        //                        && field.type == Issue::class.java) {
+        //                    try {
+        //                        field.isAccessible = true
+        //                        val newIssue = field.get(null) as Issue
+        //                        if (newIssue.id == issue.id) {
+        //                            return field
+        //                        }
+        //                    } catch (ignore: IllegalAccessException) {
+        //                    }
+        //                }
+        //            }
+        //
+        //            return null
+        //        }
+        // Then run the testsuite, grep the output for HAS-FIX and pick out the
+        // field names, then merge with the below list.
         if (studioFixes == null) {
             studioFixes = Sets.newHashSet(
                     AccessibilityDetector.ISSUE,
@@ -481,27 +402,40 @@ public abstract class Reporter {
                     AndroidTvDetector.MISSING_LEANBACK_SUPPORT,
                     AndroidTvDetector.PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE,
                     AndroidTvDetector.UNSUPPORTED_TV_HARDWARE,
+                    AnnotationDetector.FLAG_STYLE,
                     AnnotationDetector.SWITCH_TYPE_DEF,
                     ApiDetector.INLINED,
+                    ApiDetector.OBSOLETE_SDK,
                     ApiDetector.OVERRIDE,
                     ApiDetector.UNSUPPORTED,
                     ApiDetector.UNUSED,
                     AppCompatCallDetector.ISSUE,
+                    AppCompatCustomViewDetector.ISSUE,
+                    AppCompatResourceDetector.ISSUE,
                     AppIndexingApiDetector.ISSUE_APP_INDEXING,
                     AppIndexingApiDetector.ISSUE_APP_INDEXING_API,
-                    //AppIndexingApiDetector.ISSUE_URL_ERROR,
+                    AppLinksValidDetector.VALIDATION,
                     ByteOrderMarkDetector.BOM,
+                    CheckResultDetector.CHECK_RESULT,
+                    ChromeOsDetector.PERMISSION_IMPLIES_UNSUPPORTED_HARDWARE,
+                    ChromeOsDetector.UNSUPPORTED_CHROME_OS_HARDWARE,
+                    CleanupDetector.APPLY_SHARED_PREF,
                     CleanupDetector.SHARED_PREF,
                     CommentDetector.STOP_SHIP,
                     DetectMissingPrefix.MISSING_NAMESPACE,
+                    DuplicateResourceDetector.STRING_ESCAPING,
                     DuplicateResourceDetector.TYPE_MISMATCH,
+                    EllipsizeMaxLinesDetector.ISSUE,
+                    FontDetector.FONT_VALIDATION_ERROR,
+                    FontDetector.FONT_VALIDATION_WARNING,
                     GradleDetector.COMPATIBILITY,
                     GradleDetector.DEPENDENCY,
                     GradleDetector.DEPRECATED,
+                    GradleDetector.DUPLICATE_CLASSES,
+                    GradleDetector.MIN_SDK_TOO_LOW,
                     GradleDetector.NOT_INTERPOLATED,
                     GradleDetector.PLUS,
                     GradleDetector.REMOTE_VERSION,
-                    GradleDetector.MIN_SDK_TOO_LOW,
                     GradleDetector.STRING_INTEGER,
                     GridLayoutDetector.ISSUE,
                     IconDetector.WEBP_ELIGIBLE,
@@ -511,28 +445,37 @@ public abstract class Reporter {
                     InefficientWeightDetector.INEFFICIENT_WEIGHT,
                     InefficientWeightDetector.ORIENTATION,
                     JavaPerformanceDetector.USE_VALUE_OF,
+                    KeyboardNavigationDetector.ISSUE,
+                    LabelForDetector.ISSUE,
                     ManifestDetector.ALLOW_BACKUP,
                     ManifestDetector.APPLICATION_ICON,
                     ManifestDetector.MIPMAP,
                     ManifestDetector.MOCK_LOCATION,
+                    ManifestDetector.SET_VERSION,
                     ManifestDetector.TARGET_NEWER,
                     MissingClassDetector.INNERCLASS,
                     MissingIdDetector.ISSUE,
                     NamespaceDetector.RES_AUTO,
+                    NetworkSecurityConfigDetector.ISSUE,
+                    ObjectAnimatorDetector.MISSING_KEEP,
                     ObsoleteLayoutParamsDetector.ISSUE,
                     ParcelDetector.ISSUE,
+                    PermissionDetector.CHECK_PERMISSION,
+                    PermissionDetector.MISSING_PERMISSION,
                     PropertyFileDetector.ESCAPE,
                     PropertyFileDetector.HTTP,
                     PxUsageDetector.DP_ISSUE,
                     PxUsageDetector.PX_ISSUE,
                     ReadParcelableDetector.ISSUE,
                     RtlDetector.COMPAT,
+                    RtlDetector.USE_START,
                     ScrollViewChildDetector.ISSUE,
+                    SecurityDetector.EXPORTED_PROVIDER,
+                    SecurityDetector.EXPORTED_RECEIVER,
                     SecurityDetector.EXPORTED_SERVICE,
+                    ServiceCastDetector.WIFI_MANAGER,
+                    ServiceCastDetector.WIFI_MANAGER_UNCERTAIN,
                     SignatureOrSystemDetector.ISSUE,
-                    SupportAnnotationDetector.CHECK_PERMISSION,
-                    SupportAnnotationDetector.CHECK_RESULT,
-                    SupportAnnotationDetector.MISSING_PERMISSION,
                     TextFieldDetector.ISSUE,
                     TextViewDetector.SELECTABLE,
                     TitleDetector.ISSUE,
@@ -542,10 +485,16 @@ public abstract class Reporter {
                     TypographyDetector.FRACTIONS,
                     TypographyDetector.OTHER,
                     TypographyDetector.QUOTES,
+                    UnpackedNativeCodeDetector.ISSUE,
+                    UnsafeBroadcastReceiverDetector.BROADCAST_SMS,
                     UnusedResourceDetector.ISSUE,
                     UnusedResourceDetector.ISSUE_IDS,
                     UselessViewDetector.USELESS_LEAF,
                     Utf8Detector.ISSUE,
+                    VectorPathDetector.PATH_VALID,
+                    ViewTypeDetector.ADD_CAST,
+                    WakelockDetector.TIMEOUT,
+                    WearStandaloneAppDetector.WEAR_STANDALONE_APP_ISSUE,
                     WrongCallDetector.ISSUE,
                     WrongCaseDetector.WRONG_CASE
             );

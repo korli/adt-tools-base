@@ -15,13 +15,13 @@
             <tr><td>matchingFallbacks</td></tr>
             <tr><td>multiDexEnabled</td></tr>
             <tr><td>name</td></tr>
+            <tr><td>postprocessing</td></tr>
             <tr><td>pseudoLocalesEnabled</td></tr>
             <tr><td>renderscriptDebuggable</td></tr>
             <tr><td>renderscriptOptimLevel</td></tr>
             <tr><td>shrinkResources</td></tr>
             <tr><td>signingConfig</td></tr>
             <tr><td>testCoverageEnabled</td></tr>
-            <tr><td>useJack</td></tr>
             <tr><td>useProguard</td></tr>
             <tr><td>versionNameSuffix</td></tr>
             <tr><td>zipAlignEnabled</td></tr>
@@ -37,6 +37,7 @@
             <tr><td>consumerProguardFile</td></tr>
             <tr><td>consumerProguardFiles</td></tr>
             <tr><td>externalNativeBuild</td></tr>
+            <tr><td>postprocessing</td></tr>
             <tr><td>proguardFile</td></tr>
             <tr><td>proguardFiles</td></tr>
             <tr><td>resValue</td></tr>

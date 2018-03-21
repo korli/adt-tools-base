@@ -14,6 +14,7 @@ iml_module(
         "//tools/idea/.idea/libraries:JUnit4[test]",
         "//tools/base/testutils:studio.testutils[module, test]",
         "//tools/idea/.idea/libraries:Guava[test]",
+        "//tools/idea/.idea/libraries:KotlinJavaRuntime",
     ],
 )
 
@@ -32,7 +33,7 @@ maven_java_library(
 maven_pom(
     name = "pom",
     artifact = "fakeadbserver",
-    group = "com.android.tools",
+    group = "com.android.tools.fakeadbserver",
     source = "//tools/buildSrc/base:base_version",
 )
 

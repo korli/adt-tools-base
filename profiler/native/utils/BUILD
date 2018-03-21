@@ -10,7 +10,6 @@ cc_library(
         "bash_command.cc",
         "config.cc",
         "current_process.cc",
-        "device_info.cc",
         "file_cache.cc",
         "file_reader.cc",
         "fs/dir.cc",
@@ -19,9 +18,9 @@ cc_library(
         "fs/file_system.cc",
         "fs/memory_file_system.cc",
         "fs/path.cc",
+        "native_backtrace.cc",
         "installer.cc",
         "package_manager.cc",
-        "process_manager.cc",
         "socket_utils.cc",
         "stopwatch.cc",
         "tokenizer.cc",
@@ -41,10 +40,16 @@ cc_library(
         ],
     }) + select_android(
         [
+            "bash_command.android.cc",
+            "device_info.android.cc",
             "log.android.cc",
+            "process_manager.android.cc",
         ],
         [
+            "bash_command.host.cc",
+            "device_info.host.cc",
             "log.cc",
+            "process_manager.host.cc",
         ],
     ),
     hdrs = [
@@ -70,6 +75,7 @@ cc_library(
         "fs/path.h",
         "installer.h",
         "log.h",
+        "native_backtrace.h",
         "package_manager.h",
         "process_manager.h",
         "producer_consumer_queue.h",
@@ -86,6 +92,7 @@ cc_library(
         "-Itools/base/profiler/native",
         "-I$(GENDIR)/tools/base/profiler",
     ],
+    tags = ["no_windows"],
     deps = [
         "//tools/base/profiler/proto:profiler_cc_proto",
     ],
@@ -103,6 +110,7 @@ cc_test(
         "file_cache_test.cc",
         "file_reader_test.cc",
         "fs/file_system_test.cc",
+        "native_backtrace_test.cc",
         "producer_consumer_queue_test.cc",
         "stopwatch_test.cc",
         "time_value_buffer_test.cc",
@@ -118,6 +126,7 @@ cc_test(
         "//tools/base/profiler/native/testdata:utils",
     ],
     linkstatic = 1,
+    tags = ["no_windows"],
     deps = [
         ":profiler_utils",
         "//external:gmock_main",

@@ -36,6 +36,7 @@ import static com.android.SdkConstants.TOOLS_URI;
 import static com.android.SdkConstants.TRANSPARENT_COLOR;
 import static com.android.SdkConstants.VALUE_DISABLED;
 import static com.android.tools.lint.detector.api.LintUtils.endsWith;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.utils.SdkUtils.getResourceFieldName;
 
 import com.android.annotations.NonNull;
@@ -45,7 +46,6 @@ import com.android.resources.ResourceType;
 import com.android.tools.lint.client.api.ResourceReference;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -55,6 +55,7 @@ import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.Pair;
 import com.intellij.psi.PsiClass;
@@ -82,7 +83,7 @@ import org.w3c.dom.NodeList;
  * Check which looks for overdraw problems where view areas are painted and then
  * painted over, meaning that the bottom paint operation is a waste of time.
  */
-public class OverdrawDetector extends LayoutDetector implements UastScanner {
+public class OverdrawDetector extends LayoutDetector implements SourceCodeScanner {
     private static final String SET_THEME = "setTheme";
 
     /** The main issue discovered by this detector */
@@ -284,7 +285,7 @@ public class OverdrawDetector extends LayoutDetector implements UastScanner {
             }
 
             Location location = context.getLocation(attribute);
-            location.setClientData(attribute);
+            location.setData(attribute);
             if (rootAttributes == null) {
                 rootAttributes = new ArrayList<>();
             }
@@ -466,7 +467,7 @@ public class OverdrawDetector extends LayoutDetector implements UastScanner {
         list.add(classFqn);
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Nullable
     @Override
@@ -521,7 +522,7 @@ public class OverdrawDetector extends LayoutDetector implements UastScanner {
 
         @Override
         public boolean visitCallExpression(UCallExpression node) {
-            if (SET_THEME.equals(node.getMethodName()) && node.getValueArgumentCount() == 1) {
+            if (SET_THEME.equals(getMethodName(node)) && node.getValueArgumentCount() == 1) {
                 // Look at argument
                 UExpression arg = node.getValueArguments().get(0);
                 ResourceReference reference = ResourceReference.get(arg);

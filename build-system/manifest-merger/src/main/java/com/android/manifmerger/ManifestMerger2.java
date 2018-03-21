@@ -88,6 +88,7 @@ public class ManifestMerger2 {
     private final Optional<File> mReportFile;
     @NonNull private final String mFeatureName;
     @NonNull private final FileStreamProvider mFileStreamProvider;
+    @NonNull private final ImmutableList<File> mNavigationFiles;
 
     private ManifestMerger2(
             @NonNull ILogger logger,
@@ -101,7 +102,8 @@ public class ManifestMerger2 {
             @NonNull XmlDocument.Type documentType,
             @NonNull Optional<File> reportFile,
             @NonNull String featureName,
-            @NonNull FileStreamProvider fileStreamProvider) {
+            @NonNull FileStreamProvider fileStreamProvider,
+            @NonNull ImmutableList<File> navigationFiles) {
         this.mSystemPropertyResolver = systemPropertiesResolver;
         this.mPlaceHolderValues = placeHolderValues;
         this.mManifestFile = mainManifestFile;
@@ -114,6 +116,7 @@ public class ManifestMerger2 {
         this.mReportFile = reportFile;
         this.mFeatureName = featureName;
         this.mFileStreamProvider = fileStreamProvider;
+        this.mNavigationFiles = navigationFiles;
     }
 
     /**
@@ -264,8 +267,33 @@ public class ManifestMerger2 {
             }
         }
 
-        // done with proper merging phase, now we need to trim unwanted elements, placeholder
-        // substitution and system properties injection.
+        // done with proper merging phase, now we need to expand <nav-graph> elements, trim unwanted
+        // elements, perform placeholder substitution and system properties injection.
+        Map<String, NavigationXmlDocument> loadedNavigationMap = new HashMap<>();
+        for (File navigationFile : mNavigationFiles) {
+            String navigationId = navigationFile.getName().replaceAll("\\.xml$", "");
+            if (loadedNavigationMap.get(navigationId) != null) {
+                continue;
+            }
+            try (InputStream inputStream = mFileStreamProvider.getInputStream(navigationFile)) {
+                loadedNavigationMap.put(
+                        navigationId,
+                        NavigationXmlLoader.INSTANCE.load(
+                                navigationId, navigationFile, inputStream));
+            } catch (Exception e) {
+                throw new MergeFailureException(e);
+            }
+        }
+        xmlDocumentOptional =
+                Optional.of(
+                        NavGraphExpander.INSTANCE.expandNavGraphs(
+                                xmlDocumentOptional.get(),
+                                loadedNavigationMap,
+                                mergingReportBuilder));
+        if (mergingReportBuilder.hasErrors()) {
+            return mergingReportBuilder.build();
+        }
+
         ElementsTrimmer.trim(xmlDocumentOptional.get(), mergingReportBuilder);
         if (mergingReportBuilder.hasErrors()) {
             return mergingReportBuilder.build();
@@ -374,6 +402,10 @@ public class ManifestMerger2 {
             addDebuggableAttribute(document);
         }
 
+        if (mOptionalFeatures.contains(Invoker.Feature.ADD_MULTIDEX_APPLICATION_IF_NO_NAME)) {
+            addMultiDexApplicationIfNoName(document);
+        }
+
         if (!mOptionalFeatures.contains(Invoker.Feature.SKIP_XML_STRING)) {
             mergingReport.setMergedDocument(
                     MergingReport.MergedManifestKind.MERGED,
@@ -464,6 +496,25 @@ public class ManifestMerger2 {
             // assumes just 1 application element among manifest's immediate children.
             Element application = applicationElements.get(0);
             setAndroidAttribute(application, SdkConstants.ATTR_DEBUGGABLE, SdkConstants.VALUE_TRUE);
+        }
+    }
+
+    /**
+     * Adds android:name="{@link SdkConstants#SUPPORT_MULTI_DEX_APPLICATION}" if there is no value
+     * specified for that field.
+     *
+     * @param document the document for which the name attribute might be set.
+     */
+    private static void addMultiDexApplicationIfNoName(@NonNull Document document) {
+        Element manifest = document.getDocumentElement();
+        ImmutableList<Element> applicationElements =
+                getChildElementsByName(manifest, SdkConstants.TAG_APPLICATION);
+        if (!applicationElements.isEmpty()) {
+            Element application = applicationElements.get(0);
+            setAndroidAttributeIfMissing(
+                    application,
+                    SdkConstants.ATTR_NAME,
+                    SdkConstants.SUPPORT_MULTI_DEX_APPLICATION);
         }
     }
 
@@ -620,6 +671,19 @@ public class ManifestMerger2 {
                 XmlUtils.lookupNamespacePrefix(
                         node, SdkConstants.ANDROID_URI, SdkConstants.ANDROID_NS_NAME, true);
         node.setAttributeNS(SdkConstants.ANDROID_URI, prefix + ":" + localName, value);
+    }
+
+    /**
+     * Set an Android-namespaced XML attribute on the given node, if that attribute is missing.
+     *
+     * @param node Node in which to set the attribute; must be part of a document
+     * @param localName Non-prefixed attribute name
+     * @param value value of the attribute
+     */
+    private static void setAndroidAttributeIfMissing(Element node, String localName, String value) {
+        if (!node.hasAttributeNS(SdkConstants.ANDROID_URI, localName)) {
+            setAndroidAttribute(node, localName, value);
+        }
     }
 
     /**
@@ -1071,6 +1135,10 @@ public class ManifestMerger2 {
 
         @NonNull private String mFeatureName;
 
+        @NonNull
+        private final ImmutableList.Builder<File> mNavigationFilesBuilder =
+                new ImmutableList.Builder<>();
+
         /**
          * Sets a value for a {@link ManifestSystemProperty}
          * @param override the property to set
@@ -1188,7 +1256,13 @@ public class ManifestMerger2 {
              *
              * <p>(This will log a warning.)
              */
-            HANDLE_VALUE_CONFLICTS_AUTOMATICALLY
+            HANDLE_VALUE_CONFLICTS_AUTOMATICALLY,
+
+            /**
+             * Adds {@link SdkConstants#SUPPORT_MULTI_DEX_APPLICATION} as application name if none
+             * is specified. Used for legacy multidex.
+             */
+            ADD_MULTIDEX_APPLICATION_IF_NO_NAME,
         }
 
         /**
@@ -1370,6 +1444,32 @@ public class ManifestMerger2 {
         }
 
         /**
+         * Add one navigation file. It will be added last in the list of navigation files which will
+         * make it the lowest priority navigation file.
+         *
+         * @param file the navigation file to add.
+         * @return itself.
+         */
+        @NonNull
+        public Invoker addNavigationFile(@NonNull File file) {
+            this.mNavigationFilesBuilder.add(file);
+            return thisAsT();
+        }
+
+        /**
+         * Add several navigation files last in the list. Relative priorities between the passed
+         * files as parameters will be respected.
+         *
+         * @param files the navigation files to add.
+         * @return itself.
+         */
+        @NonNull
+        public Invoker addNavigationFiles(@NonNull Iterable<File> files) {
+            this.mNavigationFilesBuilder.addAll(files);
+            return thisAsT();
+        }
+
+        /**
          * Specify if the file being merged is an overlay (flavor). If not called, the merging
          * process will assume a master manifest merge. The master manifest needs to have a package
          * and some other mandatory fields like "uses-sdk", etc.
@@ -1425,7 +1525,8 @@ public class ManifestMerger2 {
                             mDocumentType,
                             Optional.fromNullable(mReportFile),
                             mFeatureName,
-                            fileStreamProvider);
+                            fileStreamProvider,
+                            mNavigationFilesBuilder.build());
             return manifestMerger.merge();
         }
 

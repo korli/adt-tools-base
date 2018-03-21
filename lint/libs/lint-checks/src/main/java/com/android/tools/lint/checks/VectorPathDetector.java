@@ -70,9 +70,11 @@ public class VectorPathDetector extends ResourceXmlDetector {
     public static final Issue PATH_VALID = Issue.create(
             "InvalidVectorPath",
             "Invalid vector paths",
-            "This check ensures that vector paths are valid. For example, it makes "
-                    + "sure that the numbers are not using scientific notation (such as 1.0e3) "
-                    + "which can lead to runtime crashes on older devices.",
+            "This check ensures that vector paths are valid. For example, it makes " +
+                    "sure that the numbers are not using scientific notation (such as 1.0e3) " +
+                    "which can lead to runtime crashes on older devices. As another example, " +
+                    "it flags numbers like `.5` which should be written as `0.5` instead to " +
+                    "avoid crashes on some pre-Marshmallow devices.",
 
             Category.CORRECTNESS,
             5,
@@ -170,7 +172,7 @@ public class VectorPathDetector extends ResourceXmlDetector {
      * Check the given path data and throw a number format exception (containing the
      * exact invalid string) if it finds a problem
      */
-    public static void validatePath(
+    public void validatePath(
             @NonNull XmlContext context,
             @NonNull Attr attribute,
             @NonNull String path) {
@@ -204,7 +206,7 @@ public class VectorPathDetector extends ResourceXmlDetector {
     // resemble the original code.
     // (frameworks/support/compat/java/android/support/v4/graphics/PathParser.java)
 
-    private static void checkFloats(@NonNull XmlContext context, @NonNull Attr attribute,
+    private void checkFloats(@NonNull XmlContext context, @NonNull Attr attribute,
             @NonNull String s, int start, int end) {
         if (s.charAt(start) == 'z' || s.charAt(start) == 'Z') {
             return;
@@ -287,8 +289,20 @@ public class VectorPathDetector extends ResourceXmlDetector {
                 String number = s.substring(startPosition, currentIndex);
                 String replace = number.startsWith(".")
                         ? ("0" + number) : ("-0." + number.substring(2));
+
                 String message = String.format("Use %1$s instead of %2$s to avoid crashes "
                         + "on some devices", replace, number);
+
+                if (number.startsWith(".") &&
+                        startPosition > 0 && Character.isDigit(s.charAt(startPosition-1))) {
+                    // Some SVG files pack numbers adjacent to each other without a separating
+                    // space when the dot implies a space, e.g. "1.2.3" is the number "1.2"
+                    // followed by ".3" (0.3). If we just replace the ".3" with "0.3" we end
+                    // up with "1.20.3", which is the same as before: 1.20 and 0.3. We need
+                    // a separating space here: "1.2 0.3"
+                    replace = " " + replace;
+                }
+
                 reportInvalidPathData(context, attribute, s, startPosition, currentIndex, number,
                         replace, message);
             }
@@ -303,7 +317,7 @@ public class VectorPathDetector extends ResourceXmlDetector {
         }
     }
 
-    private static void reportInvalidPathData(@NonNull XmlContext context, @NonNull Attr attribute,
+    private void reportInvalidPathData(@NonNull XmlContext context, @NonNull Attr attribute,
             @NonNull String s, int startPosition, int currentIndex, @NonNull String number,
             @Nullable String replace, @NonNull String message) {
         Location location = context.getValueLocation(attribute);
@@ -318,7 +332,13 @@ public class VectorPathDetector extends ResourceXmlDetector {
                     startPos.getOffset() + startPosition,
                     startPos.getOffset() + currentIndex);
             if (replace != null) {
-                lintFix = fix().replace().text(number).with(replace).build();
+                lintFix = fix()
+                        .name("Replace with " + replace.trim())
+                        .replace()
+                        .text(number)
+                        .with(replace)
+                        .range(location)
+                        .build();
             }
         }
 

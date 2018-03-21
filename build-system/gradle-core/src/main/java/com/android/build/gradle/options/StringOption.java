@@ -18,6 +18,7 @@ package com.android.build.gradle.options;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.errors.DeprecationReporter;
 import com.android.builder.model.AndroidProject;
 
 public enum StringOption implements Option<String> {
@@ -50,12 +51,23 @@ public enum StringOption implements Option<String> {
 
     // Testing
     DEVICE_POOL_SERIAL("com.android.test.devicepool.serial"),
+    PROFILE_OUTPUT_DIR("android.advanced.profileOutputDir"),
+
+    BUILD_ARTIFACT_REPORT_FILE("android.buildartifact.reportfile"),
     ;
 
     @NonNull private final String propertyName;
+    @Nullable private final DeprecationReporter.DeprecationTarget deprecationTarget;
 
     StringOption(@NonNull String propertyName) {
+        this(propertyName, null);
+    }
+
+    StringOption(
+            @NonNull String propertyName,
+            @Nullable DeprecationReporter.DeprecationTarget deprecationTarget) {
         this.propertyName = propertyName;
+        this.deprecationTarget = deprecationTarget;
     }
 
     @Override
@@ -84,5 +96,16 @@ public enum StringOption implements Option<String> {
                         + "' of type '"
                         + value.getClass()
                         + "' as string.");
+    }
+
+    @Override
+    public boolean isDeprecated() {
+        return (deprecationTarget != null);
+    }
+
+    @Nullable
+    @Override
+    public DeprecationReporter.DeprecationTarget getDeprecationTarget() {
+        return deprecationTarget;
     }
 }

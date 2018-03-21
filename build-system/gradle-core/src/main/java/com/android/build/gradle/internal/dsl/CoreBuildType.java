@@ -43,9 +43,6 @@ public interface CoreBuildType extends BuildType {
      */
     @Deprecated
     @NonNull
-    CoreJackOptions getJackOptions();
-
-    @NonNull
     JavaCompileOptions getJavaCompileOptions();
 
     @NonNull

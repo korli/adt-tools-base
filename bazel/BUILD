@@ -2,7 +2,7 @@ load("//tools/base/bazel:maven.bzl", "maven_repo")
 
 java_library(
     name = "utils",
-    srcs = glob(["src/**/utils/*.java"]),
+    srcs = glob(["src/com/android/tools/utils/*.java"]),
     visibility = [
         "//tools/base/bazel/sdk:__pkg__",
         "//tools/base/build-system/instant-run-instrumentation:__pkg__",
@@ -11,7 +11,7 @@ java_library(
 
 java_binary(
     name = "jasmin-compiler",
-    srcs = glob(["src/com/android/tools/jasmin/JasminCompiler.java"]),
+    srcs = ["src/com/android/tools/jasmin/JasminCompiler.java"],
     main_class = "com.android.tools.jasmin.JasminCompiler",
     visibility = ["//visibility:public"],
     deps = [
@@ -22,13 +22,13 @@ java_binary(
 
 java_library(
     name = "groovy-compiler",
-    srcs = glob(["src/**/groovy/*.java"]),
+    srcs = glob(["src/com/android/tools/groovy/*.java"]),
     # Note that version 2.3 of groovy, embeds timestamps into the generated classes
     # making it unsuitable for bazel or any other reasonable tool.
     # TODO: Update and use the prebuilts dependency
     deps = [
         ":utils",
-        "//tools/idea/lib:groovy-all-2.4.6",
+        "//tools/idea/.idea/libraries:Groovy",
     ],
 )
 
@@ -53,63 +53,19 @@ java_binary(
     runtime_deps = [":utils"],
 )
 
-genrule(
-    name = "kotlin-compiler.genrule",
-    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.1.0-release-112.zip"],
-    outs = ["kotlin-compiler.jar"],
-    cmd = "$(location :unzipper) $< Kotlin/kotlinc/lib/kotlin-compiler.jar:$@",
-    tools = [":unzipper"],
-)
-
-java_import(
-    name = "kotlin-compiler",
-    jars = [":kotlin-compiler.genrule"],
-)
-
-genrule(
-    name = "kotlin-runtime.genrule",
-    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.1.0-release-112.zip"],
-    outs = [
-        "kotlin-runtime.jar",
-        "kotlin-reflect.jar",
-        "kotlin-script-runtime.jar",
-    ],
-    cmd = "$(location :unzipper) $< " +
-          "Kotlin/kotlinc/lib/kotlin-runtime.jar:$(@D)/kotlin-runtime.jar " +
-          "Kotlin/kotlinc/lib/kotlin-reflect.jar:$(@D)/kotlin-reflect.jar " +
-          "Kotlin/kotlinc/lib/kotlin-script-runtime.jar:$(@D)/kotlin-script-runtime.jar",
-    tools = [":unzipper"],
-)
-
-java_import(
-    name = "kotlin-runtime",
-    jars = [":kotlin-runtime.genrule"],
-    visibility = ["//visibility:public"],
-)
-
-genrule(
-    name = "kotlin-test.genrule",
-    srcs = ["//prebuilts/tools/common/kotlin-plugin:kotlin-plugin-1.1.0-release-112.zip"],
-    outs = ["kotlin-test.jar"],
-    cmd = "$(location :unzipper) $< Kotlin/kotlinc/lib/kotlin-test.jar:$(@D)/kotlin-test.jar",
-    tools = [":unzipper"],
-)
-
-java_import(
-    name = "kotlin-test",
-    jars = [":kotlin-test.genrule"],
-    visibility = ["//visibility:public"],
-)
-
 java_binary(
     name = "kotlinc",
     srcs = ["src/com/android/tools/kotlin/KotlinCompiler.java"],
+    data = ["//prebuilts/tools/common/kotlin-plugin-ij:kotlin_plugin"],
     main_class = "com.android.tools.kotlin.KotlinCompiler",
     visibility = ["//visibility:public"],
-    runtime_deps = [":kotlin-runtime"],
+    runtime_deps = [
+        "//prebuilts/tools/common/kotlin-plugin-ij:Kotlin/kotlinc/lib/kotlin-reflect",
+        "//prebuilts/tools/common/kotlin-plugin-ij:Kotlin/kotlinc/lib/kotlin-runtime",
+    ],
     deps = [
-        ":kotlin-compiler",
         ":utils",
+        "//prebuilts/tools/common/kotlin-plugin-ij:Kotlin/kotlinc/lib/kotlin-compiler",
     ],
 )
 
@@ -118,10 +74,24 @@ java_binary(
     srcs = ["src/com/android/tools/form/FormCompiler.java"],
     main_class = "com.android.tools.form.FormCompiler",
     visibility = ["//visibility:public"],
-    runtime_deps = [":kotlin-runtime"],
+    runtime_deps = ["//prebuilts/tools/common/kotlin-plugin-ij:Kotlin/kotlinc/lib/kotlin-runtime"],
     deps = [
         ":utils",
         "//prebuilts/tools/common/bazel/formc-deps",
+    ],
+)
+
+java_library(
+    name = "bazel_generator",
+    srcs = glob(["src/com/android/tools/bazel/**"]),
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        "//tools/idea/.idea/libraries:JDOM",
+    ],
+    deps = [
+        "//tools/idea/.idea/libraries:Guava",
+        "//tools/idea/.idea/libraries:Trove4j",
+        "//tools/idea/build/lib:jps",
     ],
 )
 
@@ -129,6 +99,17 @@ java_import(
     name = "langtools",
     jars = ["@local_jdk//:langtools"],
     visibility = ["//visibility:public"],
+)
+
+java_binary(
+    name = "iml_to_build",
+    srcs = ["src/com/android/tools/binaries/ImlToBazel.java"],
+    main_class = "com.android.tools.binaries.ImlToBazel",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":bazel_generator",
+        ":utils",
+    ],
 )
 
 java_binary(
@@ -265,9 +246,22 @@ java_binary(
 )
 
 java_binary(
+    name = "gradlew",
+    srcs = ["src/com/android/tools/gradle/GradleW.java"],
+    main_class = "com.android.tools.gradle.GradleW",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tools/base/annotations",
+        "//tools/base/build-system:gradle-api",
+        "//tools/base/testutils:tools.testutils",
+        "//tools/base/third_party:com.google.guava_guava",
+    ],
+)
+
+java_binary(
     name = "antlr",
-    srcs = glob(["src/**/antlr/**"]),
-    main_class = "com.android.tools.utils.antlr.AntlrCompiler",
+    srcs = ["src/com/android/tools/binaries/AntlrCompiler.java"],
+    main_class = "com.android.tools.binaries.AntlrCompiler",
     visibility = ["//visibility:public"],
     deps = [
         ":utils",
@@ -319,17 +313,15 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
-maven_repo(
-    name = "offline_repo",
-    artifacts = [
-        "//tools/data-binding:tools.compiler",
-        "//tools/base/build-system/gradle",
-        "//tools/base/build-system/gradle-experimental",
-        "//tools/base/build-system/java-lib-plugin/java-lib-model-builder",
-        "//tools/base/devicelib:tools.devicelib",
-        "//tools/base/lint/libs/lint-tests",
-        "//tools/base/testutils:tools.testutils",
+java_test(
+    name = "iml_to_build_tests",
+    srcs = ["testSrc/com/android/tools/binaries/ImlToBazelTest.java"],
+    data = ["//tools/base/bazel/test:iml_to_bazel"],
+    test_class = "com.android.tools.binaries.ImlToBazelTest",
+    deps = [
+        ":bazel_generator",
+        ":iml_to_build",
+        ":utils",
     ],
-    include_sources = True,
-    visibility = ["//visibility:public"],
+    tags = ["no_test_windows"],
 )

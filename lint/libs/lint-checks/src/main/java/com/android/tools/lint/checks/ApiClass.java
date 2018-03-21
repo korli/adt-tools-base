@@ -40,7 +40,7 @@ import java.util.Set;
  *
  * <p>{@link #getField} returns the API level when the field was introduced.
  */
-final class ApiClass implements Comparable<ApiClass> {
+public final class ApiClass implements Comparable<ApiClass> {
     private final String mName;
     private final int mSince;
     private final int mDeprecatedIn;
@@ -158,21 +158,6 @@ final class ApiClass implements Comparable<ApiClass> {
         // This follows the same logic as getField/getMethod.
         // However, it also incorporates deprecation versions from the class.
         int apiLevel = getValueWithDefault(mMembersDeprecatedIn, name, 0);
-
-        // Look at the super classes and interfaces.
-        for (Pair<String, Integer> superClassPair : Iterables.concat(mSuperClasses, mInterfaces)) {
-            ApiClass superClass = info.getClass(superClassPair.getFirst());
-            if (superClass != null) {
-                int i = superClass.getMemberDeprecatedIn(name, info);
-                if (i != 0) {
-                    int tmp = Math.max(superClassPair.getSecond(), i);
-                    if (apiLevel == 0 || tmp < apiLevel) {
-                        apiLevel = tmp;
-                    }
-                }
-            }
-        }
-
         return apiLevel == 0
                 ? mDeprecatedIn
                 : mDeprecatedIn == 0 ? apiLevel : Math.min(apiLevel, mDeprecatedIn);
@@ -347,14 +332,24 @@ final class ApiClass implements Comparable<ApiClass> {
         }
     }
 
-    @Nullable
-    public String getPackage() {
-        int index = mName.lastIndexOf('/');
-        if (index != -1) {
+    @NonNull
+    public String getContainerName() {
+        int index = lastIndexOfSlashOrDollar(mName);
+        if (index >= 0) {
             return mName.substring(0, index);
         }
 
-        return null;
+        return "";
+    }
+
+    private static int lastIndexOfSlashOrDollar(String className) {
+        for (int i = className.length(); --i >= 0;) {
+            char c = className.charAt(i);
+            if (c == '/' || c == '$') {
+                return i;
+            }
+        }
+        return -1;
     }
 
     @NonNull

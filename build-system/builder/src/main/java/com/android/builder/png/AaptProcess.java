@@ -20,8 +20,9 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.internal.aapt.AaptException;
 import com.android.builder.internal.aapt.AaptPackageConfig;
+import com.android.builder.internal.aapt.v2.Aapt2DaemonUtil;
+import com.android.builder.internal.aapt.v2.Aapt2Exception;
 import com.android.builder.internal.aapt.v2.Aapt2QueuedResourceProcessor;
-import com.android.builder.internal.aapt.v2.AaptV2CommandBuilder;
 import com.android.builder.tasks.BooleanLatch;
 import com.android.builder.tasks.Job;
 import com.android.ide.common.process.ProcessException;
@@ -29,7 +30,6 @@ import com.android.ide.common.process.ProcessOutput;
 import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.sdklib.BuildToolInfo;
-import com.android.tools.aapt2.Aapt2Exception;
 import com.android.utils.FileUtils;
 import com.android.utils.GrabProcessOutput;
 import com.android.utils.ILogger;
@@ -44,10 +44,10 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.annotation.concurrent.NotThreadSafe;
 
-/**
- * interface to the aapt long running process.
- */
+/** interface to the aapt long running process. */
+@NotThreadSafe
 public class AaptProcess {
     private static final int DEFAULT_SLAVE_AAPT_TIMEOUT_IN_SECONDS = 5;
     private static final int SLAVE_AAPT_TIMEOUT_IN_SECONDS =
@@ -132,17 +132,11 @@ public class AaptProcess {
                 new NotifierProcessOutput(job, mProcessOutputFacade, mLogger, processOutputHandler);
 
         mProcessOutputFacade.setNotifier(notifier);
-        mWriter.write('c');
-        mWriter.write('\n');
-        mWriter.write(joiner.join(AaptV2CommandBuilder.makeCompile(request)));
-        // Finish the request
-        mWriter.write('\n');
-        mWriter.write('\n');
-        mWriter.flush();
+        Aapt2DaemonUtil.requestCompile(mWriter, request);
         processCount++;
         mLogger.verbose(
                 "AAPT2 processed(%1$d) %2$s job:%3$s",
-                hashCode(), request.getInput().getName(), job.toString());
+                hashCode(), request.getInputFile().getName(), job.toString());
     }
 
     /**
@@ -151,12 +145,10 @@ public class AaptProcess {
      * com.android.builder.tasks.Job#finished()} or {@link Job#error(Throwable)} ()} functions.
      *
      * @param config the configuration of the link request
-     * @param intermediateDir the directory for intermediate files
      * @param job the job to notify when the linking is finished successfully or not.
      */
     public void link(
             @NonNull AaptPackageConfig config,
-            @NonNull File intermediateDir,
             @NonNull Job<AaptProcess> job,
             @Nullable ProcessOutputHandler processOutputHandler)
             throws IOException {
@@ -172,17 +164,7 @@ public class AaptProcess {
                 new NotifierProcessOutput(job, mProcessOutputFacade, mLogger, processOutputHandler);
 
         mProcessOutputFacade.setNotifier(notifier);
-        try {
-            mWriter.write('l');
-            mWriter.write('\n');
-            mWriter.write(joiner.join(AaptV2CommandBuilder.makeLink(config, intermediateDir)));
-            // Finish the request
-            mWriter.write('\n');
-            mWriter.write('\n');
-            mWriter.flush();
-        } catch (AaptException e) {
-            throw new IOException(e);
-        }
+        Aapt2DaemonUtil.requestLink(mWriter, config);
         processCount++;
         mLogger.verbose("AAPT2 processed(%1$d) linking job:%2$s", hashCode(), job.toString());
     }
@@ -238,9 +220,7 @@ public class AaptProcess {
             return;
         }
         mReady.set(false);
-        mWriter.write("quit\n");
-        mWriter.write('\n');
-        mWriter.flush();
+        Aapt2DaemonUtil.requestShutdown(mWriter);
         mProcess.waitFor();
         mLogger.verbose("Process (%1$s) processed %2$s files", hashCode(), processCount);
     }
@@ -389,7 +369,11 @@ public class AaptProcess {
                 if (line.equalsIgnoreCase("Done")) {
                     mOwner.reset();
                     if (mInError.get()) {
-                        mJob.error(new AaptException(AaptProcess.joiner.join(errors)));
+                        if (errors.isEmpty()) {
+                            mJob.error(new Aapt2Exception("AAPT error: check logs for details"));
+                        } else {
+                            mJob.error(new AaptException(AaptProcess.joiner.join(errors)));
+                        }
                     } else {
                         mJob.finished();
                     }
@@ -410,7 +394,12 @@ public class AaptProcess {
                     if (mInError.get()) {
                         if (!handleOutput()) {
                             // If processing the output failed, just print the errors.
-                            mJob.error(new Aapt2Exception(AaptProcess.joiner.join(errors)));
+                            if (errors.isEmpty()) {
+                                mJob.error(
+                                        new Aapt2Exception("AAPT2 error: check logs for details"));
+                            } else {
+                                mJob.error(new Aapt2Exception(AaptProcess.joiner.join(errors)));
+                            }
                         }
                     } else {
                         mJob.finished();

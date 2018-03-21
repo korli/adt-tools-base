@@ -17,32 +17,17 @@
 package com.android.build.gradle.internal.scope;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.build.FilterData;
 import com.android.build.OutputFile;
 import com.android.build.gradle.internal.variant.MultiOutputPolicy;
 import com.android.ide.common.build.ApkData;
-import com.android.ide.common.build.ApkInfo;
-import com.android.ide.common.internal.WaitableExecutor;
-import com.android.utils.FileUtils;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Multimaps;
-import com.google.common.collect.SetMultimap;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
+import com.google.common.base.Joiner;
 import java.io.Serializable;
-import java.io.Writer;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import org.gradle.tooling.BuildException;
 
 /**
  * Information about expected Outputs from a build.
@@ -59,27 +44,14 @@ import org.gradle.tooling.BuildException;
  */
 public class OutputScope implements Serializable {
 
-    @NonNull private final MultiOutputPolicy multiOutputPolicy;
     @NonNull private final List<ApkData> apkDatas;
 
-    @NonNull
-    private final SetMultimap<VariantScope.OutputType, BuildOutput> splitOutputs =
-            Multimaps.synchronizedSetMultimap(HashMultimap.create());
-
-    public OutputScope(@NonNull MultiOutputPolicy multiOutputPolicy) {
-        this.multiOutputPolicy = multiOutputPolicy;
+    public OutputScope() {
         this.apkDatas = new ArrayList<>();
     }
 
-    public OutputScope(
-            @NonNull MultiOutputPolicy multiOutputPolicy, @NonNull Collection<ApkData> apkDatas) {
-        this.multiOutputPolicy = multiOutputPolicy;
+    public OutputScope(@NonNull Collection<ApkData> apkDatas) {
         this.apkDatas = new ArrayList<>(apkDatas);
-    }
-
-    @NonNull
-    public MultiOutputPolicy getMultiOutputPolicy() {
-        return multiOutputPolicy;
     }
 
     void addSplit(@NonNull ApkData apkData) {
@@ -97,40 +69,40 @@ public class OutputScope implements Serializable {
         return apkDatas.stream().filter(ApkData::isEnabled).collect(Collectors.toList());
     }
 
-    @Nullable
-    public ApkData getSplit(Collection<FilterData> filters) {
-        for (ApkData apkData : apkDatas) {
-            if (apkData.getFilters().equals(filters)) {
-                return apkData;
-            }
-        }
-        return null;
-    }
-
-    @Nullable
+    @NonNull
     public ApkData getMainSplit() {
 
         // no ABI specified, look for the main split.
-        List<ApkData> splitsByType = getSplitsByType(OutputFile.OutputType.MAIN);
-        if (!splitsByType.isEmpty()) {
-            return splitsByType.get(0);
+        Optional<ApkData> splitsByType =
+                apkDatas.stream()
+                        .filter(apkInfo -> apkInfo.getType() == OutputFile.OutputType.MAIN)
+                        .findFirst();
+
+        if (splitsByType.isPresent()) {
+            return splitsByType.get();
         }
         // can't find the main split, look for the universal full split.
         Optional<ApkData> universal =
                 getApkDatas()
                         .stream()
-                        .filter(split -> split.getFilterName().equals(OutputFactory.UNIVERSAL))
+                        .filter(split -> OutputFactory.UNIVERSAL.equals(split.getFilterName()))
                         .findFirst();
         if (universal.isPresent()) {
             return universal.get();
         }
-        // ok look for the first full split, it will do.
+        // ok look for the first enabled full split, it will do.
         Optional<ApkData> firstFullSplit =
                 getApkDatas()
                         .stream()
                         .filter(split -> split.getType() == OutputFile.OutputType.FULL_SPLIT)
                         .findFirst();
-        return firstFullSplit.orElse(null);
+        if (firstFullSplit.isPresent()) {
+            return firstFullSplit.get();
+        }
+        throw new RuntimeException(
+                String.format(
+                        "Cannot determine main APK output from %1$s",
+                        Joiner.on(":").join(apkDatas)));
     }
 
     @NonNull
@@ -138,192 +110,6 @@ public class OutputScope implements Serializable {
         return apkDatas.stream()
                 .filter(split -> split.getType() == outputType)
                 .collect(Collectors.toList());
-    }
-
-    public void parallelForEach(VariantScope.OutputType outputType, SplitAction action)
-            throws IOException {
-
-        WaitableExecutor executor = WaitableExecutor.useGlobalSharedThreadPool();
-        apkDatas.forEach(
-                split ->
-                        executor.execute(
-                                () -> {
-                                    addOutputForSplit(
-                                            outputType, split, action.processSplit(split));
-                                    return null;
-                                }));
-        try {
-            List<WaitableExecutor.TaskResult<Void>> taskResults = executor.waitForAllTasks();
-            taskResults.forEach(
-                    taskResult -> {
-                        if (taskResult.getException() != null) {
-                            throw new BuildException(
-                                    taskResult.getException().getMessage(),
-                                    taskResult.getException());
-                        }
-                    });
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
-    }
-
-    public void deleteAllEntries(VariantScope.OutputType outputType) {
-        splitOutputs.removeAll(outputType);
-    }
-
-    public void parallelForEachOutput(
-            Collection<BuildOutput> inputs,
-            VariantScope.OutputType inputType,
-            VariantScope.OutputType outputType,
-            SplitOutputAction action) {
-
-        parallelForEachOutput(
-                inputs,
-                inputType,
-                outputType,
-                (ParameterizedSplitOutputAction<Void>)
-                        (apkData, output, param) -> action.processSplit(apkData, output),
-                null);
-    }
-
-    public <T> void parallelForEachOutput(
-            Collection<BuildOutput> inputs,
-            VariantScope.OutputType inputType,
-            VariantScope.OutputType outputType,
-            ParameterizedSplitOutputAction<T> action,
-            T parameter) {
-
-        parallelForEachOutput(
-                inputs,
-                inputType,
-                outputType,
-                (TwoParameterizedSplitOutputAction<T, Void>)
-                        (apkData, output, paramOne, paramTwo) ->
-                                action.processSplit(apkData, output, paramOne),
-                parameter,
-                null);
-    }
-
-    public <T, U> void parallelForEachOutput(
-            Collection<BuildOutput> inputs,
-            VariantScope.OutputType inputType,
-            VariantScope.OutputType outputType,
-            TwoParameterizedSplitOutputAction<T, U> action,
-            T parameterOne,
-            U parameterTwo) {
-        WaitableExecutor executor = WaitableExecutor.useGlobalSharedThreadPool();
-        apkDatas.forEach(
-                split ->
-                        executor.execute(
-                                () -> {
-                                    BuildOutput buildOutput = getOutput(inputs, inputType, split);
-                                    if (buildOutput != null) {
-                                        addOutputForSplit(
-                                                outputType,
-                                                split,
-                                                action.processSplit(
-                                                        split,
-                                                        buildOutput.getOutputFile(),
-                                                        parameterOne,
-                                                        parameterTwo),
-                                                buildOutput.getProperties());
-                                    }
-                                    return null;
-                                }));
-        try {
-            List<WaitableExecutor.TaskResult<Void>> taskResults = executor.waitForAllTasks();
-            taskResults.forEach(
-                    taskResult -> {
-                        if (taskResult.getException() != null) {
-                            throw new BuildException(
-                                    taskResult.getException().getMessage(),
-                                    taskResult.getException());
-                        }
-                    });
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
-        }
-    }
-
-    public interface SplitAction {
-        @Nullable
-        File processSplit(ApkData apkData) throws IOException;
-    }
-
-    public interface ParameterizedSplitOutputAction<T> {
-        @Nullable
-        File processSplit(@NonNull ApkData apkData, @Nullable File output, T param)
-                throws IOException;
-    }
-
-    public interface TwoParameterizedSplitOutputAction<T, U> {
-        @Nullable
-        File processSplit(@NonNull ApkData apkData, @Nullable File output, T paramOne, U paramTwo)
-                throws IOException;
-    }
-
-    public interface SplitOutputAction {
-        @Nullable
-        File processSplit(@NonNull ApkData apkData, @Nullable File output) throws IOException;
-    }
-
-    public void save(VariantScope.OutputType outputType, File folder) throws IOException {
-        save(ImmutableList.of(outputType), folder);
-    }
-
-    public void save(ImmutableList<VariantScope.OutputType> outputTypes, File folder)
-            throws IOException {
-        String persistedString = BuildOutputs.persist(folder.toPath(), outputTypes, splitOutputs);
-        if (persistedString.isEmpty()) {
-            return;
-        }
-        FileUtils.mkdirs(folder);
-        try (Writer writer = new FileWriter(BuildOutputs.getMetadataFile(folder))) {
-            writer.append(persistedString);
-        }
-    }
-
-    @Nullable
-    public static BuildOutput getOutput(
-            Collection<BuildOutput> buildOutputs,
-            VariantScope.OutputType outputType,
-            ApkInfo apkData) {
-        Optional<BuildOutput> matchingOutput =
-                buildOutputs
-                        .stream()
-                        .filter(
-                                splitOutput ->
-                                        splitOutput.getType() == outputType
-                                                && splitOutput.getApkInfo().getType()
-                                                        == apkData.getType()
-                                                && splitOutput
-                                                        .getFilters()
-                                                        .equals(apkData.getFilters()))
-                        .findFirst();
-        return matchingOutput.orElse(null);
-    }
-
-    @Nullable
-    public static BuildOutput getOutput(
-            Collection<BuildOutput> buildOutputs,
-            VariantScope.OutputType outputType,
-            OutputFile.OutputType apkType) {
-        Optional<BuildOutput> matchingOutput =
-                buildOutputs
-                        .stream()
-                        .filter(
-                                splitOutput ->
-                                        splitOutput.getType() == outputType
-                                                && splitOutput.getApkInfo().getType() == apkType)
-                        .findFirst();
-        return matchingOutput.orElse(null);
-    }
-
-    @NonNull
-    public Collection<BuildOutput> getOutputs(VariantScope.OutputType outputType) {
-        return splitOutputs.get(outputType);
     }
 
     @Override
@@ -338,36 +124,11 @@ public class OutputScope implements Serializable {
             return false;
         }
         OutputScope that = (OutputScope) o;
-        return Objects.equals(splitOutputs, that.splitOutputs)
-                && Objects.equals(apkDatas, that.apkDatas)
-                && multiOutputPolicy == that.multiOutputPolicy;
+        return Objects.equals(apkDatas, that.apkDatas);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), splitOutputs, apkDatas, multiOutputPolicy);
-    }
-
-    public void addOutputForSplit(
-            VariantScope.OutputType outputType, ApkData apkData, @Nullable File outputFile) {
-        if (outputFile != null) {
-            splitOutputs.put(outputType, new BuildOutput(outputType, apkData, outputFile));
-        }
-    }
-
-    public void addOutputForSplit(
-            VariantScope.OutputType outputType,
-            ApkData apkData,
-            @Nullable File outputFile,
-            Map<String, String> properties) {
-
-        if (outputFile != null) {
-            splitOutputs.put(
-                    outputType, new BuildOutput(outputType, apkData, outputFile, properties));
-        }
-    }
-
-    public String persist(Path outputPath, ImmutableList<VariantScope.OutputType> outputTypes) {
-        return BuildOutputs.persist(outputPath, outputTypes, splitOutputs);
+        return Objects.hash(super.hashCode(), apkDatas);
     }
 }

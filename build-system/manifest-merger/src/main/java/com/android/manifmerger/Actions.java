@@ -83,7 +83,7 @@ public class Actions {
      * passed key.
      */
     @NonNull
-    public ImmutableList<NodeRecord> getNodeRecords(XmlNode.NodeKey key) {
+    public ImmutableList<NodeRecord> getNodeRecords(@NonNull XmlNode.NodeKey key) {
         return mRecords.containsKey(key)
                 ? mRecords.get(key).getNodeRecords()
                 : ImmutableList.<NodeRecord>of();
@@ -181,6 +181,11 @@ public class Actions {
          * element to be present by default while targeted SDK requires its declaration.
          */
         IMPLIED,
+        /**
+         * The element was converted into a different type of element in the resulting merged
+         * manifest.
+         */
+        CONVERTED,
     }
 
     /**

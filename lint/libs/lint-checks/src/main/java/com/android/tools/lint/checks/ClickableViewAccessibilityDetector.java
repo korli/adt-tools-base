@@ -18,6 +18,7 @@ package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.CLASS_VIEW;
 import static com.android.tools.lint.checks.CleanupDetector.MOTION_EVENT_CLS;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 
 import com.android.annotations.NonNull;
@@ -25,12 +26,12 @@ import com.android.annotations.Nullable;
 import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.TypeEvaluator;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
@@ -56,7 +57,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor;
  * Checks that views that override View#onTouchEvent also implement View#performClick
  * and call performClick when click detection occurs.
  */
-public class ClickableViewAccessibilityDetector extends Detector implements UastScanner {
+public class ClickableViewAccessibilityDetector extends Detector implements SourceCodeScanner {
 
     public static final Issue ISSUE = Issue.create(
             "ClickableViewAccessibility",
@@ -85,7 +86,7 @@ public class ClickableViewAccessibilityDetector extends Detector implements Uast
     public ClickableViewAccessibilityDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     public List<String> getApplicableMethodNames() {
@@ -138,7 +139,7 @@ public class ClickableViewAccessibilityDetector extends Detector implements Uast
             String message = String.format(
                     "Custom view `%1$s` has `setOnTouchListener` called on it but does not "
                             + "override `performClick`", describeClass(viewClass));
-            context.report(ISSUE, method, context.getLocation(node), message);
+            context.report(ISSUE, node, context.getLocation(node), message);
         }
     }
 
@@ -319,8 +320,7 @@ public class ClickableViewAccessibilityDetector extends Detector implements Uast
             // There are also methods like performContextClick and performLongClick
             // which also perform accessibility work, but they seem to have different
             // semantics than the intended onTouch to perform click check
-            if (PERFORM_CLICK.equals(node.getMethodName()) &&
-                    node.getValueArgumentCount() == 0) {
+            if (PERFORM_CLICK.equals(getMethodName(node)) && node.getValueArgumentCount() == 0) {
                 // TODO: Check receiver?
                 performsClick = true;
             }

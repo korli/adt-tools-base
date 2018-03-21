@@ -32,7 +32,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
-import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -763,7 +762,7 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
      * @param flavors flavors to merge
      * @return final merged product flavor
      */
-    static ProductFlavor mergeFlavors(
+    public static ProductFlavor mergeFlavors(
             @NonNull ProductFlavor lowestPriority, @NonNull List<? extends ProductFlavor> flavors) {
         DefaultProductFlavor mergedFlavor = DefaultProductFlavor.clone(lowestPriority);
         for (ProductFlavor flavor : Lists.reverse(flavors)) {
@@ -893,11 +892,6 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
         flavor.setMultiDexKeepProguard(chooseNotNull(
                 overlay.getMultiDexKeepProguard(), base.getMultiDexKeepProguard()));
 
-        flavor.setJarJarRuleFiles(ImmutableList.<File>builder()
-                .addAll(overlay.getJarJarRuleFiles())
-                .addAll(base.getJarJarRuleFiles())
-                .build());
-
         flavor.getVectorDrawables().setGeneratedDensities(
                 chooseNotNull(
                         overlay.getVectorDrawables().getGeneratedDensities(),
@@ -928,11 +922,10 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
      * Clone a given product flavor.
      *
      * @param productFlavor the flavor to clone.
-     *
      * @return a new instance that is a clone of the flavor.
      */
     @NonNull
-    static DefaultProductFlavor clone(@NonNull ProductFlavor productFlavor) {
+    public static DefaultProductFlavor clone(@NonNull ProductFlavor productFlavor) {
         DefaultProductFlavor flavor = new DefaultProductFlavor(productFlavor.getName());
         flavor._initWith(productFlavor);
         flavor.mDimension = productFlavor.getDimension();
@@ -972,7 +965,12 @@ public class DefaultProductFlavor extends BaseConfigImpl implements ProductFlavo
 
         flavor.setMultiDexKeepFile(productFlavor.getMultiDexKeepFile());
         flavor.setMultiDexKeepProguard(productFlavor.getMultiDexKeepProguard());
-        flavor.setJarJarRuleFiles(ImmutableList.copyOf(productFlavor.getJarJarRuleFiles()));
+
+        if (productFlavor instanceof DefaultProductFlavor) {
+            final DefaultProductFlavor defaultProductFlavor = (DefaultProductFlavor) productFlavor;
+            flavor.missingDimensionSelections =
+                    Maps.newHashMap(defaultProductFlavor.getMissingDimensionStrategies());
+        }
 
         if (productFlavor instanceof DefaultProductFlavor) {
             final DefaultProductFlavor defaultProductFlavor = (DefaultProductFlavor) productFlavor;
