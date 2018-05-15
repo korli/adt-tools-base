@@ -19,6 +19,7 @@ package com.android.tools.apk.analyzer.internal;
 import com.android.annotations.NonNull;
 import com.android.tools.apk.analyzer.Archive;
 import com.android.utils.FileUtils;
+
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -76,10 +77,15 @@ public class ZipArtifact implements Archive {
         }
 
         @Override
-        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
-                throws IOException {
-            Files.createDirectories(destination.resolve(source.relativize(dir).toString()));
-            return FileVisitResult.CONTINUE;
+        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+            Path resolved = destination.resolve(source.relativize(dir).toString()).normalize();
+            if (resolved.startsWith(destination)) {
+                Files.createDirectories(resolved);
+                return FileVisitResult.CONTINUE;
+            }
+            else {
+                return FileVisitResult.SKIP_SUBTREE;
+            }
         }
 
         @Override
