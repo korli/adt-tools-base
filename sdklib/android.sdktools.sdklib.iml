@@ -9,7 +9,6 @@
     </content>
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="inheritedJdk" />
-    <orderEntry type="module" module-name="android.sdktools.common" exported="" />
     <orderEntry type="module" module-name="android.sdktools.dvlib" exported="" />
     <orderEntry type="module" module-name="android.sdktools.layoutlib-api" exported="" />
     <orderEntry type="library" exported="" name="http-client" level="project" />
@@ -29,5 +28,8 @@
     </orderEntry>
     <orderEntry type="library" scope="TEST" name="com.android.tools:testutils:26.1.2" level="project" />
     <orderEntry type="library" scope="TEST" name="KotlinJavaRuntime" level="project" />
+    <orderEntry type="library" name="com.android.tools:annotations:26.1.2" level="project" />
+    <orderEntry type="library" name="Guava" level="project" />
+    <orderEntry type="library" name="com.android.tools:common:26.1.2" level="project" />
   </component>
 </module>

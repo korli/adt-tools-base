@@ -11,11 +11,13 @@
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
     <orderEntry type="library" name="gson" level="project" />
-    <orderEntry type="module" module-name="android.sdktools.common" />
     <orderEntry type="library" name="protobuf" level="project" />
     <orderEntry type="library" scope="TEST" name="analytics-protos" level="project" />
     <orderEntry type="library" scope="TEST" name="com.android.tools.analytics-library:tracker:26.1.2" level="project" />
     <orderEntry type="library" scope="TEST" name="com.android.tools.analytics-library:shared:26.1.2" level="project" />
     <orderEntry type="library" scope="TEST" name="com.android.tools:testutils:26.1.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="com.android.tools:annotations:26.1.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="com.android.tools:common:26.1.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="Guava" level="project" />
   </component>
 </module>
