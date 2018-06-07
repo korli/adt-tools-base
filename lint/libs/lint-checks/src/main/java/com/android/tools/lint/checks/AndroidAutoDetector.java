@@ -21,7 +21,7 @@ import static com.android.SdkConstants.ATTR_NAME;
 import static com.android.SdkConstants.DOT_XML;
 import static com.android.SdkConstants.TAG_INTENT_FILTER;
 import static com.android.SdkConstants.TAG_SERVICE;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_STRING;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_STRING;
 import static com.android.xml.AndroidManifest.NODE_ACTION;
 import static com.android.xml.AndroidManifest.NODE_APPLICATION;
 import static com.android.xml.AndroidManifest.NODE_METADATA;
@@ -31,16 +31,16 @@ import com.android.annotations.Nullable;
 import com.android.resources.ResourceFolderType;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
-import com.android.tools.lint.detector.api.Detector.XmlScanner;
+import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Location;
-import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.tools.lint.detector.api.XmlScanner;
 import com.android.utils.XmlUtils;
 import java.util.Arrays;
 import java.util.Collection;
@@ -57,8 +57,8 @@ import org.w3c.dom.Element;
  * <p> Uses a {@code <meta-data>} tag with a {@code name="com.google.android.gms.car.application"}
  * as a trigger for validating Automotive specific issues.
  */
-public class AndroidAutoDetector extends ResourceXmlDetector
-        implements XmlScanner, UastScanner {
+public class AndroidAutoDetector extends Detector
+        implements XmlScanner, SourceCodeScanner {
 
     // TODO: Use the new merged manifest model
 

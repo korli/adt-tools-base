@@ -1,0 +1,15 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+apply from: "../../commonLocalRepo.gradle"
+
+android {
+    compileSdkVersion rootProject.latestCompileSdk
+    buildToolsVersion = rootProject.buildToolsVersion
+}
+
+//
+// A basic Android application split over a library and a main project.
+//
+dependencies {
+    api project(':lib')
+}

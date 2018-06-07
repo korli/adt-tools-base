@@ -16,7 +16,9 @@
 
 package com.android.build.gradle.internal.ide;
 
+import static com.android.build.gradle.internal.scope.TaskOutputHolder.TaskOutputType.DATA_BINDING_BASE_CLASS_SOURCE_OUT;
 import static com.android.build.gradle.internal.scope.TaskOutputHolder.TaskOutputType.JAVAC;
+import static com.android.build.gradle.options.BooleanOption.ENABLE_DATA_BINDING_V2;
 import static com.android.builder.model.AndroidProject.ARTIFACT_MAIN;
 import static com.android.builder.model.AndroidProject.PROJECT_TYPE_FEATURE;
 
@@ -43,7 +45,6 @@ import com.android.build.gradle.internal.model.NativeLibraryFactory;
 import com.android.build.gradle.internal.ndk.NdkHandler;
 import com.android.build.gradle.internal.publishing.AndroidArtifacts;
 import com.android.build.gradle.internal.publishing.VariantPublishingSpec;
-import com.android.build.gradle.internal.scope.BuildOutput;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
@@ -55,9 +56,10 @@ import com.android.build.gradle.internal.variant.TestedVariantData;
 import com.android.build.gradle.options.BooleanOption;
 import com.android.build.gradle.options.ProjectOptions;
 import com.android.build.gradle.options.SyncOptions;
-import com.android.builder.Version;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.core.VariantType;
+import com.android.builder.errors.EvalIssueReporter;
+import com.android.builder.errors.EvalIssueReporter.Type;
 import com.android.builder.model.AaptOptions;
 import com.android.builder.model.AndroidArtifact;
 import com.android.builder.model.AndroidProject;
@@ -79,6 +81,7 @@ import com.android.builder.model.TestVariantBuildOutput;
 import com.android.builder.model.TestedTargetVariant;
 import com.android.builder.model.Variant;
 import com.android.builder.model.VariantBuildOutput;
+import com.android.builder.model.Version;
 import com.android.builder.model.level2.DependencyGraphs;
 import com.android.builder.model.level2.GlobalLibraryMap;
 import com.android.ide.common.build.ApkInfo;
@@ -98,6 +101,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -105,14 +109,18 @@ import java.util.stream.Collectors;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.ArtifactCollection;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.component.BuildIdentifier;
 import org.gradle.api.artifacts.result.ResolvedArtifactResult;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.initialization.IncludedBuild;
+import org.gradle.api.invocation.Gradle;
 import org.gradle.tooling.provider.model.ToolingModelBuilder;
 
 /**
  * Builder for the custom Android model.
  */
 public class ModelBuilder implements ToolingModelBuilder {
+    public static final String CURRENT_BUILD_NAME = "__current_build__";
 
     @NonNull
     static final DependenciesImpl EMPTY_DEPENDENCIES_IMPL =
@@ -132,6 +140,11 @@ public class ModelBuilder implements ToolingModelBuilder {
     private final int generation;
     private int modelLevel = AndroidProject.MODEL_LEVEL_0_ORIGINAL;
     private boolean modelWithFullDependency = false;
+    /**
+     * a map that goes from build name ({@link BuildIdentifier#getName()} to the root dir of the
+     * build.
+     */
+    private ImmutableMap<String, String> buildMapping = null;
 
     private Set<SyncIssue> syncIssues = Sets.newLinkedHashSet();
 
@@ -156,6 +169,7 @@ public class ModelBuilder implements ToolingModelBuilder {
         this.nativeLibFactory = nativeLibraryFactory;
         this.projectType = projectType;
         this.generation = generation;
+
     }
 
     public static void clearCaches() {
@@ -163,7 +177,7 @@ public class ModelBuilder implements ToolingModelBuilder {
     }
 
     @Override
-    public boolean canBuild(String modelName) {
+    public boolean canBuild(@NonNull String modelName) {
         // The default name for a model is the name of the Java interface.
         return modelName.equals(AndroidProject.class.getName())
                 || modelName.equals(GlobalLibraryMap.class.getName())
@@ -171,7 +185,11 @@ public class ModelBuilder implements ToolingModelBuilder {
     }
 
     @Override
-    public Object buildAll(String modelName, Project project) {
+    public Object buildAll(@NonNull String modelName, @NonNull Project project) {
+        // build a map from included build name to rootDir (as rootDir is the only thing
+        // that we have access to on the tooling API side).
+        initBuildMapping(project);
+
         if (modelName.equals(AndroidProject.class.getName())) {
             return buildAndroidProject(project);
         }
@@ -254,15 +272,21 @@ public class ModelBuilder implements ToolingModelBuilder {
         }
 
         if (modelLevel < AndroidProject.MODEL_LEVEL_3_VARIANT_OUTPUT_POST_BUILD) {
-            throw new RuntimeException("This Gradle plugin requires Studio 3.0 minimum");
+            throw new RuntimeException(
+                    "This Gradle plugin requires a newer IDE able to request IDE model level 3. For Android Studio this means version 3.0+");
         }
 
         modelWithFullDependency =
                 projectOptions.get(BooleanOption.IDE_BUILD_MODEL_FEATURE_FULL_DEPENDENCIES);
 
         // Get the boot classpath. This will ensure the target is configured.
-        List<String> bootClasspath = androidBuilder.getBootClasspathAsStrings(false);
-
+        List<String> bootClasspath;
+        if (androidBuilder.getTargetInfo() != null) {
+            bootClasspath = androidBuilder.getBootClasspathAsStrings(false);
+        } else {
+            // SDK not set up, error will be reported as a sync issue.
+            bootClasspath = Collections.emptyList();
+        }
         List<File> frameworkSource = Collections.emptyList();
 
         // List of extra artifacts, with all test variants added.
@@ -281,7 +305,7 @@ public class ModelBuilder implements ToolingModelBuilder {
 
         AaptOptions aaptOptions = AaptOptionsImpl.create(config.getAaptOptions());
 
-        syncIssues.addAll(extraModelInfo.getSyncIssues().values());
+        syncIssues.addAll(extraModelInfo.getSyncIssueHandler().getSyncIssues());
 
         List<String> flavorDimensionList = config.getFlavorDimensionList() != null ?
                 config.getFlavorDimensionList() : Lists.newArrayList();
@@ -323,7 +347,9 @@ public class ModelBuilder implements ToolingModelBuilder {
                 buildTypes,
                 productFlavors,
                 variants,
-                androidBuilder.getTarget() != null ? androidBuilder.getTarget().hashString() : "",
+                androidBuilder.getTargetInfo() != null
+                        ? androidBuilder.getTarget().hashString()
+                        : "",
                 bootClasspath,
                 frameworkSource,
                 cloneSigningConfigs(config.getSigningConfigs()),
@@ -475,7 +501,12 @@ public class ModelBuilder implements ToolingModelBuilder {
         final VariantScope scope = variantData.getScope();
         Pair<Dependencies, DependencyGraphs> result =
                 getDependencies(
-                        scope, extraModelInfo, syncIssues, modelLevel, modelWithFullDependency);
+                        scope,
+                        buildMapping,
+                        extraModelInfo,
+                        syncIssues,
+                        modelLevel,
+                        modelWithFullDependency);
 
         Set<File> additionalTestClasses = new HashSet<>();
         additionalTestClasses.addAll(variantData.getAllPreJavacGeneratedBytecode().getFiles());
@@ -483,6 +514,17 @@ public class ModelBuilder implements ToolingModelBuilder {
         if (scope.hasOutput(TaskOutputHolder.TaskOutputType.UNIT_TEST_CONFIG_DIRECTORY)) {
             additionalTestClasses.add(
                     scope.getOutput(TaskOutputHolder.TaskOutputType.UNIT_TEST_CONFIG_DIRECTORY)
+                            .getSingleFile());
+        }
+        // The separately compile R class, if applicable.
+        VariantScope testedScope = Objects.requireNonNull(scope.getTestedVariantData()).getScope();
+        if (testedScope.hasOutput(
+                TaskOutputHolder.TaskOutputType.COMPILE_ONLY_NOT_NAMESPACED_R_CLASS_JAR)) {
+            additionalTestClasses.add(
+                    testedScope
+                            .getOutput(
+                                    TaskOutputHolder.TaskOutputType
+                                            .COMPILE_ONLY_NOT_NAMESPACED_R_CLASS_JAR)
                             .getSingleFile());
         }
 
@@ -506,6 +548,7 @@ public class ModelBuilder implements ToolingModelBuilder {
     @NonNull
     public static Pair<Dependencies, DependencyGraphs> getDependencies(
             @NonNull VariantScope variantScope,
+            @NonNull ImmutableMap<String, String> buildMapping,
             @NonNull ExtraModelInfo extraModelInfo,
             @NonNull Set<SyncIssue> syncIssues,
             int modelLevel,
@@ -514,7 +557,7 @@ public class ModelBuilder implements ToolingModelBuilder {
 
         // If there is a missing flavor dimension then we don't even try to resolve dependencies
         // as it may fail due to improperly setup configuration attributes.
-        if (extraModelInfo.hasSyncIssue(SyncIssue.TYPE_UNNAMED_FLAVOR_DIMENSION)) {
+        if (extraModelInfo.getSyncIssueHandler().hasSyncIssue(Type.UNNAMED_FLAVOR_DIMENSION)) {
             result = Pair.of(EMPTY_DEPENDENCIES_IMPL, EMPTY_DEPENDENCY_GRAPH);
         } else {
             final Project project = variantScope.getGlobalScope().getProject();
@@ -537,12 +580,16 @@ public class ModelBuilder implements ToolingModelBuilder {
                                         variantScope,
                                         modelWithFullDependency,
                                         downloadSources,
+                                        buildMapping,
                                         syncIssues::add));
             } else {
                 result =
                         Pair.of(
                                 graph.createDependencies(
-                                        variantScope, downloadSources, syncIssues::add),
+                                        variantScope,
+                                        downloadSources,
+                                        buildMapping,
+                                        syncIssues::add),
                                 EMPTY_DEPENDENCY_GRAPH);
             }
         }
@@ -584,9 +631,9 @@ public class ModelBuilder implements ToolingModelBuilder {
         SourceProviders sourceProviders = determineSourceProviders(variantData);
 
         // get the outputs
-        BuildOutputSupplier<Collection<BuildOutput>> splitOutputsProxy =
+        BuildOutputSupplier<Collection<EarlySyncBuildOutput>> splitOutputsProxy =
                 getBuildOutputSupplier(variantData);
-        BuildOutputSupplier<Collection<BuildOutput>> manifestsProxy =
+        BuildOutputSupplier<Collection<EarlySyncBuildOutput>> manifestsProxy =
                 getManifestsSupplier(variantData);
 
         CoreNdkOptions ndkConfig = variantData.getVariantConfiguration().getNdkConfig();
@@ -617,7 +664,12 @@ public class ModelBuilder implements ToolingModelBuilder {
 
         Pair<Dependencies, DependencyGraphs> dependencies =
                 getDependencies(
-                        scope, extraModelInfo, syncIssues, modelLevel, modelWithFullDependency);
+                        scope,
+                        buildMapping,
+                        extraModelInfo,
+                        syncIssues,
+                        modelLevel,
+                        modelWithFullDependency);
 
         Set<File> additionalTestClasses = new HashSet<>();
         additionalTestClasses.addAll(variantData.getAllPreJavacGeneratedBytecode().getFiles());
@@ -643,8 +695,8 @@ public class ModelBuilder implements ToolingModelBuilder {
                     message ->
                             syncIssues.add(
                                     new SyncIssueImpl(
-                                            SyncIssue.TYPE_GENERIC,
-                                            SyncIssue.SEVERITY_ERROR,
+                                            Type.GENERIC,
+                                            EvalIssueReporter.Severity.ERROR,
                                             null,
                                             message)));
 
@@ -691,10 +743,11 @@ public class ModelBuilder implements ToolingModelBuilder {
                 instantRun,
                 splitOutputsProxy,
                 manifestsProxy,
-                testOptions);
+                testOptions,
+                scope.getConnectedTask() == null ? null : scope.getConnectedTask().getName());
     }
 
-    private static BuildOutputSupplier<Collection<BuildOutput>> getBuildOutputSupplier(
+    private static BuildOutputSupplier<Collection<EarlySyncBuildOutput>> getBuildOutputSupplier(
             BaseVariantData variantData) {
         final VariantScope variantScope = variantData.getScope();
 
@@ -712,9 +765,11 @@ public class ModelBuilder implements ToolingModelBuilder {
                         ApkInfo.of(VariantOutput.OutputType.MAIN, ImmutableList.of(), 0);
                 return BuildOutputSupplier.of(
                         ImmutableList.of(
-                                new BuildOutput(
+                                new EarlySyncBuildOutput(
                                         VariantScope.TaskOutputType.AAR,
-                                        mainApkInfo,
+                                        mainApkInfo.getType(),
+                                        mainApkInfo.getFilters(),
+                                        mainApkInfo.getVersionCode(),
                                         variantScope
                                                 .getOutput(TaskOutputHolder.TaskOutputType.AAR)
                                                 .getSingleFile())));
@@ -723,7 +778,7 @@ public class ModelBuilder implements ToolingModelBuilder {
                         ImmutableList.of(VariantScope.TaskOutputType.APK),
                         ImmutableList.of(variantScope.getApkLocation()));
             case UNIT_TEST:
-                return (BuildOutputSupplier<Collection<BuildOutput>>)
+                return (BuildOutputSupplier<Collection<EarlySyncBuildOutput>>)
                         () -> {
                             final BaseVariantData testedVariantData =
                                     variantScope.getTestedVariantData();
@@ -746,14 +801,11 @@ public class ModelBuilder implements ToolingModelBuilder {
                                     taskOutputSpec.getOutputType();
 
                             return ImmutableList.of(
-                                    new BuildOutput(
+                                    new EarlySyncBuildOutput(
                                             JAVAC,
-                                            ApkInfo.of(
-                                                    VariantOutput.OutputType.MAIN,
-                                                    ImmutableList.of(),
-                                                    variantData
-                                                            .getVariantConfiguration()
-                                                            .getVersionCode()),
+                                            VariantOutput.OutputType.MAIN,
+                                            ImmutableList.of(),
+                                            variantData.getVariantConfiguration().getVersionCode(),
                                             variantScope
                                                     .getOutput(testedOutputType)
                                                     // We used to call .getSingleFile() but Kotlin projects
@@ -769,7 +821,7 @@ public class ModelBuilder implements ToolingModelBuilder {
         }
     }
 
-    private static BuildOutputSupplier<Collection<BuildOutput>> getManifestsSupplier(
+    private static BuildOutputSupplier<Collection<EarlySyncBuildOutput>> getManifestsSupplier(
             BaseVariantData variantData) {
 
         switch (variantData.getType()) {
@@ -784,9 +836,11 @@ public class ModelBuilder implements ToolingModelBuilder {
                         ApkInfo.of(VariantOutput.OutputType.MAIN, ImmutableList.of(), 0);
                 return BuildOutputSupplier.of(
                         ImmutableList.of(
-                                new BuildOutput(
+                                new EarlySyncBuildOutput(
                                         VariantScope.TaskOutputType.MERGED_MANIFESTS,
-                                        mainApkInfo,
+                                        mainApkInfo.getType(),
+                                        mainApkInfo.getFilters(),
+                                        mainApkInfo.getVersionCode(),
                                         new File(
                                                 variantData.getScope().getManifestOutputDirectory(),
                                                 SdkConstants.ANDROID_MANIFEST_XML))));
@@ -846,16 +900,24 @@ public class ModelBuilder implements ToolingModelBuilder {
         if (variantData == null) {
             return Collections.emptyList();
         }
+        VariantScope scope = variantData.getScope();
+        GlobalScope globalScope = variantData.getScope().getGlobalScope();
 
+        boolean useDataBindingV2 = globalScope.getProjectOptions().get(ENABLE_DATA_BINDING_V2);
+        boolean addDataBindingSources =
+                globalScope.getExtension().getDataBinding().isEnabled()
+                        && useDataBindingV2
+                        && scope.hasOutput(DATA_BINDING_BASE_CLASS_SOURCE_OUT);
         List<File> extraFolders = getGeneratedSourceFoldersForUnitTests(variantData);
 
         // Set this to the number of folders you expect to add explicitly in the code below.
         int additionalFolders = 4;
+        if (addDataBindingSources) {
+            additionalFolders += 1;
+        }
         List<File> folders =
                 Lists.newArrayListWithExpectedSize(additionalFolders + extraFolders.size());
         folders.addAll(extraFolders);
-
-        VariantScope scope = variantData.getScope();
 
         // The R class is only generated by the first output.
         folders.add(scope.getRClassSourceOutputDir());
@@ -866,7 +928,10 @@ public class ModelBuilder implements ToolingModelBuilder {
         if (ndkMode == null || !ndkMode) {
             folders.add(scope.getRenderscriptSourceOutputDir());
         }
-
+        if (addDataBindingSources) {
+            FileCollection output = scope.getOutput(DATA_BINDING_BASE_CLASS_SOURCE_OUT);
+            folders.add(output.getSingleFile());
+        }
         return folders;
     }
 
@@ -927,5 +992,47 @@ public class ModelBuilder implements ToolingModelBuilder {
             this.variantSourceProvider = variantSourceProvider;
             this.multiFlavorSourceProvider = multiFlavorSourceProvider;
         }
+    }
+
+    private void initBuildMapping(@NonNull Project project) {
+        if (buildMapping == null) {
+            buildMapping = computeBuildMapping(project.getGradle());
+        }
+    }
+
+    @NonNull
+    public static ImmutableMap<String, String> computeBuildMapping(@NonNull Gradle gradle) {
+        ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
+
+        // Get the root dir for current build.
+        // This is necessary to handle the case when dependency comes from the same build with consumer,
+        // i.e. when BuildIdentifier.isCurrentBuild returns true. In that case, BuildIdentifier.getName
+        // returns ":" instead of the actual build name.
+        String currentBuildPath = gradle.getRootProject().getProjectDir().getAbsolutePath();
+        builder.put(CURRENT_BUILD_NAME, currentBuildPath);
+
+        Gradle rootGradleProject = gradle;
+        // first, ensure we are starting from the root Gradle object.
+        //noinspection ConstantConditions
+        while (rootGradleProject.getParent() != null) {
+            rootGradleProject = rootGradleProject.getParent();
+        }
+
+        // get the root dir for the top project if different from current project.
+        if (rootGradleProject != gradle) {
+            builder.put(
+                    rootGradleProject.getRootProject().getName(),
+                    rootGradleProject.getRootProject().getProjectDir().getAbsolutePath());
+        }
+
+        for (IncludedBuild includedBuild : rootGradleProject.getIncludedBuilds()) {
+            String includedBuildPath = includedBuild.getProjectDir().getAbsolutePath();
+            // current build has been added with key CURRENT_BUIlD_NAME, avoid redundant entry.
+            if (!includedBuildPath.equals(currentBuildPath)) {
+                builder.put(includedBuild.getName(), includedBuildPath);
+            }
+        }
+
+        return builder.build();
     }
 }

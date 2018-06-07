@@ -17,6 +17,7 @@
 package com.android.build.gradle.external.cmake.server;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.external.cmake.server.receiver.InteractiveMessage;
 import com.android.build.gradle.external.cmake.server.receiver.InteractiveProgress;
@@ -141,7 +142,7 @@ public class ServerProtocolV1 implements Server {
         return connected;
     }
 
-    @NonNull
+    @Nullable
     @Override
     public List<ProtocolVersion> getSupportedVersion() {
         if (helloResult == null || helloResult.supportedProtocolVersions == null) {
@@ -149,7 +150,8 @@ public class ServerProtocolV1 implements Server {
         }
         List<ProtocolVersion> result = new ArrayList<>();
         for (ProtocolVersion protocolVersion : helloResult.supportedProtocolVersions) {
-            if (protocolVersion.major == 1 && protocolVersion.minor == 0) {
+            // We support 1.0+ (i.e., we support major version 1 and all minor versions).
+            if (protocolVersion.major == 1) {
                 result.add(protocolVersion);
                 break;
             }
@@ -161,9 +163,7 @@ public class ServerProtocolV1 implements Server {
     @Override
     public HandshakeResult handshake(@NonNull HandshakeRequest handshakeRequest)
             throws IOException {
-        if (!connected) {
-            throw new RuntimeException("Not connected to Cmake server.");
-        }
+        throwIfNotConnected("handshake");
         writeMessage(new GsonBuilder().setPrettyPrinting().create().toJson(handshakeRequest));
         return decodeResponse(HandshakeResult.class);
     }
@@ -171,9 +171,7 @@ public class ServerProtocolV1 implements Server {
     @NonNull
     @Override
     public ConfigureCommandResult configure(@NonNull String... cacheArguments) throws IOException {
-        if (!connected) {
-            throw new RuntimeException("Not connected to Cmake server.");
-        }
+        throwIfNotConnected("configure");
 
         ConfigureRequest configureRequest = new ConfigureRequest();
 
@@ -199,14 +197,8 @@ public class ServerProtocolV1 implements Server {
     @NonNull
     @Override
     public ComputeResult compute() throws IOException {
-        if (!connected) {
-            throw new RuntimeException("Not connected to Cmake server.");
-        }
-
-        if (!configured) {
-            throw new RuntimeException(
-                    "Cmake server has not been configured successfully, unable to compute.");
-        }
+        throwIfNotConnected("compute");
+        throwIfNotConfigured("compute");
 
         writeMessage("{\"type\":\"compute\"}");
         ComputeResult computeResult = decodeResponse(ComputeResult.class);
@@ -217,13 +209,8 @@ public class ServerProtocolV1 implements Server {
     @NonNull
     @Override
     public CodeModel codemodel() throws IOException {
-        if (!connected) {
-            throw new RuntimeException("Not connected to Cmake server.");
-        }
-
-        if (!computed) {
-            throw new RuntimeException("Need to compute before requesting for codemodel.");
-        }
+        throwIfNotConnected("codemodel");
+        throwIfNotComputed("codemodel");
 
         writeMessage("{\"type\":\"codemodel\"}");
         return decodeResponse(CodeModel.class);
@@ -232,9 +219,7 @@ public class ServerProtocolV1 implements Server {
     @NonNull
     @Override
     public CacheResult cache() throws IOException {
-        if (!connected) {
-            throw new RuntimeException("Not connected to Cmake server.");
-        }
+        throwIfNotConnected("cache");
 
         CacheRequest request = new CacheRequest();
         writeMessage(new GsonBuilder().setPrettyPrinting().create().toJson(request));
@@ -244,12 +229,20 @@ public class ServerProtocolV1 implements Server {
     @NonNull
     @Override
     public GlobalSettings globalSettings() throws IOException {
-        if (!connected) {
-            throw new RuntimeException("Not connected to Cmake server.");
-        }
+        throwIfNotConnected("globalSettings");
 
         writeMessage("{\"type\":\"globalSettings\"}");
         return decodeResponse(GlobalSettings.class);
+    }
+
+    @NonNull
+    @Override
+    public CmakeInputsResult cmakeInputs() throws IOException {
+        throwIfNotConnected("cmakeInputs");
+        throwIfNotConfigured("cmakeInputs");
+
+        writeMessage("{\"type\":\"cmakeInputs\"}");
+        return decodeResponse(CmakeInputsResult.class);
     }
 
     @NonNull
@@ -283,6 +276,29 @@ public class ServerProtocolV1 implements Server {
 
     // Helper functions
 
+    /** Helper functions to throw RuntimeException if not connected, configured or computed. */
+    private void throwIfNotConnected(@NonNull String operation) {
+        if (!connected) {
+            throwError("Need to connect to CMake server before requesting for", operation);
+        }
+    }
+
+    private void throwIfNotConfigured(@NonNull String operation) {
+        if (!configured) {
+            throwError("Need to configure before requesting for", operation);
+        }
+    }
+
+    private void throwIfNotComputed(@NonNull String operation) {
+        if (!computed) {
+            throwError("Need to compute before requesting for", operation);
+        }
+    }
+
+    private static void throwError(@NonNull String message, @NonNull String operation) {
+        throw new RuntimeException(message + " " + operation + ".");
+    }
+
     /**
      * Ideally, we should use compile_commands.json generated by Cmake to get C and Cxx compiler
      * information. If for whatever reason the file is not present (or not generated), we fall back
@@ -296,7 +312,7 @@ public class ServerProtocolV1 implements Server {
     private String hackyGetLangExecutable(
             @NonNull String prefixMessage, @NonNull String suffixMessage) {
         if (configureMessages == null || configureMessages.isEmpty()) {
-            return null;
+            return "";
         }
 
         for (InteractiveMessage message : configureMessages) {
@@ -309,7 +325,7 @@ public class ServerProtocolV1 implements Server {
                     prefixMessage.length(), message.message.length() - suffixMessage.length());
         }
 
-        return null;
+        return "";
     }
 
     /**
@@ -427,7 +443,7 @@ public class ServerProtocolV1 implements Server {
                             gson.fromJson(message, InteractiveMessage.class);
                     serverReceiver.getMessageReceiver().receive(interactiveMessage);
                 }
-                return null;
+                return gson.fromJson(message, clazz);
             default:
                 throw new RuntimeException(
                         "Unsupported message type " + messageType + " received from CMake server.");

@@ -24,11 +24,14 @@ import com.android.build.gradle.internal.InstantAppTaskManager;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.VariantManager;
+import com.android.build.gradle.internal.api.dsl.extensions.BaseExtension2;
+import com.android.build.gradle.internal.dependency.SourceSetManager;
 import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
 import com.android.build.gradle.internal.ide.InstantAppModelBuilder;
 import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.plugin.TypedPluginDelegate;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.variant.InstantAppVariantFactory;
 import com.android.build.gradle.options.ProjectOptions;
@@ -38,16 +41,14 @@ import com.android.builder.profile.Recorder;
 import com.google.wireless.android.sdk.stats.GradleBuildProject;
 import javax.inject.Inject;
 import org.gradle.api.NamedDomainObjectContainer;
-import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.internal.reflect.Instantiator;
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
 
 /** Gradle plugin class for 'instantapp' projects. */
-public class InstantAppPlugin extends BasePlugin implements Plugin<Project> {
+public class InstantAppPlugin extends BasePlugin<BaseExtension2> {
     @Inject
-    public InstantAppPlugin(Instantiator instantiator, ToolingModelBuilderRegistry registry) {
-        super(instantiator, registry);
+    public InstantAppPlugin(ToolingModelBuilderRegistry registry) {
+        super(registry);
     }
 
     @Override
@@ -60,13 +61,13 @@ public class InstantAppPlugin extends BasePlugin implements Plugin<Project> {
     protected BaseExtension createExtension(
             @NonNull Project project,
             @NonNull ProjectOptions projectOptions,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
             @NonNull NamedDomainObjectContainer<BuildType> buildTypeContainer,
             @NonNull NamedDomainObjectContainer<ProductFlavor> productFlavorContainer,
             @NonNull NamedDomainObjectContainer<SigningConfig> signingConfigContainer,
             @NonNull NamedDomainObjectContainer<BaseVariantOutput> buildOutputs,
+            @NonNull SourceSetManager sourceSetManager,
             @NonNull ExtraModelInfo extraModelInfo) {
         return project.getExtensions()
                 .create(
@@ -74,13 +75,13 @@ public class InstantAppPlugin extends BasePlugin implements Plugin<Project> {
                         InstantAppExtension.class,
                         project,
                         projectOptions,
-                        instantiator,
                         androidBuilder,
                         sdkHandler,
                         buildTypeContainer,
                         productFlavorContainer,
                         signingConfigContainer,
                         buildOutputs,
+                        sourceSetManager,
                         extraModelInfo);
     }
 
@@ -137,10 +138,13 @@ public class InstantAppPlugin extends BasePlugin implements Plugin<Project> {
     @Override
     protected InstantAppVariantFactory createVariantFactory(
             @NonNull GlobalScope globalScope,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull AndroidConfig androidConfig) {
-        return new InstantAppVariantFactory(
-                globalScope, instantiator, androidBuilder, androidConfig);
+        return new InstantAppVariantFactory(globalScope, androidBuilder, androidConfig);
+    }
+
+    @Override
+    protected TypedPluginDelegate<BaseExtension2> getTypedDelegate() {
+        return null;
     }
 }

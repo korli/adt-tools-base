@@ -34,21 +34,30 @@ class BrowseErrorActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.${layoutName})
 
         testError()
     }
 
     private fun testError() {
         mErrorFragment = ErrorFragment()
-        fragmentManager.beginTransaction().add(R.id.main_browse_fragment, mErrorFragment).commit()
+        fragmentManager
+                .beginTransaction()
+                .add(R.id.main_browse_fragment, mErrorFragment)
+                .commit()
 
         mSpinnerFragment = SpinnerFragment()
-        fragmentManager.beginTransaction().add(R.id.main_browse_fragment, mSpinnerFragment).commit()
+        fragmentManager
+                .beginTransaction()
+                .add(R.id.main_browse_fragment, mSpinnerFragment)
+                .commit()
 
         val handler = Handler()
         handler.postDelayed({
-            fragmentManager.beginTransaction().remove(mSpinnerFragment).commit()
+            fragmentManager
+                    .beginTransaction()
+                    .remove(mSpinnerFragment)
+                    .commit()
             mErrorFragment.setErrorContent()
         }, TIMER_DELAY)
     }

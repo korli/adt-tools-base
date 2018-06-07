@@ -48,11 +48,13 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * A connection to the host-side android debug bridge (adb)
+ *
  * <p>This is the central point to communicate with any devices, emulators, or the applications
  * running on them.
+ *
  * <p><b>{@link #init(boolean)} must be called before anything is done.</b>
  */
-public final class AndroidDebugBridge {
+public class AndroidDebugBridge {
     /*
      * Minimum and maximum version of adb supported. This correspond to
      * ADB_SERVER_VERSION found in //device/tools/adb/adb.h
@@ -64,7 +66,7 @@ public final class AndroidDebugBridge {
     private static final String SERVER_PORT_ENV_VAR = "ANDROID_ADB_SERVER_PORT"; //$NON-NLS-1$
 
     // Where to find the ADB bridge.
-    static final String DEFAULT_ADB_HOST = "127.0.0.1"; //$NON-NLS-1$
+    static final String DEFAULT_ADB_HOST = "localhost"; //$NON-NLS-1$
     static final int DEFAULT_ADB_PORT = 5037;
 
     // Only set when in unit testing mode. This is a hack until we move to devicelib.
@@ -1118,7 +1120,9 @@ public final class AndroidDebugBridge {
             sHostAddr = InetAddress.getByName(DEFAULT_ADB_HOST);
             sSocketAddr = new InetSocketAddress(sHostAddr, sAdbServerPort);
         } catch (UnknownHostException e) {
-            // localhost should always be known.
+            // localhost should always be known, but if it is not we would
+            // like to know.
+            Log.e(DDMS, "Unable to resolve: " + DEFAULT_ADB_HOST + ", due to:" + e);
         }
     }
 

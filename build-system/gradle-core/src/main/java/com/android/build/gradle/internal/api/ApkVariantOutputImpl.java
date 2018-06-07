@@ -18,6 +18,7 @@ package com.android.build.gradle.internal.api;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.FilterData;
 import com.android.build.VariantOutput;
 import com.android.build.gradle.api.ApkVariantOutput;
 import com.android.build.gradle.internal.variant.TaskContainer;
@@ -25,6 +26,7 @@ import com.android.build.gradle.tasks.PackageAndroidArtifact;
 import com.android.ide.common.build.ApkData;
 import com.google.common.base.MoreObjects;
 import java.io.File;
+import javax.inject.Inject;
 import org.gradle.api.Task;
 
 /**
@@ -35,6 +37,7 @@ import org.gradle.api.Task;
  */
 public class ApkVariantOutputImpl extends BaseVariantOutputImpl implements ApkVariantOutput {
 
+    @Inject
     public ApkVariantOutputImpl(@NonNull ApkData apkData, @NonNull TaskContainer taskContainer) {
         super(apkData, taskContainer);
     }
@@ -90,7 +93,8 @@ public class ApkVariantOutputImpl extends BaseVariantOutputImpl implements ApkVa
 
     @Override
     public String getFilter(VariantOutput.FilterType filterType) {
-        return apkData.getFilter(filterType);
+        FilterData filterData = apkData.getFilter(filterType);
+        return filterData != null ? filterData.getIdentifier() : null;
     }
 
     @Override

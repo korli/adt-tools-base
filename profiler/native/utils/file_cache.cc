@@ -20,7 +20,6 @@
 #include <climits>
 #include <mutex>
 
-#include "utils/current_process.h"
 #include "utils/fs/disk_file_system.h"
 #include "utils/stopwatch.h"
 #include "utils/thread_name.h"
@@ -35,7 +34,7 @@ const int32_t kCleanupPeriodS = Clock::m_to_s(1);
 // Run thread much faster than cache cleanup periods, so we can interrupt on
 // short notice.
 const int32_t kSleepUs = Clock::ms_to_us(200);
-}
+}  // namespace
 
 namespace profiler {
 
@@ -46,12 +45,15 @@ using std::string;
 using std::unique_ptr;
 using std::vector;
 
-FileCache::FileCache()
-    : FileCache(unique_ptr<FileSystem>(new DiskFileSystem())) {}
+FileCache::FileCache(const string &root_path)
+    : FileCache(unique_ptr<FileSystem>(new DiskFileSystem()), root_path) {}
 
-FileCache::FileCache(unique_ptr<FileSystem> fs) : fs_(std::move(fs)) {
-  // Since we're restarting perfd, nuke any leftover cache from a previous run
-  auto cache_root = fs_->NewDir(CurrentProcess::dir() + "cache/");
+FileCache::FileCache(unique_ptr<FileSystem> fs, const string &root_path)
+    : fs_(std::move(fs)) {
+  // Since we're restarting perfd, nuke any leftover cache from a previous run.
+  // Use TEST_TMPDIR that is set up by bazel if configured.
+  auto parent_dir = fs_->GetDir(root_path);
+  auto cache_root = parent_dir->NewDir("cache");
   cache_partial_ = cache_root->NewDir("partial");
   cache_complete_ = cache_root->NewDir("complete");
 
@@ -87,8 +89,28 @@ shared_ptr<File> FileCache::Complete(const std::string &cache_id) {
   auto file_from = cache_partial_->GetFile(cache_id);
   auto file_to = cache_complete_->GetFile(cache_id);
   file_from->MoveContentsTo(file_to);
-
   return file_to;
+}
+
+std::string FileCache::AddString(const std::string &value) {
+  std::stringstream cache_id_stream;
+  std::hash<std::string> hasher;
+  cache_id_stream << hasher(value);
+  std::string cache_id = cache_id_stream.str();
+
+  auto file = cache_complete_->GetFile(cache_id);
+  if (file->Exists()) {
+    // TODO: Do we have to worry about duplicate hashes?
+    file->Touch();
+    return cache_id;
+  }
+
+  file->Create();
+  file->OpenForWrite();
+  file->Append(value);
+  file->Close();
+
+  return cache_id;
 }
 
 shared_ptr<File> FileCache::GetFile(const std::string &cache_id) {

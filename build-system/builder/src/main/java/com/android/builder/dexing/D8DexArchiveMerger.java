@@ -18,29 +18,46 @@ package com.android.builder.dexing;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.tools.r8.CompilationException;
+import com.android.ide.common.blame.Message;
+import com.android.ide.common.blame.MessageReceiver;
+import com.android.ide.common.blame.parser.DexParser;
+import com.android.tools.r8.CompilationFailedException;
 import com.android.tools.r8.CompilationMode;
 import com.android.tools.r8.D8;
 import com.android.tools.r8.D8Command;
-import com.android.tools.r8.errors.CompilationError;
+import com.android.tools.r8.Diagnostic;
+import com.android.tools.r8.OutputMode;
+import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Streams;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.file.Path;
+import java.util.concurrent.ForkJoinPool;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.stream.Collectors;
+import javax.annotation.Nonnull;
 
 final class D8DexArchiveMerger implements DexArchiveMerger {
 
-    @NonNull private final OutputStream errorStream;
+    @NonNull
+    private static final Logger LOGGER = Logger.getLogger(D8DexArchiveMerger.class.getName());
+
+    private static final String ERROR_MULTIDEX =
+            "Cannot fit requested classes in a single dex file";
+
     private final int minSdkVersion;
     @NonNull private final CompilationMode compilationMode;
+    @NonNull private final MessageReceiver messageReceiver;
+    private volatile boolean hintForMultidex = false;
 
     public D8DexArchiveMerger(
-            @NonNull OutputStream errorStream,
+            @Nonnull MessageReceiver messageReceiver,
             int minSdkVersion,
             @NonNull CompilationMode compilationMode) {
-        this.errorStream = errorStream;
         this.minSdkVersion = minSdkVersion;
         this.compilationMode = compilationMode;
+        this.messageReceiver = messageReceiver;
     }
 
     @Override
@@ -50,36 +67,78 @@ final class D8DexArchiveMerger implements DexArchiveMerger {
             @Nullable Path mainDexClasses,
             @NonNull DexingType dexingType)
             throws DexArchiveMergerException {
+        LOGGER.log(
+                Level.INFO,
+                "Merging to '"
+                        + outputDir.toAbsolutePath().toString()
+                        + "' with D8 from "
+                        + Streams.stream(inputs)
+                                .map(path -> path.toAbsolutePath().toString())
+                                .collect(Collectors.joining(", ")));
+
         if (Iterables.isEmpty(inputs)) {
             return;
         }
 
-        D8Command.Builder builder = D8Command.builder();
+        D8DiagnosticsHandler d8DiagnosticsHandler = new InterceptingDiagnosticsHandler();
+        D8Command.Builder builder = D8Command.builder(d8DiagnosticsHandler);
+        builder.setDisableDesugaring(true);
 
         for (Path input : inputs) {
             try (DexArchive archive = DexArchives.fromInput(input)) {
                 for (DexArchiveEntry dexArchiveEntry : archive.getFiles()) {
-                    builder.addDexProgramData(dexArchiveEntry.getDexFileContent());
+                    builder.addDexProgramData(
+                            dexArchiveEntry.getDexFileContent(),
+                            D8DiagnosticsHandler.getOrigin(dexArchiveEntry));
                 }
             } catch (IOException e) {
-                throw new DexArchiveMergerException(e);
+                throw getExceptionToRethrow(e, input, d8DiagnosticsHandler);
             }
         }
         try {
             if (mainDexClasses != null) {
                 builder.addMainDexListFiles(mainDexClasses);
             }
-            builder.setMinApiLevel(minSdkVersion).setMode(compilationMode).setOutputPath(outputDir);
+            builder.setMinApiLevel(minSdkVersion)
+                    .setMode(compilationMode)
+                    .setOutput(outputDir, OutputMode.DexIndexed)
+                    .setDisableDesugaring(true)
+                    .setIntermediate(false);
             D8.run(builder.build());
-        } catch (CompilationException | IOException | CompilationError e) {
-            DexArchiveMergerException exception = new DexArchiveMergerException(e);
-            try {
-                errorStream.write(e.getMessage().getBytes());
-            } catch (IOException ex) {
-                System.err.println(e.getMessage());
-                exception.addSuppressed(ex);
-            }
-            throw exception;
+        } catch (CompilationFailedException e) {
+            throw getExceptionToRethrow(e, inputs, d8DiagnosticsHandler);
         }
     }
+
+    @NonNull
+    private DexArchiveMergerException getExceptionToRethrow(
+            @NonNull Throwable t,
+            @NonNull Iterable<Path> inputs,
+            D8DiagnosticsHandler d8DiagnosticsHandler) {
+        StringBuilder msg = new StringBuilder("Error while merging dex archives: ");
+        msg.append(Joiner.on(", ").join(inputs));
+        for (String hint : d8DiagnosticsHandler.getPendingHints()) {
+            msg.append(System.lineSeparator());
+            msg.append(hint);
+        }
+        return new DexArchiveMergerException(msg.toString(), t);
+    }
+
+
+    private class InterceptingDiagnosticsHandler extends D8DiagnosticsHandler {
+        public InterceptingDiagnosticsHandler() {
+            super(D8DexArchiveMerger.this.messageReceiver);
+        }
+
+        @Override
+        protected Message convertToMessage(Message.Kind kind, Diagnostic diagnostic) {
+
+            if (diagnostic.getDiagnosticMessage().startsWith(ERROR_MULTIDEX)) {
+                addHint(DexParser.DEX_LIMIT_EXCEEDED_ERROR);
+            }
+
+            return super.convertToMessage(kind, diagnostic);
+        }
+    }
+
 }

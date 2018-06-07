@@ -31,18 +31,17 @@ import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.AaptOptions;
 import com.android.build.gradle.internal.pipeline.TransformManager;
+import com.android.build.gradle.internal.scope.BuildElements;
 import com.android.build.gradle.internal.scope.BuildOutput;
-import com.android.build.gradle.internal.scope.BuildOutputs;
+import com.android.build.gradle.internal.scope.ExistingBuildElements;
 import com.android.build.gradle.internal.scope.GlobalScope;
-import com.android.build.gradle.internal.scope.OutputScope;
-import com.android.build.gradle.internal.scope.SplitList;
 import com.android.build.gradle.internal.scope.TaskOutputHolder.TaskOutputType;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.variant.BaseVariantData;
 import com.android.build.gradle.internal.variant.MultiOutputPolicy;
 import com.android.build.gradle.tasks.ResourceUsageAnalyzer;
 import com.android.builder.core.VariantType;
-import com.android.ide.common.build.ApkData;
+import com.android.ide.common.build.ApkInfo;
 import com.android.utils.FileUtils;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -56,9 +55,11 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.xml.parsers.ParserConfigurationException;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.api.logging.Logger;
+import org.xml.sax.SAXException;
 
 /**
  * Implementation of Resource Shrinking as a transform.
@@ -93,7 +94,6 @@ public class ShrinkResourcesTransform extends Transform {
     @Nullable private final FileCollection mappingFileSrc;
     @NonNull private final FileCollection mergedManifests;
     @NonNull private final FileCollection uncompressedResources;
-    @NonNull private final FileCollection splitListInput;
 
     @NonNull private final AaptGeneration aaptGeneration;
     @NonNull private final AaptOptions aaptOptions;
@@ -108,7 +108,6 @@ public class ShrinkResourcesTransform extends Transform {
             @NonNull FileCollection uncompressedResources,
             @NonNull File compressedResources,
             @NonNull AaptGeneration aaptGeneration,
-            @NonNull FileCollection splitListInput,
             @NonNull Logger logger) {
         VariantScope variantScope = variantData.getScope();
         GlobalScope globalScope = variantScope.getGlobalScope();
@@ -125,13 +124,12 @@ public class ShrinkResourcesTransform extends Transform {
                         : null;
         this.mergedManifests = variantScope.getOutput(TaskOutputType.MERGED_MANIFESTS);
         this.uncompressedResources = uncompressedResources;
-        this.splitListInput = splitListInput;
 
         this.aaptGeneration = aaptGeneration;
         this.aaptOptions = globalScope.getExtension().getAaptOptions();
         this.variantType = variantData.getType();
         this.isDebuggableBuildType = variantConfig.getBuildType().isDebuggable();
-        this.multiOutputPolicy = variantData.getOutputScope().getMultiOutputPolicy();
+        this.multiOutputPolicy = variantData.getMultiOutputPolicy();
 
         this.compressedResources = compressedResources;
     }
@@ -181,7 +179,6 @@ public class ShrinkResourcesTransform extends Transform {
 
         secondaryFiles.add(SecondaryFile.nonIncremental(mergedManifests));
         secondaryFiles.add(SecondaryFile.nonIncremental(uncompressedResources));
-        secondaryFiles.add(SecondaryFile.nonIncremental(splitListInput));
 
         return secondaryFiles;
     }
@@ -233,25 +230,24 @@ public class ShrinkResourcesTransform extends Transform {
     public void transform(@NonNull TransformInvocation invocation)
             throws IOException, TransformException, InterruptedException {
 
-        SplitList splitList = SplitList.load(splitListInput);
-        Collection<BuildOutput> uncompressedBuildOutputs = BuildOutputs.load(uncompressedResources);
-        OutputScope outputScope = variantData.getScope().getOutputScope();
-        outputScope.parallelForEachOutput(
-                uncompressedBuildOutputs,
-                TaskOutputType.PROCESSED_RES,
-                TaskOutputType.SHRUNK_PROCESSED_RES,
-                this::splitAction,
-                invocation,
-                splitList);
-        outputScope.save(TaskOutputType.SHRUNK_PROCESSED_RES, compressedResources);
+        BuildElements mergedManifestsOutputs =
+                ExistingBuildElements.from(TaskOutputType.MERGED_MANIFESTS, mergedManifests);
+
+        ExistingBuildElements.from(TaskOutputType.PROCESSED_RES, uncompressedResources)
+                .transform(
+                        (ApkInfo apkInfo, File buildInput) ->
+                                splitAction(
+                                        apkInfo, buildInput, mergedManifestsOutputs, invocation))
+                .into(TaskOutputType.SHRUNK_PROCESSED_RES, compressedResources);
+
     }
 
     @Nullable
     public File splitAction(
-            @NonNull ApkData apkData,
+            @NonNull ApkInfo apkInfo,
             @Nullable File uncompressedResourceFile,
-            TransformInvocation invocation,
-            SplitList splitList) {
+            @NonNull BuildElements mergedManifests,
+            TransformInvocation invocation) {
 
         if (uncompressedResourceFile == null) {
             return null;
@@ -280,12 +276,10 @@ public class ShrinkResourcesTransform extends Transform {
         File compressedResourceFile =
                 new File(
                         compressedResources,
-                        "resources-" + apkData.getBaseName() + "-stripped.ap_");
+                        "resources-" + apkInfo.getBaseName() + "-stripped.ap_");
         FileUtils.mkdirs(compressedResourceFile.getParentFile());
 
-        Collection<BuildOutput> mergedManifests = BuildOutputs.load(this.mergedManifests);
-        BuildOutput mergedManifest =
-                OutputScope.getOutput(mergedManifests, TaskOutputType.MERGED_MANIFESTS, apkData);
+        BuildOutput mergedManifest = mergedManifests.element(apkInfo);
         if (mergedManifest == null) {
             try {
                 FileUtils.copyFile(uncompressedResourceFile, compressedResourceFile);
@@ -308,10 +302,18 @@ public class ShrinkResourcesTransform extends Transform {
         try {
             analyzer.setVerbose(logger.isEnabled(LogLevel.INFO));
             analyzer.setDebug(logger.isEnabled(LogLevel.DEBUG));
-            analyzer.analyze();
+            try {
+                analyzer.analyze();
+            } catch (IOException | ParserConfigurationException | SAXException e) {
+                throw new RuntimeException(e);
+            }
 
             // Just rewrite the .ap_ file to strip out the res/ files for unused resources
-            analyzer.rewriteResourceZip(uncompressedResourceFile, compressedResourceFile);
+            try {
+                analyzer.rewriteResourceZip(uncompressedResourceFile, compressedResourceFile);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
 
             // Dump some stats
             int unused = analyzer.getUnusedResourceCount();
@@ -350,8 +352,6 @@ public class ShrinkResourcesTransform extends Transform {
 
                 System.out.println(sb.toString());
             }
-        } catch (Exception e) {
-            logger.quiet("Failed to shrink resources: ignoring", e);
         } finally {
             analyzer.dispose();
         }

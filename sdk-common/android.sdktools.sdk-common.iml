@@ -3,22 +3,16 @@
   <component name="NewModuleRootManager" inherit-compiler-output="true">
     <exclude-output />
     <content url="file://$MODULE_DIR$">
-      <sourceFolder url="file://$MODULE_DIR$/src/main/java" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/test/java" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/src/test/resources" type="java-test-resource" />
-      <sourceFolder url="file://$MODULE_DIR$/src/main/resources" type="java-resource" />
     </content>
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="inheritedJdk" />
     <orderEntry type="module" module-name="android.sdktools.layoutlib-api" exported="" />
-    <orderEntry type="module" module-name="android.sdktools.builder-model" exported="" />
-    <orderEntry type="module" module-name="android.sdktools.common" exported="" />
     <orderEntry type="module" module-name="android.sdktools.sdklib" exported="" />
     <orderEntry type="library" exported="" name="kxml2" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
-    <orderEntry type="module" module-name="android.sdktools.testutils" scope="TEST" />
     <orderEntry type="library" exported="" name="gson" level="project" />
-    <orderEntry type="module" module-name="android.sdktools.builder-test-api" />
     <orderEntry type="module-library">
       <library name="bouncy-castle">
         <CLASSES>
@@ -32,9 +26,7 @@
     <orderEntry type="library" scope="TEST" name="Mocks" level="project" />
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
     <orderEntry type="library" name="KotlinJavaRuntime" level="project" />
-    <orderEntry type="library" scope="PROVIDED" name="auto-value-1.4.1" level="project" />
     <orderEntry type="library" scope="TEST" name="jimfs" level="project" />
-    <orderEntry type="module" module-name="android.sdktools.ddmlib" />
     <orderEntry type="library" name="Guava" level="project" />
     <orderEntry type="module-library">
       <library>
@@ -46,5 +38,31 @@
       </library>
     </orderEntry>
     <orderEntry type="library" scope="TEST" name="mockito" level="project" />
+    <orderEntry type="module-library" scope="TEST">
+      <library name="builder-model" type="repository">
+        <properties include-transitive-deps="false" maven-id="com.android.tools.build:builder-model:3.1.2" />
+        <CLASSES>
+          <root url="jar://$MAVEN_REPOSITORY$/com/android/tools/build/builder-model/3.1.2/builder-model-3.1.2.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+      </library>
+    </orderEntry>
+    <orderEntry type="library" scope="TEST" name="com.android.tools:sdk-common:26.1.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="equalsverifier" level="project" />
+    <orderEntry type="library" scope="TEST" name="com.android.tools:testutils:26.1.2" level="project" />
+    <orderEntry type="module-library" scope="TEST">
+      <library name="builder-test-api" type="repository">
+        <properties include-transitive-deps="false" maven-id="com.android.tools.build:builder-test-api:3.1.2" />
+        <CLASSES>
+          <root url="jar://$MAVEN_REPOSITORY$/com/android/tools/build/builder-test-api/3.1.2/builder-test-api-3.1.2.jar!/" />
+        </CLASSES>
+        <JAVADOC />
+        <SOURCES />
+      </library>
+    </orderEntry>
+    <orderEntry type="library" scope="TEST" name="com.android.tools.ddms:ddmlib:26.1.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="com.android.tools:common:26.1.2" level="project" />
+    <orderEntry type="library" scope="TEST" name="com.android.tools:annotations:26.1.2" level="project" />
   </component>
 </module>

@@ -25,6 +25,7 @@ import com.android.build.gradle.internal.fixture.TestConstants;
 import com.android.build.gradle.internal.fixture.TestProjects;
 import com.android.build.gradle.internal.fixture.VariantChecker;
 import com.android.build.gradle.internal.fixture.VariantCheckers;
+import com.android.build.gradle.options.IntegerOption;
 import com.android.build.gradle.tasks.MergeResources;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.OptionalCompilationStep;
@@ -39,7 +40,6 @@ import org.junit.rules.TemporaryFolder;
 
 /** Tests for the public DSL of the App plugin ("com.android.application") */
 public class AppPluginDslTest {
-
     public static final String PROGUARD_DEBUG = "transformClassesAndResourcesWithProguardForDebug";
     public static final String SHRINKER_DEBUG =
             "transformClassesWithAndroidGradleClassShrinkerForDebug";
@@ -124,7 +124,8 @@ public class AppPluginDslTest {
     public void testUseSupportLibrary_default() throws Exception {
         plugin.createAndroidTasks(false);
 
-        assertThat(getTask("mergeDebugResources", MergeResources.class).isDisableVectorDrawables())
+        assertThat(getTask("mergeDebugResources", MergeResources.class)
+                        .isVectorSupportLibraryUsed())
                 .isFalse();
     }
 
@@ -159,15 +160,15 @@ public class AppPluginDslTest {
 
         assertThat(
                         getTask("mergeF1DebugResources", MergeResources.class)
-                                .isDisableVectorDrawables())
+                                .isVectorSupportLibraryUsed())
                 .isFalse();
         assertThat(
                         getTask("mergeF2DebugResources", MergeResources.class)
-                                .isDisableVectorDrawables())
+                                .isVectorSupportLibraryUsed())
                 .isTrue();
         assertThat(
                         getTask("mergeF3DebugResources", MergeResources.class)
-                                .isDisableVectorDrawables())
+                                .isVectorSupportLibraryUsed())
                 .isFalse();
     }
 
@@ -346,6 +347,7 @@ public class AppPluginDslTest {
         project =
                 TestProjects.builder(projectDirectory.newFolder("oldDsl_instantRun").toPath())
                         .withPlugin(pluginType)
+                        .withProperty(IntegerOption.IDE_TARGET_DEVICE_API, 21)
                         .withProperty(
                                 AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
                                 OptionalCompilationStep.INSTANT_DEV.name())
@@ -362,10 +364,33 @@ public class AppPluginDslTest {
     }
 
     @Test
+    public void testShrinkerChoice_oldDsl_instantRun_override() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("oldDsl_instantRun").toPath())
+                        .withPlugin(pluginType)
+                        .withProperty(IntegerOption.IDE_TARGET_DEVICE_API, 21)
+                        .withProperty(
+                                AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
+                                OptionalCompilationStep.INSTANT_DEV.name())
+                        .build();
+        initFieldsFromProject();
+
+        BuildType debug = android.getBuildTypes().getByName("debug");
+        debug.setMinifyEnabled(true);
+        debug.setUseProguard(true);
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG);
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG);
+    }
+
+    @Test
     public void testShrinkerChoice_oldDsl_override() throws Exception {
         project =
                 TestProjects.builder(projectDirectory.newFolder("oldDsl_instantRun").toPath())
                         .withPlugin(pluginType)
+                        .withProperty(IntegerOption.IDE_TARGET_DEVICE_API, 21)
                         .withProperty(
                                 AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
                                 OptionalCompilationStep.INSTANT_DEV.name())
@@ -400,6 +425,7 @@ public class AppPluginDslTest {
         project =
                 TestProjects.builder(projectDirectory.newFolder("newDsl_instantRun").toPath())
                         .withPlugin(pluginType)
+                        .withProperty(IntegerOption.IDE_TARGET_DEVICE_API, 21)
                         .withProperty(
                                 AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
                                 OptionalCompilationStep.INSTANT_DEV.name())
@@ -416,10 +442,34 @@ public class AppPluginDslTest {
     }
 
     @Test
+    public void testShrinkerChoice_newDsl_instantRun_override() throws Exception {
+        project =
+                TestProjects.builder(projectDirectory.newFolder("newDsl_instantRun").toPath())
+                        .withPlugin(pluginType)
+                        .withProperty(IntegerOption.IDE_TARGET_DEVICE_API, 21)
+                        .withProperty(
+                                AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
+                                OptionalCompilationStep.INSTANT_DEV.name())
+                        .build();
+        initFieldsFromProject();
+
+        PostprocessingOptions postprocessing =
+                android.getBuildTypes().getByName("debug").getPostprocessing();
+        postprocessing.setRemoveUnusedCode(true);
+        postprocessing.setCodeShrinker("proguard");
+
+        plugin.createAndroidTasks(false);
+
+        assertThat(project.getTasks().getNames()).doesNotContain(PROGUARD_DEBUG);
+        assertThat(project.getTasks().getNames()).doesNotContain(SHRINKER_DEBUG);
+    }
+
+    @Test
     public void testShrinkerChoice_newDsl_override() throws Exception {
         project =
                 TestProjects.builder(projectDirectory.newFolder("newDsl_override").toPath())
                         .withPlugin(pluginType)
+                        .withProperty(IntegerOption.IDE_TARGET_DEVICE_API, 21)
                         .withProperty(
                                 AndroidProject.PROPERTY_OPTIONAL_COMPILATION_STEPS,
                                 OptionalCompilationStep.INSTANT_DEV.name())

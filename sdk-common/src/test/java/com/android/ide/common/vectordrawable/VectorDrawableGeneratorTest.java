@@ -13,28 +13,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.common.vectordrawable;
 
-import com.android.SdkConstants;
 import com.android.ide.common.util.GeneratorTester;
 import com.android.testutils.TestResources;
-import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import java.awt.image.BufferedImage;
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import javax.imageio.ImageIO;
 import junit.framework.TestCase;
 import org.junit.Assert;
 
-@SuppressWarnings("javadoc")
+/** Tests for {@link Svg2Vector} and {@link VdPreview} classes. */
 public class VectorDrawableGeneratorTest extends TestCase {
+    private static final int IMAGE_SIZE = 64;
+    /** Due to rendering differences between AWT implementations on different operating systems. */
+    private static final float DIFF_THRESHOLD_PERCENT = 1.25f;
 
     private static final GeneratorTester GENERATOR_TESTER =
             GeneratorTester.withTestDataRelativePath(
                     "tools/base/sdk-common/src/test/resources/testData/vectordrawable");
-
-    private static final int IMAGE_SIZE = 64;
 
     private enum FileType {
         SVG,
@@ -42,7 +46,7 @@ public class VectorDrawableGeneratorTest extends TestCase {
     }
 
     private void checkVectorConversion(String testFileName, FileType type,
-                                       boolean dumpXml, String expectedError) throws IOException {
+                                       boolean dumpXml, String expectedError) throws Exception {
         String incomingFileName;
         if (type == FileType.SVG) {
             incomingFileName = testFileName + ".svg";
@@ -55,70 +59,69 @@ public class VectorDrawableGeneratorTest extends TestCase {
         File parentDirFile = TestResources.getDirectory(getClass(), "/testData/vectordrawable");
 
         File incomingFile = new File(parentDirFile, incomingFileName);
-        String xmlContent = null;
+        String xmlContent;
         if (type == FileType.SVG) {
-            try {
-                OutputStream outStream = new ByteArrayOutputStream();
-                String errorLog = Svg2Vector.parseSvgToXml(incomingFile, outStream);
-                if (expectedError != null) {
-                    TestCase.assertNotNull(errorLog);
-                    TestCase.assertFalse(errorLog.isEmpty());
-                    TestCase.assertTrue(errorLog.contains(expectedError));
-                }
-                xmlContent = outStream.toString();
-                if (xmlContent == null || xmlContent.isEmpty()) {
-                    TestCase.fail("Empty Xml file.");
-                }
-                if (dumpXml) {
-                    File tempXmlFile = new File(parentDirFile, imageName + ".xml");
-                    PrintWriter writer = new PrintWriter(tempXmlFile);
+            OutputStream outStream = new ByteArrayOutputStream();
+            String errorLog = Svg2Vector.parseSvgToXml(incomingFile, outStream);
+            if (expectedError != null) {
+                TestCase.assertNotNull(errorLog);
+                TestCase.assertFalse(errorLog.isEmpty());
+                TestCase.assertTrue(errorLog.contains(expectedError));
+            }
+            xmlContent = outStream.toString();
+            if (xmlContent == null || xmlContent.isEmpty()) {
+                TestCase.fail("Empty Xml file.");
+            }
+            if (dumpXml) {
+                File tempXmlFile = new File(parentDirFile, imageName + ".xml");
+                try (PrintWriter writer = new PrintWriter(tempXmlFile)) {
                     writer.println(xmlContent);
-                    writer.close();
                 }
-            } catch (Exception e) {
-                TestCase.fail("Failure: Exception in Svg2Vector.parseSvgToXml!" + e.getMessage());
             }
         } else {
-            xmlContent = Files.toString(incomingFile, Charsets.UTF_8);
+            xmlContent = Files.asCharSource(incomingFile, StandardCharsets.UTF_8).read();
         }
 
-        final VdPreview.TargetSize imageTargetSize = VdPreview.TargetSize.createSizeFromWidth(IMAGE_SIZE);
+        VdPreview.TargetSize imageTargetSize = VdPreview.TargetSize.createSizeFromWidth(IMAGE_SIZE);
         StringBuilder builder = new StringBuilder();
-        BufferedImage image = VdPreview.getPreviewFromVectorXml(imageTargetSize, xmlContent,
-                builder);
+        BufferedImage image =
+                VdPreview.getPreviewFromVectorXml(imageTargetSize, xmlContent, builder);
 
         String imageNameWithParent = parentDir + imageName;
         File pngFile = new File(parentDirFile, imageName);
         if (!pngFile.exists()) {
-            GENERATOR_TESTER.generateGoldenImage(image, imageNameWithParent, imageName);
+            String golden = imageNameWithParent;
+            String path = parentDirFile.getPath();
+            int pos = path.replace('\\', '/').indexOf("/tools/base/");
+            if (pos > 0) {
+                golden = path.substring(0, pos) + File.separator
+                        + GENERATOR_TESTER.getTestDataRelPath() + File.separator + imageName;
+            }
+            GENERATOR_TESTER.generateGoldenImage(image, golden, imageName);
+            fail("Golden file " + golden + " didn't exist, created by the test.");
         } else {
             InputStream is = new FileInputStream(pngFile);
             BufferedImage goldenImage = ImageIO.read(is);
-            // Mostly, this threshold is for JDK versions. The golden image is generated
-            // on Linux with JDK 6, the expected delta is 0 on the same platform and JDK version.
-            float diffThreshold = 1.5f;
-            if (SdkConstants.currentPlatform() == SdkConstants.PLATFORM_DARWIN) {
-                diffThreshold = 5.0f;
-            }
             GeneratorTester.assertImageSimilar(
-                    imageNameWithParent, goldenImage, image, diffThreshold);
+                    imageNameWithParent, goldenImage, image, DIFF_THRESHOLD_PERCENT);
         }
-
     }
 
-    private void checkSvgConversion(String fileName) throws IOException {
+    private void checkSvgConversion(String fileName) throws Exception {
         checkVectorConversion(fileName, FileType.SVG, false, null);
     }
 
-    private void checkXmlConversion(String filename) throws IOException {
+    private void checkXmlConversion(String filename) throws Exception {
         checkVectorConversion(filename, FileType.XML, false, null);
     }
 
-    private void checkSvgConversionAndContainsError(String filename, String errorLog) throws IOException {
+    private void checkSvgConversionAndContainsError(String filename, String errorLog)
+            throws Exception {
         checkVectorConversion(filename, FileType.SVG, false, errorLog);
     }
 
-    private void checkSvgConversionDebug(String fileName) throws IOException {
+    @SuppressWarnings("unused") // Method intended for debugging.
+    private void checkSvgConversionDebug(String fileName) throws Exception {
         checkVectorConversion(fileName, FileType.SVG, true, null);
     }
 
@@ -191,7 +194,7 @@ public class VectorDrawableGeneratorTest extends TestCase {
     // Preview broken on linux, fine on chrome browser
     public void testSvgStrokeWidthTransform() throws Exception {
         checkSvgConversionAndContainsError("ic_strokewidth_transform",
-                "We don't scale the stroke width!");
+                "Scaling of the stroke width is ignored");
     }
 
     public void testSvgEmptyAttributes() throws Exception {
@@ -204,8 +207,8 @@ public class VectorDrawableGeneratorTest extends TestCase {
 
     public void testSvgContainsError() throws Exception {
         checkSvgConversionAndContainsError("ic_contains_ignorable_error",
-                "ERROR@ line 16 <switch> is not supported\n"
-                        + "ERROR@ line 17 <foreignObject> is not supported");
+                "ERROR @ line 16 <switch> is not supported\n"
+                        + "ERROR @ line 17 <foreignObject> is not supported");
     }
 
     public void testSvgLineToMoveTo() throws Exception {
@@ -281,12 +284,20 @@ public class VectorDrawableGeneratorTest extends TestCase {
         checkSvgConversion("test_transform_big_arc_translate_scale");
     }
 
+    public void testSvgTransformDegenerateArc() throws Exception {
+        checkSvgConversion("test_transform_degenerate_arc");
+    }
+
     public void testSvgTransformCircleRotate() throws Exception {
         checkSvgConversion("test_transform_circle_rotate");
     }
 
     public void testSvgTransformCircleScale() throws Exception {
         checkSvgConversion("test_transform_circle_scale");
+    }
+
+    public void testSvgTransformCircleMatrix() throws Exception {
+        checkSvgConversion("test_transform_circle_matrix");
     }
 
     public void testSvgTransformRectMatrix() throws Exception {
@@ -424,6 +435,10 @@ public class VectorDrawableGeneratorTest extends TestCase {
         checkSvgConversion("test_fill_type_no_rule");
     }
 
+    public void testSvgBlackFill() throws Exception {
+        checkSvgConversion("test_black_fill");
+    }
+
     public void testSvgDefsUseTransform() throws Exception {
         checkSvgConversion("test_defs_use_shape2");
     }
@@ -469,11 +484,15 @@ public class VectorDrawableGeneratorTest extends TestCase {
         checkSvgConversion("test_clip_path_group");
     }
 
+    public void testSvgClipPathGroup2() throws Exception {
+        checkSvgConversion("test_clip_path_group_2");
+    }
+
     public void testSvgClipPathTranslateAffected() throws Exception {
         checkSvgConversion("test_clip_path_group_translate");
     }
 
-    public void testSvgClipPathGroup2() throws Exception {
+    public void testSvgClipPathIsGroup() throws Exception {
         checkSvgConversion("test_clip_path_is_group");
     }
 
@@ -536,6 +555,10 @@ public class VectorDrawableGeneratorTest extends TestCase {
 
     public void testSvgStylePathClassNames() throws Exception {
         checkSvgConversion("test_style_path_class_names");
+    }
+
+    public void testSvgStyleShortVersion() throws Exception {
+        checkSvgConversion("test_style_short_version");
     }
 
     // Gradient tests start here
@@ -664,9 +687,178 @@ public class VectorDrawableGeneratorTest extends TestCase {
         checkSvgConversion("test_gradient_linear_x_y_numbers");
     }
 
+    public void testGradientObjectTransformation() throws Exception {
+        checkSvgConversion("test_gradient_object_transformation");
+    }
+
+    public void testSvgGradientComplex() throws Exception {
+        checkSvgConversion("test_gradient_complex");
+    }
+
+    public void testSvgGradientComplex2() throws Exception {
+        checkSvgConversion("test_gradient_complex_2");
+    }
+
+    public void testSvgGradientRadialCoordinates() throws Exception {
+        checkSvgConversion("test_gradient_radial_coordinates");
+    }
+
+    public void testSvgGradientRadialNoCoordinates() throws Exception {
+        checkSvgConversion("test_gradient_radial_no_coordinates");
+    }
+
+    public void testSvgGradientRadialNoStops() throws Exception {
+        checkVectorConversion(
+                "test_gradient_radial_no_stops", FileType.SVG, false, "has no stop info");
+    }
+
+    public void testSvgGradientRadialNoUnits() throws Exception {
+        checkSvgConversion("test_gradient_radial_no_units");
+    }
+
+    public void testSvgGradientRadialObjectBoundingBox() throws Exception {
+        checkSvgConversion("test_gradient_radial_object_bounding_box");
+    }
+
+    public void testSvgGradientRadialOneStop() throws Exception {
+        checkSvgConversion("test_gradient_radial_one_stop");
+    }
+
+    public void testSvgGradientRadialOverlappingStops() throws Exception {
+        checkSvgConversion("test_gradient_radial_overlapping_stops");
+    }
+
+    public void testSvgGradientRadialRNegative() throws Exception {
+        checkSvgConversion("test_gradient_radial_r_negative");
+    }
+
+    public void testSvgGradientRadialRZero() throws Exception {
+        checkSvgConversion("test_gradient_radial_r_zero");
+    }
+
+    public void testSvgGradientRadialSpreadPad() throws Exception {
+        checkSvgConversion("test_gradient_radial_spread_pad");
+    }
+
+    public void testSvgGradientRadialSpreadReflect() throws Exception {
+        checkSvgConversion("test_gradient_radial_spread_reflect");
+    }
+
+    public void testSvgGradientRadialSpreadRepeat() throws Exception {
+        checkSvgConversion("test_gradient_radial_spread_repeat");
+    }
+
+    public void testSvgGradientRadialStopOpacity() throws Exception {
+        checkSvgConversion("test_gradient_radial_stop_opacity");
+    }
+
+    public void testSvgGradientRadialStopOpacityFraction() throws Exception {
+        checkSvgConversion("test_gradient_radial_stop_opacity_fraction");
+    }
+
+    public void testSvgGradientRadialStroke() throws Exception {
+        checkSvgConversion("test_gradient_radial_stroke");
+    }
+
+    public void testSvgGradientRadialThreeStops() throws Exception {
+        checkSvgConversion("test_gradient_radial_three_stops");
+    }
+
+    public void testSvgGradientRadialUserSpaceOnUse() throws Exception {
+        checkSvgConversion("test_gradient_radial_user_space_on_use");
+    }
+
+    public void testSvgGradientRadialUserSpace2() throws Exception {
+        checkSvgConversion("test_gradient_radial_user_space_2");
+    }
+
+    public void testSvgGradientRadialTransformTranslate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate");
+    }
+
+    public void testSvgGradientRadialTransformTranslateUserSpace() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate_userspace");
+    }
+
+    public void testSvgGradientRadialTransformTranslateScale() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate_scale");
+    }
+
+    public void testSvgGradientRadialTransformScaleTranslate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_scale_translate");
+    }
+
+    public void testSvgGradientRadialTransformMatrix() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_matrix");
+    }
+
+    public void testSvgGradientRadialTransformRotate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_rotate");
+    }
+
+    public void testSvgGradientRadialTransformRotateScale() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_rotate_scale");
+    }
+
+    public void testSvgGradientRadialTransformRotateScaleTranslate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_rotate_scale_translate");
+    }
+
+    public void testSvgGradientRadialTransformRotateTranslate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_rotate_translate");
+    }
+
+    public void testSvgGradientRadialTransformRotateTranslateScale() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_rotate_translate_scale");
+    }
+
+    public void testSvgGradientRadialTransformScale() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_scale");
+    }
+
+    public void testSvgGradientRadialTransformScaleRotate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_scale_rotate");
+    }
+
+    public void testSvgGradientRadialTransformScaleRotateTranslate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_scale_rotate_translate");
+    }
+
+    public void testSvgGradientRadialTransformScaleTranslateRotate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_scale_translate_rotate");
+    }
+
+    public void testSvgGradientRadialTransformTranslateRotate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate_rotate");
+    }
+
+    public void testSvgGradientRadialTransformTranslateRotateScale() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate_rotate_scale");
+    }
+
+    public void testSvgGradientRadialTransformTranslateScaleRotate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate_scale_rotate");
+    }
+
+    public void testSvgGradientRadialTransformTranslateGroupScaleTranslate() throws Exception {
+        checkSvgConversion("test_gradient_radial_transform_translate_group_scale_translate");
+    }
+
+    public void testSvgGradientRadialUnitsAsNumbers() throws Exception {
+        checkSvgConversion("test_gradient_radial_units_as_numbers");
+    }
+
+    public void testSvgGradientRadialCoordinatesNegativePercentage() throws Exception {
+        checkSvgConversion("test_gradient_radial_coordinates_negative_percentage");
+    }
+
     // XML files start here.
     public void testXmlIconSizeOpacity() throws Exception {
         checkXmlConversion("ic_size_opacity");
+    }
+
+    public void testXmlTintAndOpacity() throws Exception {
+        checkXmlConversion("test_tint_and_opacity");
     }
 
     public void testXmlColorFormats() throws Exception {

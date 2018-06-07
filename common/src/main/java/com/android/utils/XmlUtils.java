@@ -15,22 +15,6 @@
  */
 package com.android.utils;
 
-import static com.android.SdkConstants.AMP_ENTITY;
-import static com.android.SdkConstants.ANDROID_NS_NAME;
-import static com.android.SdkConstants.ANDROID_URI;
-import static com.android.SdkConstants.APOS_ENTITY;
-import static com.android.SdkConstants.APP_PREFIX;
-import static com.android.SdkConstants.GT_ENTITY;
-import static com.android.SdkConstants.LT_ENTITY;
-import static com.android.SdkConstants.NEWLINE_ENTITY;
-import static com.android.SdkConstants.QUOT_ENTITY;
-import static com.android.SdkConstants.XMLNS;
-import static com.android.SdkConstants.XMLNS_PREFIX;
-import static com.android.SdkConstants.XMLNS_URI;
-import static com.google.common.base.Charsets.UTF_16BE;
-import static com.google.common.base.Charsets.UTF_16LE;
-import static com.google.common.base.Charsets.UTF_8;
-
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -39,37 +23,21 @@ import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.google.common.base.CharMatcher;
 import com.google.common.io.Files;
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
-import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamReader;
-import org.w3c.dom.Attr;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
+import org.w3c.dom.*;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 import org.xml.sax.XMLReader;
+
+import javax.xml.parsers.*;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+import java.io.*;
+import java.util.*;
+
+import static com.android.SdkConstants.*;
+import static com.google.common.base.Charsets.*;
+import static com.google.common.base.Charsets.UTF_8;
 
 /** XML Utilities */
 public class XmlUtils {
@@ -576,8 +544,7 @@ public class XmlUtils {
         return null;
     }
 
-    public static SAXParserFactory configureSaxFactory(
-            @NonNull SAXParserFactory factory,
+    public static SAXParserFactory configureSaxFactory(@NonNull SAXParserFactory factory,
             boolean namespaceAware, boolean checkDtd) {
         try {
             factory.setXIncludeAware(false);
@@ -592,8 +559,8 @@ public class XmlUtils {
     }
 
     @NonNull
-    public static SAXParser createSaxParser(
-            @NonNull SAXParserFactory factory) throws ParserConfigurationException, SAXException {
+    public static SAXParser createSaxParser(@NonNull SAXParserFactory factory)
+            throws ParserConfigurationException, SAXException {
         return createSaxParser(factory, false);
     }
 
@@ -795,23 +762,50 @@ public class XmlUtils {
      * @return the corresponding XML string for the value
      */
     public static String formatFloatAttribute(double value) {
+        if (!Double.isFinite(value)) {
+            throw new IllegalArgumentException("Invalid number: " + value);
+        }
         // Use locale-independent conversion to make sure that the decimal separator is always dot.
         // We use Float.toString as opposed to Double.toString to avoid writing too many
         // insignificant digits.
         String result = Float.toString((float) value);
-        int pos = result.lastIndexOf('.');
+        return trimInsignificantZeros(result);
+    }
+
+    /**
+     * Removes trailing zeros after the decimal dot and also the dot itself if there were non-zero
+     * digits after it.
+     *
+     * @param floatingPointNumber the string representing a floating point number
+     * @return the original number with trailing zeros removed
+     */
+    public static String trimInsignificantZeros(String floatingPointNumber) {
+        int pos = floatingPointNumber.lastIndexOf('.');
         if (pos < 0) {
-            return result;
+            return floatingPointNumber;
         }
         if (pos == 0) {
             pos = 2;
         }
 
-        int i = result.length();
-        while (--i > pos && result.charAt(i) == '0') {
-            // Skip trailing zeros.
+        int exponent = floatingPointNumber.indexOf('e', pos);
+        if (exponent < 0) {
+            exponent = floatingPointNumber.indexOf('E', pos);
         }
-        return result.substring(0, i == pos ? i : i + 1);
+        int i = exponent >= 0 ? exponent : floatingPointNumber.length();
+        while (--i > pos) {
+            if (floatingPointNumber.charAt(i) != '0') {
+                i++;
+                break;
+            }
+        }
+        if (exponent < 0) {
+            return floatingPointNumber.substring(0, i);
+        } else if (exponent == i) {
+            return floatingPointNumber;
+        } else {
+            return floatingPointNumber.substring(0, i) + floatingPointNumber.substring(exponent);
+        }
     }
 
     /**

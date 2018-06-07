@@ -25,16 +25,14 @@ import static org.mockito.Mockito.when;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.api.transform.QualifiedContent;
-import com.android.build.gradle.internal.TaskContainerAdaptor;
 import com.android.build.gradle.internal.TaskFactory;
+import com.android.build.gradle.internal.TaskFactoryImpl;
+import com.android.build.gradle.internal.errors.SyncIssueHandler;
 import com.android.build.gradle.internal.ide.SyncIssueImpl;
-import com.android.build.gradle.internal.scope.AndroidTaskRegistry;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.TransformVariantScope;
-import com.android.builder.core.ErrorReporter;
 import com.android.builder.model.SyncIssue;
 import com.android.builder.profile.Recorder;
-import com.android.ide.common.blame.Message;
 import com.android.utils.FileUtils;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableList;
@@ -82,18 +80,16 @@ public class TaskTestUtils {
     protected TaskFactory taskFactory;
     protected TransformVariantScope scope;
     protected TransformManager transformManager;
-    protected FakeErrorReporter errorReporter;
+    protected FakeConfigurableErrorReporter errorReporter;
 
     protected Supplier<RuntimeException> mTransformTaskFailed;
     protected Project project;
 
-    static class FakeErrorReporter extends ErrorReporter {
+    static class FakeConfigurableErrorReporter implements SyncIssueHandler {
 
         private SyncIssue syncIssue = null;
 
-        protected FakeErrorReporter(@NonNull EvaluationMode mode) {
-            super(mode);
-        }
+        protected FakeConfigurableErrorReporter() {}
 
         public SyncIssue getSyncIssue() {
             return syncIssue;
@@ -101,8 +97,11 @@ public class TaskTestUtils {
 
         @NonNull
         @Override
-        public SyncIssue handleIssue(
-                @Nullable String data, int type, int severity, @NonNull String msg) {
+        public SyncIssue reportIssue(
+                @NonNull Type type,
+                @NonNull Severity severity,
+                @NonNull String msg,
+                @Nullable String data) {
             // always create a sync issue, no matter what the mode is. This can be used to validate
             // what error is thrown anyway.
             syncIssue = new SyncIssueImpl(type, severity, data, msg);
@@ -110,15 +109,53 @@ public class TaskTestUtils {
         }
 
         @Override
-        public void receiveMessage(@NonNull Message message) {
-            // do nothing
+        public boolean hasSyncIssue(@NonNull Type type) {
+            return syncIssue != null && syncIssue.getType() == type.getType();
         }
 
+        @NonNull
         @Override
-        public boolean hasSyncIssue(int type) {
-            return syncIssue != null && syncIssue.getType() == type;
+        public ImmutableList<SyncIssue> getSyncIssues() {
+            if (syncIssue != null) {
+                return ImmutableList.of(syncIssue);
+            }
+
+            return ImmutableList.of();
         }
 
+        // Kotlin default impl doesn't work in java...
+        @NonNull
+        @Override
+        public SyncIssue reportIssue(
+                @NonNull Type type, @NonNull Severity severity, @NonNull String msg) {
+            return reportIssue(type, severity, msg, null);
+        }
+
+        @NonNull
+        @Override
+        public SyncIssue reportError(
+                @NonNull Type type, @NonNull String msg, @Nullable String data) {
+            return reportIssue(type, Severity.ERROR, msg, data);
+        }
+
+        @NonNull
+        @Override
+        public SyncIssue reportError(@NonNull Type type, @NonNull String msg) {
+            return reportIssue(type, Severity.ERROR, msg, null);
+        }
+
+        @NonNull
+        @Override
+        public SyncIssue reportWarning(
+                @NonNull Type type, @NonNull String msg, @Nullable String data) {
+            return reportIssue(type, Severity.WARNING, msg, data);
+        }
+
+        @NonNull
+        @Override
+        public SyncIssue reportWarning(@NonNull Type type, @NonNull String msg) {
+            return reportIssue(type, Severity.WARNING, msg, null);
+        }
     }
 
     public static final class FakeRecorder implements Recorder {
@@ -168,10 +205,9 @@ public class TaskTestUtils {
         FileUtils.mkdirs(projectDirectory);
         project = ProjectBuilder.builder().withProjectDir(projectDirectory).build();
         scope = getScope();
-        errorReporter = new FakeErrorReporter(ErrorReporter.EvaluationMode.IDE);
-        transformManager = new TransformManager(
-                project, new AndroidTaskRegistry(), errorReporter, new FakeRecorder());
-        taskFactory = new TaskContainerAdaptor(project.getTasks());
+        errorReporter = new FakeConfigurableErrorReporter();
+        transformManager = new TransformManager(project, errorReporter, new FakeRecorder());
+        taskFactory = new TaskFactoryImpl(project.getTasks());
         mTransformTaskFailed = () -> new RuntimeException(
                 String.format("Transform task creation failed.  Sync issue:\n %s",
                         errorReporter.getSyncIssue().toString()));

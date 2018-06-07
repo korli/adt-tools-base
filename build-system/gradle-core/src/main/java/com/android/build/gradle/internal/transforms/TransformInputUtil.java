@@ -16,43 +16,73 @@
 
 package com.android.build.gradle.internal.transforms;
 
+import com.android.annotations.NonNull;
 import com.android.build.api.transform.DirectoryInput;
 import com.android.build.api.transform.JarInput;
+import com.android.build.api.transform.Status;
 import com.android.build.api.transform.TransformInput;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import java.io.File;
 import java.util.Collection;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Utility methods for retrieving files from TransformInput.
  */
 public class TransformInputUtil {
 
-    public static Collection<File> getAllFiles(Collection<TransformInput> transformInputs) {
+    /** Return existing jars and directories from the inputs. Deleted ones are omitted. */
+    public static Collection<File> getAllFiles(Iterable<TransformInput> transformInputs) {
         return getAllFiles(transformInputs, true, true);
     }
 
-    public static Collection<File> getDirectories(Collection<TransformInput> transformInputs) {
+    /** Return existing directories from the inputs. Deleted ones are omitted. */
+    public static Collection<File> getDirectories(Iterable<TransformInput> transformInputs) {
         return getAllFiles(transformInputs, true, false);
     }
 
     private static Collection<File> getAllFiles(
-            Collection<TransformInput> transformInputs,
+            Iterable<TransformInput> transformInputs,
             boolean includeDirectoryInput,
             boolean includeJarInput) {
         ImmutableList.Builder<File> inputFiles = ImmutableList.builder();
         for (TransformInput input : transformInputs) {
             if (includeDirectoryInput) {
                 for (DirectoryInput directoryInput : input.getDirectoryInputs()) {
-                    inputFiles.add(directoryInput.getFile());
+                    if (directoryInput.getFile().isDirectory()) {
+                        inputFiles.add(directoryInput.getFile());
+                    }
                 }
             }
             if (includeJarInput) {
                 for (JarInput jarInput : input.getJarInputs()) {
-                    inputFiles.add(jarInput.getFile());
+                    if (jarInput.getFile().isFile()) {
+                        inputFiles.add(jarInput.getFile());
+                    }
                 }
             }
         }
         return inputFiles.build();
+    }
+
+    @NonNull
+    public static Map<Status, Set<File>> getByStatus(@NonNull DirectoryInput dir) {
+        Map<Status, Set<File>> byStatus =
+                dir.getChangedFiles()
+                        .entrySet()
+                        .stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        Map.Entry::getValue,
+                                        Collectors.mapping(Map.Entry::getKey, Collectors.toSet())));
+
+        for (Status status : Status.values()) {
+            byStatus.putIfAbsent(status, ImmutableSet.of());
+        }
+
+        return byStatus;
     }
 }

@@ -18,11 +18,8 @@ package com.android.build.gradle.tasks;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.incremental.DexPackagingPolicy;
 import com.android.build.gradle.internal.incremental.FileType;
-import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
 import com.android.build.gradle.internal.scope.OutputScope;
-import com.android.build.gradle.internal.scope.PackagingScope;
 import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.builder.profile.ProcessProfileWriter;
@@ -31,7 +28,6 @@ import com.google.wireless.android.sdk.stats.GradleBuildProjectMetrics;
 import java.io.File;
 import java.io.IOException;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.Internal;
 
 /** Task to package an Android application (APK). */
@@ -96,11 +92,9 @@ public class PackageApplication extends PackageAndroidArtifact {
         private final TaskOutputHolder.TaskOutputType expectedOutputType;
 
         public StandardConfigAction(
-                @NonNull PackagingScope packagingScope,
+                @NonNull VariantScope packagingScope,
                 @NonNull File outputDirectory,
-                @Nullable InstantRunPatchingPolicy patchingPolicy,
                 @NonNull VariantScope.TaskOutputType inputResourceFilesType,
-                @NonNull FileCollection resourceFiles,
                 @NonNull FileCollection manifests,
                 @NonNull VariantScope.TaskOutputType manifestType,
                 @NonNull OutputScope outputScope,
@@ -109,9 +103,7 @@ public class PackageApplication extends PackageAndroidArtifact {
             super(
                     packagingScope,
                     outputDirectory,
-                    patchingPolicy,
                     inputResourceFilesType,
-                    resourceFiles,
                     manifests,
                     manifestType,
                     fileCache,
@@ -122,7 +114,7 @@ public class PackageApplication extends PackageAndroidArtifact {
         @NonNull
         @Override
         public String getName() {
-            return packagingScope.getTaskName("package");
+            return variantScope.getTaskName("package");
         }
 
         @NonNull
@@ -149,10 +141,8 @@ public class PackageApplication extends PackageAndroidArtifact {
 
         public InstantRunResourcesConfigAction(
                 @NonNull File outputFile,
-                @NonNull PackagingScope scope,
-                @Nullable InstantRunPatchingPolicy patchingPolicy,
+                @NonNull VariantScope scope,
                 @NonNull VariantScope.TaskOutputType inputResourceFilesType,
-                @NonNull FileCollection resourceFiles,
                 @NonNull FileCollection manifests,
                 @NonNull VariantScope.TaskOutputType manifestType,
                 @Nullable FileCache fileCache,
@@ -160,9 +150,7 @@ public class PackageApplication extends PackageAndroidArtifact {
             super(
                     scope,
                     outputFile.getParentFile(),
-                    patchingPolicy,
                     inputResourceFilesType,
-                    resourceFiles,
                     manifests,
                     manifestType,
                     fileCache,
@@ -173,7 +161,7 @@ public class PackageApplication extends PackageAndroidArtifact {
         @NonNull
         @Override
         public String getName() {
-            return packagingScope.getTaskName("packageInstantRunResources");
+            return variantScope.getTaskName("packageInstantRunResources");
         }
 
         @NonNull
@@ -188,15 +176,14 @@ public class PackageApplication extends PackageAndroidArtifact {
                     TaskOutputHolder.TaskOutputType.INSTANT_RUN_PACKAGED_RESOURCES;
             packageApplication.instantRunFileType = FileType.RESOURCES;
 
-            // Don't try to add any special dex files to this zip.
-            packageApplication.dexPackagingPolicy = DexPackagingPolicy.STANDARD;
-
             // Skip files which are not needed for hot/cold swap.
-            FileCollection emptyCollection = packagingScope.getProject().files();
+            FileCollection emptyCollection = variantScope.getGlobalScope().getProject().files();
 
             packageApplication.dexFolders = emptyCollection;
             packageApplication.jniFolders = emptyCollection;
             packageApplication.javaResourceFiles = emptyCollection;
+            packageApplication.apkList =
+                    variantScope.getOutput(TaskOutputHolder.TaskOutputType.APK_LIST);
 
             // Don't sign.
             packageApplication.setSigningConfig(null);

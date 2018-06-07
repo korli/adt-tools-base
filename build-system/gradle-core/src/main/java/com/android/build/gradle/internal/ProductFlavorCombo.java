@@ -19,7 +19,6 @@ package com.android.build.gradle.internal;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.DimensionAware;
-import com.android.builder.model.ProductFlavor;
 import com.android.utils.StringHelper;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ArrayListMultimap;
@@ -28,7 +27,6 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import java.util.List;
-import java.util.stream.Collectors;
 import org.gradle.api.Named;
 
 /**
@@ -62,7 +60,7 @@ public class ProductFlavorCombo<T extends DimensionAware & Named> {
                     sb.append(flavor.getName());
                     first = false;
                 } else {
-                    sb.append(StringHelper.capitalize(flavor.getName()));
+                    StringHelper.appendCapitalized(sb, flavor.getName());
                 }
             }
             name = sb.toString();
@@ -73,17 +71,6 @@ public class ProductFlavorCombo<T extends DimensionAware & Named> {
     @NonNull
     public List<T> getFlavorList() {
         return flavorList;
-    }
-
-    /**
-     * Return the name of the combined list of flavors.
-     */
-    @NonNull
-    public static String getFlavorComboName(List<? extends Named> flavorList) {
-        return StringHelper.combineAsCamelCase(
-                flavorList.stream()
-                        .map(namedObject -> namedObject.getName())
-                        .collect(Collectors.toList()));
     }
 
     /**
@@ -127,19 +114,6 @@ public class ProductFlavorCombo<T extends DimensionAware & Named> {
                     0, flavorDimensions, map);
         }
         return result;
-    }
-
-    /**
-     * Remove all null reference from an array and create an ImmutableList it.
-     */
-    private static ImmutableList<ProductFlavor> filterNullFromArray(ProductFlavor[] flavors) {
-        ImmutableList.Builder<ProductFlavor> builder = ImmutableList.builder();
-        for (ProductFlavor flavor : flavors) {
-            if (flavor != null) {
-                builder.add(flavor);
-            }
-        }
-        return builder.build();
     }
 
     private static <S extends DimensionAware & Named> void createProductFlavorCombinations(

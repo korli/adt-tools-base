@@ -16,6 +16,10 @@
 
 package com.android.testutils.truth;
 
+import static com.google.common.truth.Truth.assert_;
+
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.utils.FileUtils;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
@@ -41,8 +45,13 @@ public class FileSubject extends Subject<FileSubject, File> {
                 }
             };
 
-    public FileSubject(FailureStrategy failureStrategy, File subject) {
+    public FileSubject(@NonNull FailureStrategy failureStrategy, @Nullable File subject) {
         super(failureStrategy, subject);
+    }
+
+    @NonNull
+    public static FileSubject assertThat(@Nullable File file) {
+        return assert_().about(FileSubject.FACTORY).that(file);
     }
 
     public void hasName(String name) {
@@ -142,6 +151,18 @@ public class FileSubject extends Subject<FileSubject, File> {
 
     public void isNewerThan(File other) {
         isNewerThan(other.lastModified());
+    }
+
+    public void isNewerThanOrSameAs(long otherTimestamp) {
+        long thisTimestamp = getSubject().lastModified();
+        if (getSubject().lastModified() < otherTimestamp) {
+            failWithBadResults(
+                    "is newer than or same as", otherTimestamp, "was modified at", thisTimestamp);
+        }
+    }
+
+    public void isNewerThanOrSameAs(File other) {
+        isNewerThanOrSameAs(other.lastModified());
     }
 
     public void contentWithUnixLineSeparatorsIsExactly(String expected) throws IOException {

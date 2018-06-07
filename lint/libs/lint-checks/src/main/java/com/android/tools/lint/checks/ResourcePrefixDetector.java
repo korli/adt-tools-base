@@ -26,6 +26,7 @@ import static com.android.utils.SdkUtils.startsWithIgnoreCase;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.resources.ResourceFolderType;
+import com.android.tools.lint.detector.api.BinaryResourceScanner;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
 import com.android.tools.lint.detector.api.Detector;
@@ -35,10 +36,10 @@ import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.ResourceContext;
-import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.tools.lint.detector.api.XmlScanner;
 import com.android.utils.XmlUtils;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Arrays;
@@ -53,8 +54,8 @@ import org.w3c.dom.Element;
  *
  * TODO: What about id's?
  */
-public class ResourcePrefixDetector extends ResourceXmlDetector implements
-        Detector.BinaryResourceScanner {
+public class ResourcePrefixDetector extends Detector implements
+        BinaryResourceScanner, XmlScanner {
     /** The main issue discovered by this detector */
     @SuppressWarnings("unchecked")
     public static final Issue ISSUE = Issue.create(

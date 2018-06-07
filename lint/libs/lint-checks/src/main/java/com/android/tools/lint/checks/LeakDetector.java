@@ -16,9 +16,11 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.SdkConstants.CLASS_APPLICATION;
 import static com.android.SdkConstants.CLASS_CONTEXT;
 import static com.android.SdkConstants.CLASS_FRAGMENT;
 import static com.android.SdkConstants.CLASS_VIEW;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -32,6 +34,7 @@ import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.intellij.openapi.util.Ref;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
@@ -64,7 +67,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor;
 /**
  * Looks for leaks via static fields
  */
-public class LeakDetector extends Detector implements Detector.UastScanner {
+public class LeakDetector extends Detector implements SourceCodeScanner {
     /** Leaking data via static fields */
     public static final Issue ISSUE = Issue.create(
             "StaticFieldLeak",
@@ -100,7 +103,7 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
     public LeakDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Nullable
     @Override
@@ -115,7 +118,8 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
         boolean isAnonymous = declaration instanceof UAnonymousClass;
 
         // Only consider static inner classes
-        boolean isStatic = context.getEvaluator().isStatic(declaration) || containingClass == null;
+        JavaEvaluator evaluator = context.getEvaluator();
+        boolean isStatic = evaluator.isStatic(declaration) || containingClass == null;
         if (isStatic || isAnonymous) { // containingClass == null: implicitly static
             // But look for fields that store contexts
             for (UField field : declaration.getFields()) {
@@ -129,12 +133,23 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
 
         String superClass = null;
         for (String cls : SUPER_CLASSES) {
-            if (context.getEvaluator().inheritsFrom(declaration, cls, false)) {
+            if (evaluator.inheritsFrom(declaration, cls, false)) {
                 superClass = cls;
                 break;
             }
         }
         assert superClass != null;
+
+        UElement uastParent = declaration.getUastParent();
+        if (uastParent != null) {
+            //noinspection unchecked
+            UMethod method = UastUtils.getParentOfType(
+                    uastParent, UMethod.class, true,
+                    UClass.class, UObjectLiteralExpression.class);
+            if (method != null && evaluator.isStatic(method)) {
+                return;
+            }
+        }
 
         //noinspection unchecked
         UCallExpression invocation = UastUtils.getParentOfType(
@@ -151,6 +166,9 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
             name = "anonymous " + ((UAnonymousClass)declaration).getBaseClassReference().getQualifiedName();
         } else {
             name = declaration.getQualifiedName();
+            if (name == null) {
+                name = declaration.getName();
+            }
         }
 
         String superClassName = superClass.substring(superClass.lastIndexOf('.') + 1);
@@ -174,7 +192,7 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
             return;
         }
 
-        if (LeakDetector.isLeakCandidate(cls, context.getEvaluator())) {
+        if (isLeakCandidate(cls, context.getEvaluator())) {
             context.report(LeakDetector.ISSUE, field, context.getLocation(field),
                     "This field leaks a context object");
         }
@@ -300,7 +318,7 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
                             }
                             if (rhs instanceof UCallExpression) {
                                 UCallExpression call = (UCallExpression) rhs;
-                                if ("getApplicationContext".equals(call.getMethodName())) {
+                                if ("getApplicationContext".equals(getMethodName(call))) {
                                     assignedToAppContext.set(true);
                                 }
                             }
@@ -355,7 +373,8 @@ public class LeakDetector extends Detector implements Detector.UastScanner {
     static boolean isLeakCandidate(
             @NonNull PsiClass cls,
             @NonNull JavaEvaluator evaluator) {
-        return evaluator.extendsClass(cls, CLASS_CONTEXT, false)
+        return evaluator.extendsClass(cls, CLASS_CONTEXT, false) &&
+                   !evaluator.extendsClass(cls, CLASS_APPLICATION, false)
                 || evaluator.extendsClass(cls, CLASS_VIEW, false)
                 || evaluator.extendsClass(cls, CLASS_FRAGMENT, false);
     }

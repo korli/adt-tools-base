@@ -90,6 +90,21 @@ public class ResourceCycleDetectorTest extends AbstractCheckTest {
                             + "</LinearLayout>\n")));
     }
 
+    public void testNoCycleThroughFramework() throws Exception {
+        //noinspection all // Sample code
+        lint().files(
+                xml("res/values/theme.xml", "" +
+                        "<resources>\n" +
+                        //"    <style name=\"InterstitialDialogLayout\" />\n" +
+                        //"\n" +
+                        "    <style name=\"ButtonBar\" parent=\"@android:style/ButtonBar\" />\n" +
+                        //"    <style name=\"ButtonBarButton\" parent=\"@android:style/Widget.Button\" />\n" +
+                        "\n" +
+                        "</resources>\n"))
+                .run()
+                .expectClean();
+    }
+
     public void testColors() throws Exception {
         //noinspection all // Sample code
         assertEquals(""
@@ -450,6 +465,79 @@ public class ResourceCycleDetectorTest extends AbstractCheckTest {
                                         + "        android:font=\"@font/font1\" />\n"
                                         + "</font-family>"
                                         + "\n")));
+    }
+
+    public void testAdaptiveIconCycle() {
+        // Regression test for issue 67462465: Flag cycles in adaptive icons
+        //noinspection all // Sample code
+        lint().files(
+                xml("res/drawable/drawable_recursive.xml", "" +
+                        "<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
+                        "    <background>\n" +
+                        "        <solid android:color=\"#ffffff\" />\n" +
+                        "    </background>\n" +
+                        "    <foreground android:drawable=\"@drawable/drawable_recursive\" />\n" +
+                        "</adaptive-icon>"))
+                .run()
+                .expect("res/drawable/drawable_recursive.xml:5: Error: Drawable drawable_recursive should not reference itself [ResourceCycle]\n" +
+                        "    <foreground android:drawable=\"@drawable/drawable_recursive\" />\n" +
+                        "                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" +
+                        "1 errors, 0 warnings");
+    }
+
+    public void testNoCycleWithDifferentTypes() {
+        // Ensure that we don't think we have a cycle when the folder+resource types don't match
+        //noinspection all // Sample code
+        lint().files(
+                // Sample from support/v17/leanback
+                xml("res/layout/lb_search_orb.xml", "" +
+                        "<merge xmlns:android=\"http://schemas.android.com/apk/res/android\" >\n" +
+                        "\n" +
+                        "    <View\n" +
+                        "        android:id=\"@+id/search_orb\"\n" +
+                        "        android:layout_width=\"@dimen/lb_search_orb_size\"\n" +
+                        "        android:layout_height=\"@dimen/lb_search_orb_size\"\n" +
+                        "        android:background=\"@drawable/lb_search_orb\" />\n" +
+                        "\n" +
+                        "    <ImageView\n" +
+                        "        android:id=\"@+id/icon\"\n" +
+                        "        android:layout_width=\"wrap_content\"\n" +
+                        "        android:layout_height=\"wrap_content\"\n" +
+                        "        android:layout_gravity=\"center\"\n" +
+                        "        android:src=\"@drawable/lb_ic_in_app_search\"\n" +
+                        "        android:contentDescription=\"@string/orb_search_action\" />\n" +
+                        "\n" +
+                        "</merge>"))
+                .run()
+                .expectClean();
+    }
+
+    public void testNoCycleWithToolsAttributes() {
+        // Ensure that we don't consider tools:showIn as a real resource since it's not
+        // a regular resource reference and is used to clue in the layout editor for what
+        // layout to surround a layout with
+
+        //noinspection all // Sample code
+        lint().files(
+                xml("res/layout/a.xml", "" +
+                        "<LinearLayout xmlns:android=\"http://schemas.android.com/apk/res/android\" >\n" +
+                        "\n" +
+                        "    <include\n" +
+                        "        layout=\"@layout/b\"\n" +
+                        "        android:layout_width=\"@dimen/lb_search_orb_size\"\n" +
+                        "        android:layout_height=\"@dimen/lb_search_orb_size\" />\n" +
+                        "\n" +
+                        "</LinearLayout>"),
+                xml("res/layout/b.xml", "" +
+                        "<merge xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                        "    xmlns:tools=\"http://schemas.android.com/tools\"\n" +
+                        "    android:layout_width=\"match_parent\"\n" +
+                        "    android:layout_height=\"match_parent\"\n" +
+                        "    tools:showIn=\"@layout/a\">\n" +
+                        "\n" +
+                        "</merge>"))
+                .run()
+                .expectClean();
     }
 
     @SuppressWarnings("all") // Sample code

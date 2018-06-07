@@ -26,7 +26,7 @@ public class ByteOrderMarkDetectorTest extends AbstractCheckTest {
         return new ByteOrderMarkDetector();
     }
 
-    public void testXml() throws Exception {
+    public void testXml() {
         // See issue b.android.com/65103
         //noinspection all // Sample code
         lint().files(
@@ -34,6 +34,12 @@ public class ByteOrderMarkDetectorTest extends AbstractCheckTest {
                         + "<manifest package='foo.\ufeffbar'>\n"
                         + "</manifest>"),
                 xml("res/values-zh-rCN/bom.xml", ""
+                        + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                        + "<resources xmlns:tools=\"http://schemas.android.com/tools\">\n"
+                        + "\t<string name=\"hanping_chinese\ufeff_lite\ufeff_app_name\">(Translated name)</string>\n"
+                        + "\t<string tools:ignore='ByteOrderMark' name=\"something\">test\ufefftest2</string>\n"
+                        + "</resources>\n"),
+                xml("res/raw/bom_allowed.xml", ""
                         + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                         + "<resources xmlns:tools=\"http://schemas.android.com/tools\">\n"
                         + "\t<string name=\"hanping_chinese\ufeff_lite\ufeff_app_name\">(Translated name)</string>\n"

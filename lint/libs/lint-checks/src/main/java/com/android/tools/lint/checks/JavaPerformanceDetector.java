@@ -17,15 +17,16 @@
 package com.android.tools.lint.checks;
 
 import static com.android.SdkConstants.SUPPORT_LIB_ARTIFACT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_CHARACTER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INTEGER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BYTE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_CHARACTER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_DOUBLE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_FLOAT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INTEGER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_LONG_WRAPPER;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
 
 import com.android.annotations.NonNull;
@@ -41,6 +42,7 @@ import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 import com.intellij.psi.PsiElement;
@@ -76,7 +78,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor;
  * Looks for performance issues in Java files, such as memory allocations during
  * drawing operations and using HashMap instead of SparseArray.
  */
-public class JavaPerformanceDetector extends Detector implements Detector.UastScanner {
+public class JavaPerformanceDetector extends Detector implements SourceCodeScanner {
 
     private static final Implementation IMPLEMENTATION = new Implementation(
             JavaPerformanceDetector.class,
@@ -151,7 +153,7 @@ public class JavaPerformanceDetector extends Detector implements Detector.UastSc
     public JavaPerformanceDetector() {
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     public List<Class<? extends UElement>> getApplicableUastTypes() {
@@ -233,7 +235,7 @@ public class JavaPerformanceDetector extends Detector implements Detector.UastSc
                     String argument = node.getValueArguments().get(0).asSourceString();
 
                     String replacedType = typeName.substring(typeName.lastIndexOf('.') + 1);
-                    LintFix fix = fix()
+                    LintFix fix = LintFix.create()
                             .name("Replace with valueOf()").replace()
                             .pattern("(new\\s+" + replacedType + ")")
                             .with(replacedType + ".valueOf")
@@ -272,7 +274,7 @@ public class JavaPerformanceDetector extends Detector implements Detector.UastSc
             if (receiver == null) {
                 return;
             }
-            String functionName = node.getMethodName();
+            String functionName = getMethodName(node);
             if (functionName == null) {
                 return;
             }

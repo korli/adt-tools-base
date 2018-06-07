@@ -28,14 +28,15 @@
 #include "utils/config.h"
 #include "utils/log.h"
 
-#include "dex/slicer/instrumentation.h"
-#include "dex/slicer/reader.h"
-#include "dex/slicer/writer.h"
+#include "instrumentation.h"
+#include "reader.h"
+#include "writer.h"
 
 using profiler::Agent;
 using profiler::Log;
 using profiler::MemoryTrackingEnv;
 using profiler::ScopedLocalRef;
+using profiler::proto::AgentConfig;
 
 namespace profiler {
 
@@ -52,6 +53,9 @@ class JvmtiAllocator : public dex::Writer::Allocator {
  private:
   jvmtiEnv* jvmti_env_;
 };
+
+// TODO: Move the flag to the agent config to be set by Studio.
+const bool is_io_profiling_enabled = false;
 
 // Retrieve the app's data directory path
 static std::string GetAppDataPath() {
@@ -139,6 +143,10 @@ void JNICALL OnClassFileLoaded(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
     auto dex_ir = reader.GetIr();
 
     slicer::MethodInstrumenter mi(dex_ir);
+    // Add Entry hook method with this argument passed as type Object.
+    mi.AddTransformation<slicer::EntryHook>(ir::MethodId(
+        "Lcom/android/tools/profiler/support/network/okhttp/OkHttp3Wrapper;",
+        "setOkHttpClassLoader"), true);
     mi.AddTransformation<slicer::ExitHook>(ir::MethodId(
         "Lcom/android/tools/profiler/support/network/okhttp/OkHttp3Wrapper;",
         "insertInterceptor"));
@@ -169,6 +177,10 @@ void JNICALL OnClassFileLoaded(jvmtiEnv* jvmti_env, JNIEnv* jni_env,
     auto dex_ir = reader.GetIr();
 
     slicer::MethodInstrumenter mi(dex_ir);
+    // Add Entry hook method with this argument passed as type Object.
+    mi.AddTransformation<slicer::EntryHook>(ir::MethodId(
+        "Lcom/android/tools/profiler/support/network/okhttp/OkHttp2Wrapper;",
+        "setOkHttpClassLoader"), true);
     mi.AddTransformation<slicer::ExitHook>(ir::MethodId(
         "Lcom/android/tools/profiler/support/network/okhttp/OkHttp2Wrapper;",
         "insertInterceptor"));
@@ -211,7 +223,7 @@ void BindJNIMethod(JNIEnv* jni, const char* class_name, const char* method_name,
   }
 }
 
-void LoadDex(jvmtiEnv* jvmti, JNIEnv* jni, bool log_live_alloc_count) {
+void LoadDex(jvmtiEnv* jvmti, JNIEnv* jni, AgentConfig* agent_config) {
   // Load in perfa.jar which should be in to data/data.
   std::string agent_lib_path(GetAppDataPath());
   agent_lib_path.append("perfa.jar");
@@ -219,6 +231,17 @@ void LoadDex(jvmtiEnv* jvmti, JNIEnv* jni, bool log_live_alloc_count) {
 
   // TODO: Removed these once the auto-JNI-binding feature becomes
   // available in all published O system images.
+  if (is_io_profiling_enabled) {
+    BindJNIMethod(jni, "com/android/tools/profiler/support/io/IoTracker",
+                  "trackIoCall", "(JIJZ)V");
+    BindJNIMethod(jni, "com/android/tools/profiler/support/io/IoTracker",
+                  "trackNewFileSession", "(JLjava/lang/String;)V");
+    BindJNIMethod(jni, "com/android/tools/profiler/support/io/IoTracker",
+                  "trackTerminatingFileSession", "(J)V");
+    BindJNIMethod(jni, "com/android/tools/profiler/support/io/IoTracker",
+                  "nextId", "()J");
+  }
+
   BindJNIMethod(jni,
                 "com/android/tools/profiler/support/network/"
                 "HttpTracker$InputStreamTracker",
@@ -230,7 +253,7 @@ void LoadDex(jvmtiEnv* jvmti, JNIEnv* jni, bool log_live_alloc_count) {
   BindJNIMethod(jni,
                 "com/android/tools/profiler/support/network/"
                 "HttpTracker$InputStreamTracker",
-                "reportBytes", "(J[B)V");
+                "reportBytes", "(J[BI)V");
   BindJNIMethod(jni,
                 "com/android/tools/profiler/support/network/"
                 "HttpTracker$OutputStreamTracker",
@@ -239,6 +262,10 @@ void LoadDex(jvmtiEnv* jvmti, JNIEnv* jni, bool log_live_alloc_count) {
                 "com/android/tools/profiler/support/network/"
                 "HttpTracker$OutputStreamTracker",
                 "onWriteBegin", "(J)V");
+  BindJNIMethod(jni,
+                "com/android/tools/profiler/support/network/"
+                "HttpTracker$OutputStreamTracker",
+                "reportBytes", "(J[BI)V");
   BindJNIMethod(
       jni, "com/android/tools/profiler/support/network/HttpTracker$Connection",
       "nextId", "()J");
@@ -313,8 +340,11 @@ void LoadDex(jvmtiEnv* jvmti, JNIEnv* jni, bool log_live_alloc_count) {
 
   jclass service =
       jni->FindClass("com/android/tools/profiler/support/ProfilerService");
-  jmethodID initialize = jni->GetStaticMethodID(service, "initialize", "(Z)V");
-  jni->CallStaticVoidMethod(service, initialize, !log_live_alloc_count);
+  jmethodID initialize = jni->GetStaticMethodID(service, "initialize", "(ZZ)V");
+  bool log_live_alloc_count = agent_config->mem_config().use_live_alloc();
+  bool network_request_payload = agent_config->profiler_network_request_payload();
+  jni->CallStaticVoidMethod(service, initialize, !log_live_alloc_count,
+      network_request_payload);
 }
 
 extern "C" JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options,
@@ -328,6 +358,9 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options,
     Log::E("Config file parameter was not specified");
     return JNI_ERR;
   }
+
+  SetAllCapabilities(jvmti_env);
+
   // TODO: Update options to support more than one argument if needed.
   profiler::Config config(options);
   Log::V("StudioProfilers agent attached.");
@@ -335,9 +368,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options,
   Agent::Instance(&config);
 
   JNIEnv* jni_env = GetThreadLocalJNI(vm);
-  LoadDex(jvmti_env, jni_env, agent_config.mem_config().use_live_alloc());
-
-  SetAllCapabilities(jvmti_env);
+  LoadDex(jvmti_env, jni_env, &agent_config);
 
   jvmtiEventCallbacks callbacks;
   memset(&callbacks, 0, sizeof(callbacks));
@@ -384,8 +415,10 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnAttach(JavaVM* vm, char* options,
   }
   jvmti_env->Deallocate(reinterpret_cast<unsigned char*>(loaded_classes));
 
-  MemoryTrackingEnv::Instance(vm, agent_config.mem_config().use_live_alloc(),
-                              agent_config.mem_config().max_stack_depth());
+  MemoryTrackingEnv::Instance(vm,
+                            agent_config.mem_config().use_live_alloc(),
+                            agent_config.mem_config().max_stack_depth(),
+                            agent_config.mem_config().track_global_jni_refs());
 
   return JNI_OK;
 }

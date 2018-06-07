@@ -16,6 +16,8 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
+
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -28,6 +30,7 @@ import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiType;
@@ -46,7 +49,7 @@ import org.jetbrains.uast.UReturnExpression;
 import org.jetbrains.uast.UastUtils;
 import org.jetbrains.uast.visitor.AbstractUastVisitor;
 
-public class FirebaseAnalyticsDetector extends Detector implements Detector.UastScanner {
+public class FirebaseAnalyticsDetector extends Detector implements SourceCodeScanner {
 
     private static final int EVENT_NAME_MAX_LENGTH = 32;
     private static final int EVENT_PARAM_NAME_MAX_LENGTH = 24;
@@ -230,7 +233,7 @@ public class FirebaseAnalyticsDetector extends Detector implements Detector.Uast
         }
 
          private void checkMethodCall(UCallExpression expression) {
-            String method = expression.getMethodName();
+            String method = getMethodName(expression);
             if (method == null ||
                      (!method.equals("putString") && !method.equals("putLong")
                     && !method.equals("putDouble"))) {

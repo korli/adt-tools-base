@@ -21,7 +21,6 @@ import com.android.build.api.transform.Status
 import com.android.build.api.transform.TransformInput
 import com.android.build.api.transform.TransformInvocation
 import com.android.build.gradle.internal.pipeline.TransformInvocationBuilder
-import com.android.builder.core.ErrorReporter
 import com.android.builder.dexing.DexMergerTool
 import com.android.builder.dexing.DexingType
 import com.android.ide.common.process.ProcessOutput
@@ -32,6 +31,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.mockito.ArgumentCaptor
+import org.mockito.Captor
 import org.mockito.Mock
 import org.mockito.Mockito
 import org.mockito.MockitoAnnotations
@@ -42,10 +42,17 @@ import java.util.concurrent.ForkJoinPool
 open class ExternalLibsMergerTransformTest {
 
     @Mock lateinit var context : Context
-    @Mock lateinit var callable : DexMergerTransformCallable
+    @Mock private lateinit var callable : DexMergerTransformCallable
     @Mock lateinit var factory : DexMergerTransformCallable.Factory
     @Rule @JvmField val folder : TemporaryFolder = TemporaryFolder()
-    val errorReporter = NoOpErrorReporter()
+    private val messageReceiver = NoOpMessageReceiver()
+
+    @Captor
+    private lateinit var processOutputCaptor : ArgumentCaptor<ProcessOutput>
+    @Captor
+    private lateinit var outputDirCaptor : ArgumentCaptor<File>
+    @Captor
+    private lateinit var outputListCaptor : ArgumentCaptor<MutableIterable<Path>>
 
     @Before
     fun setUp() = MockitoAnnotations.initMocks(this)
@@ -56,7 +63,7 @@ open class ExternalLibsMergerTransformTest {
                 DexMergerTool.DX,
                 21,
                 true,
-                errorReporter,
+                messageReceiver,
                 factory)
 
         Truth.assertThat(transform.parameterInputs).containsExactly(
@@ -110,19 +117,20 @@ open class ExternalLibsMergerTransformTest {
                 .build()
 
         val transform = ExternalLibsMergerTransform(DexingType.MONO_DEX,
-                DexMergerTool.D8, 21, true, errorReporter, factory)
+                DexMergerTool.D8, 21, true, messageReceiver, factory)
 
         transform.transform(transformInvocation)
 
         Mockito.verifyZeroInteractions(factory)
     }
 
-    internal fun testTransformCall(transformInvocation : TransformInvocation) : List<Path> {
+    private fun testTransformCall(transformInvocation : TransformInvocation) : List<Path> {
 
         val transform = ExternalLibsMergerTransform(DexingType.MONO_DEX,
-                DexMergerTool.D8, 21, true, errorReporter, factory)
-        
+                DexMergerTool.D8, 21, true, messageReceiver, factory)
+
         Mockito.`when`(factory.create(
+                Mockito.any(),
                 Mockito.eq(DexingType.MONO_DEX),
                 Mockito.any(ProcessOutput::class.java),
                 Mockito.any(),
@@ -135,11 +143,8 @@ open class ExternalLibsMergerTransformTest {
 
         transform.transform(transformInvocation)
 
-        val processOutputCaptor = ArgumentCaptor.forClass(ProcessOutput::class.java)
-        val outputDirCaptor = ArgumentCaptor.forClass(File::class.java)
-        val outputListCaptor: ArgumentCaptor<MutableIterable<Path>> =
-                ArgumentCaptor.forClass(MutableIterable::class.java) as ArgumentCaptor<MutableIterable<Path>>
-        Mockito.verify(factory).create(Mockito.eq(DexingType.MONO_DEX),
+        Mockito.verify(factory).create(Mockito.any(),
+                Mockito.eq(DexingType.MONO_DEX),
                 processOutputCaptor.capture(),
                 outputDirCaptor.capture(),
                 outputListCaptor.capture(),
@@ -152,11 +157,11 @@ open class ExternalLibsMergerTransformTest {
         return outputListCaptor.allValues.flatten()
     }
 
-    internal fun createJarInput(numberOfJars : Int) : ImmutableList<TransformInput> {
+    private fun createJarInput(numberOfJars : Int) : ImmutableList<TransformInput> {
         return createJarInput(numberOfJars, Status.ADDED)
     }
 
-    internal fun createJarInput(numberOfJars: Int, status : Status) : ImmutableList<TransformInput> {
+    private fun createJarInput(numberOfJars: Int, status : Status) : ImmutableList<TransformInput> {
         val builder = ImmutableList.builder<TransformInput>()
         for (i in 1..numberOfJars) {
             builder.add(TransformTestHelper.SingleJarInputBuilder(folder.newFile())

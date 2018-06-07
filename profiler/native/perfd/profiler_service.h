@@ -19,7 +19,8 @@
 #include <grpc++/grpc++.h>
 
 #include "perfd/daemon.h"
-#include "proto/profiler_service.grpc.pb.h"
+#include "perfd/sessions/sessions_manager.h"
+#include "proto/profiler.grpc.pb.h"
 #include "utils/clock.h"
 #include "utils/file_cache.h"
 
@@ -31,11 +32,12 @@ class ProfilerServiceImpl final
     : public profiler::proto::ProfilerService::Service {
  public:
   explicit ProfilerServiceImpl(
-      Daemon::Utilities* utilities,
+      Daemon::Utilities* utilities, SessionsManager* sessions,
       std::unordered_map<int32_t, int64_t>* heartbeat_timestamp_map)
       : clock_(utilities->clock()),
         config_(utilities->config()),
         file_cache_(*utilities->file_cache()),
+        sessions_(sessions),
         heartbeat_timestamp_map_(*heartbeat_timestamp_map) {}
 
   grpc::Status GetCurrentTime(grpc::ServerContext* context,
@@ -55,6 +57,14 @@ class ProfilerServiceImpl final
       const profiler::proto::AgentStatusRequest* request,
       profiler::proto::AgentStatusResponse* response) override;
 
+  // The current implementation only returns 'connected processes' and is for
+  // testing only. When we move process discover to perfd, we will fix this.
+  // TODO: If needed, add a flag to indicate a process is 'connected'.
+  grpc::Status GetProcesses(
+      grpc::ServerContext* context,
+      const profiler::proto::GetProcessesRequest* request,
+      profiler::proto::GetProcessesResponse* response) override;
+
   grpc::Status GetDevices(
       grpc::ServerContext* context,
       const profiler::proto::GetDevicesRequest* request,
@@ -64,6 +74,31 @@ class ProfilerServiceImpl final
       grpc::ServerContext* context,
       const profiler::proto::AgentAttachRequest* request,
       profiler::proto::AgentAttachResponse* response) override;
+
+  grpc::Status BeginSession(
+      grpc::ServerContext* context,
+      const profiler::proto::BeginSessionRequest* request,
+      profiler::proto::BeginSessionResponse* response) override;
+
+  grpc::Status EndSession(
+      grpc::ServerContext* context,
+      const profiler::proto::EndSessionRequest* request,
+      profiler::proto::EndSessionResponse* response) override;
+
+  grpc::Status GetSession(
+      grpc::ServerContext* context,
+      const profiler::proto::GetSessionRequest* request,
+      profiler::proto::GetSessionResponse* response) override;
+
+  grpc::Status GetSessions(
+      grpc::ServerContext* context,
+      const profiler::proto::GetSessionsRequest* request,
+      profiler::proto::GetSessionsResponse* response) override;
+
+  grpc::Status DeleteSession(
+      grpc::ServerContext* context,
+      const profiler::proto::DeleteSessionRequest* request,
+      profiler::proto::DeleteSessionResponse* response) override;
 
  private:
   // True if an JVMTI agent has been attached to an app. False otherwise.
@@ -77,6 +112,7 @@ class ProfilerServiceImpl final
   const Clock& clock_;
   const Config& config_;
   FileCache& file_cache_;
+  SessionsManager* sessions_;
   std::unordered_map<int32_t, int64_t>& heartbeat_timestamp_map_;
 };
 

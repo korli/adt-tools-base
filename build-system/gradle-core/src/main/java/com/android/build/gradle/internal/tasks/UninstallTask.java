@@ -35,7 +35,7 @@ import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFile;
 import org.gradle.api.tasks.TaskAction;
 
-public class UninstallTask extends BaseTask {
+public class UninstallTask extends AndroidBuilderTask {
 
     private BaseVariantData variant;
 
@@ -120,9 +120,8 @@ public class UninstallTask extends BaseTask {
         @NonNull
         @Override
         public String getName() {
-            String prefix = "uninstall";
-
-            return prefix + StringHelper.capitalize(scope.getVariantConfiguration().getFullName());
+            return StringHelper.appendCapitalized(
+                    "uninstall", scope.getVariantConfiguration().getFullName());
         }
 
         @NonNull

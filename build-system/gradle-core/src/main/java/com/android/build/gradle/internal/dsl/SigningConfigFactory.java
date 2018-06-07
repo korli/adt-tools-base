@@ -19,35 +19,28 @@ package com.android.build.gradle.internal.dsl;
 import com.android.annotations.NonNull;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.signing.DefaultSigningConfig;
-import com.android.ide.common.signing.KeystoreHelper;
-import com.android.prefs.AndroidLocation;
 import java.io.File;
 import org.gradle.api.NamedDomainObjectFactory;
-import org.gradle.internal.reflect.Instantiator;
-import org.gradle.tooling.BuildException;
+import org.gradle.api.model.ObjectFactory;
 
-/**
- * Factory to create SigningConfig object using an {@link Instantiator} to add the DSL methods.
- */
+/** Factory to create SigningConfig object using an {@link ObjectFactory} to add the DSL methods. */
 public class SigningConfigFactory implements NamedDomainObjectFactory<SigningConfig> {
 
-    private final Instantiator instantiator;
+    private final ObjectFactory objectFactory;
+    private final File defaultDebugKeystoreLocation;
 
-    public SigningConfigFactory(Instantiator instantiator) {
-        this.instantiator = instantiator;
+    public SigningConfigFactory(ObjectFactory objectFactory, File defaultDebugKeystoreLocation) {
+        this.objectFactory = objectFactory;
+        this.defaultDebugKeystoreLocation = defaultDebugKeystoreLocation;
     }
 
+    @Override
     @NonNull
     public SigningConfig create(@NonNull String name) {
-        SigningConfig signingConfig = instantiator.newInstance(SigningConfig.class, name);
+        SigningConfig signingConfig = objectFactory.newInstance(SigningConfig.class, name);
         if (BuilderConstants.DEBUG.equals(name)) {
-            try {
-                signingConfig.initWith(
-                        DefaultSigningConfig.debugSigningConfig(
-                                new File(KeystoreHelper.defaultDebugKeystoreLocation())));
-            } catch (AndroidLocation.AndroidLocationException e) {
-                throw new BuildException("Failed to get default debug keystore location.", e);
-            }
+            signingConfig.initWith(
+                    DefaultSigningConfig.debugSigningConfig(defaultDebugKeystoreLocation));
         }
         return signingConfig;
     }

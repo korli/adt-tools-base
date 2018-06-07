@@ -28,7 +28,6 @@ import com.android.resources.ResourceType;
 import com.android.tools.lint.client.api.LintDriver;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -37,6 +36,7 @@ import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.Pair;
 import com.google.common.collect.Lists;
@@ -61,7 +61,7 @@ import org.w3c.dom.NodeList;
 /**
  * Checks for consistency in layouts across different resource folders
  */
-public class LayoutConsistencyDetector extends LayoutDetector implements UastScanner {
+public class LayoutConsistencyDetector extends LayoutDetector implements SourceCodeScanner {
 
     /** Map from layout resource names to a list of files defining that resource,
      * and within each file the value is a map from string ids to the widget type
@@ -397,7 +397,7 @@ public class LayoutConsistencyDetector extends LayoutDetector implements UastSca
 
         // Sort locations by the file parent folders
         if (locations.size() > 1) {
-            Collections.sort(locations, (location1, location2) -> {
+            locations.sort((location1, location2) -> {
                 File file1 = location1.getFile();
                 File file2 = location2.getFile();
                 String folder1 = file1.getParentFile().getName();
@@ -418,7 +418,7 @@ public class LayoutConsistencyDetector extends LayoutDetector implements UastSca
         return locations.get(0);
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     public boolean appliesToResourceRefs() {

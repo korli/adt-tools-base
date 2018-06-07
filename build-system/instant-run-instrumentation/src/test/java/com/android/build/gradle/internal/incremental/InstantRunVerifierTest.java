@@ -16,17 +16,23 @@
 
 package com.android.build.gradle.internal.incremental;
 
+import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.ABSTRACT_METHOD_CHANGE;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.COMPATIBLE;
+import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.METHOD_ADDED;
+import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.METHOD_DELETED;
+import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.REFLECTION_USED;
 import static org.junit.Assert.assertEquals;
 
 import Lpackage.AnyClassWithMethodInvocation;
 import com.android.build.gradle.internal.incremental.fixture.VerifierHarness;
 import com.google.common.collect.Lists;
+import com.kotlin.JvmOverloadsTest;
 import com.verifier.tests.AddClassAnnotation;
 import com.verifier.tests.AddInstanceField;
 import com.verifier.tests.AddInterfaceImplementation;
 import com.verifier.tests.AddMethodAnnotation;
 import com.verifier.tests.AddNotRuntimeClassAnnotation;
+import com.verifier.tests.AddingDefaultMethodToInterface;
 import com.verifier.tests.ChangeFieldType;
 import com.verifier.tests.ChangeInstanceFieldToStatic;
 import com.verifier.tests.ChangeInstanceFieldVisibility;
@@ -37,6 +43,8 @@ import com.verifier.tests.ChangeSuperClass;
 import com.verifier.tests.ChangedClassInitializer1;
 import com.verifier.tests.ChangedClassInitializer2;
 import com.verifier.tests.ChangedClassInitializer3;
+import com.verifier.tests.ChangingDefaultIntoNonDefaultMethod;
+import com.verifier.tests.ChangingNonDefaultIntoDefaultMethod;
 import com.verifier.tests.DisabledClassChanging;
 import com.verifier.tests.DisabledClassNotChanging;
 import com.verifier.tests.DisabledMethodChanging;
@@ -49,6 +57,7 @@ import com.verifier.tests.RemoveClassAnnotation;
 import com.verifier.tests.RemoveInterfaceImplementation;
 import com.verifier.tests.RemoveMethodAnnotation;
 import com.verifier.tests.RemoveNotRuntimeClassAnnotation;
+import com.verifier.tests.RemovingDefaultMethodFromInterface;
 import com.verifier.tests.StaticInitializerAdded;
 import com.verifier.tests.StaticInitializerRemoved;
 import com.verifier.tests.UnchangedClass;
@@ -233,7 +242,7 @@ public class InstantRunVerifierTest {
     @Test
     public void testClassNewInstanceReflectionUser() throws IOException {
         // not changing a method implementation that uses reflection should be ok.
-        assertEquals(COMPATIBLE, harness.verify(NewInstanceReflectionUser.class, null));
+        assertEquals(REFLECTION_USED, harness.verify(NewInstanceReflectionUser.class, null));
         assertEquals(InstantRunVerifierStatus.REFLECTION_USED,
                 harness.verify(NewInstanceReflectionUser.class, "verifier"));
     }
@@ -241,11 +250,9 @@ public class InstantRunVerifierTest {
     @Test
     public void testReflectiveUserNotChanging() throws IOException {
         // not changing a method implementation that uses reflection should be ok.
-        assertEquals(COMPATIBLE,
-                harness.verify(ReflectiveUserNotChanging.class, null));
+        assertEquals(REFLECTION_USED, harness.verify(ReflectiveUserNotChanging.class, null));
         // changing other methods should be fine.
-        assertEquals(COMPATIBLE,
-                harness.verify(ReflectiveUserNotChanging.class, "verifier"));
+        assertEquals(REFLECTION_USED, harness.verify(ReflectiveUserNotChanging.class, "verifier"));
     }
 
     @Test
@@ -481,5 +488,40 @@ public class InstantRunVerifierTest {
         assertEquals(
                 InstantRunVerifierStatus.METHOD_ADDED,
                 harness.verify(StaticInitializerAdded.class, "verifier"));
+    }
+
+    @Test
+    public void testDefaultMethodsInInterfaces() throws IOException {
+        // not changing an interface should be ok.
+        assertEquals(COMPATIBLE, harness.verify(ChangingDefaultIntoNonDefaultMethod.class, null));
+        assertEquals(
+                METHOD_ADDED, harness.verify(AddingDefaultMethodToInterface.class, "verifier"));
+        assertEquals(
+                METHOD_DELETED,
+                harness.verify(RemovingDefaultMethodFromInterface.class, "verifier"));
+
+        assertEquals(
+                ABSTRACT_METHOD_CHANGE,
+                harness.verify(ChangingDefaultIntoNonDefaultMethod.class, "verifier"));
+        assertEquals(
+                ABSTRACT_METHOD_CHANGE,
+                harness.verify(ChangingNonDefaultIntoDefaultMethod.class, "verifier"));
+    }
+
+    @Test
+    public void testSyntheticConstructorChange() throws IOException {
+        // not changing a synthetic constructor should be ok.
+        assertEquals(COMPATIBLE, harness.verify(com.kotlin.MyDataClass.class, null));
+        assertEquals(
+                InstantRunVerifierStatus.SYNTHETIC_CONSTRUCTOR_CHANGE,
+                harness.verify(com.kotlin.MyDataClass.class, "verifier"));
+    }
+
+    @Test
+    public void testJvmOverloadsConstructorChange() throws IOException {
+        assertEquals(COMPATIBLE, harness.verify(JvmOverloadsTest.class, null));
+        assertEquals(
+                InstantRunVerifierStatus.SYNTHETIC_CONSTRUCTOR_CHANGE,
+                harness.verify(JvmOverloadsTest.class, "verifier"));
     }
 }

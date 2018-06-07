@@ -13,24 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.common.vectordrawable;
 
+import static com.android.ide.common.vectordrawable.VdUtil.parseColorValue;
+
 import com.android.SdkConstants;
+import com.android.utils.XmlUtils;
 import com.google.common.collect.ImmutableMap;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.LinearGradientPaint;
 import java.awt.MultipleGradientPaint;
+import java.awt.RadialGradientPaint;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
-import java.math.RoundingMode;
 import java.text.DecimalFormat;
-import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
@@ -39,10 +40,8 @@ import java.util.logging.Logger;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.NodeList;
 
-/** Used to represent one VectorDrawable's path element. */
+/** Represents one path element of a VectorDrawable. */
 class VdPath extends VdElement {
-    private static final Logger LOGGER = Logger.getLogger(VdPath.class.getSimpleName());
-
     private static final String PATH_ID = "android:name";
     private static final String PATH_DESCRIPTION = "android:pathData";
     private static final String PATH_FILL = "android:fillColor";
@@ -57,37 +56,37 @@ class VdPath extends VdElement {
     private static final String PATH_TRIM_START = "android:trimPathStart";
     private static final String PATH_TRIM_END = "android:trimPathEnd";
     private static final String PATH_TRIM_OFFSET = "android:trimPathOffset";
-    private static final String PATH_STROKE_LINECAP = "android:strokeLineCap";
-    private static final String PATH_STROKE_LINEJOIN = "android:strokeLineJoin";
-    private static final String PATH_STROKE_MITERLIMIT = "android:strokeMiterLimit";
+    private static final String PATH_STROKE_LINE_CAP = "android:strokeLineCap";
+    private static final String PATH_STROKE_LINE_JOIN = "android:strokeLineJoin";
+    private static final String PATH_STROKE_MITER_LIMIT = "android:strokeMiterLimit";
 
-    private static final String LINECAP_BUTT = "butt";
-    private static final String LINECAP_ROUND = "round";
-    private static final String LINECAP_SQUARE = "square";
-    private static final String LINEJOIN_MITER = "miter";
-    private static final String LINEJOIN_ROUND = "round";
-    private static final String LINEJOIN_BEVEL = "bevel";
-
-
-    private VdGradient fillGradient = null;
-    private VdGradient strokeGradient = null;
+    private static final String LINE_CAP_BUTT = "butt";
+    private static final String LINE_CAP_ROUND = "round";
+    private static final String LINE_CAP_SQUARE = "square";
+    private static final String LINE_JOIN_MITER = "miter";
+    private static final String LINE_JOIN_ROUND = "round";
+    private static final String LINE_JOIN_BEVEL = "bevel";
+    public static final float EPSILON = 1e-6f;
 
 
-    private Node[] mNodeList = null;
-    private int mStrokeColor = 0;
-    private int mFillColor = 0;
+    private VdGradient fillGradient;
+    private VdGradient strokeGradient;
 
-    private float mStrokeWidth = 0;
-    private int mStrokeLineCap = 0;
-    private int mStrokeLineJoin = 0;
+    private Node[] mNodeList;
+    private int mStrokeColor;
+    private int mFillColor;
+
+    private float mStrokeWidth;
+    private int mStrokeLineCap;
+    private int mStrokeLineJoin;
     private float mStrokeMiterlimit = 4;
     private float mStrokeAlpha = 1.0f;
     private float mFillAlpha = 1.0f;
     private int mFillType = PathIterator.WIND_NON_ZERO;
     // TODO: support trim path.
-    private float mTrimPathStart = 0;
+    private float mTrimPathStart;
     private float mTrimPathEnd = 1;
-    private float mTrimPathOffset = 0;
+    private float mTrimPathOffset;
 
     private void toPath(Path2D path) {
         path.reset();
@@ -97,7 +96,7 @@ class VdPath extends VdElement {
     }
 
     /**
-     * Represent one segment of the path data. Like "l 0,0 1,1"
+     * Represents one segment of the path data, e.g. "l 0,0 1,1".
      */
     public static class Node {
         private char mType;
@@ -132,45 +131,39 @@ class VdPath extends VdElement {
             return false;
         }
 
-        public static String NodeListToString(Node[] nodes, String decimalPlaceString) {
-            StringBuilder stringBuilder = new StringBuilder();
-            for (Node n : nodes) {
-                stringBuilder.append(n.mType);
-                int len = n.mParams.length;
+        public static String nodeListToString(Node[] nodes, DecimalFormat decimalFormat) {
+            StringBuilder result = new StringBuilder();
+            for (Node node : nodes) {
+                result.append(node.mType);
+                int len = node.mParams.length;
                 boolean implicitLineTo = false;
                 char lineToType = ' ';
-                if ((n.mType == 'm' || n.mType == 'M') && len > 2) {
+                if ((node.mType == 'm' || node.mType == 'M') && len > 2) {
                     implicitLineTo = true;
-                    lineToType = n.mType == 'm' ? 'l' : 'L';
+                    lineToType = node.mType == 'm' ? 'l' : 'L';
                 }
                 for (int j = 0; j < len; j++) {
                     if (j > 0) {
-                        stringBuilder.append(((j & 1) == 1) ? "," : " ");
+                        result.append(j % 2 != 0 ? "," : " ");
                     }
                     if (implicitLineTo && j == 2) {
-                        stringBuilder.append(lineToType);
+                        result.append(lineToType);
                     }
-                    // To avoid trailing zeros like 17.0, use this trick
-                    float value = n.mParams[j];
-                    if (value == (long) value) {
-                        stringBuilder.append(String.valueOf((long) value));
-                    } else {
-                        DecimalFormatSymbols fractionSeparator = new DecimalFormatSymbols();
-                        fractionSeparator.setDecimalSeparator('.');
-                        DecimalFormat df = new DecimalFormat(decimalPlaceString, fractionSeparator);
-                        df.setRoundingMode(RoundingMode.HALF_UP);
-                        stringBuilder.append(df.format(value));
+                    float param = node.mParams[j];
+                    if (!Float.isFinite(param)) {
+                        throw new IllegalArgumentException("Invalid number: " + param);
                     }
-
+                    String str = XmlUtils.trimInsignificantZeros(decimalFormat.format(param));
+                    result.append(str);
                 }
             }
 
-            return stringBuilder.toString();
+            return result.toString();
         }
 
         private static final char INIT_TYPE = ' ';
-        public static void transform(AffineTransform totalTransform,
-                                     Node[] nodes) {
+
+        public static void transform(AffineTransform totalTransform, Node[] nodes) {
             Point2D.Float currentPoint = new Point2D.Float();
             Point2D.Float currentSegmentStartPoint = new Point2D.Float();
             char previousType = INIT_TYPE;
@@ -211,10 +204,9 @@ class VdPath extends VdElement {
             // Therefore a looping will be necessary for such commands.
             //
             // Note that if the matrix is translation only, then we can save many computations.
-
             int paramsLen = mParams.length;
             float[] tempParams = new float[2 * paramsLen];
-            // These has to be pre-transformed value. In another word, the same as it is
+            // These has to be pre-transformed value. In other words, the same as it is
             // in the pathData.
             float currentX = currentPoint.x;
             float currentY = currentPoint.y;
@@ -228,6 +220,7 @@ class VdPath extends VdElement {
                     currentX = currentSegmentStartX;
                     currentY = currentSegmentStartY;
                     break;
+
                 case 'M':
                 case 'L':
                 case 'T':
@@ -243,6 +236,7 @@ class VdPath extends VdElement {
 
                     totalTransform.transform(mParams, 0, mParams, 0, paramsLen / 2);
                     break;
+
                 case 'm':
                     // We also need to workaround a bug in API 21 that 'm' after 'z'
                     // is not picking up the relative value correctly.
@@ -252,16 +246,15 @@ class VdPath extends VdElement {
                         mParams[1] += currentSegmentStartY;
                         currentSegmentStartX = mParams[0];
                         currentSegmentStartY = mParams[1];
-                        for (int i = 1; i < paramsLen / step; i++) {
-                            mParams[i * step + 0] += mParams[(i - 1) * step + 0];
-                            mParams[i * step + 1] += mParams[(i - 1) * step + 1];
+                        for (int i = step; i < paramsLen; i += step) {
+                            mParams[i] += mParams[i - step];
+                            mParams[i + 1] += mParams[i + 1 - step];
                         }
                         currentX = mParams[paramsLen - 2];
                         currentY = mParams[paramsLen - 1];
 
                         totalTransform.transform(mParams, 0, mParams, 0, paramsLen / 2);
                     } else {
-
                         // We need to handle the initial 'm' similar to 'M' for first pair.
                         // Then all the following numbers are handled as 'l'
                         int startIndex = 0;
@@ -273,62 +266,61 @@ class VdPath extends VdElement {
                             currentSegmentStartY = currentY;
 
                             totalTransform.transform(mParams, 0, mParams, 0, paramsLenInitialM / 2);
-                            startIndex = 1;
+                            startIndex = step;
                         }
-                        for (int i = startIndex; i < paramsLen / step; i++) {
-                            int indexX = i * step + (step - 2);
-                            int indexY = i * step + (step - 1);
-                            currentX += mParams[indexX];
-                            currentY += mParams[indexY];
+                        for (int i = startIndex; i < paramsLen; i += step) {
+                            currentX += mParams[i + step - 2];
+                            currentY += mParams[i + step - 1];
                         }
 
                         if (!isTranslationOnly(totalTransform)) {
-                            deltaTransform(totalTransform, mParams, 2 * startIndex,
-                                    paramsLen - 2 * startIndex);
+                            deltaTransform(totalTransform, mParams, startIndex,
+                                    paramsLen - startIndex);
                         }
                     }
-
                     break;
+
                 case 'l':
                 case 't':
                 case 'c':
                 case 's':
                 case 'q':
-                    for (int i = 0; i < paramsLen / step; i ++) {
-                        int indexX = i * step + (step - 2);
-                        int indexY = i * step + (step - 1);
-                        currentX += mParams[indexX];
-                        currentY += mParams[indexY];
+                    for (int i = 0; i < paramsLen; i += step) {
+                        currentX += mParams[i + step - 2];
+                        currentY += mParams[i + step - 1];
                     }
                     if (!isTranslationOnly(totalTransform)) {
                         deltaTransform(totalTransform, mParams, 0, paramsLen);
                     }
                     break;
+
                 case 'H':
                     mType = 'L';
-                    for (int i = 0; i < paramsLen; i ++) {
-                        tempParams[i * 2 + 0] = mParams[i];
+                    for (int i = 0; i < paramsLen; i++) {
+                        tempParams[i * 2] = mParams[i];
                         tempParams[i * 2 + 1] = currentY;
                         currentX = mParams[i];
                     }
                     totalTransform.transform(tempParams, 0, tempParams, 0, paramsLen /*points*/);
                     mParams = tempParams;
                     break;
+
                 case 'V':
                     mType = 'L';
-                    for (int i = 0; i < paramsLen; i ++) {
-                        tempParams[i * 2 + 0] = currentX;
+                    for (int i = 0; i < paramsLen; i++) {
+                        tempParams[i * 2] = currentX;
                         tempParams[i * 2 + 1] = mParams[i];
                         currentY = mParams[i];
                     }
                     totalTransform.transform(tempParams, 0, tempParams, 0, paramsLen /*points*/);
                     mParams = tempParams;
                     break;
+
                 case 'h':
-                    for (int i = 0; i < paramsLen; i ++) {
-                        // tempParams may not be used, but I would rather merge the code here.
-                        tempParams[i * 2 + 0] = mParams[i];
+                    for (int i = 0; i < paramsLen; i++) {
                         currentX += mParams[i];
+                        // tempParams may not be used but is assigned here to avoid a second loop.
+                        tempParams[i * 2] = mParams[i];
                         tempParams[i * 2 + 1] = 0;
                     }
                     if (!isTranslationOnly(totalTransform)) {
@@ -337,10 +329,11 @@ class VdPath extends VdElement {
                         mParams = tempParams;
                     }
                     break;
+
                 case 'v':
                     for (int i = 0; i < paramsLen; i++) {
-                        // tempParams may not be used, but I would rather merge the code here.
-                        tempParams[i * 2 + 0] = 0;
+                        // tempParams may not be used but is assigned here to avoid a second loop.
+                        tempParams[i * 2] = 0;
                         tempParams[i * 2 + 1] = mParams[i];
                         currentY += mParams[i];
                     }
@@ -351,62 +344,62 @@ class VdPath extends VdElement {
                         mParams = tempParams;
                     }
                     break;
+
                 case 'A':
-                    for (int i = 0; i < paramsLen / step; i ++) {
+                    for (int i = 0; i < paramsLen; i += step) {
                         // (0:rx 1:ry 2:x-axis-rotation 3:large-arc-flag 4:sweep-flag 5:x 6:y)
                         // [0, 1, 2]
                         if (!isTranslationOnly(totalTransform)) {
                             EllipseSolver ellipseSolver = new EllipseSolver(totalTransform,
                                     currentX, currentY,
-                                    mParams[i * step + 0], mParams[i * step + 1], mParams[i * step + 2],
-                                    mParams[i * step + 3], mParams[i * step + 4],
-                                    mParams[i * step + 5], mParams[i * step + 6]);
-                            mParams[i * step + 0] = ellipseSolver.getMajorAxis();
-                            mParams[i * step + 1] = ellipseSolver.getMinorAxis();
-                            mParams[i * step + 2] = ellipseSolver.getRotationDegree();
+                                    mParams[i], mParams[i + 1], mParams[i + 2],
+                                    mParams[i + 3], mParams[i + 4],
+                                    mParams[i + 5], mParams[i + 6]);
+                            mParams[i] = ellipseSolver.getMajorAxis();
+                            mParams[i + 1] = ellipseSolver.getMinorAxis();
+                            mParams[i + 2] = ellipseSolver.getRotationDegree();
                             if (ellipseSolver.getDirectionChanged()) {
-                                mParams[i * step + 4] = 1 - mParams[i * step + 4];
+                                mParams[i + 4] = 1 - mParams[i + 4];
                             }
-                        } else {
-                            // No need to change the value of rx , ry, rotation, and flags.
                         }
                         // [5, 6]
-                        currentX = mParams[i * step + 5];
-                        currentY = mParams[i * step + 6];
+                        currentX = mParams[i + 5];
+                        currentY = mParams[i + 6];
 
-                        totalTransform.transform(mParams, i * step + 5, mParams, i * step + 5, 1 /*1 point only*/);
+                        totalTransform.transform(mParams, i + 5, mParams, i + 5, 1 /*1 point only*/);
                     }
                     break;
+
                 case 'a':
-                    for (int i = 0; i < paramsLen / step; i ++) {
+                    for (int i = 0; i < paramsLen; i += step) {
                         float oldCurrentX = currentX;
                         float oldCurrentY = currentY;
 
-                        currentX += mParams[i * step + 5];
-                        currentY += mParams[i * step + 6];
+                        currentX += mParams[i + 5];
+                        currentY += mParams[i + 6];
                         if (!isTranslationOnly(totalTransform)) {
                             EllipseSolver ellipseSolver = new EllipseSolver(totalTransform,
                                     oldCurrentX, oldCurrentY,
-                                    mParams[i * step + 0], mParams[i * step + 1], mParams[i * step + 2],
-                                    mParams[i * step + 3], mParams[i * step + 4],
-                                    oldCurrentX + mParams[i * step + 5],
-                                    oldCurrentY + mParams[i * step + 6]);
+                                    mParams[i], mParams[i + 1], mParams[i + 2],
+                                    mParams[i + 3], mParams[i + 4],
+                                    oldCurrentX + mParams[i + 5],
+                                    oldCurrentY + mParams[i + 6]);
                             // (0:rx 1:ry 2:x-axis-rotation 3:large-arc-flag 4:sweep-flag 5:x 6:y)
                             // [5, 6]
-                            deltaTransform(totalTransform, mParams, i * step + 5, 2);
+                            deltaTransform(totalTransform, mParams, i + 5, 2);
                             // [0, 1, 2]
-                            mParams[i * step + 0] = ellipseSolver.getMajorAxis();
-                            mParams[i * step + 1] = ellipseSolver.getMinorAxis();
-                            mParams[i * step + 2] = ellipseSolver.getRotationDegree();
+                            mParams[i] = ellipseSolver.getMajorAxis();
+                            mParams[i + 1] = ellipseSolver.getMinorAxis();
+                            mParams[i + 2] = ellipseSolver.getRotationDegree();
                             if (ellipseSolver.getDirectionChanged()) {
-                                mParams[i * step + 4] = 1 - mParams[i * step + 4];
+                                mParams[i + 4] = 1 - mParams[i + 4];
                             }
                         }
-
                     }
                     break;
+
                 default:
-                    throw new IllegalArgumentException("Type is not right!!!");
+                    throw new IllegalStateException("Unexpected type " + mType);
             }
             currentPoint.setLocation(currentX, currentY);
             currentSegmentStartPoint.setLocation(currentSegmentStartX, currentSegmentStartY);
@@ -419,61 +412,26 @@ class VdPath extends VdElement {
         }
 
         /**
-         * Convert the <code>tempParams</code> into a double array, then apply the
-         * delta transform and convert it back to float array.
-         * @param offset in number of floats, not points.
-         * @param paramsLen in number of floats, not points.
+         * Applies delta transform to a set of points represented by a float array.
+         *
+         * @param totalTransform the transform to apply
+         * @param coordinates coordinates of points to apply the transform to
+         * @param offset in number of floats, not points
+         * @param paramsLen in number of floats, not points
          */
-        private static void deltaTransform(AffineTransform totalTransform, float[] tempParams,
+        private static void deltaTransform(AffineTransform totalTransform, float[] coordinates,
                 int offset, int paramsLen) {
             double[] doubleArray = new double[paramsLen];
-            for (int i = 0; i < paramsLen; i++)
-            {
-                doubleArray[i] = (double) tempParams[i + offset];
+            for (int i = 0; i < paramsLen; i++) {
+                doubleArray[i] = (double) coordinates[i + offset];
             }
 
             totalTransform.deltaTransform(doubleArray, 0, doubleArray, 0, paramsLen / 2);
 
-            for (int i = 0; i < paramsLen; i++)
-            {
-                tempParams[i + offset] = (float) doubleArray[i];
+            for (int i = 0; i < paramsLen; i++) {
+                coordinates[i + offset] = (float) doubleArray[i];
             }
         }
-    }
-
-    /** @return color value in #AARRGGBB format. */
-    protected static int calculateColor(String value) {
-        int len = value.length();
-        int ret;
-        int k = 0;
-        switch (len) {
-            case 7: // #RRGGBB
-                ret = (int) Long.parseLong(value.substring(1), 16);
-                ret |= 0xFF000000;
-                break;
-            case 9: // #AARRGGBB
-                ret = (int) Long.parseLong(value.substring(1), 16);
-                break;
-            case 4: // #RGB
-                ret = (int) Long.parseLong(value.substring(1), 16);
-
-                k |= ((ret >> 8) & 0xF) * 0x110000;
-                k |= ((ret >> 4) & 0xF) * 0x1100;
-                k |= ((ret) & 0xF) * 0x11;
-                ret = k | 0xFF000000;
-                break;
-            case 5: // #ARGB
-                ret = (int) Long.parseLong(value.substring(1), 16);
-                k |= ((ret >> 12) & 0xF) * 0x11000000;
-                k |= ((ret >> 8) & 0xF) * 0x110000;
-                k |= ((ret >> 4) & 0xF) * 0x1100;
-                k |= ((ret) & 0xF) * 0x11;
-                ret = k;
-                break;
-            default:
-                return 0xFF000000;
-        }
-        return ret;
     }
 
     private void setNameValue(String name, String value) {
@@ -486,11 +444,11 @@ class VdPath extends VdElement {
         } else if (PATH_ID.equals(name)) {
             mName = value;
         } else if (PATH_FILL.equals(name)) {
-            mFillColor = calculateColor(value);
+            mFillColor = parseColorValue(value);
         } else if (PATH_FILL_TYPE.equals(name)) {
             mFillType = parseFillType(value);
         } else if (PATH_STROKE.equals(name)) {
-            mStrokeColor = calculateColor(value);
+            mStrokeColor = parseColorValue(value);
         } else if (PATH_FILL_OPACITY.equals(name)) {
             mFillAlpha = Float.parseFloat(value);
         } else if (PATH_STROKE_OPACITY.equals(name)) {
@@ -503,28 +461,27 @@ class VdPath extends VdElement {
             mTrimPathEnd = Float.parseFloat(value);
         } else if (PATH_TRIM_OFFSET.equals(name)) {
             mTrimPathOffset = Float.parseFloat(value);
-        } else if (PATH_STROKE_LINECAP.equals(name)) {
-            if (LINECAP_BUTT.equals(value)) {
+        } else if (PATH_STROKE_LINE_CAP.equals(name)) {
+            if (LINE_CAP_BUTT.equals(value)) {
                 mStrokeLineCap = 0;
-            } else if (LINECAP_ROUND.equals(value)) {
+            } else if (LINE_CAP_ROUND.equals(value)) {
                 mStrokeLineCap = 1;
-            } else if (LINECAP_SQUARE.equals(value)) {
+            } else if (LINE_CAP_SQUARE.equals(value)) {
                 mStrokeLineCap = 2;
             }
-        } else if (PATH_STROKE_LINEJOIN.equals(name)) {
-            if (LINEJOIN_MITER.equals(value)) {
+        } else if (PATH_STROKE_LINE_JOIN.equals(name)) {
+            if (LINE_JOIN_MITER.equals(value)) {
                 mStrokeLineJoin = 0;
-            } else if (LINEJOIN_ROUND.equals(value)) {
+            } else if (LINE_JOIN_ROUND.equals(value)) {
                 mStrokeLineJoin = 1;
-            } else if (LINEJOIN_BEVEL.equals(value)) {
+            } else if (LINE_JOIN_BEVEL.equals(value)) {
                 mStrokeLineJoin = 2;
             }
-        } else if (PATH_STROKE_MITERLIMIT.equals(name)) {
+        } else if (PATH_STROKE_MITER_LIMIT.equals(name)) {
             mStrokeMiterlimit = Float.parseFloat(value);
         } else {
-            LOGGER.log(Level.WARNING, ">>>>>> DID NOT UNDERSTAND ! \"" + name + "\" <<<<");
+            getLogger().log(Level.WARNING, ">>>>>> DID NOT UNDERSTAND ! \"" + name + "\" <<<<");
         }
-
     }
 
     private static int parseFillType(String value) {
@@ -534,7 +491,7 @@ class VdPath extends VdElement {
         return PathIterator.WIND_NON_ZERO;
     }
 
-    /** Multiply the <code>alpha</code> value into the alpha channel <code>color</code>. */
+    /** Multiplies the {@code alpha} value into the alpha channel {@code color}. */
     protected static int applyAlpha(int color, float alpha) {
         int alphaBytes = (color >> 24) & 0xff;
         color &= 0x00FFFFFF;
@@ -543,11 +500,10 @@ class VdPath extends VdElement {
     }
 
     /**
-     * Draw the current path
+     * Draws the current path.
      */
     @Override
     public void draw(Graphics2D g, AffineTransform currentMatrix, float scaleX, float scaleY) {
-
         Path2D path2d = new Path2D.Double(mFillType);
         toPath(path2d);
 
@@ -585,7 +541,6 @@ class VdPath extends VdElement {
         }
     }
 
-
     @Override
     public void parseAttributes(NamedNodeMap attributes) {
         for (int i = 0; i < attributes.getLength(); i++) {
@@ -621,14 +576,12 @@ class VdPath extends VdElement {
                 " mStrokeAlpha:" + mStrokeAlpha;
     }
 
-
     /**
      * We parse the given node for the gradient information if it exists. If it contains a gradient,
      * depending on what type, we set the fillGradient or strokeGradient of the current VdPath to a
      * new VdGradient and add the gradient information.
      */
     protected void addGradientIfExists(org.w3c.dom.Node current) {
-
         // This should be guaranteed to be the gradient given the way we are writing the VD XMLs.
         org.w3c.dom.Node gradientNode = current.getFirstChild();
         VdGradient newGradient = new VdGradient();
@@ -663,8 +616,8 @@ class VdPath extends VdElement {
                 org.w3c.dom.Node stop = items.item(i);
                 if (stop.getNodeName().equals("item")) {
                     NamedNodeMap stopAttr = stop.getAttributes();
-                    String color = "";
-                    String offset = "";
+                    String color = null;
+                    String offset = null;
                     for (int j = 0; j < stopAttr.getLength(); j++) {
                         org.w3c.dom.Node currentItem = stopAttr.item(j);
                         if (currentItem.getNodeName().equals("android:color")) {
@@ -673,13 +626,13 @@ class VdPath extends VdElement {
                             offset = currentItem.getNodeValue();
                         }
                     }
-                    if (color.isEmpty()) {
+                    if (color == null) {
                         color = "#000000";
-                        LOGGER.log(Level.WARNING, ">>>>>> No color for gradient found >>>>>>");
+                        getLogger().log(Level.WARNING, ">>>>>> No color for gradient found >>>>>>");
                     }
-                    if (offset.isEmpty()) {
+                    if (offset == null) {
                         offset = "0";
-                        LOGGER.log(Level.WARNING, ">>>>>> No offset for gradient found>>>>>>");
+                        getLogger().log(Level.WARNING, ">>>>>> No offset for gradient found>>>>>>");
                     }
                     GradientStop gradientStop = new GradientStop(color, offset);
                     newGradient.mGradientStops.add(gradientStop);
@@ -692,22 +645,18 @@ class VdPath extends VdElement {
      * Contains gradient information in order to draw the fill or stroke of a path with a gradient.
      */
     class VdGradient {
-        // Gradient attributes
-        private float mStartX = 0;
-        private float mStartY = 0;
-        private float mEndX = 0;
-        private float mEndY = 0;
-        private float mCenterX = 0;
-        private float mCenterY = 0;
-        private float mGradientRadius = 0;
+        // Gradient attributes.
+        private float mStartX;
+        private float mStartY;
+        private float mEndX;
+        private float mEndY;
+        private float mCenterX;
+        private float mCenterY;
+        private float mGradientRadius;
         private String mTileMode = "NO_CYCLE";
-        private String mGradientType = "";
+        private String mGradientType = "linear";
 
         private final ArrayList<GradientStop> mGradientStops = new ArrayList<>();
-
-        private float[] mFractions = null;
-        private Color[] mGradientColors = null;
-        private float[] mOpacities = null;
 
         VdGradient() {}
 
@@ -747,16 +696,14 @@ class VdPath extends VdElement {
             if (mGradientStops.isEmpty()) {
                 return;
             }
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-            mFractions = new float[mGradientStops.size()];
-            mGradientColors = new Color[mGradientStops.size()];
-            mOpacities = new float[mGradientStops.size()];
+            float[] mFractions = new float[mGradientStops.size()];
+            Color[] mGradientColors = new Color[mGradientStops.size()];
 
             for (int j = 0; j < mGradientStops.size(); j++) {
                 GradientStop stop = mGradientStops.get(j);
                 float fraction = Float.parseFloat(stop.getOffset());
-                int colorInt = calculateColor(stop.getColor());
+                int colorInt = parseColorValue(stop.getColor());
                 //TODO: If opacity for android gradient items becomes supported, use mOpacity to modify colors.
                 Color color = new Color(colorInt, true);
 
@@ -764,17 +711,28 @@ class VdPath extends VdElement {
                 mGradientColors[j] = color;
             }
 
-            // Gradient stop fractions must be strictly increasing in Java Swing. Decrement the
-            // first of two equal fraction floats by a small amount to get the effect of two
-            // overlapping stops.
+            // Gradient stop fractions must be strictly increasing in Java Swing. Increment the
+            // second of two equal fraction floats by a small amount to get the effect of two
+            // overlapping stops. When the fraction is the 1.0, then decrement accordingly.
             // See LinearGradientPaint constructor:
             // https://docs.oracle.com/javase/7/docs/api/java/awt/LinearGradientPaint.html
             for (int i = 0; i < mGradientStops.size() - 1; i++) {
-                if (mFractions[i] == mFractions[i + 1]) {
-                    mFractions[i] -= 0.0000001;
+                if (mFractions[i] >= mFractions[i + 1]) {
+                    if (mFractions[i] + EPSILON <= 1.0f) {
+                        mFractions[i + 1] = mFractions[i] + EPSILON;
+                    }
                 }
             }
 
+            for (int i = mGradientStops.size() - 2; i >= 0; i--) {
+                if (mFractions[i] >= mFractions[i + 1] && mFractions[i] >= 1.0f) {
+                    mFractions[i] = mFractions[i + 1] - EPSILON;
+                } else {
+                    break;
+                }
+            }
+
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             // Create stroke in case the gradient applies to a stroke.
             BasicStroke stroke =
                     new BasicStroke(
@@ -794,11 +752,31 @@ class VdPath extends VdElement {
                 } else if (mTileMode.equals("repeat")) {
                     tile = MultipleGradientPaint.CycleMethod.REPEAT;
                 }
-                LinearGradientPaint gradient =
-                        new LinearGradientPaint(
-                                mStartX, mStartY, mEndX, mEndY, mFractions, mGradientColors, tile);
-                g.setPaint(gradient);
-
+                if (mGradientType.equals("linear")) {
+                    LinearGradientPaint gradient =
+                            new LinearGradientPaint(
+                                    mStartX,
+                                    mStartY,
+                                    mEndX,
+                                    mEndY,
+                                    mFractions,
+                                    mGradientColors,
+                                    tile);
+                    g.setPaint(gradient);
+                } else if (mGradientType.equals("radial")) {
+                    RadialGradientPaint paint =
+                            new RadialGradientPaint(
+                                    mCenterX,
+                                    mCenterY,
+                                    mGradientRadius,
+                                    mFractions,
+                                    mGradientColors,
+                                    tile);
+                    g.setPaint(paint);
+                } else {
+                    getLogger().log(Level.WARNING,
+                            ">>>>>> Unsupported gradient type: \"" + mGradientType + "\">>>>>>");
+                }
                 if (fill) {
                     g.fill(path2d);
                 } else {
@@ -809,5 +787,7 @@ class VdPath extends VdElement {
         }
     }
 
-
+    private static Logger getLogger() {
+        return Logger.getLogger(VdPath.class.getSimpleName());
+    }
 }

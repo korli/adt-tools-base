@@ -18,14 +18,13 @@ package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
+import com.android.build.gradle.internal.errors.DeprecationReporter;
 import com.android.builder.core.BuilderConstants;
 import com.android.builder.core.DefaultApiVersion;
 import com.android.builder.core.DefaultProductFlavor;
-import com.android.builder.core.ErrorReporter;
 import com.android.builder.internal.ClassFieldImpl;
 import com.android.builder.model.ApiVersion;
 import com.android.builder.model.ClassField;
-import com.android.builder.model.SyncIssue;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import java.util.Collection;
@@ -34,7 +33,7 @@ import java.util.Set;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.logging.Logger;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.api.model.ObjectFactory;
 
 /** Base DSL object used to configure product flavors. */
 public abstract class BaseFlavor extends DefaultProductFlavor implements CoreProductFlavor {
@@ -47,30 +46,27 @@ public abstract class BaseFlavor extends DefaultProductFlavor implements CorePro
 
     @NonNull private final ExternalNativeBuildOptions externalNativeBuildOptions;
 
-    @NonNull private final ErrorReporter errorReporter;
-
-    @NonNull private final JackOptions jackOptions;
-
     @NonNull private final JavaCompileOptions javaCompileOptions;
 
     @NonNull private final ShaderOptions shaderOptions;
 
+    @NonNull private final DeprecationReporter deprecationReporter;
+
     public BaseFlavor(
             @NonNull String name,
             @NonNull Project project,
-            @NonNull Instantiator instantiator,
-            @NonNull Logger logger,
-            @NonNull ErrorReporter errorReporter) {
-        super(name, instantiator.newInstance(VectorDrawablesOptions.class));
+            @NonNull ObjectFactory objectFactory,
+            @NonNull DeprecationReporter deprecationReporter,
+            @NonNull Logger logger) {
+        super(name, objectFactory.newInstance(VectorDrawablesOptions.class));
         this.project = project;
+        this.deprecationReporter = deprecationReporter;
         this.logger = logger;
-        this.errorReporter = errorReporter;
-        ndkConfig = instantiator.newInstance(NdkOptions.class);
+        ndkConfig = objectFactory.newInstance(NdkOptions.class);
         externalNativeBuildOptions =
-                instantiator.newInstance(ExternalNativeBuildOptions.class, instantiator);
-        jackOptions = instantiator.newInstance(JackOptions.class, errorReporter);
-        javaCompileOptions = instantiator.newInstance(JavaCompileOptions.class, instantiator);
-        shaderOptions = instantiator.newInstance(ShaderOptions.class);
+                objectFactory.newInstance(ExternalNativeBuildOptions.class, objectFactory);
+        javaCompileOptions = objectFactory.newInstance(JavaCompileOptions.class, objectFactory);
+        shaderOptions = objectFactory.newInstance(ShaderOptions.class);
     }
 
     /** Encapsulates per-variant configurations for the NDK, such as ABI filters. */
@@ -461,122 +457,141 @@ public abstract class BaseFlavor extends DefaultProductFlavor implements CorePro
     }
 
     /**
-     * Adds a resource configuration filter.
+     * Specifies an <a
+     * href="https://d.android.com/guide/topics/resources/providing-resources.html#AlternativeResources">
+     * alternative resource</a> to keep.
      *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
-     * type but of different value will be ignored from the final packaging of the APK.
+     * <p>For example, if you are using a library that includes language resources (such as
+     * AppCompat or Google Play Services), then your APK includes all translated language strings
+     * for the messages in those libraries whether the rest of your app is translated to the same
+     * languages or not. If you'd like to keep only the language that your app officially supports,
+     * you can specify those languages using the <code>resConfig</code> property, as shown in the
+     * sample below. Any resources for languages not specified are removed.
      *
-     * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
+     * <pre>
+     * android {
+     *     defaultConfig {
+     *         ...
+     *         // Keeps language resources for only the locale specified below.
+     *         resConfig "en"
+     *     }
+     * }
+     * </pre>
      *
-     * <p>To package only the localization languages your app includes as string resources, specify
-     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
-     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
-     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
-     * package 'values-ja' resources in the final APK.
+     * <p>You can also use this property to filter resources for screen densities. For example,
+     * specifying <code>hdpi</code> removes all other screen density resources (such as <code>mdpi
+     * </code>, <code>xhdpi</code>, etc) from the final APK.
+     *
+     * <p><b>Note:</b> <code>auto</code> is no longer supported because it created a number of
+     * issues with multi-module projects. Instead, you should specify the locale that your app
+     * supports, as shown in the sample above. Android plugin 3.1.0 and higher ignore the <code>auto
+     * </code> argument, and Gradle packages all string resources your app and its dependencies
+     * provide.
+     *
+     * <p>To learn more, see <a
+     * href="https://d.android.com/studio/build/shrink-code.html#unused-alt-resources">Remove unused
+     * alternative resources</a>.
      */
     public void resConfig(@NonNull String config) {
+        checkResConfigValue("resConfig", config);
         addResourceConfiguration(config);
     }
 
     /**
-     * Adds several resource configuration filters.
+     * Specifies a list of <a
+     * href="https://d.android.com/guide/topics/resources/providing-resources.html#AlternativeResources">
+     * alternative resources</a> to keep.
      *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
-     * type but of different value will be ignored from the final packaging of the APK.
+     * <p>For example, if you are using a library that includes language resources (such as
+     * AppCompat or Google Play Services), then your APK includes all translated language strings
+     * for the messages in those libraries whether the rest of your app is translated to the same
+     * languages or not. If you'd like to keep only the languages that your app officially supports,
+     * you can specify those languages using the <code>resConfigs</code> property, as shown in the
+     * sample below. Any resources for languages not specified are removed.
      *
-     * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
+     * <pre>
+     * android {
+     *     defaultConfig {
+     *         ...
+     *         // Keeps language resources for only the locales specified below.
+     *         resConfigs "en", "fr"
+     *     }
+     * }
+     * </pre>
      *
-     * <p>To package only the localization languages your app includes as string resources, specify
-     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
-     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
-     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
-     * package 'values-ja' resources in the final APK.
+     * <p>You can also use this property to filter resources for screen densities. For example,
+     * specifying <code>hdpi</code> removes all other screen density resources (such as <code>mdpi
+     * </code>, <code>xhdpi</code>, etc) from the final APK.
+     *
+     * <p><b>Note:</b> <code>auto</code> is no longer supported because it created a number of
+     * issues with multi-module projects. Instead, you should specify a list of locales that your
+     * app supports, as shown in the sample above. Android plugin 3.1.0 and higher ignore the <code>
+     * auto</code> argument, and Gradle packages all string resources your app and its dependencies
+     * provide.
+     *
+     * <p>To learn more, see <a
+     * href="https://d.android.com/studio/build/shrink-code.html#unused-alt-resources">Remove unused
+     * alternative resources</a>.
      */
     public void resConfigs(@NonNull String... config) {
+        for (String aConfig : config) {
+            checkResConfigValue("resConfigs", aConfig);
+        }
         addResourceConfigurations(config);
     }
 
     /**
-     * Adds several resource configuration filters.
+     * Specifies a list of <a
+     * href="https://d.android.com/guide/topics/resources/providing-resources.html#AlternativeResources">
+     * alternative resources</a> to keep.
      *
-     * <p>If a qualifier value is passed, then all other resources using a qualifier of the same
-     * type but of different value will be ignored from the final packaging of the APK.
+     * <p>For example, if you are using a library that includes language resources (such as
+     * AppCompat or Google Play Services), then your APK includes all translated language strings
+     * for the messages in those libraries whether the rest of your app is translated to the same
+     * languages or not. If you'd like to keep only the languages that your app officially supports,
+     * you can specify those languages using the <code>resConfigs</code> property, as shown in the
+     * sample below. Any resources for languages not specified are removed.
      *
-     * <p>For instance, specifying 'hdpi', will ignore all resources using mdpi, xhdpi, etc...
+     * <pre>
+     * android {
+     *     defaultConfig {
+     *         ...
+     *         // Keeps language resources for only the locales specified below.
+     *         resConfigs "en", "fr"
+     *     }
+     * }
+     * </pre>
      *
-     * <p>To package only the localization languages your app includes as string resources, specify
-     * 'auto'. For example, if your app includes string resources for 'values-en' and 'values-fr',
-     * and its dependencies provide 'values-en' and 'values-ja', Gradle packages only the
-     * 'values-en' and 'values-fr' resources from the app and its dependencies. Gradle does not
-     * package 'values-ja' resources in the final APK.
+     * <p>You can also use this property to filter resources for screen densities. For example,
+     * specifying <code>hdpi</code> removes all other screen density resources (such as <code>mdpi
+     * </code>, <code>xhdpi</code>, etc) from the final APK.
+     *
+     * <p><b>Note:</b> <code>auto</code> is no longer supported because it created a number of
+     * issues with multi-module projects. Instead, you should specify a list of locales that your
+     * app supports, as shown in the sample above. Android plugin 3.1.0 and higher ignore the <code>
+     * auto</code> argument, and Gradle packages all string resources your app and its dependencies
+     * provide.
+     *
+     * <p>To learn more, see <a
+     * href="https://d.android.com/studio/build/shrink-code.html#unused-alt-resources">Remove unused
+     * alternative resources</a>.
      */
     public void resConfigs(@NonNull Collection<String> config) {
+        for (String aConfig : config) {
+            checkResConfigValue("resConfigs", aConfig);
+        }
         addResourceConfigurations(config);
     }
 
-    /** {@inheritDoc} */
-    @Deprecated
-    @Override
-    @NonNull
-    public JackOptions getJackOptions() {
-        return jackOptions;
-    }
-
-    /**
-     * The Jack toolchain is deprecated.
-     *
-     * <p>If you want to use Java 8 language features, use the improved support included in the
-     * default toolchain. To learn more, read <a
-     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     * features</a>.
-     */
-    @Deprecated
-    public void jackOptions(@NonNull Action<JackOptions> action) {
-        action.execute(jackOptions);
-    }
-
-    /**
-     * The Jack toolchain is deprecated.
-     *
-     * <p>If you want to use Java 8 language features, use the improved support included in the
-     * default toolchain. To learn more, read <a
-     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     * features</a>.
-     */
-    @Deprecated
-    @Nullable
-    public Boolean getUseJack() {
-        errorReporter.handleSyncWarning(
-                null, SyncIssue.TYPE_GENERIC, JackOptions.DEPRECATION_WARNING);
-        return null;
-    }
-
-    /**
-     * The Jack toolchain is deprecated.
-     *
-     * <p>If you want to use Java 8 language features, use the improved support included in the
-     * default toolchain. To learn more, read <a
-     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     * features</a>.
-     */
-    @Deprecated
-    public void setUseJack(Boolean useJack) {
-        errorReporter.handleSyncWarning(
-                null, SyncIssue.TYPE_GENERIC, JackOptions.DEPRECATION_WARNING);
-    }
-
-    /**
-     * The Jack toolchain is deprecated.
-     *
-     * <p>If you want to use Java 8 language features, use the improved support included in the
-     * default toolchain. To learn more, read <a
-     * href="https://developer.android.com/studio/write/java8-support.html">Use Java 8 language
-     * features</a>.
-     */
-    @Deprecated
-    public void useJack(Boolean useJack) {
-        errorReporter.handleSyncWarning(
-                null, SyncIssue.TYPE_GENERIC, JackOptions.DEPRECATION_WARNING);
+    private void checkResConfigValue(String dslElement, String resConfigValue) {
+        if (resConfigValue.equals("auto")) {
+            deprecationReporter.reportDeprecatedValue(
+                    "ProductFlavor." + dslElement,
+                    "auto",
+                    null,
+                    "https://google.github.io/android-gradle-dsl/current/com.android.build.gradle.internal.dsl.ProductFlavor.html#com.android.build.gradle.internal.dsl.ProductFlavor:resConfig(java.lang.String)",
+                    DeprecationReporter.DeprecationTarget.AUTO_SPLITS_OR_RES_CONFIG);
+        }
     }
 
     /** Options for configuration Java compilation. */
@@ -600,17 +615,6 @@ public abstract class BaseFlavor extends DefaultProductFlavor implements CorePro
     /** Configure the shader compiler options for this product flavor. */
     public void shaders(@NonNull Action<ShaderOptions> action) {
         action.execute(shaderOptions);
-    }
-
-    public void jarJarRuleFile(Object file) {
-        getJarJarRuleFiles().add(project.file(file));
-    }
-
-    public void jarJarRuleFiles(Object... files) {
-        getJarJarRuleFiles().clear();
-        for (Object file : files) {
-            getJarJarRuleFiles().add(project.file(file));
-        }
     }
 
     /**

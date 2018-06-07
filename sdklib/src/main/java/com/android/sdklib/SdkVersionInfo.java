@@ -29,7 +29,7 @@ public class SdkVersionInfo {
      * release. This number is used as a baseline and any more recent platforms
      * found can be used to increase the highest known number.
      */
-    public static final int HIGHEST_KNOWN_API = 26;
+    public static final int HIGHEST_KNOWN_API = 27;
 
     /**
      * Like {@link #HIGHEST_KNOWN_API} but does not include preview platforms.
@@ -126,8 +126,8 @@ public class SdkVersionInfo {
             case 23: return "6.0";
             case 24: return "7.0";
             case 25: return "7.1.1";
-            case 26:
-                return "8.0";
+            case 26: return "8.0";
+            case 27: return "8.1";
             // If you add more versions here, also update #getBuildCodes and
             // #HIGHEST_KNOWN_API
 
@@ -178,6 +178,7 @@ public class SdkVersionInfo {
             case 25:
                 return "Nougat";
             case 26:
+            case 27:
                 return "Oreo";
 
             // If you add more versions here, also update #getBuildCodes and
@@ -226,6 +227,7 @@ public class SdkVersionInfo {
             case 24: return "N"; //$NON-NLS-1$
             case 25: return "N_MR1"; //$NON-NLS-1$
             case 26: return "O"; //$NON-NLS-1$
+            case 27: return "O_MR1"; //$NON-NLS-1$
             // If you add more versions here, also update #getAndroidName and
             // #HIGHEST_KNOWN_API
         }
@@ -271,8 +273,27 @@ public class SdkVersionInfo {
      */
     public static int getApiByPreviewName(@NonNull String previewName, boolean recognizeUnknowns) {
         // JellyBean => JELLY_BEAN
-        String codeName = camelCaseToUnderlines(previewName).toUpperCase(Locale.US);
-        return getApiByBuildCode(codeName, recognizeUnknowns);
+        String codeName = previewName.contains("_") ? previewName :
+                camelCaseToUnderlines(previewName).toUpperCase(Locale.US);
+
+        // The build code is KITKAT, not KIT_KAT as may be inferred from "KitKat":
+        if (codeName.contains("KIT_KAT")) {
+            codeName = codeName.replace("KIT_KAT", "KITKAT");
+        }
+
+        int code = getApiByBuildCode(codeName, recognizeUnknowns);
+        if (code == -1) {
+            for (int api = 1; api <= HIGHEST_KNOWN_API; api++) {
+                String c = getCodeName(api);
+                if (c != null && (c.equalsIgnoreCase(codeName) || c.equalsIgnoreCase(previewName))) {
+                    return api;
+                }
+            }
+            if (previewName.equalsIgnoreCase("KeyLimePie")) {
+                return 19;
+            }
+        }
+        return code;
     }
 
     /**

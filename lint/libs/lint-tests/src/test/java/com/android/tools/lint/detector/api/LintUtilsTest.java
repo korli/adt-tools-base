@@ -19,22 +19,23 @@ package com.android.tools.lint.detector.api;
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_NAME;
 import static com.android.SdkConstants.DOT_JAVA;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_CHAR;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_CHARACTER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INTEGER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
+import static com.android.SdkConstants.DOT_KT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BYTE;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BYTE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_CHAR;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_CHARACTER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_DOUBLE;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_DOUBLE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_FLOAT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_FLOAT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INTEGER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_LONG;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_LONG_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_SHORT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_SHORT_WRAPPER;
 import static com.android.tools.lint.detector.api.LintUtils.computeResourceName;
 import static com.android.tools.lint.detector.api.LintUtils.convertVersion;
 import static com.android.tools.lint.detector.api.LintUtils.describeCounts;
@@ -43,7 +44,6 @@ import static com.android.tools.lint.detector.api.LintUtils.endsWith;
 import static com.android.tools.lint.detector.api.LintUtils.findSubstring;
 import static com.android.tools.lint.detector.api.LintUtils.formatList;
 import static com.android.tools.lint.detector.api.LintUtils.getAutoBoxedType;
-import static com.android.tools.lint.detector.api.LintUtils.getBaseName;
 import static com.android.tools.lint.detector.api.LintUtils.getChildren;
 import static com.android.tools.lint.detector.api.LintUtils.getCommonParent;
 import static com.android.tools.lint.detector.api.LintUtils.getEncodedString;
@@ -55,7 +55,6 @@ import static com.android.tools.lint.detector.api.LintUtils.getPrimitiveType;
 import static com.android.tools.lint.detector.api.LintUtils.idReferencesMatch;
 import static com.android.tools.lint.detector.api.LintUtils.isDataBindingExpression;
 import static com.android.tools.lint.detector.api.LintUtils.isEditableTo;
-import static com.android.tools.lint.detector.api.LintUtils.isImported;
 import static com.android.tools.lint.detector.api.LintUtils.isJavaKeyword;
 import static com.android.tools.lint.detector.api.LintUtils.isModelOlderThan;
 import static com.android.tools.lint.detector.api.LintUtils.isXmlFile;
@@ -65,7 +64,6 @@ import static com.android.tools.lint.detector.api.LintUtils.startsWith;
 import static com.android.tools.lint.detector.api.LintUtils.stripIdPrefix;
 import static com.android.utils.SdkUtils.escapePropertyValue;
 import static com.google.common.truth.Truth.assertThat;
-import static java.io.File.separatorChar;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -78,11 +76,11 @@ import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
 import com.android.testutils.TestUtils;
 import com.android.tools.lint.LintCliClient;
+import com.android.tools.lint.checks.infrastructure.ClassName;
 import com.android.tools.lint.checks.infrastructure.LintDetectorTest;
 import com.android.tools.lint.checks.infrastructure.TestFiles;
 import com.android.tools.lint.checks.infrastructure.TestIssueRegistry;
 import com.android.tools.lint.checks.infrastructure.TestLintClient;
-import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.client.api.LintDriver;
 import com.android.tools.lint.client.api.LintRequest;
 import com.android.tools.lint.client.api.UastParser;
@@ -93,7 +91,6 @@ import com.google.common.base.Charsets;
 import com.google.common.collect.Iterables;
 import com.google.common.io.Files;
 import com.intellij.openapi.Disposable;
-import com.intellij.psi.PsiJavaFile;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -102,10 +99,7 @@ import java.io.OutputStreamWriter;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import junit.framework.TestCase;
-import lombok.ast.Node;
 import org.intellij.lang.annotations.Language;
 import org.jetbrains.uast.UFile;
 import org.w3c.dom.Document;
@@ -113,7 +107,7 @@ import org.w3c.dom.Element;
 
 @SuppressWarnings("javadoc")
 public class LintUtilsTest extends TestCase {
-    public void testPrintList() throws Exception {
+    public void testPrintList() {
         assertEquals("bar, baz, foo",
                 formatList(Arrays.asList("foo", "bar", "baz"), 3));
         assertEquals("foo, bar, baz",
@@ -140,7 +134,7 @@ public class LintUtilsTest extends TestCase {
         assertFalse(isDataBindingExpression("foo"));
     }
 
-    public void testDescribeCounts() throws Exception {
+    public void testDescribeCounts() {
         assertThat(describeCounts(0, 0, true, true)).isEqualTo("No errors or warnings");
         assertThat(describeCounts(0, 0, true, false)).isEqualTo("no errors or warnings");
         assertThat(describeCounts(0, 1, true, true)).isEqualTo("1 warning");
@@ -155,7 +149,7 @@ public class LintUtilsTest extends TestCase {
         assertThat(describeCounts(5, 4, true, true)).isEqualTo("5 errors, 4 warnings");
     }
 
-    public void testEndsWith() throws Exception {
+    public void testEndsWith() {
         assertTrue(endsWith("Foo", ""));
         assertTrue(endsWith("Foo", "o"));
         assertTrue(endsWith("Foo", "oo"));
@@ -166,14 +160,14 @@ public class LintUtilsTest extends TestCase {
         assertFalse(endsWith("Foo", "f"));
     }
 
-    public void testStartsWith() throws Exception {
+    public void testStartsWith() {
         assertTrue(startsWith("FooBar", "Bar", 3));
         assertTrue(startsWith("FooBar", "BAR", 3));
         assertTrue(startsWith("FooBar", "Foo", 0));
         assertFalse(startsWith("FooBar", "Foo", 2));
     }
 
-    public void testIsXmlFile() throws Exception {
+    public void testIsXmlFile() {
         assertTrue(isXmlFile(new File("foo.xml")));
         assertTrue(isXmlFile(new File("foo.Xml")));
         assertTrue(isXmlFile(new File("foo.XML")));
@@ -181,12 +175,6 @@ public class LintUtilsTest extends TestCase {
         assertFalse(isXmlFile(new File("foo.png")));
         assertFalse(isXmlFile(new File("xml")));
         assertFalse(isXmlFile(new File("xml.png")));
-    }
-
-    public void testGetBasename() throws Exception {
-        assertEquals("foo", getBaseName("foo.png"));
-        assertEquals("foo", getBaseName("foo.9.png"));
-        assertEquals(".foo", getBaseName(".foo"));
     }
 
     public void testEditDistance() {
@@ -211,7 +199,7 @@ public class LintUtilsTest extends TestCase {
         assertFalse(isEditableTo("radiobutton", "bitton", 3));
     }
 
-    public void testSplitPath() throws Exception {
+    public void testSplitPath() {
         assertTrue(Arrays.equals(new String[] { "/foo", "/bar", "/baz" },
                 Iterables.toArray(splitPath("/foo:/bar:/baz"), String.class)));
 
@@ -285,13 +273,13 @@ public class LintUtilsTest extends TestCase {
                         new File("/foo/bar/foo2/foo3"))));
     }
 
-    public void testStripIdPrefix() throws Exception {
+    public void testStripIdPrefix() {
         assertEquals("foo", stripIdPrefix("@+id/foo"));
         assertEquals("foo", stripIdPrefix("@id/foo"));
         assertEquals("foo", stripIdPrefix("foo"));
     }
 
-    public void testIdReferencesMatch() throws Exception {
+    public void testIdReferencesMatch() {
         assertTrue(idReferencesMatch("@+id/foo", "@+id/foo"));
         assertTrue(idReferencesMatch("@id/foo", "@id/foo"));
         assertTrue(idReferencesMatch("@id/foo", "@+id/foo"));
@@ -398,7 +386,7 @@ public class LintUtilsTest extends TestCase {
         checkEncoding("UTF_32LE", true /*bom*/, "\r\n");
     }
 
-    public void testGetLocale() throws Exception {
+    public void testGetLocale() {
         assertNull(getLocale(""));
         assertNull(getLocale("values"));
         assertNull(getLocale("values-xlarge-port"));
@@ -409,7 +397,7 @@ public class LintUtilsTest extends TestCase {
     }
 
 
-    public void testGetLocale2() throws Exception {
+    public void testGetLocale2() {
         LintDetectorTest.TestFile xml;
         XmlContext context;
 
@@ -439,7 +427,7 @@ public class LintUtilsTest extends TestCase {
         assertEquals("nb", getLocale(context).getLanguage());
     }
 
-    public void testGetLocaleAndRegion() throws Exception {
+    public void testGetLocaleAndRegion() {
         assertNull(getLocaleAndRegion(""));
         assertNull(getLocaleAndRegion("values"));
         assertNull(getLocaleAndRegion("values-xlarge-port"));
@@ -448,46 +436,6 @@ public class LintUtilsTest extends TestCase {
         assertEquals("b+pt+PT", getLocaleAndRegion("values-b+pt+PT-nokeys"));
         assertEquals("zh-rCN", getLocaleAndRegion("values-zh-rCN-keyshidden"));
         assertEquals("ms", getLocaleAndRegion("values-ms-keyshidden"));
-    }
-
-    @SuppressWarnings("all") // sample code
-    public void testIsImported() throws Exception {
-        assertFalse(isImported(getCompilationUnit(
-                "package foo.bar;\n" +
-                "class Foo {\n" +
-                "}\n"),
-                "android.app.Activity"));
-
-        assertTrue(isImported(getCompilationUnit(
-                "package foo.bar;\n" +
-                "import foo.bar.*;\n" +
-                "import android.app.Activity;\n" +
-                "import foo.bar.Baz;\n" +
-                "class Foo {\n" +
-                "}\n"),
-                "android.app.Activity"));
-
-        assertTrue(isImported(getCompilationUnit(
-                "package foo.bar;\n" +
-                "import android.app.Activity;\n" +
-                "class Foo {\n" +
-                "}\n"),
-                "android.app.Activity"));
-
-        assertTrue(isImported(getCompilationUnit(
-                "package foo.bar;\n" +
-                "import android.app.*;\n" +
-                "class Foo {\n" +
-                "}\n"),
-                "android.app.Activity"));
-
-        assertFalse(isImported(getCompilationUnit(
-                "package foo.bar;\n" +
-                "import android.app.*;\n" +
-                "import foo.bar.Activity;\n" +
-                "class Foo {\n" +
-                "}\n"),
-                "android.app.Activity"));
     }
 
     public void testComputeResourceName() {
@@ -502,75 +450,6 @@ public class LintUtilsTest extends TestCase {
         assertEquals("my_prefix_name", computeResourceName("myPrefix", "name", ResourceFolderType.LAYOUT));
         assertEquals("UnitTestPrefixContentFrame", computeResourceName("unit_test_prefix_", "ContentFrame", ResourceFolderType.VALUES));
         assertEquals("MyPrefixMyStyle", computeResourceName("myPrefix_", "MyStyle", ResourceFolderType.VALUES));
-    }
-
-    public static Node getCompilationUnit(@Language("JAVA") String javaSource) {
-        return getCompilationUnit(javaSource, new File("test"));
-    }
-
-    public static Node getCompilationUnit(@Language("JAVA") String javaSource, File relativePath) {
-        JavaContext context = parse(javaSource, relativePath);
-        return context.getCompilationUnit();
-    }
-
-    private static final Pattern PACKAGE_PATTERN = Pattern.compile("package\\s+(.*)\\s*;");
-    private static final Pattern CLASS_PATTERN = Pattern
-            .compile("class\\s*(\\S+)\\s*(extends.*)?(implements.*)?\\{");
-
-    public static Pair<JavaContext,Disposable> parsePsi(@Language("JAVA") String javaSource) {
-        // Figure out the "to" path: the package plus class name + java in the src/ folder
-        Matcher matcher = PACKAGE_PATTERN.matcher(javaSource);
-        String pkg = "";
-        if (matcher.find()) {
-            pkg = matcher.group(1).trim();
-        }
-        matcher = CLASS_PATTERN.matcher(javaSource);
-        assertTrue("Couldn't find class declaration in source", matcher.find());
-        String cls = matcher.group(1).trim();
-        int typeParameter = cls.indexOf('<');
-        if (typeParameter != -1) {
-            cls = cls.substring(0, typeParameter);
-        }
-        String path = "src/" + pkg.replace('.', '/') + '/' + cls + DOT_JAVA;
-        return parsePsi(javaSource, new File(path.replace('/', separatorChar)));
-    }
-
-    /** @deprecated Use {@link #parseUast(String, File)} or {@link #parsePsi(String, File)}
-     * instead */
-    @Deprecated
-    public static JavaContext parse(@Language("JAVA") String javaSource) {
-        // Figure out the "to" path: the package plus class name + java in the src/ folder
-        Matcher matcher = PACKAGE_PATTERN.matcher(javaSource);
-        String pkg = "";
-        if (matcher.find()) {
-            pkg = matcher.group(1).trim();
-        }
-        matcher = CLASS_PATTERN.matcher(javaSource);
-        assertTrue("Couldn't find class declaration in source", matcher.find());
-        String cls = matcher.group(1).trim();
-        String path = "src/" + pkg.replace('.', '/') + '/' + cls + DOT_JAVA;
-        return parse(javaSource, new File(path.replace('/', separatorChar)));
-    }
-
-    /** @deprecated Use {@link #parseUast(String, File)} or {@link #parsePsi(String, File)}
-     * instead */
-    @Deprecated
-    public static JavaContext parse(@Language("JAVA") final String javaSource,
-            final File relativePath) {
-        Pair<JavaContext, Disposable> parse =
-                parse(javaSource, relativePath, true, false, false);
-        // Disposal not necessary for lombok
-        return parse.getFirst();
-    }
-
-    public static Pair<JavaContext,Disposable> parsePsi(@Language("JAVA") final String javaSource,
-            final File relativePath) {
-        return parse(javaSource, relativePath, false, true, false);
-    }
-
-    public static Pair<JavaContext,Disposable> parseUast(@Language("JAVA") final String javaSource,
-            final File relativePath) {
-        return parse(javaSource, relativePath, false, true, true);
     }
 
     private static Project createTestProjectForFile(File dir, File relativePath, String source) {
@@ -634,50 +513,62 @@ public class LintUtilsTest extends TestCase {
         return new XmlTestContext(driver, project, xml, fullPath, folderType, parser, document);
     }
 
-    public static Pair<JavaContext,Disposable>  parse(@Language("JAVA") final String javaSource,
-            final File relativePath, boolean lombok, boolean psi, boolean uast) {
+    public static Pair<JavaContext,Disposable> parse(@Language("JAVA") String javaSource,
+            @Nullable File relativePath) {
+        if (relativePath == null) {
+            ClassName className = new ClassName(javaSource);
+            String pkg = className.getPackageName();
+            String name = className.getClassName();
+            assert pkg != null;
+            assert name != null;
+            relativePath = new File("src" + File.separatorChar +
+                    pkg.replace('.', File.separatorChar) + File.separatorChar + name + DOT_JAVA);
+        }
+
+        return doParse(javaSource, relativePath);
+    }
+
+    public static Pair<JavaContext,Disposable> parseKotlin(@Language("Kt") String kotlinSource,
+            @Nullable File relativePath) {
+        if (relativePath == null) {
+            ClassName className = new ClassName(kotlinSource);
+            String pkg = className.getPackageName();
+            String name = className.getClassName();
+            assert pkg != null;
+            assert name != null;
+            relativePath = new File("src" + File.separatorChar +
+                    pkg.replace('.', File.separatorChar) + File.separatorChar + name + DOT_KT);
+        }
+
+        return doParse(kotlinSource, relativePath);
+    }
+    public static Pair<JavaContext,Disposable> doParse(String source,
+            final File relativePath) {
         // TODO: Clean up -- but where?
         File dir = Files.createTempDir();
         final File fullPath = new File(dir, relativePath.getPath());
         fullPath.getParentFile().mkdirs();
         try {
-            Files.write(javaSource, fullPath, Charsets.UTF_8);
+            Files.asCharSink(fullPath, Charsets.UTF_8).write(source);
         } catch (IOException e) {
             fail(e.getMessage());
         }
-        Project project = createTestProjectForFile(dir, relativePath, javaSource);
+        Project project = createTestProjectForFile(dir, relativePath, source);
         LintCliClient client = (LintCliClient) project.getClient();
         LintRequest request = new LintRequest(client, Collections.singletonList(fullPath));
 
         LintDriver driver = new LintDriver(new TestIssueRegistry(),
                 new LintCliClient(), request);
         driver.setScope(Scope.JAVA_FILE_SCOPE);
-        JavaTestContext context = new JavaTestContext(driver, client, project, javaSource, fullPath);
-        JavaParser parser = null;
-        if (lombok || psi) {
-            parser = client.getJavaParser(project);
-            context.setParser(parser);
-            assertNotNull(parser);
-            parser.prepareJavaParse(Collections.singletonList(context));
-        }
-        if (lombok) {
-            Node compilationUnit = parser.parseJava(context);
-            assertNotNull(javaSource, compilationUnit);
-            context.setCompilationUnit(compilationUnit);
-        }
-        if (psi) {
-            PsiJavaFile javaFile = parser.parseJavaToPsi(context);
-            assertNotNull("Couldn't parse source", javaFile);
-            context.setJavaFile(javaFile);
-        }
-        if (uast) {
-            UastParser uastParser = client.getUastParser(project);
-            assertNotNull(uastParser);
-            context.setUastParser(uastParser);
-            uastParser.prepare(Collections.singletonList(context));
-            UFile uFile = uastParser.parse(context);
-            context.setUastFile(uFile);
-        }
+        JavaTestContext context = new JavaTestContext(driver, client, project, source, fullPath);
+        UastParser uastParser = client.getUastParser(project);
+        assertNotNull(uastParser);
+        context.setUastParser(uastParser);
+        uastParser.prepare(Collections.singletonList(context), Collections.emptyList());
+        UFile uFile = uastParser.parse(context);
+        context.setUastFile(uFile);
+        assert uFile != null;
+        context.setJavaFile(uFile.getPsi());
         Disposable disposable = () -> client.disposeProjects(Collections.singletonList(project));
         return Pair.of(context, disposable);
     }
@@ -693,7 +584,7 @@ public class LintUtilsTest extends TestCase {
                 null));
     }
 
-    public void testIsModelOlderThan() throws Exception {
+    public void testIsModelOlderThan() {
         Project project = mock(Project.class);
         when(project.getGradleModelVersion()).thenReturn(GradleVersion.parse("0.10.4"));
 
@@ -768,7 +659,7 @@ public class LintUtilsTest extends TestCase {
                         "Prefix foo Divider bar Suffix"));
     }
 
-    public void testEscapePropertyValue() throws Exception {
+    public void testEscapePropertyValue() {
         assertEquals("foo", escapePropertyValue("foo"));
         assertEquals("\\  foo  ", escapePropertyValue("  foo  "));
         assertEquals("c\\:/foo/bar", escapePropertyValue("c:/foo/bar"));
@@ -830,7 +721,7 @@ public class LintUtilsTest extends TestCase {
         throw new AssertionError("Didn't find " + activityName);
     }
 
-    public void testResolveManifestName() throws Exception {
+    public void testResolveManifestName() {
         assertEquals("test.pkg.TestActivity", resolveManifestName(getElementWithNameValue(""
                 + "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                 + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n"
@@ -918,5 +809,4 @@ public class LintUtilsTest extends TestCase {
             return xmlSource;
         }
     }
-
 }

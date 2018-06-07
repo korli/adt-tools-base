@@ -26,16 +26,58 @@ java_binary(
     runtime_deps = [":dxlib-preview"],
 )
 
+# Fake "future" build tools for testing against before they are released
+filegroup(
+    name = "build-tools/future",
+    srcs = glob(
+        include = ["*/build-tools/4509860/**"],
+    ),
+    visibility = [
+        "//tools/base/build-system/builder:__subpackages__",
+        "//tools/base/build-system/integration-test:__subpackages__",
+    ],
+)
+
+filegroup(
+    name = "build-tools/27.0.3",
+    srcs = glob(
+        include = ["*/build-tools/27.0.3/**"],
+    ),
+    visibility = [
+        "//tools/base/build-system/integration-test:__subpackages__",
+    ],
+)
+
 filegroup(
     name = "build-tools/latest",
-    srcs = [":build-tools/26.0.2"],
+    srcs = [":build-tools/27.0.3"],
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "build-tools/27.0.1",
+    srcs = glob(
+        include = ["*/build-tools/27.0.1/**"],
+    ),
+    visibility = [
+        "//tools/base/build-system/integration-test:__subpackages__",
+    ],
 )
 
 filegroup(
     name = "build-tools/minimum",
     srcs = [":build-tools/25.0.0"],
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "build-tools/27.0.0",
+    srcs = glob(
+        include = ["*/build-tools/27.0.0/**"],
+    ),
+    visibility = [
+        "//tools/base/build-system/integration-test:__subpackages__",
+    ],
 )
 
 filegroup(
@@ -89,21 +131,6 @@ filegroup(
         include = ["*/platform-tools/**"],
     ),
     visibility = ["//visibility:public"],
-)
-
-filegroup(
-    name = "navigation-runtime_latest",
-    srcs = [":navigation-runtime_0.0.1-SNAPSHOT"],
-    visibility = ["//visibility:public"],
-)
-
-filegroup(
-    name = "navigation-runtime_0.0.1-SNAPSHOT",
-    srcs = glob(
-        include = [
-            "*/extras/m2repository/com/android/support/navigation/navigation-runtime/0.0.1-SNAPSHOT/**",
-        ],
-    ),
 )
 
 filegroup(
@@ -209,24 +236,24 @@ platform_filegroup(
     name = "platforms/android-24",
     visibility = [
         "//tools/base/build-system/gradle:__pkg__",
-        "//tools/base/build-system/integration-test:__pkg__",
+        "//tools/base/build-system/integration-test:__subpackages__",
         "//tools/data-binding:__pkg__",
     ],
 )
 
 platform_filegroup(
     name = "platforms/android-23",
-    visibility = ["//tools/base/build-system/integration-test:__pkg__"],
+    visibility = ["//tools/base/build-system/integration-test:__subpackages__"],
 )
 
 platform_filegroup(
     name = "platforms/android-21",
-    visibility = ["//tools/base/build-system/integration-test:__pkg__"],
+    visibility = ["//tools/base/build-system/integration-test:__subpackages__"],
 )
 
 platform_filegroup(
     name = "platforms/android-19",
-    visibility = ["//tools/base/build-system/integration-test:__pkg__"],
+    visibility = ["//tools/base/build-system/integration-test:__subpackages__"],
 )
 
 filegroup(
@@ -312,5 +339,13 @@ filegroup(
 filegroup(
     name = "sources",
     srcs = glob(["*/sources/**"]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "instant-apps-sdk",
+    srcs = glob(
+        include = ["*/extras/google/instantapps/**"],
+    ),
     visibility = ["//visibility:public"],
 )

@@ -16,37 +16,30 @@
 
 package com.android.build.gradle.internal.coverage;
 
-import org.gradle.api.logging.Logging;
+import com.android.annotations.NonNull;
+import javax.inject.Inject;
 
 /**
  * DSL object for configuring JaCoCo settings.
  */
 public class JacocoOptions {
 
-    @SuppressWarnings("MethodMayBeStatic")
-    @Deprecated
-    public void setVersion(String version) {
-        Logging.getLogger(JacocoOptions.class).warn(""
-                + "It is no longer possible to set the Jacoco version in the "
-                + "jacoco {} block.\n"
-                + "To update the version of Jacoco without updating the android plugin,\n"
-                + "add a buildscript dependency on a newer version, for example: "
-                + "buildscript{"
-                + "    dependencies {\n"
-                + "        classpath \"org.jacoco:org.jacoco.core:0.7.5.201505241946\""
-                + "    }"
-                + "}");
+    /** Default JaCoCo version. */
+    public static final String DEFAULT_VERSION = "0.7.9";
+
+    @Inject
+    public JacocoOptions() {}
+
+    @NonNull private String version = DEFAULT_VERSION;
+
+    /** Returns the version of JaCoCo to use. */
+    @NonNull
+    public String getVersion() {
+        return version;
     }
 
-
-    /**
-     * This will not affect the JaCoCo version used.
-     *
-     * @deprecated Use a build script dependency instead.
-     */
-    @SuppressWarnings("MethodMayBeStatic")
-    @Deprecated
-    public String getVersion() {
-        throw new UnsupportedOperationException();
+    /** Set the version of JaCoCo to use. */
+    public void setVersion(@NonNull String version) {
+        this.version = version;
     }
 }

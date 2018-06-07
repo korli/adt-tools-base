@@ -23,10 +23,14 @@ import com.android.build.gradle.internal.ApplicationTaskManager;
 import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.TaskManager;
+import com.android.build.gradle.internal.api.dsl.extensions.AppExtensionImpl;
+import com.android.build.gradle.internal.dependency.SourceSetManager;
 import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
 import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.plugin.AppPluginDelegate;
+import com.android.build.gradle.internal.plugin.TypedPluginDelegate;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.variant.ApplicationVariantFactory;
 import com.android.build.gradle.options.ProjectOptions;
@@ -36,18 +40,14 @@ import com.android.builder.profile.Recorder;
 import com.google.wireless.android.sdk.stats.GradleBuildProject;
 import javax.inject.Inject;
 import org.gradle.api.NamedDomainObjectContainer;
-import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.internal.reflect.Instantiator;
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
 
-/**
- * Gradle plugin class for 'application' projects.
- */
-public class AppPlugin extends BasePlugin implements Plugin<Project> {
+/** Gradle plugin class for 'application' projects. */
+public class AppPlugin extends BasePlugin<AppExtensionImpl> {
     @Inject
-    public AppPlugin(Instantiator instantiator, ToolingModelBuilderRegistry registry) {
-        super(instantiator, registry);
+    public AppPlugin(ToolingModelBuilderRegistry registry) {
+        super(registry);
     }
 
     @Override
@@ -60,13 +60,13 @@ public class AppPlugin extends BasePlugin implements Plugin<Project> {
     protected BaseExtension createExtension(
             @NonNull Project project,
             @NonNull ProjectOptions projectOptions,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
             @NonNull NamedDomainObjectContainer<BuildType> buildTypeContainer,
             @NonNull NamedDomainObjectContainer<ProductFlavor> productFlavorContainer,
             @NonNull NamedDomainObjectContainer<SigningConfig> signingConfigContainer,
             @NonNull NamedDomainObjectContainer<BaseVariantOutput> buildOutputs,
+            @NonNull SourceSetManager sourceSetManager,
             @NonNull ExtraModelInfo extraModelInfo) {
         return project.getExtensions()
                 .create(
@@ -74,13 +74,13 @@ public class AppPlugin extends BasePlugin implements Plugin<Project> {
                         AppExtension.class,
                         project,
                         projectOptions,
-                        instantiator,
                         androidBuilder,
                         sdkHandler,
                         buildTypeContainer,
                         productFlavorContainer,
                         signingConfigContainer,
                         buildOutputs,
+                        sourceSetManager,
                         extraModelInfo);
     }
 
@@ -124,10 +124,14 @@ public class AppPlugin extends BasePlugin implements Plugin<Project> {
     @Override
     protected ApplicationVariantFactory createVariantFactory(
             @NonNull GlobalScope globalScope,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull AndroidConfig androidConfig) {
-        return new ApplicationVariantFactory(
-                globalScope, instantiator, androidBuilder, androidConfig);
+        return new ApplicationVariantFactory(globalScope, androidBuilder, androidConfig);
+    }
+
+
+    @Override
+    protected TypedPluginDelegate<AppExtensionImpl> getTypedDelegate() {
+        return new AppPluginDelegate();
     }
 }

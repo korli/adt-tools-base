@@ -6,11 +6,13 @@ cc_library(
         "daemon.h",
         "profiler_component.h",
         "profiler_service.h",
+        "//tools/base/profiler/native/perfd/sessions:sessions_manager.h",
     ],
     copts = [
         "-Itools/base/profiler/native",
         "-I$(GENDIR)/tools/base/profiler",
     ],
+    tags = ["no_windows"],
     visibility = ["//visibility:public"],
 )
 
@@ -35,13 +37,16 @@ cc_binary(
         "-I$(GENDIR)/tools/base/profiler",
     ],
     linkopts = ANDROID_LINKOPTS,
+    tags = ["no_windows"],
     visibility = ["//visibility:public"],
     deps = [
         "//tools/base/profiler/native/perfd/cpu:profiler_cpu",
         "//tools/base/profiler/native/perfd/event:profiler_event",
         "//tools/base/profiler/native/perfd/graphics:profiler_graphics",
+        "//tools/base/profiler/native/perfd/io:profiler_io",
         "//tools/base/profiler/native/perfd/memory:profiler_memory",
         "//tools/base/profiler/native/perfd/network:profiler_network",
+        "//tools/base/profiler/native/perfd/sessions:profiler_sessions",
         "//tools/base/profiler/proto:profiler_cc_proto",
     ],
 )
@@ -55,5 +60,6 @@ android_cc_binary(
     ],
     binary = ":perfd.stripped",
     filename = "perfd",
+    tags = ["no_windows"],
     visibility = ["//visibility:public"],
 )

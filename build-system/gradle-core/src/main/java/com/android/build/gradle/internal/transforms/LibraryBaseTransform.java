@@ -46,6 +46,7 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
+import org.gradle.api.file.FileCollection;
 
 public abstract class LibraryBaseTransform extends Transform {
 
@@ -64,8 +65,7 @@ public abstract class LibraryBaseTransform extends Transform {
     @NonNull
     protected final String packagePath;
     protected final boolean packageBuildConfig;
-    @Nullable
-    protected final File typedefRecipe;
+    @Nullable protected final FileCollection typedefRecipe;
 
     @Nullable
     protected List<ExcludeListProvider> excludeListProviders;
@@ -73,7 +73,7 @@ public abstract class LibraryBaseTransform extends Transform {
     public LibraryBaseTransform(
             @NonNull File mainClassLocation,
             @Nullable File localJarsLocation,
-            @Nullable File typedefRecipe,
+            @Nullable FileCollection typedefRecipe,
             @NonNull String packageName,
             boolean packageBuildConfig) {
         this.mainClassLocation = mainClassLocation;
@@ -270,7 +270,7 @@ public abstract class LibraryBaseTransform extends Transform {
             @Nullable JarMerger.Transformer typedefRemover)
             throws IOException {
         try (JarMerger jarMerger = new JarMerger(toFile.toPath())) {
-            jarMerger.addDirectory(fromFolder.toPath(), filter, typedefRemover);
+            jarMerger.addDirectory(fromFolder.toPath(), filter, typedefRemover, null);
         }
     }
 
@@ -294,9 +294,10 @@ public abstract class LibraryBaseTransform extends Transform {
                 ZipEntryFilter thisFilter =
                         hasResources || forIntermediateJar ? filter : filterAndOnlyClasses;
                 if (content instanceof JarInput) {
-                    jarMerger.addJar(content.getFile().toPath(), thisFilter);
+                    jarMerger.addJar(content.getFile().toPath(), thisFilter, null);
                 } else {
-                    jarMerger.addDirectory(content.getFile().toPath(), thisFilter, typedefRemover);
+                    jarMerger.addDirectory(
+                            content.getFile().toPath(), thisFilter, typedefRemover, null);
                 }
             }
         }

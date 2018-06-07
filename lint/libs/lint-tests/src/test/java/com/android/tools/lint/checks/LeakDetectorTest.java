@@ -25,7 +25,7 @@ public class LeakDetectorTest extends AbstractCheckTest {
         return new LeakDetector();
     }
 
-    public void testStaticFields() throws Exception {
+    public void testStaticFields() {
         String expected = ""
                 + "src/test/pkg/LeakTest.java:18: Warning: Do not place Android context classes in static fields; this is a memory leak (and also breaks Instant Run) [StaticFieldLeak]\n"
                 + "    private static Activity sField7; // LEAK!\n"
@@ -323,5 +323,55 @@ public class LeakDetectorTest extends AbstractCheckTest {
                         + "    private Context myContext; // ERROR\n"
                         + "    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
                         + "0 errors, 2 warnings\n");
+    }
+
+    public void testApplicationOk() {
+        //noinspection all // Sample code
+        lint().files(
+                java("package test.pkg;\n" +
+                        "\n" +
+                        "import android.app.Application;\n" +
+                        "import android.content.Context;\n" +
+                        "\n" +
+                        "public class ApplicationTest {\n" +
+                        "    public static Application application;\n" +
+                        "    public static MyApp app;\n" +
+                        "\n" +
+                        "    public static class MyApp {\n" +
+                        "        private Application application;\n" +
+                        "    }\n" +
+                        "}\n"))
+                .run()
+                .expectClean();
+    }
+
+    public void testClassesInStaticMethods() {
+        // Regression test for https://issuetracker.google.com/70496601
+        //noinspection all // Sample code
+        lint().files(
+                java("package test.pkg;\n" +
+                        "\n" +
+                        "import android.os.AsyncTask;\n" +
+                        "\n" +
+                        "class C {\n" +
+                        "    public static void f(String param) {\n" +
+                        "        class CustomInternalTask extends AsyncTask<Void, Void, Void> {\n" +
+                        "            @Override\n" +
+                        "            protected Void doInBackground(Void... params) {\n" +
+                        "                return null;\n" +
+                        "            }\n" +
+                        "        }\n" +
+                        "        new CustomInternalTask().execute();\n" +
+                        "\n" +
+                        "        new AsyncTask<Void, Void, Void>() {\n" +
+                        "            @Override\n" +
+                        "            protected Void doInBackground(Void... params) {\n" +
+                        "                return null;\n" +
+                        "            }\n" +
+                        "        }.execute();\n" +
+                        "    }\n" +
+                        "}"))
+                .run()
+                .expectClean();
     }
 }

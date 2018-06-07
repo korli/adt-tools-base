@@ -18,7 +18,6 @@ package com.android.build.gradle.internal.scope;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.external.gson.NativeBuildConfigValue;
 import com.android.build.gradle.internal.InstantRunTaskManager;
 import com.android.build.gradle.internal.PostprocessingFeatures;
 import com.android.build.gradle.internal.core.Abi;
@@ -39,7 +38,6 @@ import com.android.build.gradle.tasks.ExternalNativeBuildTask;
 import com.android.build.gradle.tasks.ExternalNativeJsonGenerator;
 import com.android.build.gradle.tasks.GenerateBuildConfig;
 import com.android.build.gradle.tasks.ManifestProcessorTask;
-import com.android.build.gradle.tasks.MergeResources;
 import com.android.build.gradle.tasks.MergeSourceSetFolders;
 import com.android.build.gradle.tasks.ProcessAndroidResources;
 import com.android.build.gradle.tasks.RenderscriptCompile;
@@ -50,11 +48,9 @@ import com.android.sdklib.AndroidVersion;
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
-import java.util.function.Supplier;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.ArtifactCollection;
-import org.gradle.api.artifacts.ArtifactView;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.Sync;
@@ -142,6 +138,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getInstantRunSplitApkOutputFolder();
 
     @NonNull
+    File getDefaultInstantRunApkLocation();
+
+    @NonNull
     FileCollection getJavaClasspath(
             @NonNull AndroidArtifacts.ConsumedConfigType configType,
             @NonNull ArtifactType classesType);
@@ -164,6 +163,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getJavaOutputDir();
 
     @NonNull
+    BuildArtifactHolder getBuildArtifactHolder();
+
+    @NonNull
     FileCollection getArtifactFileCollection(
             @NonNull AndroidArtifacts.ConsumedConfigType configType,
             @NonNull AndroidArtifacts.ArtifactScope scope,
@@ -176,7 +178,7 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
             @NonNull ArtifactType artifactType);
 
     @NonNull
-    Supplier<Collection<File>> getLocalPackagedJars();
+    FileCollection getLocalPackagedJars();
 
     @NonNull
     FileCollection getProvidedOnlyClasspath();
@@ -189,6 +191,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
 
     @NonNull
     File getManifestKeepListProguardFile();
+
+    @NonNull
+    File getConsumerProguardFile();
 
     @NonNull
     File getMainDexListFile();
@@ -228,6 +233,9 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getBuildConfigSourceOutputDir();
 
     @NonNull
+    File getGeneratedAssetsDir(@NonNull String name);
+
+    @NonNull
     File getGeneratedResOutputDir();
 
     @NonNull
@@ -252,10 +260,16 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getAidlSourceOutputDir();
 
     @NonNull
-    File getShadersOutputDir();
+    File getPackagedAidlDir();
 
     @NonNull
-    File getPackagedAidlDir();
+    File getAarClassesJar();
+
+    @NonNull
+    File getAarLibsDirectory();
+
+    @NonNull
+    File getAnnotationZipFile();
 
     /**
      * Returns the path to an optional recipe file (only used for libraries) which describes
@@ -294,7 +308,7 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getGeneratedClassListOutputFileForDataBinding();
 
     @NonNull
-    File getBundleFolderForDataBinding();
+    File getBundleArtifactFolderForDataBinding();
 
     @NonNull
     File getProguardOutputFolder();
@@ -330,9 +344,6 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     File getMicroApkResDirectory();
 
     @NonNull
-    File getBaseBundleDir();
-
-    @NonNull
     File getAarLocation();
 
     @NonNull
@@ -350,91 +361,89 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     @NonNull
     File getApkLocation();
 
-    AndroidTask<? extends ManifestProcessorTask> getManifestProcessorTask();
+    ManifestProcessorTask getManifestProcessorTask();
 
-    void setManifestProcessorTask(
-            AndroidTask<? extends ManifestProcessorTask> manifestProcessorTask);
+    void setManifestProcessorTask(ManifestProcessorTask manifestProcessorTask);
 
-    AndroidTask<DefaultTask> getAssembleTask();
+    DefaultTask getAssembleTask();
 
-    void setAssembleTask(@NonNull AndroidTask<DefaultTask> assembleTask);
+    void setAssembleTask(@NonNull DefaultTask assembleTask);
 
-    AndroidTask<? extends DefaultTask> getPreBuildTask();
+    DefaultTask getPreBuildTask();
 
-    void setPreBuildTask(AndroidTask<? extends DefaultTask> preBuildTask);
+    void setPreBuildTask(DefaultTask preBuildTask);
 
-    AndroidTask<Task> getSourceGenTask();
+    Task getSourceGenTask();
 
-    void setSourceGenTask(AndroidTask<Task> sourceGenTask);
+    void setSourceGenTask(Task sourceGenTask);
 
-    AndroidTask<Task> getResourceGenTask();
+    Task getResourceGenTask();
 
-    void setResourceGenTask(AndroidTask<Task> resourceGenTask);
+    void setResourceGenTask(Task resourceGenTask);
 
-    AndroidTask<Task> getAssetGenTask();
+    Task getAssetGenTask();
 
-    void setAssetGenTask(AndroidTask<Task> assetGenTask);
+    void setAssetGenTask(Task assetGenTask);
 
-    AndroidTask<CheckManifest> getCheckManifestTask();
+    CheckManifest getCheckManifestTask();
 
-    void setCheckManifestTask(AndroidTask<CheckManifest> checkManifestTask);
+    void setCheckManifestTask(CheckManifest checkManifestTask);
 
-    AndroidTask<RenderscriptCompile> getRenderscriptCompileTask();
+    RenderscriptCompile getRenderscriptCompileTask();
 
-    void setRenderscriptCompileTask(AndroidTask<RenderscriptCompile> renderscriptCompileTask);
+    void setRenderscriptCompileTask(RenderscriptCompile renderscriptCompileTask);
 
-    AndroidTask<AidlCompile> getAidlCompileTask();
+    AidlCompile getAidlCompileTask();
 
-    void setAidlCompileTask(AndroidTask<AidlCompile> aidlCompileTask);
-
-    @Nullable
-    AndroidTask<MergeResources> getMergeResourcesTask();
-
-    void setMergeResourcesTask(@Nullable AndroidTask<MergeResources> mergeResourcesTask);
+    void setAidlCompileTask(AidlCompile aidlCompileTask);
 
     @Nullable
-    AndroidTask<MergeSourceSetFolders> getMergeAssetsTask();
+    MergeSourceSetFolders getMergeAssetsTask();
 
-    void setMergeAssetsTask(@Nullable AndroidTask<MergeSourceSetFolders> mergeAssetsTask);
+    void setMergeAssetsTask(@Nullable MergeSourceSetFolders mergeAssetsTask);
 
-    AndroidTask<GenerateBuildConfig> getGenerateBuildConfigTask();
+    GenerateBuildConfig getGenerateBuildConfigTask();
 
-    void setGenerateBuildConfigTask(AndroidTask<GenerateBuildConfig> generateBuildConfigTask);
+    void setGenerateBuildConfigTask(GenerateBuildConfig generateBuildConfigTask);
 
-    AndroidTask<Sync> getProcessJavaResourcesTask();
+    Sync getProcessJavaResourcesTask();
 
-    void setProcessJavaResourcesTask(AndroidTask<Sync> processJavaResourcesTask);
+    void setProcessJavaResourcesTask(Sync processJavaResourcesTask);
 
-    void setMergeJavaResourcesTask(AndroidTask<TransformTask> mergeJavaResourcesTask);
+    void setMergeJavaResourcesTask(TransformTask mergeJavaResourcesTask);
 
-    AndroidTask<TransformTask> getMergeJavaResourcesTask();
-
-    @Nullable
-    AndroidTask<? extends JavaCompile> getJavacTask();
-
-    void setJavacTask(@Nullable AndroidTask<? extends JavaCompile> javacTask);
-
-    AndroidTask<Task> getCompileTask();
-    void setCompileTask(AndroidTask<Task> compileTask);
-
-    AndroidTask<GenerateApkDataTask> getMicroApkTask();
-    void setMicroApkTask(AndroidTask<GenerateApkDataTask> microApkTask);
-
-    AndroidTask<?> getCoverageReportTask();
-
-    void setCoverageReportTask(AndroidTask<?> coverageReportTask);
+    TransformTask getMergeJavaResourcesTask();
 
     @Nullable
-    AndroidTask<ExternalNativeBuildTask> getExternalNativeBuildTask();
-    void setExternalNativeBuildTask(@NonNull AndroidTask<ExternalNativeBuildTask> task);
+    JavaCompile getJavacTask();
+
+    void setJavacTask(@Nullable JavaCompile javacTask);
+
+    Task getCompileTask();
+
+    void setCompileTask(Task compileTask);
+
+    @Nullable
+    DefaultTask getConnectedTask();
+
+    void setConnectedTask(DefaultTask compileTask);
+
+    GenerateApkDataTask getMicroApkTask();
+
+    void setMicroApkTask(GenerateApkDataTask microApkTask);
+
+    Task getCoverageReportTask();
+
+    void setCoverageReportTask(Task coverageReportTask);
+
+    @Nullable
+    ExternalNativeBuildTask getExternalNativeBuildTask();
+
+    void setExternalNativeBuildTask(@NonNull ExternalNativeBuildTask task);
 
     @Nullable
     ExternalNativeJsonGenerator getExternalNativeJsonGenerator();
     void setExternalNativeJsonGenerator(@NonNull ExternalNativeJsonGenerator generator);
-
-    @NonNull
-    Collection<NativeBuildConfigValue> getExternalNativeBuildConfigValues();
-    void addExternalNativeBuildConfigValues(@NonNull Collection<NativeBuildConfigValue> values);
 
     @Nullable
     InstantRunTaskManager getInstantRunTaskManager();
@@ -443,14 +452,13 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     @NonNull
     File getProcessResourcePackageOutputDirectory();
 
-    void setProcessResourcesTask(
-            AndroidTask<ProcessAndroidResources> processAndroidResourcesAndroidTask);
+    void setProcessResourcesTask(ProcessAndroidResources processAndroidResourcesAndroidTask);
 
-    AndroidTask<ProcessAndroidResources> getProcessResourcesTask();
+    ProcessAndroidResources getProcessResourcesTask();
 
-    void setDataBindingExportBuildInfoTask(AndroidTask<DataBindingExportBuildInfoTask> task);
+    void setDataBindingExportBuildInfoTask(DataBindingExportBuildInfoTask task);
 
-    AndroidTask<DataBindingExportBuildInfoTask> getDataBindingExportBuildInfoTask();
+    DataBindingExportBuildInfoTask getDataBindingExportBuildInfoTask();
 
     @NonNull
     VariantDependencies getVariantDependencies();
@@ -458,12 +466,15 @@ public interface VariantScope extends TransformVariantScope, InstantRunVariantSc
     @NonNull
     File getInstantRunResourceApkFolder();
 
+    @NonNull
+    File getIntermediateDir(@NonNull TaskOutputType taskOutputType);
+
     enum Java8LangSupport {
         INVALID,
         UNUSED,
+        D8,
         DESUGAR,
         RETROLAMBDA,
-        DEXGUARD,
     }
 
     @NonNull

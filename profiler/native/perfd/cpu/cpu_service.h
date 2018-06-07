@@ -20,11 +20,15 @@
 #include <map>
 #include <string>
 
+#include "perfd/cpu/atrace_manager.h"
 #include "perfd/cpu/cpu_cache.h"
 #include "perfd/cpu/cpu_usage_sampler.h"
+#include "perfd/cpu/simpleperf.h"
 #include "perfd/cpu/simpleperf_manager.h"
 #include "perfd/cpu/thread_monitor.h"
 #include "proto/cpu.grpc.pb.h"
+#include "utils/current_process.h"
+#include "utils/device_info.h"
 
 namespace profiler {
 
@@ -37,7 +41,9 @@ class CpuServiceImpl final : public profiler::proto::CpuService::Service {
         clock_(clock),
         usage_sampler_(*usage_sampler),
         thread_monitor_(*thread_monitor),
-        simplerperf_manager_(clock) {}
+        simpleperf_manager_(clock, simpleperf_),
+        // Number of millis to wait between atrace dumps when profiling.
+        atrace_manager_(clock, 500) {}
 
   grpc::Status GetData(grpc::ServerContext* context,
                        const profiler::proto::CpuDataRequest* request,
@@ -75,6 +81,12 @@ class CpuServiceImpl final : public profiler::proto::CpuService::Service {
       profiler::proto::ProfilingStateResponse* response) override;
 
  private:
+  // Stops profiling process of |pid|, regardless of whether it is alive or
+  // dead. If |response| is not null, populate it with the capture data (trace);
+  // otherwise, discard any capture result.
+  void StopProfilingAndCleanUp(
+      int32_t pid, profiler::proto::CpuProfilingAppStopResponse* response);
+
   // Data cache that will be queried to serve requests.
   CpuCache& cache_;
   // Clock that timestamps start profiling requests.
@@ -83,17 +95,23 @@ class CpuServiceImpl final : public profiler::proto::CpuService::Service {
   CpuUsageSampler& usage_sampler_;
   // The monitor that detects thread activities (i.e., state changes).
   ThreadMonitor& thread_monitor_;
-  SimplePerfManager simplerperf_manager_;
+  const Simpleperf simpleperf_{CurrentProcess::dir(),
+                               DeviceInfo::is_emulator()};
+  SimpleperfManager simpleperf_manager_;
+  AtraceManager atrace_manager_;
   // Absolute on-device path to the trace file. Activity manager or simpleperf
   // determines the path and populate the file with trace data.
   std::string trace_path_;
   // The timestamp when the last start profiling request was processed
-  // successfully. Map from an app name to its correspondent timestamp.
+  // successfully. Map from an app name to its corresponding timestamp.
   std::map<std::string, int64_t> last_start_profiling_timestamps_;
   // The last start profiling requests processed successfully.
-  // Map from an app name to its correspondent request.
+  // Map from an app name to its corresponding request.
   std::map<std::string, profiler::proto::CpuProfilingAppStartRequest>
       last_start_profiling_requests_;
+  // Map a pid to its corresponding app name. It's used for sanity check if an
+  // app has restarted and got a new pid.
+  std::map<int, std::string> app_pids_;
 };
 
 }  // namespace profiler

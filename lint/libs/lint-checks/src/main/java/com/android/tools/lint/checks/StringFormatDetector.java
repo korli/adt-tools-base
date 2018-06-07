@@ -24,16 +24,16 @@ import static com.android.SdkConstants.CLASS_V4_FRAGMENT;
 import static com.android.SdkConstants.FORMAT_METHOD;
 import static com.android.SdkConstants.GET_STRING_METHOD;
 import static com.android.SdkConstants.TAG_STRING;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_CHARACTER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INTEGER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_OBJECT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_STRING;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BYTE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_CHARACTER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_DOUBLE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_FLOAT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INTEGER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_LONG_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_OBJECT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_SHORT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_STRING;
 import static com.android.utils.CharSequences.indexOf;
 
 import com.android.annotations.NonNull;
@@ -49,7 +49,6 @@ import com.android.tools.lint.client.api.JavaEvaluator;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -61,6 +60,7 @@ import com.android.tools.lint.detector.api.ResourceEvaluator;
 import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
 import com.android.utils.Pair;
 import com.google.common.collect.ImmutableList;
@@ -101,7 +101,7 @@ import org.w3c.dom.NodeList;
  * <p>
  * TODO: Handle Resources.getQuantityString as well
  */
-public class StringFormatDetector extends ResourceXmlDetector implements UastScanner {
+public class StringFormatDetector extends ResourceXmlDetector implements SourceCodeScanner {
     private static final Implementation IMPLEMENTATION_XML = new Implementation(
             StringFormatDetector.class,
             Scope.ALL_RESOURCES_SCOPE);

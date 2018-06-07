@@ -16,7 +16,6 @@
 
 package com.android.tools.lint.checks.infrastructure
 
-import org.junit.Assert.fail
 import com.android.tools.lint.client.api.Configuration
 import com.android.tools.lint.client.api.DefaultConfiguration
 import com.android.tools.lint.client.api.IssueRegistry
@@ -26,6 +25,7 @@ import com.android.tools.lint.detector.api.Issue
 import com.android.tools.lint.detector.api.Location
 import com.android.tools.lint.detector.api.Project
 import com.android.tools.lint.detector.api.Severity
+import org.junit.Assert.fail
 
 class TestConfiguration(
         private val task: TestLintTask,
@@ -46,16 +46,12 @@ class TestConfiguration(
     }
 
     override fun isEnabled(issue: Issue): Boolean {
-        if (issue == IssueRegistry.LINT_ERROR) {
-            return task.allowSystemErrors || !task.allowCompilationErrors
-        } else if (issue == IssueRegistry.PARSER_ERROR) {
-            return !task.allowSystemErrors
-        } else if (issue == IssueRegistry.OBSOLETE_LINT_CHECK) {
-            return !task.allowObsoleteLintChecks
-        }
-
-        if (task.issueIds != null) {
-            for (id in task.issueIds!!) {
+        when {
+            issue == IssueRegistry.LINT_ERROR -> return task.allowSystemErrors ||
+                    !task.allowCompilationErrors
+            issue == IssueRegistry.PARSER_ERROR -> return !task.allowSystemErrors
+            issue == IssueRegistry.OBSOLETE_LINT_CHECK -> return !task.allowObsoleteLintChecks
+            task.issueIds != null -> for (id in task.issueIds!!) {
                 if (issue.id == id) {
                     return true
                 }

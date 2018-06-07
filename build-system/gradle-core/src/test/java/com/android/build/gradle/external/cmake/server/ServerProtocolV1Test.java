@@ -26,7 +26,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -47,9 +46,6 @@ public class ServerProtocolV1Test {
         serverReceiver = new ServerReceiver();
     }
 
-    @After
-    public void tearDown() throws Exception {}
-
     // Test connect
     @Test
     public void testConnectValid() throws IOException {
@@ -65,15 +61,16 @@ public class ServerProtocolV1Test {
                 "{\"supportedProtocolVersions\":[{\"major\":123,\"minor\":45}],\"type\":\"hello\"}\n";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedHelloMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
         final boolean connected = serverProtocolV1.connect();
         assertThat(connected).isTrue();
 
         final HelloResult actualHelloResult = serverProtocolV1.getHelloResult();
 
         assertThat(actualHelloResult.type).isEqualTo("hello");
+        assertThat(actualHelloResult.supportedProtocolVersions).isNotNull();
         assertThat(actualHelloResult.supportedProtocolVersions).hasLength(1);
 
         ProtocolVersion protocolVersion = actualHelloResult.supportedProtocolVersions[0];
@@ -89,8 +86,7 @@ public class ServerProtocolV1Test {
         HandshakeRequest handshakeRequest = new HandshakeRequest();
         handshakeRequest.cookie = "zimtstern";
         handshakeRequest.protocolVersion = new ProtocolVersion();
-        handshakeRequest.protocolVersion.minor = 1;
-        handshakeRequest.protocolVersion.minor = 0;
+        handshakeRequest.protocolVersion.major = 1;
         handshakeRequest.sourceDirectory = "/home/code/cmake";
         handshakeRequest.buildDirectory = "/tmp/testbuild";
         handshakeRequest.generator = "Ninja";
@@ -99,9 +95,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"zimtstern\",\"inReplyTo\":\"handshake\",\"type\":\"reply\"}\n";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedHandshakeMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
         final HandshakeResult handshakeResult = serverProtocolV1.handshake(handshakeRequest);
 
         assertThat(handshakeResult.cookie).isEqualTo("zimtstern");
@@ -118,13 +114,13 @@ public class ServerProtocolV1Test {
         HandshakeRequest handshakeRequest = new HandshakeRequest();
         handshakeRequest.cookie = "zimtstern";
         handshakeRequest.protocolVersion = new ProtocolVersion();
-        handshakeRequest.protocolVersion.minor = 1;
-        handshakeRequest.protocolVersion.minor = 0;
+        handshakeRequest.protocolVersion.major = 1;
         handshakeRequest.sourceDirectory = "/home/code/cmake";
         handshakeRequest.buildDirectory = "/tmp/testbuild";
         handshakeRequest.generator = "Ninja";
 
         final HandshakeResult handshakeResult = serverProtocolV1.handshake(handshakeRequest);
+        assertThat(handshakeResult).isNull();
     }
 
     // Test configure
@@ -138,9 +134,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -165,12 +161,12 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         interactiveMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG,
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -191,9 +187,9 @@ public class ServerProtocolV1Test {
 
         final String C_COMPILER_EXEC = "/usr/bin/clang";
         final String COMPILER_INFO =
-                serverProtocolV1.CMAKE_SERVER_C_COMPILER_PREFIX
+                ServerProtocolV1.CMAKE_SERVER_C_COMPILER_PREFIX
                         + C_COMPILER_EXEC
-                        + serverProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
+                        + ServerProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
 
         final String interactiveMsg =
                 "{\"cookie\":\"\",\"message\":\""
@@ -203,12 +199,12 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         interactiveMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG,
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -220,7 +216,7 @@ public class ServerProtocolV1Test {
         final String c_compiler_info = serverProtocolV1.getCCompilerExecutable();
         assertThat(c_compiler_info).isEqualTo(C_COMPILER_EXEC);
         final String cc_compiler_info = serverProtocolV1.getCppCompilerExecutable();
-        assertThat(cc_compiler_info).isNull();
+        assertThat(cc_compiler_info).isEmpty();
     }
 
     @Test
@@ -233,9 +229,9 @@ public class ServerProtocolV1Test {
 
         final String CXX_COMPILER_EXEC = "/usr/bin/clang++";
         final String COMPILER_INFO =
-                serverProtocolV1.CMAKE_SERVER_CXX_COMPILER_PREFIX
+                ServerProtocolV1.CMAKE_SERVER_CXX_COMPILER_PREFIX
                         + CXX_COMPILER_EXEC
-                        + serverProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
+                        + ServerProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
 
         final String interactiveMsg =
                 "{\"cookie\":\"\",\"message\":\""
@@ -245,12 +241,12 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         interactiveMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG,
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -260,7 +256,7 @@ public class ServerProtocolV1Test {
                 .isTrue();
 
         final String c_compiler_info = serverProtocolV1.getCCompilerExecutable();
-        assertThat(c_compiler_info).isNull();
+        assertThat(c_compiler_info).isEmpty();
         final String cc_compiler_info = serverProtocolV1.getCppCompilerExecutable();
         assertThat(cc_compiler_info).isEqualTo(CXX_COMPILER_EXEC);
     }
@@ -275,14 +271,14 @@ public class ServerProtocolV1Test {
 
         final String CXX_COMPILER_EXEC = "/usr/bin/clang++";
         final String CXX_COMPILER_INFO =
-                serverProtocolV1.CMAKE_SERVER_CXX_COMPILER_PREFIX
+                ServerProtocolV1.CMAKE_SERVER_CXX_COMPILER_PREFIX
                         + CXX_COMPILER_EXEC
-                        + serverProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
+                        + ServerProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
         final String C_COMPILER_EXEC = "/usr/bin/clang";
         final String C_COMPILER_INFO =
-                serverProtocolV1.CMAKE_SERVER_C_COMPILER_PREFIX
+                ServerProtocolV1.CMAKE_SERVER_C_COMPILER_PREFIX
                         + C_COMPILER_EXEC
-                        + serverProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
+                        + ServerProtocolV1.CMAKE_SERVER_C_COMPILER_SUFFIX;
 
         final String interactiveMsgC =
                 "{\"cookie\":\"\",\"message\":\""
@@ -298,18 +294,18 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         interactiveMsgC,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG,
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         otherInteractiveMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG,
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         interactiveMsgCxx,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG,
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -335,13 +331,14 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
                         cacheArguments.toArray(new String[cacheArguments.size()]));
+        assertThat(configureCommandResult).isNull();
     }
 
     @Test
@@ -356,9 +353,9 @@ public class ServerProtocolV1Test {
                 .thenReturn(
                         "Non conforming message 1",
                         "some random message",
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -379,11 +376,11 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
                         "Non conforming message 1",
                         "some random message",
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -404,9 +401,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"compute\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedComputeMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         ComputeResult computeResult = serverProtocolV1.compute();
         assertThat(ServerUtils.isComputedResultValid(computeResult)).isTrue();
@@ -422,9 +419,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"compute\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedComputeMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         ComputeResult computeResult = serverProtocolV1.compute();
         assertThat(ServerUtils.isComputedResultValid(computeResult)).isFalse();
@@ -438,9 +435,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"compute\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedComputeMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         ComputeResult computeResult = serverProtocolV1.compute();
         assertThat(ServerUtils.isComputedResultValid(computeResult)).isFalse();
@@ -456,9 +453,9 @@ public class ServerProtocolV1Test {
         final String expectedMsg = getCodeModelResponseString();
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final CodeModel codeModel = serverProtocolV1.codemodel();
         assertThat(ServerUtils.isCodeModelValid(codeModel)).isTrue();
@@ -471,9 +468,9 @@ public class ServerProtocolV1Test {
         final String expectedMsg = getCodeModelResponseString();
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final CodeModel codeModel = serverProtocolV1.codemodel();
         assertThat(ServerUtils.isCodeModelValid(codeModel)).isFalse();
@@ -486,9 +483,9 @@ public class ServerProtocolV1Test {
         final String expectedMsg = getCodeModelResponseString();
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final CodeModel codeModel = serverProtocolV1.codemodel();
         assertThat(ServerUtils.isCodeModelValid(codeModel)).isFalse();
@@ -502,12 +499,59 @@ public class ServerProtocolV1Test {
         final String expectedMsg = getCodeModelResponseString();
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final CodeModel codeModel = serverProtocolV1.codemodel();
         assertThat(ServerUtils.isCodeModelValid(codeModel)).isFalse();
+    }
+
+    // Test cmake inputs
+    @Test
+    public void testCmakeInputsValid() throws IOException {
+        ServerProtocolV1 serverProtocolV1 = createConnectedServer();
+        configureServer(serverProtocolV1);
+
+        final String expectedMsg = getCmakeInputsResponseString();
+        Mockito.when(mockBufferedReader.readLine())
+                .thenReturn(
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        expectedMsg,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+
+        final CmakeInputsResult cmakeInputsResult = serverProtocolV1.cmakeInputs();
+        assertThat(ServerUtils.isCmakeInputsResultValid(cmakeInputsResult)).isTrue();
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testCmakeInputsDisconnected() throws IOException {
+        ServerProtocolV1 serverProtocolV1 = createUnconnectedServer();
+
+        final String expectedMsg = getCmakeInputsResponseString();
+        Mockito.when(mockBufferedReader.readLine())
+                .thenReturn(
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        expectedMsg,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+
+        final CmakeInputsResult cmakeInputsResult = serverProtocolV1.cmakeInputs();
+        assertThat(ServerUtils.isCmakeInputsResultValid(cmakeInputsResult)).isFalse();
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testCmakeInputsUnconfigured() throws IOException {
+        ServerProtocolV1 serverProtocolV1 = createConnectedServer();
+
+        final String expectedMsg = getCmakeInputsResponseString();
+        Mockito.when(mockBufferedReader.readLine())
+                .thenReturn(
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        expectedMsg,
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+
+        final CmakeInputsResult cmakeInputsResult = serverProtocolV1.cmakeInputs();
+        assertThat(ServerUtils.isCmakeInputsResultValid(cmakeInputsResult)).isFalse();
     }
 
     // Helper test functions
@@ -525,9 +569,9 @@ public class ServerProtocolV1Test {
                 "{\"supportedProtocolVersions\":[{\"major\":123,\"minor\":45}],\"type\":\"hello\"}\n";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedHelloMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final boolean connected = serverProtocolV1.connect();
         assertThat(connected).isTrue();
@@ -538,9 +582,8 @@ public class ServerProtocolV1Test {
      * Creates a server objects that's yet to be connected to a Cmake server.
      *
      * @return server object
-     * @throws IOException I/O failure
      */
-    private ServerProtocolV1 createUnconnectedServer() throws IOException {
+    private ServerProtocolV1 createUnconnectedServer() {
         return new ServerProtocolV1(
                 mockCmakeInstallPath,
                 serverReceiver,
@@ -562,9 +605,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"configure\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedConfigureMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         final ConfigureCommandResult configureCommandResult =
                 serverProtocolV1.configure(
@@ -585,9 +628,9 @@ public class ServerProtocolV1Test {
                 "{\"cookie\":\"\",\"inReplyTo\":\"compute\",\"type\":\"reply\"}";
         Mockito.when(mockBufferedReader.readLine())
                 .thenReturn(
-                        serverProtocolV1.CMAKE_SERVER_HEADER_MSG,
+                        ServerProtocolV1.CMAKE_SERVER_HEADER_MSG,
                         expectedComputeMsg,
-                        serverProtocolV1.CMAKE_SERVER_FOOTER_MSG);
+                        ServerProtocolV1.CMAKE_SERVER_FOOTER_MSG);
 
         ComputeResult computeResult = serverProtocolV1.compute();
         assertThat(ServerUtils.isComputedResultValid(computeResult)).isTrue();
@@ -598,7 +641,7 @@ public class ServerProtocolV1Test {
      *
      * @return list of cached arguments
      */
-    private List<String> getCachedArgs() {
+    private static List<String> getCachedArgs() {
         List<String> cacheArguments = new ArrayList<>();
         cacheArguments.add("-DCMAKE_ANDROID_ARCH_ABI=x86");
         cacheArguments.add("-DCMAKE_ANDROID_NDK=/home/usr/ndk");
@@ -612,7 +655,7 @@ public class ServerProtocolV1Test {
      *
      * @return code model json response string
      */
-    private String getCodeModelResponseString() {
+    private static String getCodeModelResponseString() {
         return "{\"configurations\": [{\n"
                 + "\"name\": \"\",\n"
                 + "\"projects\": [{\n"
@@ -643,6 +686,49 @@ public class ServerProtocolV1Test {
                 + "\"cookie\": \"\",\n"
                 + "\"inReplyTo\": \"codemodel\",\n"
                 + "\"type\": \"reply\"\n"
+                + "}";
+    }
+
+    /**
+     * Returns a cmakeInputs response string.
+     *
+     * @return cmakeInputs json response string
+     */
+    private static String getCmakeInputsResponseString() {
+        return "{  \n"
+                + "   \"buildFiles\":[  \n"
+                + "      {  \n"
+                + "         \"isCMake\":true,\n"
+                + "         \"isTemporary\":false,\n"
+                + "         \"sources\":[  \n"
+                + "            \"../../../Android/Sdk/cmake/3.8/share/cmake-3.8/Modules/CMakeNinjaFindMake.cmake\",\n"
+                + "            \"../../../Android/Sdk/cmake/3.8/share/cmake-3.8/Modules/CMakeDetermineSystem.cmake\",\n"
+                + "            \"../../../Android/Sdk/cmake/3.8/share/cmake-3.8/Modules/Platform/Android-Determine.cmake\"\n"
+                + "         ]\n"
+                + "      },\n"
+                + "      {  \n"
+                + "         \"isCMake\":false,\n"
+                + "         \"isTemporary\":false,\n"
+                + "         \"sources\":[  \n"
+                + "            \"CMakeLists.txt\",\n"
+                + "            \"../../../Android/Sdk/ndk-bundle/build/cmake/android.toolchain.cmake\"\n"
+                + "         ]\n"
+                + "      },\n"
+                + "      {  \n"
+                + "         \"isCMake\":false,\n"
+                + "         \"isTemporary\":true,\n"
+                + "         \"sources\":[  \n"
+                + "            \"app/.externalNativeBuild/cmake/debug/x86/CMakeFiles/3.8.0-rc2/CMakeSystem.cmake\",\n"
+                + "            \"app/.externalNativeBuild/cmake/debug/x86/CMakeFiles/3.8.0-rc2/CMakeCCompiler.cmake\",\n"
+                + "            \"app/.externalNativeBuild/cmake/debug/x86/CMakeFiles/3.8.0-rc2/CMakeCXXCompiler.cmake\"\n"
+                + "         ]\n"
+                + "      }\n"
+                + "   ],\n"
+                + "   \"cmakeRootDirectory\":\"/usr/local/google/home/Android/Sdk/cmake/3.8/share/cmake-3.8\",\n"
+                + "   \"cookie\":\"\",\n"
+                + "   \"inReplyTo\":\"cmakeInputs\",\n"
+                + "   \"sourceDirectory\":\"/usr/local/google/home/large-android\",\n"
+                + "   \"type\":\"reply\"\n"
                 + "}";
     }
 }

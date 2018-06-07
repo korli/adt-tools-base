@@ -3,6 +3,8 @@ load("//tools/base/bazel:android.bzl", "ANDROID_COPTS", "ANDROID_LINKOPTS", "and
 cc_binary(
     name = "libperfa.so",
     srcs = [
+        "jni_function_table.cc",
+        "jni_function_table.h",
         "jvmti_helper.cc",
         "jvmti_helper.h",
         "memory/memory_tracking_env.cc",
@@ -17,11 +19,12 @@ cc_binary(
     ],
     linkopts = ANDROID_LINKOPTS,
     linkshared = 1,
+    tags = ["no_windows"],
     visibility = ["//visibility:public"],
     deps = [
+        "//external:slicer",
         "//prebuilts/studio/jdk:jni_headers",
         "//tools/base/profiler/native/agent",
-        "//tools/base/profiler/native/dex/slicer",
         "//tools/base/profiler/native/utils:profiler_utils",
         "//tools/base/profiler/proto:profiler_cc_proto",
     ],
@@ -34,7 +37,11 @@ android_cc_binary(
         "armeabi-v7a",
         "arm64-v8a",
     ],
-    binary = ":libperfa.so.stripped",
+    binary = select({
+        "//tools/base/bazel:windows": ":libperfa.so",
+        "//conditions:default": ":libperfa.so.stripped",
+    }),
     filename = "libperfa.so",
+    tags = ["no_windows"],
     visibility = ["//visibility:public"],
 )

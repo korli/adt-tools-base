@@ -16,6 +16,7 @@
 
 package com.android.build.gradle.internal.incremental;
 
+import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.ABSTRACT_METHOD_CHANGE;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.CLASS_ANNOTATION_CHANGE;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.COMPATIBLE;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.FIELD_ADDED;
@@ -30,6 +31,7 @@ import static com.android.build.gradle.internal.incremental.InstantRunVerifierSt
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.REFLECTION_USED;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.R_CLASS_CHANGE;
 import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.STATIC_INITIALIZER_CHANGE;
+import static com.android.build.gradle.internal.incremental.InstantRunVerifierStatus.SYNTHETIC_CONSTRUCTOR_CHANGE;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
@@ -332,6 +334,11 @@ public class InstantRunVerifier {
             return METHOD_ANNOTATION_CHANGE;
         }
 
+        // check for abstract/concrete implementation change.
+        if (!checkAccessCompatibility(methodNode.access, updatedMethod.access)) {
+            return ABSTRACT_METHOD_CHANGE;
+        }
+
         // the method exist in both classes, check if the original method was disabled for
         // instantRun or contained calls to blacklisted APIs. If either of these conditions
         // is true, and the method implementation has changed, a restart is needed.
@@ -346,25 +353,53 @@ public class InstantRunVerifier {
             }
         }
 
-        boolean usingBlackListedAPIs =
-                InstantRunMethodVerifier.verifyMethod(updatedMethod) != COMPATIBLE;
-
-        // either disabled or using blacklisted APIs, let it through only if the method
-        // implementation is unchanged.
-        if ((disabledMethod || usingBlackListedAPIs) &&
-                !METHOD_COMPARATOR.areEqual(methodNode, updatedMethod)) {
-
-            if (disabledMethod) {
-                logger.info("Instant Run disabled for method %s.", updatedMethod.name);
-                return INSTANT_RUN_DISABLED;
-            } else {
-                return REFLECTION_USED;
-            }
-
+        // since we are about to replace the entire class, it does not matter if this implementation
+        // method has changed or not, we must do a cold swap as reflection code would start running
+        // in the $override class which would fail due to lack of setAccessible flags.
+        if (InstantRunMethodVerifier.verifyMethod(updatedMethod) != COMPATIBLE) {
+            return REFLECTION_USED;
         }
+
+        // if the method implementation is unchanged, it's fine to let it through.
+        if (METHOD_COMPARATOR.areEqual(methodNode, updatedMethod)) {
+            return COMPATIBLE;
+        }
+
+        // the method implementation has changed, check that IR is enabled or dealing with
+        // synthetic constructors.
+        if (disabledMethod) {
+            return INSTANT_RUN_DISABLED;
+        }
+
+        // finally check if this is a generated constructor as we don't support hotswapping those.
+        if ((updatedMethod.access & Opcodes.ACC_SYNTHETIC) != 0
+                || ByteCodeUtils.isAnnotatedWith(methodNode, "Lkotlin/jvm/JvmOverloads;")) {
+            return SYNTHETIC_CONSTRUCTOR_CHANGE;
+        }
+
         return COMPATIBLE;
     }
 
+    /**
+     * check that access mode of a method is compatible between two versions of the method.
+     *
+     * @param oldMethodAccess the old version access modes
+     * @param newMethodAccess the new version access modes.
+     * @return true if the modes are InstantRun compatible or false if a coldswap should be
+     *     generated.
+     */
+    private static boolean checkAccessCompatibility(int oldMethodAccess, int newMethodAccess) {
+        if (newMethodAccess == oldMethodAccess) {
+            return true;
+        }
+        boolean oldMethodAbstract = (oldMethodAccess & Opcodes.ACC_ABSTRACT) != 0;
+        boolean newMethodAbstract = (newMethodAccess & Opcodes.ACC_ABSTRACT) != 0;
+
+        if (oldMethodAbstract == !newMethodAbstract) return false;
+
+        // other access changes like public -> package private are ok.
+        return true;
+    }
     @Nullable
     private static MethodNode findMethod(@NonNull ClassNode classNode,
             @NonNull  String name,
@@ -403,12 +438,16 @@ public class InstantRunVerifier {
             first.accept(new TraceMethodVisitor(firstMethodTextifier));
             second.accept(new TraceMethodVisitor(secondMethodTextifier));
 
-            StringWriter firstText = new StringWriter();
-            StringWriter secondText = new StringWriter();
-            firstMethodTextifier.print(new PrintWriter(firstText));
-            secondMethodTextifier.print(new PrintWriter(secondText));
+            try (StringWriter firstText = new StringWriter();
+                    StringWriter secondText = new StringWriter()) {
 
-            return firstText.toString().equals(secondText.toString());
+                firstMethodTextifier.print(new PrintWriter(firstText));
+                secondMethodTextifier.print(new PrintWriter(secondText));
+
+                return firstText.toString().equals(secondText.toString());
+            } catch (IOException e) {
+                throw new RuntimeException("Error while comparing method code", e);
+            }
         }
     }
 

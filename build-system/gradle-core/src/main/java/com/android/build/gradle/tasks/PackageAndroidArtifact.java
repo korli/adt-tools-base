@@ -22,46 +22,48 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.annotations.concurrency.GuardedBy;
 import com.android.apkzlib.utils.IOExceptionWrapper;
 import com.android.apkzlib.zip.compress.Zip64NotSupportedException;
+import com.android.build.FilterData;
+import com.android.build.OutputFile;
+import com.android.build.VariantOutput;
 import com.android.build.gradle.internal.aapt.AaptGeneration;
+import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.AbiSplitOptions;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
+import com.android.build.gradle.internal.dsl.DslAdaptersKt;
 import com.android.build.gradle.internal.dsl.PackagingOptions;
-import com.android.build.gradle.internal.incremental.DexPackagingPolicy;
 import com.android.build.gradle.internal.incremental.FileType;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
-import com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy;
 import com.android.build.gradle.internal.packaging.IncrementalPackagerBuilder;
+import com.android.build.gradle.internal.pipeline.StreamFilter;
+import com.android.build.gradle.internal.scope.BuildElements;
 import com.android.build.gradle.internal.scope.BuildOutput;
-import com.android.build.gradle.internal.scope.BuildOutputs;
+import com.android.build.gradle.internal.scope.ExistingBuildElements;
+import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.OutputScope;
-import com.android.build.gradle.internal.scope.PackagingScope;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.IncrementalTask;
 import com.android.build.gradle.internal.tasks.KnownFilesSaveData;
 import com.android.build.gradle.internal.tasks.KnownFilesSaveData.InputSet;
-import com.android.build.gradle.internal.transforms.InstantRunSliceSplitApkBuilder;
-import com.android.build.gradle.internal.transforms.InstantRunSplitApkBuilder;
 import com.android.build.gradle.internal.variant.MultiOutputPolicy;
 import com.android.build.gradle.internal.variant.TaskContainer;
+import com.android.build.gradle.options.ProjectOptions;
 import com.android.build.gradle.options.StringOption;
 import com.android.builder.files.FileCacheByPath;
 import com.android.builder.files.IncrementalRelativeFileSets;
 import com.android.builder.files.RelativeFile;
-import com.android.builder.internal.aapt.Aapt;
 import com.android.builder.internal.packaging.IncrementalPackager;
 import com.android.builder.packaging.PackagingUtils;
 import com.android.builder.utils.FileCache;
-import com.android.ide.common.build.ApkData;
-import com.android.ide.common.process.ProcessException;
+import com.android.ide.common.build.ApkInfo;
 import com.android.ide.common.res2.FileStatus;
 import com.android.sdklib.AndroidVersion;
 import com.android.utils.FileUtils;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Joiner;
 import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -80,6 +82,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -93,6 +96,7 @@ import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
+import org.gradle.tooling.BuildException;
 
 /** Abstract task to package an Android artifact. */
 public abstract class PackageAndroidArtifact extends IncrementalTask {
@@ -101,14 +105,15 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
     // ----- PUBLIC TASK API -----
 
+    // Path sensitivity here and below is absolute due to http://b/72085541
     @InputFiles
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileCollection getManifests() {
         return manifests;
     }
 
     @InputFiles
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileCollection getResourceFiles() {
         return resourceFiles;
     }
@@ -134,14 +139,14 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
     @InputFiles
     @Optional
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileCollection getJavaResourceFiles() {
         return javaResourceFiles;
     }
 
     @InputFiles
     @Optional
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileCollection getJniFolders() {
         return jniFolders;
     }
@@ -154,13 +159,13 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
     @InputFiles
     @Optional
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileCollection getDexFolders() {
         return dexFolders;
     }
 
     @InputFiles
-    @PathSensitive(PathSensitivity.RELATIVE)
+    @PathSensitive(PathSensitivity.ABSOLUTE)
     public FileCollection getAssets() {
         return assets;
     }
@@ -169,7 +174,7 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
     protected FileCollection javaResourceFiles;
     protected FileCollection jniFolders;
 
-    @NonNull private Set<String> abiFilters;
+    private Set<String> abiFilters;
 
     private boolean debugBuild;
     private boolean jniDebugBuild;
@@ -181,10 +186,6 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
     private AndroidVersion minSdkVersion;
 
     protected InstantRunBuildContext instantRunContext;
-
-    protected File instantRunSupportDir;
-
-    protected DexPackagingPolicy dexPackagingPolicy;
 
     protected FileCollection manifests;
 
@@ -202,10 +203,6 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
     protected File outputDirectory;
 
-    @GuardedBy("this")
-    @Nullable
-    private Map<ApkData, File> outputFiles;
-
     @Nullable protected OutputFileProvider outputFileProvider;
 
     @Input
@@ -214,13 +211,12 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
     }
 
     protected File aaptIntermediateFolder;
-    protected String versionName;
-    protected int versionCode;
-    protected String applicationId;
 
     protected AaptGeneration aaptGeneration;
 
     protected FileCache fileCache;
+
+    protected FileCollection apkList;
 
     /**
      * Name of directory, inside the intermediate directory, where zip caches are kept.
@@ -244,22 +240,6 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
     public void setDebugBuild(boolean debugBuild) {
         this.debugBuild = debugBuild;
-    }
-
-    @Input
-    @Optional
-    public String getVersionName() {
-        return versionName;
-    }
-
-    @Input
-    public int getVersionCode() {
-        return versionCode;
-    }
-
-    @Input
-    public String getApplicationId() {
-        return applicationId;
     }
 
     @Nested
@@ -291,8 +271,8 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
     }
 
     @Input
-    public String getDexPackagingPolicy() {
-        return dexPackagingPolicy.toString();
+    public Boolean isInInstantRunMode() {
+        return instantRunContext.isInInstantRunMode();
     }
 
     /*
@@ -325,7 +305,7 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
     interface OutputFileProvider {
         @NonNull
-        File getOutputFile(@NonNull ApkData apkData);
+        File getOutputFile(@NonNull ApkInfo apkData);
     }
 
     VariantScope.TaskOutputType taskInputType;
@@ -359,48 +339,29 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
      * is changed (e.g., by the users), the task will be re-executed in non-incremental mode.
      */
     @Input
-    public Collection<File> getApkPathList() {
-        return ImmutableList.copyOf(getOutputFiles().values());
+    Collection<String> getApkNames() {
+        // this task does not handle packaging of the configuration splits.
+        return outputScope
+                .getApkDatas()
+                .stream()
+                .filter(apkData -> apkData.getType() != VariantOutput.OutputType.SPLIT)
+                .map(ApkInfo::getOutputFileName)
+                .collect(Collectors.toList());
     }
 
-    @NonNull
-    private synchronized Map<ApkData, File> getOutputFiles() {
-        if (outputFiles == null) {
-            //noinspection NonPrivateFieldAccessedInSynchronizedContext
-            outputFiles =
-                    computeOutputFiles(
-                            outputScope,
-                            BuildOutputs.load(taskInputType, resourceFiles),
-                            taskInputType,
-                            outputFileProvider,
-                            outputDirectory);
-        }
-        return outputFiles;
+    @InputFiles
+    FileCollection getApkList() {
+        return apkList;
     }
 
-    @NonNull
-    private static Map<ApkData, File> computeOutputFiles(
-            @NonNull OutputScope outputScope,
-            @NonNull Collection<BuildOutput> buildOutputs,
-            @NonNull VariantScope.OutputType outputType,
-            @Nullable OutputFileProvider outputFileProvider,
-            @NonNull File outputDirectory) {
-        Map<ApkData, File> outputFiles = Maps.newHashMap();
-
-        for (ApkData apkData : outputScope.getApkDatas()) {
-            BuildOutput buildOutput = OutputScope.getOutput(buildOutputs, outputType, apkData);
-            //noinspection VariableNotUsedInsideIf - Only continue if a matching output is found
-            if (buildOutput != null) {
-                File outputFile =
-                        outputFileProvider != null
-                                ? outputFileProvider.getOutputFile(apkData)
-                                : new File(outputDirectory, apkData.getOutputFileName());
-                outputFiles.put(apkData, outputFile);
-            }
-        }
-
-        return outputFiles;
+    private BuildOutput computeBuildOutputFile(ApkInfo apkInfo) {
+        File outputFile =
+                outputFileProvider != null
+                        ? outputFileProvider.getOutputFile(apkInfo)
+                        : new File(outputDirectory, apkInfo.getOutputFileName());
+        return new BuildOutput(getTaskOutputType(), apkInfo, outputFile);
     }
+
 
     protected abstract VariantScope.TaskOutputType getTaskOutputType();
 
@@ -410,70 +371,82 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
     }
 
     @NonNull
-    Set<File> getAndroidResources(@NonNull ApkData apkData, @Nullable File processedResources)
-            throws IOException {
+    static Set<File> getAndroidResources(@Nullable File processedResources) {
 
-        if (instantRunContext.isInInstantRunMode()
-                && instantRunContext.getPatchingPolicy()
-                        == InstantRunPatchingPolicy.MULTI_APK_SEPARATE_RESOURCES) {
-            Collection<BuildOutput> manifestFiles =
-                    BuildOutputs.load(
-                            TaskOutputHolder.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
-                            manifests);
-            BuildOutput manifestOutput =
-                    OutputScope.getOutput(
-                            manifestFiles,
-                            TaskOutputHolder.TaskOutputType.INSTANT_RUN_MERGED_MANIFESTS,
-                            apkData);
-
-            if (manifestOutput == null) {
-                throw new RuntimeException("Cannot find merged manifest file");
-            }
-            File manifestFile = manifestOutput.getOutputFile();
-            return ImmutableSet.of(generateEmptyAndroidResourcesForInstantRun(manifestFile));
-        } else {
-            return processedResources != null
-                    ? ImmutableSet.of(processedResources)
-                    : ImmutableSet.of();
-        }
-    }
-
-    @NonNull
-    private File generateEmptyAndroidResourcesForInstantRun(File manifestFile) throws IOException {
-        try (Aapt aapt =
-                InstantRunSplitApkBuilder.makeAapt(
-                        aaptGeneration, getBuilder(), fileCache, aaptIntermediateFolder)) {
-
-            // use default values for aaptOptions since we don't package any resources.
-            return InstantRunSliceSplitApkBuilder.generateSplitApkResourcesAp(
-                    getLogger(),
-                    aapt,
-                    manifestFile,
-                    instantRunSupportDir,
-                    new com.android.builder.internal.aapt.AaptOptions(
-                            ImmutableList.of(), false, ImmutableList.of()),
-                    getBuilder(),
-                    resourceFiles,
-                    "main_resources");
-        } catch (InterruptedException e) {
-            Thread.interrupted();
-            throw new IOException("Exception while generating InstantRun main resources APK", e);
-        } catch (ProcessException e) {
-            throw new IOException("Exception while generating InstantRun main resources APK", e);
-        }
+        return processedResources != null ? ImmutableSet.of(processedResources) : ImmutableSet.of();
     }
 
     @Override
-    protected void doFullTaskAction() throws IOException {
+    protected void doFullTaskAction() {
 
-        Collection<BuildOutput> mergedResources =
-                BuildOutputs.load(getTaskInputType(), resourceFiles);
-        outputScope.parallelForEachOutput(
-                mergedResources, getTaskInputType(), getTaskOutputType(), this::splitFullAction);
-        outputScope.save(getTaskOutputType(), outputDirectory);
+        // check that we don't have colliding output file names
+        checkFileNameUniqueness();
+        ExistingBuildElements.from(getTaskInputType(), resourceFiles)
+                .transform(
+                        (ApkInfo apkInfo, File inputFile) -> {
+                            try {
+                                return splitFullAction(apkInfo, inputFile);
+                            } catch (IOException e) {
+                                throw new BuildException(e.getMessage(), e);
+                            }
+                        })
+                .into(getTaskOutputType(), outputDirectory);
     }
 
-    public File splitFullAction(@NonNull ApkData apkData, @Nullable File processedResources)
+    private void checkFileNameUniqueness() {
+
+        checkFileNameUniqueness(
+                new BuildElements(
+                        outputScope
+                                .getApkDatas()
+                                .stream()
+                                .map(this::computeBuildOutputFile)
+                                .collect(Collectors.toList())));
+    }
+
+    @VisibleForTesting
+    static void checkFileNameUniqueness(BuildElements buildElements) {
+
+        Collection<File> fileOutputs =
+                buildElements.stream().map(BuildOutput::getOutputFile).collect(Collectors.toList());
+
+        java.util.Optional<String> repeatingFileNameOptional =
+                fileOutputs
+                        .stream()
+                        .filter(fileOutput -> Collections.frequency(fileOutputs, fileOutput) > 1)
+                        .map(File::getName)
+                        .findFirst();
+        if (repeatingFileNameOptional.isPresent()) {
+            String repeatingFileName = repeatingFileNameOptional.get();
+            List<String> conflictingApks =
+                    buildElements
+                            .stream()
+                            .filter(
+                                    buildOutput ->
+                                            buildOutput
+                                                    .getOutputFile()
+                                                    .getName()
+                                                    .equals(repeatingFileName))
+                            .map(
+                                    buildOutput -> {
+                                        ApkInfo apkInfo = buildOutput.getApkInfo();
+                                        if (apkInfo.getFilters().isEmpty()) {
+                                            return apkInfo.getType().toString();
+                                        } else {
+                                            return Joiner.on("-").join(apkInfo.getFilters());
+                                        }
+                                    })
+                            .collect(Collectors.toList());
+
+            throw new RuntimeException(
+                    String.format(
+                            "Several variant outputs are configured to use "
+                                    + "the same file name \"%1$s\", filters : %2$s",
+                            repeatingFileName, Joiner.on(":").join(conflictingApks)));
+        }
+    }
+
+    public File splitFullAction(@NonNull ApkInfo apkData, @Nullable File processedResources)
             throws IOException {
 
         File incrementalDirForSplit = new File(getIncrementalFolder(), apkData.getFullName());
@@ -497,11 +470,12 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
          */
         cacheByPath.clear();
 
-        Set<File> androidResources = getAndroidResources(apkData, processedResources);
+        Set<File> androidResources = getAndroidResources(processedResources);
 
         FileUtils.mkdirs(outputDirectory);
 
-        File outputFile = getOutputFiles().get(apkData);
+        BuildOutput buildOutput = computeBuildOutputFile(apkData);
+        File outputFile = buildOutput.getOutputFile();
 
         /*
          * Additionally, make sure we have no previous package, if it exists.
@@ -518,7 +492,7 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
         ImmutableMap<RelativeFile, FileStatus> updatedJniResources =
                 IncrementalRelativeFileSets.fromZipsAndDirectories(getJniFolders());
 
-        Collection<BuildOutput> manifestOutputs = BuildOutputs.load(manifestType, manifests);
+        BuildElements manifestOutputs = ExistingBuildElements.from(manifestType, manifests);
         doTask(
                 apkData,
                 incrementalDirForSplit,
@@ -620,11 +594,11 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
      * @throws IOException failed to package the APK
      */
     private void doTask(
-            @NonNull ApkData apkData,
+            @NonNull ApkInfo apkData,
             @NonNull File incrementalDirForSplit,
             @NonNull File outputFile,
             @NonNull FileCacheByPath cacheByPath,
-            @NonNull Collection<BuildOutput> manifestOutputs,
+            @NonNull BuildElements manifestOutputs,
             @NonNull ImmutableMap<RelativeFile, FileStatus> changedDex,
             @NonNull ImmutableMap<RelativeFile, FileStatus> changedJavaResources,
             @NonNull ImmutableMap<RelativeFile, FileStatus> changedAssets,
@@ -636,7 +610,7 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
                 ImmutableMap.builder();
         javaResourcesForApk.putAll(changedJavaResources);
 
-        if (dexPackagingPolicy == DexPackagingPolicy.INSTANT_RUN_MULTI_APK) {
+        if (isInInstantRunMode()) {
             changedDex = ImmutableMap.copyOf(
                     Maps.filterKeys(
                             changedDex,
@@ -647,13 +621,16 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
         }
         final ImmutableMap<RelativeFile, FileStatus> dexFilesToPackage = changedDex;
 
-        String abiFilter = apkData.getFilter(com.android.build.OutputFile.FilterType.ABI);
+        String filter = null;
+        FilterData abiFilter = apkData.getFilter(OutputFile.FilterType.ABI);
+        if (abiFilter != null) {
+            filter = abiFilter.getIdentifier();
+        }
 
         // find the manifest file for this split.
-        BuildOutput manifestForSplit =
-                OutputScope.getOutput(manifestOutputs, manifestType, apkData);
+        BuildOutput manifestForSplit = manifestOutputs.element(apkData);
 
-        if (manifestForSplit == null || manifestForSplit.getOutputFile() == null) {
+        if (manifestForSplit == null) {
             throw new RuntimeException(
                     "Found a .ap_ for split "
                             + apkData
@@ -681,8 +658,7 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
                         .withIntermediateDir(incrementalDirForSplit)
                         .withProject(getProject())
                         .withDebuggableBuild(getDebugBuild())
-                        .withAcceptedAbis(
-                                abiFilter == null ? abiFilters : ImmutableSet.of(abiFilter))
+                        .withAcceptedAbis(filter == null ? abiFilters : ImmutableSet.of(filter))
                         .withJniDebuggableBuild(getJniDebugBuild())
                         .build()) {
             packager.updateDex(dexFilesToPackage);
@@ -729,21 +705,27 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
 
     @Override
-    protected void doIncrementalTaskAction(Map<File, FileStatus> changedInputs) throws IOException {
+    protected void doIncrementalTaskAction(Map<File, FileStatus> changedInputs) {
         checkNotNull(changedInputs, "changedInputs == null");
-        outputScope.parallelForEachOutput(
-                BuildOutputs.load(getTaskInputType(), resourceFiles),
-                getTaskInputType(),
-                getTaskOutputType(),
-                (split, output) -> splitIncrementalAction(split, output, changedInputs));
-        outputScope.save(getTaskOutputType(), outputDirectory);
+        ExistingBuildElements.from(getTaskInputType(), resourceFiles)
+                .transform(
+                        (apkInfo, inputFile) -> {
+                            try {
+                                return splitIncrementalAction(apkInfo, inputFile, changedInputs);
+                            } catch (IOException e) {
+                                throw new BuildException(e.getMessage(), e);
+                            }
+                        })
+                .into(getTaskOutputType(), outputDirectory);
     }
 
     private File splitIncrementalAction(
-            ApkData apkData, @Nullable File processedResources, Map<File, FileStatus> changedInputs)
+            @NonNull ApkInfo apkData,
+            @Nullable File processedResources,
+            Map<File, FileStatus> changedInputs)
             throws IOException {
 
-        Set<File> androidResources = getAndroidResources(apkData, processedResources);
+        Set<File> androidResources = getAndroidResources(processedResources);
 
         File incrementalDirForSplit = new File(getIncrementalFolder(), apkData.getFullName());
 
@@ -822,9 +804,10 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
                         cacheByPath,
                         cacheUpdates);
 
-        File outputFile = getOutputFiles().get(apkData);
+        BuildOutput buildOutput = computeBuildOutputFile(apkData);
+        File outputFile = buildOutput.getOutputFile();
 
-        Collection<BuildOutput> manifestOutputs = BuildOutputs.load(manifestType, manifests);
+        BuildElements manifestOutputs = ExistingBuildElements.from(manifestType, manifests);
 
         doTask(
                 apkData,
@@ -872,35 +855,27 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
             implements TaskConfigAction<T> {
 
         protected final Project project;
-        protected final PackagingScope packagingScope;
-        @Nullable protected final DexPackagingPolicy dexPackagingPolicy;
+        protected final VariantScope variantScope;
         @NonNull protected final FileCollection manifests;
         @NonNull protected final VariantScope.TaskOutputType inputResourceFilesType;
-        @NonNull protected final FileCollection resourceFiles;
         @NonNull protected final File outputDirectory;
         @NonNull protected final OutputScope outputScope;
         @Nullable private final FileCache fileCache;
         @NonNull private final VariantScope.TaskOutputType manifestType;
 
         public ConfigAction(
-                @NonNull PackagingScope packagingScope,
+                @NonNull VariantScope variantScope,
                 @NonNull File outputDirectory,
-                @Nullable InstantRunPatchingPolicy patchingPolicy,
                 @NonNull VariantScope.TaskOutputType inputResourceFilesType,
-                @NonNull FileCollection resourceFiles,
                 @NonNull FileCollection manifests,
                 @NonNull VariantScope.TaskOutputType manifestType,
                 @Nullable FileCache fileCache,
                 @NonNull OutputScope outputScope) {
-            this.project = packagingScope.getProject();
-            this.packagingScope = checkNotNull(packagingScope);
+            this.project = variantScope.getGlobalScope().getProject();
+            this.variantScope = checkNotNull(variantScope);
             this.inputResourceFilesType = inputResourceFilesType;
-            dexPackagingPolicy = patchingPolicy == null
-                    ? DexPackagingPolicy.STANDARD
-                    : patchingPolicy.getDexPatchingPolicy();
             this.manifests = manifests;
             this.outputDirectory = outputDirectory;
-            this.resourceFiles = resourceFiles;
             this.outputScope = outputScope;
             this.manifestType = manifestType;
             this.fileCache = fileCache;
@@ -908,86 +883,115 @@ public abstract class PackageAndroidArtifact extends IncrementalTask {
 
         @Override
         public void execute(@NonNull final T packageAndroidArtifact) {
+            GlobalScope globalScope = variantScope.getGlobalScope();
+            GradleVariantConfiguration variantConfiguration =
+                    variantScope.getVariantConfiguration();
+
             packageAndroidArtifact.instantRunFileType = FileType.MAIN;
             packageAndroidArtifact.taskInputType = inputResourceFilesType;
-            packageAndroidArtifact.setAndroidBuilder(packagingScope.getAndroidBuilder());
-            packageAndroidArtifact.setVariantName(packagingScope.getFullVariantName());
-            packageAndroidArtifact.setMinSdkVersion(packagingScope.getMinSdkVersion());
-            packageAndroidArtifact.instantRunContext = packagingScope.getInstantRunBuildContext();
-            packageAndroidArtifact.dexPackagingPolicy = dexPackagingPolicy;
+            packageAndroidArtifact.setAndroidBuilder(globalScope.getAndroidBuilder());
+            packageAndroidArtifact.setVariantName(variantScope.getFullVariantName());
+            packageAndroidArtifact.setMinSdkVersion(variantScope.getMinSdkVersion());
+            packageAndroidArtifact.instantRunContext = variantScope.getInstantRunBuildContext();
             packageAndroidArtifact.aaptIntermediateFolder =
                     new File(
-                            packagingScope.getIncrementalDir("PackageAndroidArtifact"),
+                            variantScope.getIncrementalDir(packageAndroidArtifact.getName()),
                             "aapt-temp");
-            packageAndroidArtifact.versionName = packagingScope.getVersionName();
-            packageAndroidArtifact.versionCode = packagingScope.getVersionCode();
-            packageAndroidArtifact.applicationId = packagingScope.getApplicationId();
 
-            packageAndroidArtifact.instantRunSupportDir =
-                    packagingScope.getInstantRunSupportDir();
-            packageAndroidArtifact.resourceFiles = resourceFiles;
+            packageAndroidArtifact.resourceFiles = variantScope.getOutput(inputResourceFilesType);
             packageAndroidArtifact.outputDirectory = outputDirectory;
             packageAndroidArtifact.setIncrementalFolder(
-                    packagingScope.getIncrementalDir(packageAndroidArtifact.getName()));
+                    new File(
+                            variantScope.getIncrementalDir(packageAndroidArtifact.getName()),
+                            "tmp"));
             packageAndroidArtifact.outputScope = outputScope;
 
             packageAndroidArtifact.fileCache = fileCache;
             packageAndroidArtifact.aaptOptionsNoCompress =
-                    packagingScope.getAaptOptions().getNoCompress();
+                    DslAdaptersKt.convert(globalScope.getExtension().getAaptOptions())
+                            .getNoCompress();
 
             packageAndroidArtifact.manifests = manifests;
 
-            packageAndroidArtifact.dexFolders = packagingScope.getDexFolders();
-            packageAndroidArtifact.javaResourceFiles = packagingScope.getJavaResources();
+            packageAndroidArtifact.dexFolders = getDexFolders();
+            packageAndroidArtifact.javaResourceFiles = getJavaResources();
 
-            packageAndroidArtifact.assets = packagingScope.getOutput(MERGED_ASSETS);
-            packageAndroidArtifact.setAbiFilters(packagingScope.getSupportedAbis());
-            packageAndroidArtifact.setJniDebugBuild(packagingScope.isJniDebuggable());
-            packageAndroidArtifact.setDebugBuild(packagingScope.isDebuggable());
-            packageAndroidArtifact.setPackagingOptions(packagingScope.getPackagingOptions());
+            packageAndroidArtifact.assets = variantScope.getOutput(MERGED_ASSETS);
+            packageAndroidArtifact.setAbiFilters(variantConfiguration.getSupportedAbis());
+            packageAndroidArtifact.setJniDebugBuild(
+                    variantConfiguration.getBuildType().isJniDebuggable());
+            packageAndroidArtifact.setDebugBuild(
+                    variantConfiguration.getBuildType().isDebuggable());
+            packageAndroidArtifact.setPackagingOptions(
+                    globalScope.getExtension().getPackagingOptions());
 
-            packageAndroidArtifact.projectBaseName = packagingScope.getProjectBaseName();
+            ProjectOptions projectOptions = variantScope.getGlobalScope().getProjectOptions();
+            packageAndroidArtifact.projectBaseName = globalScope.getProjectBaseName();
             packageAndroidArtifact.manifestType = manifestType;
             packageAndroidArtifact.aaptGeneration =
-                    AaptGeneration.fromProjectOptions(packagingScope.getProjectOptions());
-
+                    AaptGeneration.fromProjectOptions(projectOptions);
             packageAndroidArtifact.buildTargetAbi =
-                    packagingScope.isAbiSplitsEnabled()
-                            ? packagingScope
-                                    .getProjectOptions()
-                                    .get(StringOption.IDE_BUILD_TARGET_ABI)
+                    globalScope.getExtension().getSplits().getAbi().isEnable()
+                            ? projectOptions.get(StringOption.IDE_BUILD_TARGET_ABI)
                             : null;
             packageAndroidArtifact.buildTargetDensity =
-                    packagingScope.isDensitySplitsEnabled()
-                            ? packagingScope
-                                    .getProjectOptions()
-                                    .get(StringOption.IDE_BUILD_TARGET_DENSITY)
+                    globalScope.getExtension().getSplits().getDensity().isEnable()
+                            ? projectOptions.get(StringOption.IDE_BUILD_TARGET_DENSITY)
                             : null;
 
-            packagingScope.addTask(
-                    TaskContainer.TaskKind.PACKAGE_ANDROID_ARTIFACT, packageAndroidArtifact);
+            variantScope
+                    .getVariantData()
+                    .addTask(
+                            TaskContainer.TaskKind.PACKAGE_ANDROID_ARTIFACT,
+                            packageAndroidArtifact);
             configure(packageAndroidArtifact);
         }
 
         protected void configure(T task) {
+            GlobalScope globalScope = variantScope.getGlobalScope();
+            GradleVariantConfiguration variantConfiguration =
+                    variantScope.getVariantConfiguration();
             task.instantRunFileType = FileType.MAIN;
-            task.dexPackagingPolicy = dexPackagingPolicy;
 
-            task.dexFolders = packagingScope.getDexFolders();
-            task.javaResourceFiles = packagingScope.getJavaResources();
+            task.dexFolders = getDexFolders();
+            task.javaResourceFiles = getJavaResources();
 
-            if (packagingScope.getMultiOutputPolicy() == MultiOutputPolicy.MULTI_APK) {
-                task.jniFolders = packagingScope.getJniFolders();
+            if (variantScope.getVariantData().getMultiOutputPolicy()
+                    == MultiOutputPolicy.MULTI_APK) {
+                task.jniFolders = getJniFolders();
             } else {
                 Set<String> filters =
-                        AbiSplitOptions.getAbiFilters(packagingScope.getAbiFilters());
+                        AbiSplitOptions.getAbiFilters(
+                                globalScope.getExtension().getSplits().getAbiFilters());
 
-                task.jniFolders =
-                        filters.isEmpty() ? packagingScope.getJniFolders() : project.files();
+                task.jniFolders = filters.isEmpty() ? getJniFolders() : project.files();
             }
 
+            task.apkList = variantScope.getOutput(TaskOutputHolder.TaskOutputType.APK_LIST);
+
             // Don't sign.
-            task.setSigningConfig(packagingScope.getSigningConfig());
+            task.setSigningConfig(variantConfiguration.getSigningConfig());
+        }
+
+        @NonNull
+        public FileCollection getDexFolders() {
+            return variantScope
+                    .getTransformManager()
+                    .getPipelineOutputAsFileCollection(StreamFilter.DEX);
+        }
+
+        @NonNull
+        public FileCollection getJavaResources() {
+            return variantScope
+                    .getTransformManager()
+                    .getPipelineOutputAsFileCollection(StreamFilter.RESOURCES);
+        }
+
+        @NonNull
+        public FileCollection getJniFolders() {
+            return variantScope
+                    .getTransformManager()
+                    .getPipelineOutputAsFileCollection(StreamFilter.NATIVE_LIBS);
         }
     }
 }

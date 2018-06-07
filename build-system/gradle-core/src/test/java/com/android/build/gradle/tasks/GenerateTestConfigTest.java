@@ -16,9 +16,9 @@
 
 package com.android.build.gradle.tasks;
 
-import static com.android.testutils.truth.MoreTruth.assertThat;
 
-import com.android.utils.FileUtils;
+import static com.android.testutils.truth.PathSubject.assertThat;
+
 import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 import com.google.common.truth.Truth;
@@ -57,7 +57,7 @@ public class GenerateTestConfigTest {
             expected.put("android_merged_resources", "/project/build/mergedResources");
             expected.put("android_custom_package", "com.example.app");
             expected.put("android_merged_assets", "/project/build/mergedAssets");
-            expected.put("android_merged_manifest", FileUtils.join("", "project", "build", "mergedManifest.xml"));
+            expected.put("android_merged_manifest", "/project/build/mergedManifest.xml");
             Truth.assertThat(result).containsExactlyEntriesIn(expected);
         }
     }

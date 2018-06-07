@@ -40,8 +40,8 @@ import com.android.annotations.NonNull;
 import com.android.resources.ResourceFolderType;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.ClassScanner;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.ClassScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.LayoutDetector;
@@ -317,7 +317,7 @@ public class MissingClassDetector extends LayoutDetector implements ClassScanner
                 String message = "Use '$' instead of '.' for inner classes (or use only lowercase letters in package names); replace \"" +
                         className + "\" with \"" + fixed + "\"";
                 Location location = context.getLocation(classNameNode);
-                LintFix fix = fix().replace().text(className).with(fixed).build();
+                LintFix fix = LintFix.create().replace().text(className).with(fixed).build();
                 context.report(INNERCLASS, element, location, message, fix);
             }
         }

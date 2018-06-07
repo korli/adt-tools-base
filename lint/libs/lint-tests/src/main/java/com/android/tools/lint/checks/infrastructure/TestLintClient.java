@@ -18,26 +18,28 @@ package com.android.tools.lint.checks.infrastructure;
 
 import static com.android.SdkConstants.ANDROID_URI;
 import static com.android.SdkConstants.ATTR_ID;
-import static com.android.SdkConstants.DOT_KT;
 import static com.android.SdkConstants.NEW_ID_PREFIX;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.Mockito.mock;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.builder.model.AndroidArtifact;
+import com.android.builder.model.AndroidLibrary;
 import com.android.builder.model.AndroidProject;
 import com.android.builder.model.BuildTypeContainer;
+import com.android.builder.model.Dependencies;
+import com.android.builder.model.JavaLibrary;
+import com.android.builder.model.Library;
 import com.android.builder.model.LintOptions;
+import com.android.builder.model.MavenCoordinates;
 import com.android.builder.model.ProductFlavorContainer;
 import com.android.builder.model.SourceProvider;
 import com.android.builder.model.Variant;
 import com.android.ide.common.res2.AbstractResourceRepository;
-import com.android.ide.common.res2.DuplicateDataException;
 import com.android.ide.common.res2.MergingException;
 import com.android.ide.common.res2.ResourceFile;
 import com.android.ide.common.res2.ResourceItem;
@@ -49,10 +51,9 @@ import com.android.sdklib.AndroidTargetHash;
 import com.android.sdklib.AndroidVersion;
 import com.android.sdklib.IAndroidTarget;
 import com.android.testutils.TestUtils;
-import com.android.tools.lint.EcjParser;
-import com.android.tools.lint.ExternalAnnotationRepository;
 import com.android.tools.lint.LintCliClient;
 import com.android.tools.lint.LintCliFlags;
+import com.android.tools.lint.LintExternalAnnotationsManager;
 import com.android.tools.lint.Reporter;
 import com.android.tools.lint.TextReporter;
 import com.android.tools.lint.Warning;
@@ -60,14 +61,12 @@ import com.android.tools.lint.checks.ApiLookup;
 import com.android.tools.lint.client.api.CircularDependencyException;
 import com.android.tools.lint.client.api.Configuration;
 import com.android.tools.lint.client.api.IssueRegistry;
-import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.client.api.LintClient;
 import com.android.tools.lint.client.api.LintDriver;
 import com.android.tools.lint.client.api.LintListener;
 import com.android.tools.lint.client.api.LintRequest;
 import com.android.tools.lint.client.api.UastParser;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.LintFix;
@@ -75,7 +74,6 @@ import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Position;
 import com.android.tools.lint.detector.api.Project;
-import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.TextFormat;
 import com.android.utils.ILogger;
@@ -96,19 +94,16 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
-import java.lang.reflect.Field;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
-import org.eclipse.jdt.core.compiler.CategorizedProblem;
-import org.eclipse.jdt.core.compiler.IProblem;
-import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 import org.jetbrains.uast.UFile;
 import org.w3c.dom.Attr;
 import org.w3c.dom.Document;
@@ -185,11 +180,10 @@ public class TestLintClient extends LintCliClient {
     }
 
     @Nullable
-    private static File findIncrementalProject(@NonNull List<File> files,
-            @Nullable String incrementalFileName) {
+    private File findIncrementalProject(@NonNull List<File> files) {
         // Multiple projects: assume the project names were included in the incremental
         // task names
-        if (incrementalFileName == null) {
+        if (task.incrementalFileName == null) {
             if (files.size() == 1) {
                 assert false : "Need to specify incremental file name if more than one project";
             } else {
@@ -200,7 +194,7 @@ public class TestLintClient extends LintCliClient {
             for (File dir : files) {
                 File root = dir.getParentFile(); // Allow the project name to be part of the name
                 File current = new File(root,
-                        incrementalFileName.replace('/', File.separatorChar));
+                        task.incrementalFileName.replace('/', File.separatorChar));
                 if (current.exists()) {
                     return dir;
                 }
@@ -209,9 +203,20 @@ public class TestLintClient extends LintCliClient {
 
         for (File dir : files) {
             File current = new File(dir,
-                    incrementalFileName.replace('/', File.separatorChar));
+                    task.incrementalFileName.replace('/', File.separatorChar));
             if (current.exists()) {
                 return dir;
+            }
+        }
+
+        // Just using basename? Search among all files
+        for (File root : files) {
+            for (File relative : getFilesRecursively(root)) {
+                if (relative.getName().equals(task.incrementalFileName)) {
+                    // Turn the basename into a full relative name
+                    task.incrementalFileName = relative.getPath();
+                    return root;
+                }
             }
         }
 
@@ -223,7 +228,7 @@ public class TestLintClient extends LintCliClient {
         if (task.incrementalFileName != null) {
             boolean found = false;
 
-            File dir = findIncrementalProject(files, task.incrementalFileName);
+            File dir = findIncrementalProject(files);
             if (dir != null) {
                 File current = new File(dir,
                         task.incrementalFileName.replace('/', File.separatorChar));
@@ -238,8 +243,14 @@ public class TestLintClient extends LintCliClient {
                 }
             }
             if (!found) {
+                List<File> allFiles = new ArrayList<>();
+                for (File file : files) {
+                    allFiles.addAll(getFilesRecursively(file));
+                }
+
+                String all = allFiles.toString();
                 fail("Could not find incremental file " + task.incrementalFileName
-                        + " in the project folders " + files);
+                        + " in the test project folders; did you mean one of " + all);
             }
         }
 
@@ -258,37 +269,6 @@ public class TestLintClient extends LintCliClient {
 
         String result = analyze(files, issues);
 
-        if (runExtraTokenChecks()) {
-            output.setLength(0);
-            reset();
-            try {
-                //lintClient.warnings.clear();
-                Field field = LintCliClient.class.getDeclaredField("warnings");
-                field.setAccessible(true);
-                List list = (List)field.get(this);
-                list.clear();
-            } catch (Throwable t) {
-                fail(t.toString());
-            }
-
-            String secondResult;
-            try {
-                //EcjPsiBuilder.setDebugOptions(true, true);
-                secondResult = analyze(files, issues);
-            } finally {
-                //EcjPsiBuilder.setDebugOptions(false, false);
-            }
-
-            assertEquals("The lint check produced different results when run on the "
-                            + "normal test files and a version where parentheses and whitespace tokens "
-                            + "have been inserted everywhere. The lint check should be resilient towards "
-                            + "these kinds of differences (since in the IDE, PSI will include both "
-                            + "types of nodes. Your detector should call LintUtils.skipParenthes(parent) "
-                            + "to jump across parentheses nodes when checking parents, and there are "
-                            + "similar methods in LintUtils to skip across whitespace siblings.\n",
-                    result, secondResult);
-        }
-
         for (File f : files) {
             TestUtils.deleteFile(f);
         }
@@ -296,20 +276,32 @@ public class TestLintClient extends LintCliClient {
         return Pair.of(result, warnings);
     }
 
-    private boolean runExtraTokenChecks() {
-        if (task.skipExtraTokenChecks) {
-            return false;
-        }
-        for (Issue issue : task.getCheckedIssues()) {
-            if (issue.getImplementation().getScope().contains(Scope.JAVA_FILE)) {
-                Class<? extends Detector> detectorClass = issue.getImplementation()
-                        .getDetectorClass();
-                if (Detector.JavaPsiScanner.class.isAssignableFrom(detectorClass)) {
-                    return true;
+    private static List<File> getFilesRecursively(File root) {
+        List<File> result = new ArrayList<>();
+        addFilesUnder(result, root, root.getPath());
+        return result;
+    }
+
+    private static void addFilesUnder(List<File> result, File file, String skipPrefix) {
+        if (file.isFile()) {
+            String path = file.getPath();
+            if (path.startsWith(skipPrefix)) {
+                int length = skipPrefix.length();
+                if (path.length() > length && path.charAt(length) == File.separatorChar) {
+                    length++;
+                }
+                path = path.substring(length);
+            }
+            result.add(new File(path));
+        } else if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                Arrays.sort(files, (o1, o2) -> o1.getName().compareToIgnoreCase(o2.getName()));
+                for (File child : files) {
+                    addFilesUnder(result, child, skipPrefix);
                 }
             }
         }
-        return false;
     }
 
     @Override
@@ -425,6 +417,7 @@ public class TestLintClient extends LintCliClient {
                     case LintOptions.SEVERITY_WARNING: severity = Severity.WARNING; break;
                     case LintOptions.SEVERITY_INFORMATIONAL: severity = Severity.INFORMATIONAL; break;
                     case LintOptions.SEVERITY_IGNORE: severity = Severity.IGNORE; break;
+                    case LintOptions.SEVERITY_DEFAULT_ENABLED: severity = Severity.WARNING; break;
                     default: continue;
                 }
                 overrides.put(id, severity);
@@ -449,7 +442,7 @@ public class TestLintClient extends LintCliClient {
         }
 
         if (incrementalCheck != null) {
-            File projectDir = findIncrementalProject(files, task.incrementalFileName);
+            File projectDir = findIncrementalProject(files);
             assert projectDir != null;
             assertTrue(isProjectDirectory(projectDir));
             Project project = createProject(projectDir, projectDir);
@@ -546,8 +539,6 @@ public class TestLintClient extends LintCliClient {
     protected LintDriver createDriver(@NonNull IssueRegistry registry,
             @NonNull LintRequest request) {
         LintDriver driver = super.createDriver(registry, request);
-        // 3rd party lint unit tests may need this for a while
-        driver.setRunCompatChecks(task.runCompatChecks, task.runCompatChecks);
         driver.setFatalOnlyMode(task.vital);
         return driver;
     }
@@ -596,13 +587,14 @@ public class TestLintClient extends LintCliClient {
         return writer.toString();
     }
 
-    @Nullable
+    @NonNull
     @Override
     public UastParser getUastParser(@Nullable Project project) {
         return new LintCliUastParser(project) {
             @Override
-            public boolean prepare(@NonNull List<? extends JavaContext> contexts) {
-                boolean ok = super.prepare(contexts);
+            public boolean prepare(@NonNull List<? extends JavaContext> contexts,
+                    @NonNull List<? extends JavaContext> testContexts) {
+                boolean ok = super.prepare(contexts, testContexts);
                 if (task.forceSymbolResolutionErrors) {
                     ok = false;
                 }
@@ -612,15 +604,6 @@ public class TestLintClient extends LintCliClient {
             @Nullable
             @Override
             public UFile parse(@NonNull JavaContext context) {
-                if (context.file.getPath().endsWith(DOT_KT)) {
-                    // We don't yet have command line invocation of Kotlin working;
-                    // for now do simple (VERY simple) mocking
-                    context.report(IssueRegistry.LINT_ERROR, Location.create(context.file),
-                            "Kotlin not supported in the test file infrastructure yet; "
-                                    + "for now test manually in the IDE");
-                    return mock(UFile.class);
-                }
-
                 UFile file = super.parse(context);
 
                 if (!task.allowCompilationErrors) {
@@ -629,59 +612,15 @@ public class TestLintClient extends LintCliClient {
                                 .findChildOfType(file.getPsi(), PsiErrorElement.class);
                         if (error != null) {
                             fail("Found error element " + error);
-                            // TODO: Use ECJ parser to produce build errors with better
-                            // error messages, source offsets, etc?
                         }
                     } else {
-                        fail("Failure processing source " + context.file +
+                        fail("Failure processing source " +
+                                context.getProject().getRelativePath(context.file) +
                                 ": No UAST AST created");
                     }
                 }
 
                 return file;
-            }
-        };
-    }
-
-    @Override
-    public JavaParser getJavaParser(@Nullable Project project) {
-        return new EcjParser(this, project) {
-            @Override
-            public boolean prepareJavaParse(@NonNull List<JavaContext> contexts) {
-                boolean success = super.prepareJavaParse(contexts);
-                if (task.forceSymbolResolutionErrors) {
-                    success = false;
-                }
-                if (!task.allowCompilationErrors && ecjResult != null) {
-                    StringBuilder sb = new StringBuilder();
-                    for (CompilationUnitDeclaration unit : ecjResult.getCompilationUnits()) {
-                        // so maybe I don't need my map!!
-                        CategorizedProblem[] problems = unit.compilationResult()
-                                .getAllProblems();
-                        if (problems != null) {
-                            for (IProblem problem : problems) {
-                                if (problem == null || !problem.isError()) {
-                                    continue;
-                                }
-                                String filename = new File(new String(
-                                        problem.getOriginatingFileName())).getName();
-                                sb.append(filename)
-                                        .append(":")
-                                        .append(problem.isError() ? "Error" : "Warning")
-                                        .append(": ").append(problem.getSourceLineNumber())
-                                        .append(": ").append(problem.getMessage())
-                                        .append('\n');
-                            }
-                        }
-                    }
-                    if (sb.length() > 0) {
-                        fail("Found compilation problems in lint test not overriding "
-                                + "allowCompilationErrors():\n" + sb);
-                    }
-
-                }
-
-                return success;
             }
         };
     }
@@ -739,12 +678,15 @@ public class TestLintClient extends LintCliClient {
 
         super.report(context, issue, severity, location, message, format, fix);
 
-        // Make sure errors are unique!
-        Warning prev = null;
-        for (Warning warning : warnings) {
-            assertNotSame(warning, prev);
-            assert prev == null || !warning.equals(prev) : "Warning (message, location) reported more than once: " + warning;
-            prev = warning;
+        // Make sure errors are unique! See documentation for #allowDuplicates.
+        if (!task.allowDuplicates) {
+            Warning prev = null;
+            for (Warning warning : warnings) {
+                assertNotSame(warning, prev);
+                assert prev == null || !warning.equals(prev) :
+                        "Warning (message, location) reported more than once: " + warning;
+                prev = warning;
+            }
         }
 
         if (fix instanceof LintFix.ReplaceString) {
@@ -805,7 +747,7 @@ public class TestLintClient extends LintCliClient {
 
     @Override
     public File findResource(@NonNull String relativePath) {
-        if (relativePath.equals(ExternalAnnotationRepository.SDK_ANNOTATIONS_PATH)) {
+        if (relativePath.equals(LintExternalAnnotationsManager.SDK_ANNOTATIONS_PATH)) {
             try {
                 File rootDir = TestUtils.getWorkspaceRoot();
                 File file = new File(rootDir, "tools/adt/idea/android/annotations");
@@ -883,7 +825,7 @@ public class TestLintClient extends LintCliClient {
         ResourceSet resourceSet =
                 new ResourceSet(project.getName(), null, getProjectResourceLibraryName(), true) {
                     @Override
-                    protected void checkItems() throws DuplicateDataException {
+                    protected void checkItems() {
                         // No checking in ProjectResources; duplicates can happen, but
                         // the project resources shouldn't abort initialization
                     }
@@ -1034,11 +976,11 @@ public class TestLintClient extends LintCliClient {
             if (bytes != null) {
                 return new URLConnection(url) {
                     @Override
-                    public void connect() throws IOException {
+                    public void connect() {
                     }
 
                     @Override
-                    public InputStream getInputStream() throws IOException {
+                    public InputStream getInputStream() {
                         return new ByteArrayInputStream(bytes);
                     }
                 };
@@ -1105,6 +1047,33 @@ public class TestLintClient extends LintCliClient {
 
             return projectDescription == null ||
                     projectDescription.getType() != ProjectDescription.Type.JAVA;
+        }
+
+        @Nullable
+        @Override
+        public Boolean dependsOn(@NonNull String artifact) {
+            if (mocker != null) {
+                Dependencies deps = mocker.getVariant().getMainArtifact().getDependencies();
+                for (AndroidLibrary lib : deps.getLibraries()) {
+                    if (libraryMatches(artifact, lib)) {
+                        return true;
+                    }
+                }
+                for (JavaLibrary lib : deps.getJavaLibraries()) {
+                    if (libraryMatches(artifact, lib)) {
+                        return true;
+                    }
+                }
+            }
+
+            return super.dependsOn(artifact);
+        }
+
+        private boolean libraryMatches(@NonNull String artifact, Library lib) {
+            MavenCoordinates coordinates = lib.getResolvedCoordinates();
+            return artifact.startsWith(coordinates.getGroupId()) &&
+                    artifact.equals(coordinates.getGroupId() + ':'
+                            + coordinates.getArtifactId());
         }
 
         @Override

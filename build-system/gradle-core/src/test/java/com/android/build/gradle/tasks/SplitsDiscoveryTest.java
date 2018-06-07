@@ -21,9 +21,12 @@ import static org.mockito.Mockito.when;
 
 import com.android.build.VariantOutput;
 import com.android.build.gradle.internal.scope.SplitList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import org.gradle.api.Project;
 import org.gradle.api.file.FileCollection;
 import org.gradle.testfixtures.ProjectBuilder;
@@ -61,6 +64,7 @@ public class SplitsDiscoveryTest {
         task = project.getTasks().create("test", SplitsDiscovery.class);
         task.persistedList = outputFile;
         task.resourceConfigs = ImmutableSet.of();
+        task.aapt2Enabled = true;
     }
 
     @After
@@ -152,6 +156,8 @@ public class SplitsDiscoveryTest {
         assertThat(new File(mergedFolder, "values-fr").mkdirs()).isTrue();
         assertThat(new File(mergedFolder, "values-de").mkdirs()).isTrue();
         assertThat(new File(mergedFolder, "values-fr_be").mkdirs()).isTrue();
+        assertThat(new File(mergedFolder, "values-fr_ca").mkdirs()).isTrue();
+        assertThat(new File(mergedFolder, "values-fr_ma").mkdirs()).isTrue();
         // wrong name, should not be picked up
         assertThat(new File(mergedFolder, "en").mkdirs()).isTrue();
 
@@ -162,8 +168,41 @@ public class SplitsDiscoveryTest {
         SplitList splitList = SplitList.load(outputs);
         assertThat(splitList.getFilters(VariantOutput.FilterType.DENSITY)).isEmpty();
         assertThat(splitList.getFilters(VariantOutput.FilterType.LANGUAGE))
-                .containsExactly("fr", "de", "fr_be");
+                .containsExactly("fr,fr_be,fr_ca,fr_ma", "de");
         assertThat(splitList.getFilters(VariantOutput.FilterType.ABI)).isEmpty();
+
+        Map<String, String> expectedLanguageFiltersAndNames =
+                ImmutableMap.of("fr,fr_be,fr_ca,fr_ma", "fr", "de", "de");
+        validateLanguageFilterNames(splitList, expectedLanguageFiltersAndNames);
+    }
+
+    @Test
+    public void testAutoLanguageFiltersWithAapt2Disabled() throws IOException {
+        File mergedFolder = temporaryFolder.newFolder();
+        assertThat(new File(mergedFolder, "values-fr").mkdirs()).isTrue();
+        assertThat(new File(mergedFolder, "values-de").mkdirs()).isTrue();
+        assertThat(new File(mergedFolder, "values-fr_be").mkdirs()).isTrue();
+        assertThat(new File(mergedFolder, "values-fr_ca").mkdirs()).isTrue();
+        assertThat(new File(mergedFolder, "values-fr_ma").mkdirs()).isTrue();
+        // wrong name, should not be picked up
+        assertThat(new File(mergedFolder, "en").mkdirs()).isTrue();
+
+        task.mergedResourcesFolders = project.files(mergedFolder).builtBy(task);
+
+        task.languageAuto = true;
+        task.aapt2Enabled = false;
+        task.taskAction();
+        SplitList splitList = SplitList.load(outputs);
+        assertThat(splitList.getFilters(VariantOutput.FilterType.DENSITY)).isEmpty();
+        assertThat(splitList.getFilters(VariantOutput.FilterType.LANGUAGE))
+                .containsExactly("fr", "de", "fr_be", "fr_ca", "fr_ma");
+        assertThat(splitList.getFilters(VariantOutput.FilterType.ABI)).isEmpty();
+
+        Map<String, String> expectedLanguageFiltersAndNames =
+                ImmutableMap.of(
+                        "fr", "fr", "de", "de", "fr_be", "fr_be", "fr_ca", "fr_ca", "fr_ma",
+                        "fr_ma");
+        validateLanguageFilterNames(splitList, expectedLanguageFiltersAndNames);
     }
 
     @Test
@@ -189,8 +228,12 @@ public class SplitsDiscoveryTest {
         assertThat(splitList.getFilters(VariantOutput.FilterType.DENSITY))
                 .containsExactly("hdpi", "xhdpi");
         assertThat(splitList.getFilters(VariantOutput.FilterType.LANGUAGE))
-                .containsExactly("fr", "de", "fr_be");
+                .containsExactly("fr,fr_be", "de");
         assertThat(splitList.getFilters(VariantOutput.FilterType.ABI)).isEmpty();
+
+        Map<String, String> expectedLanguageFiltersAndNames =
+                ImmutableMap.of("fr,fr_be", "fr", "de", "de");
+        validateLanguageFilterNames(splitList, expectedLanguageFiltersAndNames);
     }
 
     @Test
@@ -224,8 +267,12 @@ public class SplitsDiscoveryTest {
         assertThat(splitList.getFilters(VariantOutput.FilterType.DENSITY))
                 .containsExactly("hdpi", "xhdpi");
         assertThat(splitList.getFilters(VariantOutput.FilterType.LANGUAGE))
-                .containsExactly("fr", "de", "fr-rBE");
+                .containsExactly("fr,fr-rBE", "de");
         assertThat(splitList.getFilters(VariantOutput.FilterType.ABI)).isEmpty();
+
+        Map<String, String> expectedLanguageFiltersAndNames =
+                ImmutableMap.of("fr,fr-rBE", "fr", "de", "de");
+        validateLanguageFilterNames(splitList, expectedLanguageFiltersAndNames);
     }
 
     @Test
@@ -241,5 +288,18 @@ public class SplitsDiscoveryTest {
         assertThat(splitList.getFilters(VariantOutput.FilterType.DENSITY)).isEmpty();
         assertThat(splitList.getFilters(VariantOutput.FilterType.LANGUAGE)).isEmpty();
         assertThat(splitList.getFilters(VariantOutput.FilterType.ABI)).isEmpty();
+    }
+
+    private static void validateLanguageFilterNames(
+            SplitList splitList, Map<String, String> expected) throws IOException {
+        Map<String, String> actual = new HashMap<>();
+        splitList.forEach(
+                (filterType, filters) -> {
+                    if (filterType == VariantOutput.FilterType.LANGUAGE) {
+                        filters.forEach(
+                                filter -> actual.put(filter.getValue(), filter.getDisplayName()));
+                    }
+                });
+        assertThat(actual).isEqualTo(expected);
     }
 }

@@ -7,13 +7,11 @@ iml_module(
     iml_files = ["java-lib-model.iml"],
     tags = ["managed"],
     visibility = ["//visibility:public"],
-    deps = ["//tools/base/annotations:studio.android-annotations[module]"],
-)
-
-fileset(
-    name = "version.properties",
-    srcs = ["//tools/buildSrc/base:version.properties"],
-    mappings = {"//tools/buildSrc/base:": "com/android/java/model/"},
+    # do not sort: must match IML order
+    deps = [
+        "//tools/base/annotations:studio.android-annotations[module]",
+        "//tools/idea/.idea/libraries:KotlinJavaRuntime",
+    ],
 )
 
 maven_java_library(
@@ -23,7 +21,6 @@ maven_java_library(
     ]),
     pom = ":pom",
     resource_strip_prefix = "tools/base/build-system/java-lib-plugin/java-lib-model",
-    resources = [":version.properties"],
     visibility = [
         "//visibility:public",
     ],

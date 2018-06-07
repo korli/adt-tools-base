@@ -22,11 +22,9 @@ import com.android.annotations.Nullable;
 import com.android.annotations.VisibleForTesting;
 import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
-import com.google.common.collect.ImmutableList;
 import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -77,10 +75,7 @@ public class IncrementalVisitor extends ClassVisitor {
 
     protected String visitedClassName;
     protected String visitedSuperName;
-    @NonNull
-    protected final ClassNode classNode;
-    @NonNull
-    protected final List<ClassNode> parentNodes;
+    @NonNull protected final AsmClassNode classAndInterfaceNode;
     @NonNull
     protected final ILogger logger;
 
@@ -100,15 +95,15 @@ public class IncrementalVisitor extends ClassVisitor {
     }
 
     public IncrementalVisitor(
-            @NonNull ClassNode classNode,
-            @NonNull List<ClassNode> parentNodes,
+            @NonNull AsmClassNode classAndInterfaceNode,
             @NonNull ClassVisitor classVisitor,
             @NonNull ILogger logger) {
         super(Opcodes.ASM5, classVisitor);
-        this.classNode = classNode;
-        this.parentNodes = parentNodes;
+        this.classAndInterfaceNode = classAndInterfaceNode;
         this.logger = logger;
-        this.logger.verbose("%s: Visiting %s", getClass().getSimpleName(), classNode.name);
+        this.logger.verbose(
+                "%s: Visiting %s",
+                getClass().getSimpleName(), classAndInterfaceNode.getClassNode().name);
     }
 
     @NonNull
@@ -117,14 +112,16 @@ public class IncrementalVisitor extends ClassVisitor {
     }
 
     @Nullable
-    FieldNode getFieldByName(@NonNull String fieldName) {
-        FieldNode fieldNode = getFieldByNameInClass(fieldName, classNode);
-        Iterator<ClassNode> iterator = parentNodes.iterator();
-        while(fieldNode == null && iterator.hasNext()) {
-            ClassNode parentNode = iterator.next();
-            fieldNode = getFieldByNameInClass(fieldName, parentNode);
-        }
-        return fieldNode;
+    AccessRight getFieldAccessRightByName(@NonNull String fieldName) {
+        FieldNode fieldNode = getFieldByNameInClass(fieldName, classAndInterfaceNode);
+        return fieldNode != null ? AccessRight.fromNodeAccess(fieldNode.access) : null;
+    }
+
+    @Nullable
+    protected static FieldNode getFieldByNameInClass(
+            @NonNull String fieldName, @NonNull AsmClassNode classAndInterfaceNode) {
+        return classAndInterfaceNode.onHierarchy(
+                classNode -> getFieldByNameInClass(fieldName, classNode));
     }
 
     @Nullable
@@ -141,14 +138,16 @@ public class IncrementalVisitor extends ClassVisitor {
     }
 
     @Nullable
-    protected MethodNode getMethodByName(String methodName, String desc) {
-        MethodNode methodNode = getMethodByNameInClass(methodName, desc, classNode);
-        Iterator<ClassNode> iterator = parentNodes.iterator();
-        while(methodNode == null && iterator.hasNext()) {
-            ClassNode parentNode = iterator.next();
-            methodNode = getMethodByNameInClass(methodName, desc, parentNode);
-        }
-        return methodNode;
+    protected AccessRight getMethodAccessRightByName(String methodName, String desc) {
+        MethodNode methodNode = getMethodByNameInClass(methodName, desc, classAndInterfaceNode);
+        return methodNode != null ? AccessRight.fromNodeAccess(methodNode.access) : null;
+    }
+
+    @Nullable
+    protected static MethodNode getMethodByNameInClass(
+            String methodName, String desc, AsmClassNode classAndInterfaceNode) {
+        return classAndInterfaceNode.onAll(
+                classNode -> getMethodByNameInClass(methodName, desc, classNode));
     }
 
     @Nullable
@@ -214,8 +213,7 @@ public class IncrementalVisitor extends ClassVisitor {
     public interface VisitorBuilder {
         @NonNull
         IncrementalVisitor build(
-                @NonNull ClassNode classNode,
-                @NonNull List<ClassNode> parentNodes,
+                @NonNull AsmClassNode classNode,
                 @NonNull ClassVisitor classVisitor,
                 @NonNull ILogger logger);
 
@@ -309,7 +307,8 @@ public class IncrementalVisitor extends ClassVisitor {
         // this is a package private interface.
         AccessRight accessRight = AccessRight.fromNodeAccess(classNode.access);
         File outputFile = new File(outputDirectory, path);
-        if ((classNode.access & Opcodes.ACC_INTERFACE) != 0) {
+        // no need to visit interfaces that do not have default methods.
+        if ((classNode.access & Opcodes.ACC_INTERFACE) != 0 && !hasDefaultMethods(classNode)) {
             if (visitorBuilder.getOutputType() == OutputType.INSTRUMENT) {
                 // don't change the name of interfaces.
                 Files.createParentDirs(outputFile);
@@ -332,14 +331,19 @@ public class IncrementalVisitor extends ClassVisitor {
 
         // if we are targeting a more recent version than the current device, disable instant run
         // for that class.
-        List<ClassNode> parentsNodes =
+        AsmClassNode parentedClassNode =
                 isClassTargetingNewerPlatform(
-                        targetApiLevel, TARGET_API_TYPE, directoryClassReader, classNode, logger)
-                        ? ImmutableList.of()
-                        : AsmUtils.parseParents(
+                                targetApiLevel,
+                                TARGET_API_TYPE,
+                                directoryClassReader,
+                                classNode,
+                                logger)
+                        ? null
+                        : AsmUtils.loadClass(
                                 logger, directoryClassReader, classNode, targetApiLevel);
+
         // if we could not determine the parent hierarchy, disable instant run.
-        if (parentsNodes.isEmpty() || isPackageInstantRunDisabled(inputFile)) {
+        if (parentedClassNode == null || isPackageInstantRunDisabled(inputFile)) {
             if (visitorBuilder.getOutputType() == OutputType.INSTRUMENT) {
                 Files.createParentDirs(outputFile);
                 Files.write(classBytes, outputFile);
@@ -351,8 +355,7 @@ public class IncrementalVisitor extends ClassVisitor {
 
         outputFile = new File(outputDirectory, visitorBuilder.getMangledRelativeClassFilePath(path));
         Files.createParentDirs(outputFile);
-        IncrementalVisitor visitor =
-                visitorBuilder.build(classNode, parentsNodes, classWriter, logger);
+        IncrementalVisitor visitor = visitorBuilder.build(parentedClassNode, classWriter, logger);
 
         if (visitorBuilder.getOutputType() == OutputType.INSTRUMENT) {
             /*
@@ -373,6 +376,25 @@ public class IncrementalVisitor extends ClassVisitor {
         return outputFile;
     }
 
+    /**
+     * Returns true the passed classNode is an interface and it has any default method
+     * implementation.
+     *
+     * @param classNode the ASM representation of an interface.
+     * @return true if it has any non abstract methods.
+     */
+    @VisibleForTesting
+    static boolean hasDefaultMethods(@NonNull ClassNode classNode) {
+        if ((classNode.access & Opcodes.ACC_INTERFACE) == 0) {
+            return false;
+        }
+        // interfaces before V1_8 cannot have default methods.
+        return classNode.version >= Opcodes.V1_8
+                && ((List<MethodNode>) classNode.methods)
+                        .stream()
+                        .anyMatch(methodNode -> (methodNode.access & Opcodes.ACC_ABSTRACT) == 0);
+    }
+
     @NonNull
     private static File getBinaryFolder(@NonNull File inputFile, @NonNull ClassNode classNode) {
         return new File(inputFile.getAbsolutePath().substring(0,
@@ -380,25 +402,27 @@ public class IncrementalVisitor extends ClassVisitor {
     }
 
     /**
-     * If the passed class is annotated with an annotation type that denotes the target
-     * api level like {@link #TARGET_API_TYPE}, and will return true if the passed targetApiLevel
-     * is lower than the value of the annotation.
+     * If the passed class is annotated with an annotation type that denotes the target api level
+     * like {@link #TARGET_API_TYPE}, and will return true if the passed targetApiLevel is lower
+     * than the value of the annotation.
+     *
      * @param targetApiLevel the target api level we are instrumenting against.
      * @param targetApiAnnotationType the type of the annotation to look for
      * @param locator a class locator implementation that can locate and load outclasses if any
      * @param classNode the class of interest
      * @param logger to log messages
      * @return true if the class of interest is annotated with targetApiAnnotationType and the
-     * annotation value is superior to the passed targetApiLevel.
+     *     annotation value is superior to the passed targetApiLevel.
      * @throws IOException when outer classes cannot be loaded successfully.
      */
     @VisibleForTesting
     static boolean isClassTargetingNewerPlatform(
             int targetApiLevel,
             @NonNull Type targetApiAnnotationType,
-            @NonNull AsmUtils.ClassReaderProvider locator,
+            @NonNull AsmUtils.ClassNodeProvider locator,
             @NonNull ClassNode classNode,
-            @NonNull ILogger logger) throws IOException {
+            @NonNull ILogger logger)
+            throws IOException {
 
         List<AnnotationNode> invisibleAnnotations =
                 AsmUtils.getInvisibleAnnotationsOnClassOrOuterClasses(locator, classNode, logger);

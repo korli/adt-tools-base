@@ -17,8 +17,10 @@
 package com.android.build.gradle.internal.scope;
 
 import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import com.android.build.OutputFile;
 import com.android.build.gradle.internal.variant.MultiOutputPolicy;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.gson.Gson;
@@ -28,9 +30,11 @@ import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.apache.commons.io.FileUtils;
 import org.gradle.api.file.FileCollection;
 
@@ -46,17 +50,26 @@ public class SplitList {
      */
     private ImmutableList<Record> records;
 
-    public static SplitList EMPTY = new SplitList(ImmutableList.of());
+    public static final SplitList EMPTY = new SplitList(ImmutableList.of());
 
     private SplitList(List<Record> records) {
         this.records = ImmutableList.copyOf(records);
     }
 
-    public static SplitList load(FileCollection persistedList) throws IOException {
+    @NonNull
+    public static SplitList load(@NonNull FileCollection persistedList) throws IOException {
         String persistedData = FileUtils.readFileToString(persistedList.getSingleFile());
         Gson gson = new Gson();
         Type collectionType = new TypeToken<ArrayList<Record>>() {}.getType();
         return new SplitList(gson.fromJson(persistedData, collectionType));
+    }
+
+    @NonNull
+    public static SplitList maybeLoad(@Nullable FileCollection persistedList) throws IOException {
+        if (persistedList == null) {
+            return EMPTY;
+        }
+        return load(persistedList);
     }
 
     public Set<String> getFilters(OutputFile.FilterType splitType) throws IOException {
@@ -66,21 +79,19 @@ public class SplitList {
     public synchronized Set<String> getFilters(String filterType) throws IOException {
         Optional<Record> record =
                 records.stream().filter(r -> r.splitType.equals(filterType)).findFirst();
-        return record.isPresent()
-                ? record.get().values
-                : ImmutableSet.of();
+        return record.isPresent() ? record.get().getValues() : ImmutableSet.of();
     }
 
     public interface SplitAction {
-        void apply(OutputFile.FilterType filterType, Set<String> value);
+        void apply(OutputFile.FilterType filterType, Collection<Filter> filters);
     }
 
     public void forEach(SplitAction action) throws IOException {
         records.forEach(
                 record -> {
-                    if (record.isConfigSplit() && !record.values.isEmpty()) {
+                    if (record.isConfigSplit() && !record.getValues().isEmpty()) {
                         action.apply(
-                                OutputFile.FilterType.valueOf(record.splitType), record.values);
+                                OutputFile.FilterType.valueOf(record.splitType), record.filters);
                     }
                 });
     }
@@ -103,10 +114,10 @@ public class SplitList {
 
     public static synchronized void save(
             @NonNull File outputFile,
-            @NonNull Set<String> densityFilters,
-            @NonNull Set<String> languageFilters,
-            @NonNull Set<String> abiFilters,
-            @NonNull Collection<String> resourceConfigs)
+            @NonNull Collection<Filter> densityFilters,
+            @NonNull Collection<Filter> languageFilters,
+            @NonNull Collection<Filter> abiFilters,
+            @NonNull Collection<Filter> resourceConfigs)
             throws IOException {
 
         ImmutableList<Record> records =
@@ -114,7 +125,7 @@ public class SplitList {
                         new Record(OutputFile.FilterType.DENSITY.name(), densityFilters),
                         new Record(OutputFile.FilterType.LANGUAGE.name(), languageFilters),
                         new Record(OutputFile.FilterType.ABI.name(), abiFilters),
-                        new Record(RESOURCE_CONFIGS, ImmutableSet.copyOf(resourceConfigs)));
+                        new Record(RESOURCE_CONFIGS, resourceConfigs));
 
         Gson gson = new Gson();
         String listOfFilters = gson.toJson(records);
@@ -126,15 +137,51 @@ public class SplitList {
      */
     private static final class Record {
         private final String splitType;
-        private final Set<String> values;
+        private final Collection<Filter> filters;
 
-        private Record(String splitType, Set<String> values) {
+        private Record(String splitType, Collection<Filter> filters) {
             this.splitType = splitType;
-            this.values = values;
+
+            Set<String> filterValues = new HashSet<>();
+            filters.forEach(
+                    filter -> {
+                        Preconditions.checkState(!filterValues.contains(filter.getValue()));
+                        filterValues.add(filter.getValue());
+                    });
+
+            this.filters = filters;
         }
 
         private boolean isConfigSplit() {
             return !splitType.equals(RESOURCE_CONFIGS);
+        }
+
+        public Set<String> getValues() {
+            return filters.stream().map(filter -> filter.value).collect(Collectors.toSet());
+        }
+    }
+
+    public static final class Filter {
+        @NonNull private final String value;
+        @Nullable private final String simplifiedName;
+
+        public Filter(@NonNull String value, @Nullable String simplifiedName) {
+            this.value = value;
+            this.simplifiedName = simplifiedName;
+        }
+
+        public Filter(@NonNull String value) {
+            this(value, null);
+        }
+
+        @NonNull
+        public String getValue() {
+            return value;
+        }
+
+        @NonNull
+        public String getDisplayName() {
+            return simplifiedName != null ? simplifiedName : value;
         }
     }
 }

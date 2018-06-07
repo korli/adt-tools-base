@@ -28,6 +28,7 @@ import com.android.ide.common.build.ApkData;
 import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.util.Collection;
+import org.gradle.api.GradleException;
 import org.gradle.api.Task;
 
 /**
@@ -135,6 +136,10 @@ public abstract class BaseVariantOutputImpl implements BaseVariantOutput {
     }
 
     public void setOutputFileName(String outputFileName) {
+        if (new File(outputFileName).isAbsolute()) {
+            throw new GradleException("Absolute path are not supported when setting " +
+                    "an output file name");
+        }
         apkData.setOutputFileName(outputFileName);
     }
 }

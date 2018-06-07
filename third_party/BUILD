@@ -16,17 +16,31 @@ maven_java_library(
 )
 
 maven_java_library(
+    name = "com.android.tools.build_aapt2-proto",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/android/tools/build/aapt2-proto/0.1.0:jar",
+    visibility = ["//visibility:public"],
+    exports = [":com.google.protobuf_protobuf-java"],
+)
+
+maven_java_library(
+    name = "com.android.tools.build_bundletool",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/android/tools/build/bundletool/0.1.0-alpha01:jar",
+    visibility = ["//visibility:public"],
+    exports = [
+        ":com.android.tools.build_aapt2-proto",
+        ":com.google.auto.value_auto-value",
+        ":com.google.errorprone_error_prone_annotations",
+        ":com.google.guava_guava",
+        ":com.google.protobuf_protobuf-java",
+        ":com.google.protobuf_protobuf-java-util",
+    ],
+)
+
+maven_java_library(
     name = "com.android.tools.build_transform-api",
     export_artifact = "//prebuilts/tools/common/m2/repository/com/android/tools/build/transform-api/2.0.0-deprecated-use-gradle-api:jar",
     visibility = ["//visibility:public"],
     exports = [],
-)
-
-maven_java_library(
-    name = "com.android.tools.external.lombok_lombok-ast",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/android/tools/external/lombok/lombok-ast/0.2.3:jar",
-    visibility = ["//visibility:public"],
-    exports = [":com.google.guava_guava"],
 )
 
 maven_java_library(
@@ -48,7 +62,6 @@ maven_java_library(
     export_artifact = "//prebuilts/tools/common/m2/repository/com/google/api-client/google-api-client/1.22.0:jar",
     visibility = ["//visibility:public"],
     exports = [
-        ":com.google.guava_guava-jdk5",
         ":com.google.http-client_google-http-client-jackson2",
         ":com.google.oauth-client_google-oauth-client",
     ],
@@ -70,7 +83,7 @@ maven_java_library(
 
 maven_java_library(
     name = "com.google.auto.value_auto-value",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/auto/value/auto-value/1.4.1:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/auto/value/auto-value/1.5.2:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -84,14 +97,14 @@ maven_java_library(
 
 maven_java_library(
     name = "com.google.code.gson_gson",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/code/gson/gson/2.3:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/code/gson/gson/2.7:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
 
 maven_java_library(
     name = "com.google.errorprone_error_prone_annotations",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/errorprone/error_prone_annotations/2.0.18:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/errorprone/error_prone_annotations/2.1.2:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -106,13 +119,6 @@ maven_java_library(
         ":com.google.j2objc_j2objc-annotations",
         ":org.codehaus.mojo_animal-sniffer-annotations",
     ],
-)
-
-maven_java_library(
-    name = "com.google.guava_guava-jdk5",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/guava/guava-jdk5/17.0:jar",
-    visibility = ["//visibility:public"],
-    exports = [],
 )
 
 maven_java_library(
@@ -168,14 +174,14 @@ maven_java_library(
 
 maven_java_library(
     name = "com.google.protobuf_protobuf-java",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/protobuf/protobuf-java/3.0.0:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/protobuf/protobuf-java/3.4.0:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
 
 maven_java_library(
     name = "com.google.protobuf_protobuf-java-util",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/protobuf/protobuf-java-util/3.0.0:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/google/protobuf/protobuf-java-util/3.4.0:jar",
     visibility = ["//visibility:public"],
     exports = [
         ":com.google.code.gson_gson",
@@ -209,13 +215,6 @@ maven_java_library(
 )
 
 maven_java_library(
-    name = "com.intellij_annotations",
-    export_artifact = "//prebuilts/tools/common/m2/repository/com/intellij/annotations/12.0:jar",
-    visibility = ["//visibility:public"],
-    exports = [],
-)
-
-maven_java_library(
     name = "com.squareup.okhttp_okhttp",
     export_artifact = "//prebuilts/tools/common/m2/repository/com/squareup/okhttp/okhttp/2.5.0:jar",
     visibility = ["//visibility:public"],
@@ -230,10 +229,66 @@ maven_java_library(
 )
 
 maven_java_library(
+    name = "com.squareup_javapoet",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/squareup/javapoet/1.8.0:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
     name = "com.squareup_javawriter",
     export_artifact = "//prebuilts/tools/common/m2/repository/com/squareup/javawriter/2.5.0:jar",
     visibility = ["//visibility:public"],
     exports = [],
+)
+
+maven_java_library(
+    name = "com.sun.activation_javax.activation",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/activation/javax.activation/1.2.0:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "com.sun.istack_istack-commons-runtime",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/istack/istack-commons-runtime/2.21:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "com.sun.istack_istack-commons-tools",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/istack/istack-commons-tools/2.21:jar",
+    visibility = ["//visibility:public"],
+    exports = [":org.apache.ant_ant"],
+)
+
+maven_java_library(
+    name = "com.sun.xml.bind.external_rngom",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/xml/bind/external/rngom/2.2.11:jar",
+    visibility = ["//visibility:public"],
+    exports = [":relaxngDatatype_relaxngDatatype"],
+)
+
+maven_java_library(
+    name = "com.sun.xml.dtd-parser_dtd-parser",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/xml/dtd-parser/dtd-parser/1.1:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "com.sun.xml.fastinfoset_FastInfoset",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/xml/fastinfoset/FastInfoset/1.2.13:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "com.sun.xsom_xsom",
+    export_artifact = "//prebuilts/tools/common/m2/repository/com/sun/xsom/xsom/20140925:jar",
+    visibility = ["//visibility:public"],
+    exports = [":relaxngDatatype_relaxngDatatype"],
 )
 
 maven_java_library(
@@ -259,7 +314,7 @@ maven_java_library(
 
 maven_java_library(
     name = "commons-logging_commons-logging",
-    export_artifact = "//prebuilts/tools/common/m2/repository/commons-logging/commons-logging/1.1.1:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/commons-logging/commons-logging/1.2:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -445,6 +500,13 @@ maven_java_library(
 )
 
 maven_java_library(
+    name = "javax.xml.bind_jaxb-api",
+    export_artifact = "//prebuilts/tools/common/m2/repository/javax/xml/bind/jaxb-api/2.2.12-b140109.1041:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
     name = "junit_junit",
     export_artifact = "//prebuilts/tools/common/m2/repository/junit/junit/4.12:jar",
     visibility = ["//visibility:public"],
@@ -527,6 +589,20 @@ maven_java_library(
 maven_java_library(
     name = "org.antlr_antlr4",
     export_artifact = "//prebuilts/tools/common/m2/repository/org/antlr/antlr4/4.5.3:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "org.apache.ant_ant",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/apache/ant/ant/1.7.0:jar",
+    visibility = ["//visibility:public"],
+    exports = [":org.apache.ant_ant-launcher"],
+)
+
+maven_java_library(
+    name = "org.apache.ant_ant-launcher",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/apache/ant/ant-launcher/1.7.0:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -660,7 +736,7 @@ maven_java_library(
 
 maven_java_library(
     name = "org.codehaus.groovy_groovy-all",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/codehaus/groovy/groovy-all/2.4.11:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/codehaus/groovy/groovy-all/2.4.12:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -778,6 +854,64 @@ maven_java_library(
 )
 
 maven_java_library(
+    name = "org.glassfish.jaxb_codemodel",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/glassfish/jaxb/codemodel/2.2.11:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "org.glassfish.jaxb_jaxb-core",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/glassfish/jaxb/jaxb-core/2.2.11:jar",
+    visibility = ["//visibility:public"],
+    exports = [
+        ":com.sun.istack_istack-commons-runtime",
+        ":javax.xml.bind_jaxb-api",
+        ":org.glassfish.jaxb_txw2",
+    ],
+)
+
+maven_java_library(
+    name = "org.glassfish.jaxb_jaxb-runtime",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/glassfish/jaxb/jaxb-runtime/2.2.11:jar",
+    visibility = ["//visibility:public"],
+    exports = [
+        ":com.sun.xml.fastinfoset_FastInfoset",
+        ":org.glassfish.jaxb_jaxb-core",
+        ":org.jvnet.staxex_stax-ex",
+    ],
+)
+
+maven_java_library(
+    name = "org.glassfish.jaxb_jaxb-xjc",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/glassfish/jaxb/jaxb-xjc/2.2.11:jar",
+    visibility = ["//visibility:public"],
+    exports = [
+        ":com.sun.istack_istack-commons-tools",
+        ":com.sun.xml.bind.external_rngom",
+        ":com.sun.xml.dtd-parser_dtd-parser",
+        ":com.sun.xsom_xsom",
+        ":org.glassfish.jaxb_codemodel",
+        ":org.glassfish.jaxb_jaxb-core",
+    ],
+)
+
+maven_java_library(
+    name = "org.glassfish.jaxb_txw2",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/glassfish/jaxb/txw2/2.2.11:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "org.gradle_gradle-tooling-api",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/gradle/gradle-tooling-api/4.4:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+    runtime_deps = [":org.slf4j_slf4j-api"],
+)
+
+maven_java_library(
     name = "org.hamcrest_hamcrest-core",
     export_artifact = "//prebuilts/tools/common/m2/repository/org/hamcrest/hamcrest-core/1.3:jar",
     visibility = ["//visibility:public"],
@@ -786,98 +920,144 @@ maven_java_library(
 
 maven_java_library(
     name = "org.jacoco_org.jacoco.agent",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jacoco/org.jacoco.agent/0.7.4.201502262128:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jacoco/org.jacoco.agent/0.7.9:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
 
 maven_java_library(
     name = "org.jacoco_org.jacoco.core",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jacoco/org.jacoco.core/0.7.4.201502262128:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jacoco/org.jacoco.core/0.7.9:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
 
 maven_java_library(
     name = "org.jacoco_org.jacoco.report",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jacoco/org.jacoco.report/0.7.4.201502262128:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jacoco/org.jacoco.report/0.7.9:jar",
     visibility = ["//visibility:public"],
     exports = [":org.jacoco_org.jacoco.core"],
 )
 
 maven_java_library(
     name = "org.jetbrains.kotlin_kotlin-android-extensions",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-android-extensions/1.1.3-2:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-android-extensions/1.2.30:jar",
     visibility = ["//visibility:public"],
-    exports = [":org.jetbrains.kotlin_kotlin-compiler-embeddable"],
+    exports = [],
+    runtime_deps = [":org.jetbrains.kotlin_kotlin-compiler-embeddable"],
 )
 
 maven_java_library(
-    name = "org.jetbrains.kotlin_kotlin-annotation-processing",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-annotation-processing/1.1.3-2:jar",
+    name = "org.jetbrains.kotlin_kotlin-annotation-processing-gradle",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-annotation-processing-gradle/1.2.30:jar",
     visibility = ["//visibility:public"],
     exports = [":org.jetbrains.kotlin_kotlin-stdlib"],
+    runtime_deps = [":org.jetbrains.kotlin_kotlin-compiler-embeddable"],
 )
 
 maven_java_library(
-    name = "org.jetbrains.kotlin_kotlin-compiler-embeddable",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-compiler-embeddable/1.1.3-2:jar",
+    name = "org.jetbrains.kotlin_kotlin-build-common",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-build-common/1.2.30:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
 
 maven_java_library(
-    name = "org.jetbrains.kotlin_kotlin-compiler-runner",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-compiler-runner/1.1.3-2:jar",
+    name = "org.jetbrains.kotlin_kotlin-compiler-embeddable",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-compiler-embeddable/1.2.30:jar",
     visibility = ["//visibility:public"],
-    exports = [":org.jetbrains.kotlin_kotlin-compiler-embeddable"],
-)
-
-maven_java_library(
-    name = "org.jetbrains.kotlin_kotlin-gradle-plugin",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-gradle-plugin/1.1.3-2:jar",
-    visibility = ["//visibility:public"],
-    exports = [
-        ":commons-io_commons-io",
-        ":commons-lang_commons-lang",
-        ":org.jetbrains.kotlin_kotlin-android-extensions",
-        ":org.jetbrains.kotlin_kotlin-annotation-processing",
-        ":org.jetbrains.kotlin_kotlin-compiler-embeddable",
-        ":org.jetbrains.kotlin_kotlin-compiler-runner",
-        ":org.jetbrains.kotlin_kotlin-gradle-plugin-api",
+    exports = [],
+    runtime_deps = [
+        ":org.jetbrains.kotlin_kotlin-reflect",
+        ":org.jetbrains.kotlin_kotlin-script-runtime",
         ":org.jetbrains.kotlin_kotlin-stdlib",
     ],
 )
 
 maven_java_library(
+    name = "org.jetbrains.kotlin_kotlin-compiler-runner",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-compiler-runner/1.2.30:jar",
+    visibility = ["//visibility:public"],
+    exports = [
+        ":org.jetbrains.kotlin_kotlin-build-common",
+        ":org.jetbrains.kotlin_kotlin-daemon-client",
+    ],
+)
+
+maven_java_library(
+    name = "org.jetbrains.kotlin_kotlin-daemon-client",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-daemon-client/1.2.30:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "org.jetbrains.kotlin_kotlin-gradle-plugin",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-gradle-plugin/1.2.30:jar",
+    visibility = ["//visibility:public"],
+    exports = [
+        ":org.jetbrains.kotlin_kotlin-gradle-plugin-api",
+        ":org.jetbrains.kotlin_kotlin-stdlib",
+    ],
+    runtime_deps = [
+        ":org.jetbrains.kotlin_kotlin-android-extensions",
+        ":org.jetbrains.kotlin_kotlin-annotation-processing-gradle",
+        ":org.jetbrains.kotlin_kotlin-compiler-embeddable",
+        ":org.jetbrains.kotlin_kotlin-compiler-runner",
+        ":org.jetbrains.kotlin_kotlin-reflect",
+    ],
+)
+
+maven_java_library(
     name = "org.jetbrains.kotlin_kotlin-gradle-plugin-api",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-gradle-plugin-api/1.1.3-2:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-gradle-plugin-api/1.2.30:jar",
     visibility = ["//visibility:public"],
     exports = [":org.jetbrains.kotlin_kotlin-stdlib"],
 )
 
 maven_java_library(
+    name = "org.jetbrains.kotlin_kotlin-reflect",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-reflect/1.2.30:jar",
+    visibility = ["//visibility:public"],
+    exports = [":org.jetbrains.kotlin_kotlin-stdlib"],
+)
+
+maven_java_library(
+    name = "org.jetbrains.kotlin_kotlin-script-runtime",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-script-runtime/1.2.30:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
     name = "org.jetbrains.kotlin_kotlin-stdlib",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-stdlib/1.1.3-2:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-stdlib/1.2.30:jar",
     visibility = ["//visibility:public"],
     exports = [":org.jetbrains_annotations"],
 )
 
 maven_java_library(
     name = "org.jetbrains.kotlin_kotlin-stdlib-jre7",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-stdlib-jre7/1.1.3-2:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-stdlib-jre7/1.2.30:jar",
     visibility = ["//visibility:public"],
     exports = [":org.jetbrains.kotlin_kotlin-stdlib"],
 )
 
 maven_java_library(
     name = "org.jetbrains.kotlin_kotlin-stdlib-jre8",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-stdlib-jre8/1.1.3-2:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-stdlib-jre8/1.2.30:jar",
     visibility = ["//visibility:public"],
     exports = [
         ":org.jetbrains.kotlin_kotlin-stdlib",
         ":org.jetbrains.kotlin_kotlin-stdlib-jre7",
     ],
+)
+
+maven_java_library(
+    name = "org.jetbrains.kotlin_kotlin-test",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jetbrains/kotlin/kotlin-test/1.2.30:jar",
+    visibility = ["//visibility:public"],
+    exports = [":org.jetbrains.kotlin_kotlin-stdlib"],
 )
 
 maven_java_library(
@@ -897,6 +1077,13 @@ maven_java_library(
 maven_java_library(
     name = "org.jsoup_jsoup",
     export_artifact = "//prebuilts/tools/common/m2/repository/org/jsoup/jsoup/1.6.3:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
+)
+
+maven_java_library(
+    name = "org.jvnet.staxex_stax-ex",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/jvnet/staxex/stax-ex/1.7.7:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -964,7 +1151,7 @@ maven_java_library(
 
 maven_java_library(
     name = "org.slf4j_slf4j-api",
-    export_artifact = "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-api/1.6.2:jar",
+    export_artifact = "//prebuilts/tools/common/m2/repository/org/slf4j/slf4j-api/1.7.10:jar",
     visibility = ["//visibility:public"],
     exports = [],
 )
@@ -1001,4 +1188,11 @@ maven_java_library(
         ":com.google.code.findbugs_jsr305",
         ":com.google.guava_guava",
     ],
+)
+
+maven_java_library(
+    name = "relaxngDatatype_relaxngDatatype",
+    export_artifact = "//prebuilts/tools/common/m2/repository/relaxngDatatype/relaxngDatatype/20020414:jar",
+    visibility = ["//visibility:public"],
+    exports = [],
 )

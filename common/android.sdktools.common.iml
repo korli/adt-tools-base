@@ -9,8 +9,9 @@
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="inheritedJdk" />
     <orderEntry type="library" exported="" name="Guava" level="project" />
-    <orderEntry type="library" exported="" name="com.android.tools:annotations:26.0.0" level="project" />
+    <orderEntry type="library" exported="" name="com.android.tools:annotations:26.1.2" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
     <orderEntry type="library" scope="TEST" name="truth" level="project" />
+    <orderEntry type="library" scope="TEST" name="com.android.tools:testutils:26.1.2" level="project" />
   </component>
 </module>

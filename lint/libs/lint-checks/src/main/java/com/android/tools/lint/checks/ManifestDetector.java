@@ -80,6 +80,7 @@ import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.tools.lint.detector.api.XmlScanner;
 import com.android.utils.XmlUtils;
 import com.google.common.collect.Maps;
 import java.io.File;
@@ -98,7 +99,7 @@ import org.w3c.dom.NodeList;
  * Checks for issues in AndroidManifest files such as declaring elements in the
  * wrong order.
  */
-public class ManifestDetector extends Detector implements Detector.XmlScanner {
+public class ManifestDetector extends Detector implements XmlScanner {
     private static final Implementation IMPLEMENTATION = new Implementation(
             ManifestDetector.class,
             Scope.MANIFEST_SCOPE
@@ -127,7 +128,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             "The manifest should contain a `<uses-sdk>` element which defines the " +
             "minimum API Level required for the application to run, " +
             "as well as the target version (the highest API level you have tested " +
-            "the version for.)",
+            "the version for).",
 
             Category.CORRECTNESS,
             9,
@@ -420,6 +421,17 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
             IMPLEMENTATION).addMoreInfo(
             "http://android-developers.blogspot.com/2016/04/deprecation-of-bindlistener.html");
 
+    public static final Issue APP_INDEXING_SERVICE = Issue.create(
+            "AppIndexingService",
+            "App Indexing Background Services",
+            "Apps targeting Android 8.0 or higher can no longer rely on background services while listening for updates " +
+            "to the on-device index. Use a `BroadcastReceiver` for the `UPDATE_INDEX` intent to continue supporting indexing in your app.",
+            Category.CORRECTNESS,
+            4,
+            Severity.WARNING,
+            IMPLEMENTATION).addMoreInfo(
+              "https://firebase.google.com/docs/app-indexing/android/personal-content#add-a-broadcast-receiver-to-your-app");
+
     /** Permission name of mock location permission */
     public static final String MOCK_LOCATION_PERMISSION =
             "android.permission.ACCESS_MOCK_LOCATION";
@@ -475,7 +487,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
      * Checks that the main {@code <application>} tag specifies both an icon and allowBackup,
      * possibly merged from some upstream dependency
      */
-    private static void checkMergedApplication(@NonNull XmlContext context,
+    private void checkMergedApplication(@NonNull XmlContext context,
             Element sourceApplicationElement) {
         if (context.getProject().isLibrary()) {
             return;
@@ -559,7 +571,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
         }
     }
 
-    private static void checkDocumentElement(XmlContext context, Element element) {
+    private void checkDocumentElement(XmlContext context, Element element) {
         Attr codeNode = element.getAttributeNodeNS(ANDROID_URI, ATTR_VERSION_CODE);
         if (codeNode != null && codeNode.getValue().startsWith(PREFIX_RESOURCE_REF)
                 && context.isEnabled(ILLEGAL_REFERENCE)) {
@@ -647,7 +659,7 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
         }
     }
 
-    // ---- Implements Detector.XmlScanner ----
+    // ---- Implements XmlScanner ----
 
     @Override
     public Collection<String> getApplicableElements() {
@@ -716,19 +728,28 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                 checkMipmapIcon(context, element);
             } else if (tag.equals(TAG_SERVICE)
                        && context.getMainProject().isGradleProject()) {
-                Attr bindListenerAttr = null;
-                for (Element child : XmlUtils.getSubTags(element)) {
-                    if (child.getTagName().equals(TAG_INTENT_FILTER)) {
-                        for (Element innerChild : XmlUtils.getSubTags(child)) {
-                            if (innerChild.getTagName().equals(NODE_ACTION)) {
-                                Attr nodeNS = innerChild.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
-                                if (nodeNS != null
-                                    && "com.google.android.gms.wearable.BIND_LISTENER"
-                                        .equals(nodeNS.getValue())) {
-                                    bindListenerAttr = nodeNS;
-                                    break;
-                                }
+                Project project = context.getMainProject();
+                if (project.getTargetSdk() >= 26) {
+                    for (Element child : XmlUtils.getSubTagsByName(element, TAG_INTENT_FILTER)) {
+                        for (Element innerChild : XmlUtils.getSubTagsByName(child, NODE_ACTION)) {
+                            Attr attr = innerChild.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
+                            if (attr != null && "com.google.firebase.appindexing.UPDATE_INDEX".equals(attr.getValue())) {
+                                String message = "`UPDATE_INDEX` is configured as a service in your app, " +
+                                                 "which is no longer supported for the API level you're targeting. " +
+                                                 "Use a `BroadcastReceiver` instead.";
+                                context.report(APP_INDEXING_SERVICE, attr, context.getLocation(attr), message);
+                                break;
                             }
+                        }
+                    }
+                }
+                Attr bindListenerAttr = null;
+                for (Element child : XmlUtils.getSubTagsByName(element, TAG_INTENT_FILTER)) {
+                    for (Element innerChild : XmlUtils.getSubTagsByName(child, NODE_ACTION)) {
+                        Attr attr = innerChild.getAttributeNodeNS(ANDROID_URI, ATTR_NAME);
+                        if (attr != null && "com.google.android.gms.wearable.BIND_LISTENER".equals(attr.getValue())) {
+                            bindListenerAttr = attr;
+                            break;
                         }
                     }
                 }
@@ -736,7 +757,6 @@ public class ManifestDetector extends Detector implements Detector.XmlScanner {
                     return;
                 }
                 // Ensure that the play-services-wearable version dependency is >= 8.2.0
-                Project project = context.getMainProject();
                 Variant variant = project.getCurrentVariant();
                 if (variant != null) {
                     Dependencies dependencies = variant.getMainArtifact().getDependencies();

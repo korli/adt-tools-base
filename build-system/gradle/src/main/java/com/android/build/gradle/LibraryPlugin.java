@@ -22,10 +22,14 @@ import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.LibraryTaskManager;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.TaskManager;
+import com.android.build.gradle.internal.api.dsl.extensions.LibraryExtensionImpl;
+import com.android.build.gradle.internal.dependency.SourceSetManager;
 import com.android.build.gradle.internal.dsl.BuildType;
 import com.android.build.gradle.internal.dsl.ProductFlavor;
 import com.android.build.gradle.internal.dsl.SigningConfig;
 import com.android.build.gradle.internal.ndk.NdkHandler;
+import com.android.build.gradle.internal.plugin.LibPluginDelegate;
+import com.android.build.gradle.internal.plugin.TypedPluginDelegate;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.variant.LibraryVariantFactory;
 import com.android.build.gradle.internal.variant.VariantFactory;
@@ -36,19 +40,15 @@ import com.android.builder.profile.Recorder;
 import com.google.wireless.android.sdk.stats.GradleBuildProject;
 import javax.inject.Inject;
 import org.gradle.api.NamedDomainObjectContainer;
-import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.internal.reflect.Instantiator;
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
 
-/**
- * Gradle plugin class for 'library' projects.
- */
-public class LibraryPlugin extends BasePlugin implements Plugin<Project> {
+/** Gradle plugin class for 'library' projects. */
+public class LibraryPlugin extends BasePlugin<LibraryExtensionImpl> {
 
     @Inject
-    public LibraryPlugin(Instantiator instantiator, ToolingModelBuilderRegistry registry) {
-        super(instantiator, registry);
+    public LibraryPlugin(ToolingModelBuilderRegistry registry) {
+        super(registry);
     }
 
     @NonNull
@@ -56,13 +56,13 @@ public class LibraryPlugin extends BasePlugin implements Plugin<Project> {
     protected BaseExtension createExtension(
             @NonNull Project project,
             @NonNull ProjectOptions projectOptions,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull SdkHandler sdkHandler,
             @NonNull NamedDomainObjectContainer<BuildType> buildTypeContainer,
             @NonNull NamedDomainObjectContainer<ProductFlavor> productFlavorContainer,
             @NonNull NamedDomainObjectContainer<SigningConfig> signingConfigContainer,
             @NonNull NamedDomainObjectContainer<BaseVariantOutput> buildOutputs,
+            @NonNull SourceSetManager sourceSetManager,
             @NonNull ExtraModelInfo extraModelInfo) {
         return project.getExtensions()
                 .create(
@@ -70,13 +70,13 @@ public class LibraryPlugin extends BasePlugin implements Plugin<Project> {
                         getExtensionClass(),
                         project,
                         projectOptions,
-                        instantiator,
                         androidBuilder,
                         sdkHandler,
                         buildTypeContainer,
                         productFlavorContainer,
                         signingConfigContainer,
                         buildOutputs,
+                        sourceSetManager,
                         extraModelInfo);
     }
 
@@ -95,10 +95,9 @@ public class LibraryPlugin extends BasePlugin implements Plugin<Project> {
     @Override
     protected VariantFactory createVariantFactory(
             @NonNull GlobalScope globalScope,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidBuilder androidBuilder,
             @NonNull AndroidConfig androidConfig) {
-        return new LibraryVariantFactory(globalScope, androidBuilder, instantiator, androidConfig);
+        return new LibraryVariantFactory(globalScope, androidBuilder, androidConfig);
     }
 
     @Override
@@ -137,5 +136,15 @@ public class LibraryPlugin extends BasePlugin implements Plugin<Project> {
         // Default assemble task for the default-published artifact.
         // This is needed for the prepare task on the consuming project.
         project.getTasks().create("assembleDefault");
+    }
+
+    @Override
+    protected TypedPluginDelegate<LibraryExtensionImpl> getTypedDelegate() {
+        return new LibPluginDelegate();
+    }
+
+    @Override
+    protected boolean isPackagePublished() {
+        return true;
     }
 }

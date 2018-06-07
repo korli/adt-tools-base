@@ -23,6 +23,7 @@ import com.android.SdkConstants;
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.annotations.concurrency.Immutable;
+import java.io.Serializable;
 import java.util.Objects;
 
 /**
@@ -30,7 +31,7 @@ import java.util.Objects;
  * ?android:attr/bar}
  */
 @Immutable
-public class ResourceUrl {
+public class ResourceUrl implements Serializable {
     /** Type of resource */
     @NonNull public final ResourceType type;
 
@@ -56,19 +57,6 @@ public class ResourceUrl {
             boolean framework,
             boolean create,
             boolean theme) {
-        if (name.isEmpty() && type != ResourceType.PUBLIC) {
-            throw new IllegalArgumentException("Resource name cannot be empty.");
-        }
-
-        if (namespace != null && namespace.isEmpty()) {
-            throw new IllegalArgumentException("Namespace provided but it's an empty string.");
-        }
-
-        if (create && theme) {
-            throw new IllegalArgumentException(
-                    "Both `create` and `theme` cannot be used at the same time.");
-        }
-
         this.type = type;
         this.name = name;
         this.framework = framework;
@@ -107,6 +95,7 @@ public class ResourceUrl {
      * @param type the resource type
      * @param name the name
      */
+    @NonNull
     public static ResourceUrl create(
             @Nullable String namespace, @NonNull ResourceType type, @NonNull String name) {
         return new ResourceUrl(

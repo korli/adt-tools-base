@@ -8,7 +8,7 @@ load("//tools/base/bazel:bazel.bzl", "java_jarjar")
 java_jarjar(
     name = "studio-profiler-grpc-1.0-jarjar",
     srcs = [
-        "//prebuilts/tools/common/m2/repository/com/google/protobuf/protobuf-java/3.0.0:jar",
+        "//prebuilts/tools/common/m2/repository/com/google/protobuf/protobuf-java/3.4.0:jar",
         "//prebuilts/tools/common/m2/repository/io/grpc/grpc-auth/1.0.3:jar",
         "//prebuilts/tools/common/m2/repository/io/grpc/grpc-context/1.0.3:jar",
         "//prebuilts/tools/common/m2/repository/io/grpc/grpc-core/1.0.3:jar",

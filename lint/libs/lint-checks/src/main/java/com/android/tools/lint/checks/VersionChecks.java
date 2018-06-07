@@ -1,22 +1,67 @@
 package com.android.tools.lint.checks;
 
-import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.sdklib.SdkVersionInfo;
-import com.android.tools.lint.detector.api.ClassContext;
-import com.intellij.psi.*;
-import com.intellij.psi.util.PsiTreeUtil;
-import org.jetbrains.uast.*;
-import org.jetbrains.uast.visitor.AbstractUastVisitor;
-import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.*;
-import org.objectweb.asm.tree.analysis.AnalyzerException;
-
-import java.util.Collections;
-import java.util.List;
-
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.tools.lint.detector.api.LintUtils.getNextInstruction;
 import static com.android.tools.lint.detector.api.LintUtils.skipParentheses;
+import static com.android.utils.SdkUtils.endsWithIgnoreCase;
+
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.annotations.VisibleForTesting;
+import com.android.sdklib.SdkVersionInfo;
+import com.android.tools.lint.client.api.JavaEvaluator;
+import com.android.tools.lint.detector.api.ClassContext;
+import com.android.tools.lint.detector.api.LintUtils;
+import com.intellij.openapi.util.Ref;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.util.PsiTreeUtil;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import org.jetbrains.uast.UBinaryExpression;
+import org.jetbrains.uast.UBlockExpression;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UClass;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UIfExpression;
+import org.jetbrains.uast.ULambdaExpression;
+import org.jetbrains.uast.ULiteralExpression;
+import org.jetbrains.uast.ULocalVariable;
+import org.jetbrains.uast.UMethod;
+import org.jetbrains.uast.UPolyadicExpression;
+import org.jetbrains.uast.UQualifiedReferenceExpression;
+import org.jetbrains.uast.UReferenceExpression;
+import org.jetbrains.uast.UReturnExpression;
+import org.jetbrains.uast.USwitchClauseExpressionWithBody;
+import org.jetbrains.uast.UUnaryExpression;
+import org.jetbrains.uast.UastBinaryOperator;
+import org.jetbrains.uast.UastContext;
+import org.jetbrains.uast.UastPrefixOperator;
+import org.jetbrains.uast.UastUtils;
+import org.jetbrains.uast.visitor.AbstractUastVisitor;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.analysis.AnalyzerException;
 
 /**
  * Utility methods for checking whether a given element is surrounded (or preceded!) by
@@ -200,7 +245,7 @@ public class VersionChecks {
                 done = true;
             }
 
-            return done || !expression.equals(node);
+            return done;
         }
 
         @Override
@@ -256,7 +301,15 @@ public class VersionChecks {
         return statement instanceof UReturnExpression;
     }
 
-    public static boolean isWithinVersionCheckConditional(@NonNull UElement element, int api) {
+    public static boolean isWithinVersionCheckConditional(
+            @NonNull JavaEvaluator evaluator, @NonNull UElement element,
+            int api) {
+        return isWithinVersionCheckConditional(evaluator, element, api, null);
+    }
+
+    public static boolean isWithinVersionCheckConditional(
+            @NonNull JavaEvaluator evaluator, @NonNull UElement element,
+            int api, @Nullable ApiLevelLookup apiLookup) {
         UElement current = skipParentheses(element.getUastParent());
         UElement prev = element;
         while (current != null) {
@@ -264,16 +317,89 @@ public class VersionChecks {
                 UIfExpression ifStatement = (UIfExpression) current;
                 UExpression condition = ifStatement.getCondition();
                 if (prev != condition) {
-                    boolean fromThen = prev == ifStatement.getThenExpression();
-                    Boolean ok = isVersionCheckConditional(api, condition, fromThen, prev, null);
-                    if (ok != null) {
-                        return ok;
+                    boolean fromThen = prev.equals(ifStatement.getThenExpression());
+                    Boolean ok = isVersionCheckConditional(api, condition, fromThen, prev, apiLookup);
+                    if (ok != null && ok) {
+                        return true;
                     }
                 }
             } else if (current instanceof UPolyadicExpression &&
                     (isAndedWithConditional(current, api, prev) ||
                             isOredWithConditional(current, api, prev))) {
                 return true;
+            } else if (current instanceof USwitchClauseExpressionWithBody) {
+                USwitchClauseExpressionWithBody body = (USwitchClauseExpressionWithBody) current;
+                for (UExpression condition : body.getCaseValues()) {
+                    Boolean ok = isVersionCheckConditional(api, condition, true, prev, apiLookup);
+                    if (ok != null && ok) {
+                        return true;
+                    }
+                }
+            } else if (current instanceof UCallExpression && prev instanceof ULambdaExpression) {
+                // If the API violation is in a lambda that is passed to a method,
+                // see if the lambda parameter is invoked inside that method, wrapped within
+                // a suitable version conditional.
+                //
+                // Optionally also see if we're passing in the API level as a parameter
+                // to the function.
+                //
+                // Algorithm:
+                //  (1) Figure out which parameter we're mapping the lambda argument to.
+                //  (2) Find that parameter invoked within the function
+                //  (3) From the invocation see if it's a suitable version conditional
+                //
+
+                UCallExpression call = (UCallExpression) current;
+                PsiMethod method = call.resolve();
+                if (method != null) {
+                    Map<UExpression, PsiParameter> mapping = evaluator
+                            .computeArgumentMapping(call, method);
+                    PsiParameter parameter = mapping.get(prev);
+                    if (parameter != null) {
+                        UastContext context = UastUtils.getUastContext(element);
+                        UMethod uMethod = context.getMethod(method);
+                        Ref<UCallExpression> match = new Ref<>();
+                        String parameterName = parameter.getName();
+                        uMethod.accept(new AbstractUastVisitor() {
+                            @Override
+                            public boolean visitCallExpression(UCallExpression node) {
+                                String callName = LintUtils.getMethodName(node);
+                                if (Objects.equals(callName, parameterName)) {
+                                    // Potentially not correct due to scopes, but these lambda
+                                    // utility methods tend to be short and for lambda function
+                                    // calls, resolve on call returns null
+                                    match.set(node);
+                                }
+                                return super.visitCallExpression(node);
+                            }
+                        });
+                        UCallExpression lambdaInvocation = match.get();
+                        ApiLevelLookup newApiLookup = arg -> {
+                            if (arg instanceof UReferenceExpression) {
+                                PsiElement resolved = ((UReferenceExpression) arg)
+                                        .resolve();
+                                if (resolved instanceof PsiParameter) {
+                                    PsiParameter parameter1 = (PsiParameter) resolved;
+                                    PsiParameterList parameterList = PsiTreeUtil.getParentOfType(resolved,
+                                            PsiParameterList.class);
+                                    if (parameterList != null) {
+                                        int index = parameterList.getParameterIndex(parameter1);
+                                        List<UExpression> arguments = call.getValueArguments();
+                                        if (index != -1 && index < arguments.size()) {
+                                            return getApiLevel(arguments.get(index), null);
+                                        }
+                                    }
+                                }
+                            }
+                            return -1;
+                        };
+                        if (lambdaInvocation != null &&
+                                isWithinVersionCheckConditional(evaluator, lambdaInvocation, api,
+                                        newApiLookup)) {
+                            return true;
+                        }
+                    }
+                }
             } else if (current instanceof UMethod || current instanceof PsiFile) {
                 return false;
             }
@@ -377,15 +503,23 @@ public class VersionChecks {
                 } else if (name.equals("isAtLeastO")) {
                     return api <= 26;
                 } else if (name.startsWith("isAtLeastP")) {
-                    return api <= 27; // could be higher if there's an OMR1 etc
+                    return api <= 28;
                 }
             }
+        }
+
+        int version = getMinSdkVersionFromMethodName(name);
+        if (version != -1) {
+            return api <= version;
         }
 
         // Unconditional version utility method? If so just attempt to call it
         if (!method.hasModifierProperty(PsiModifier.ABSTRACT)) {
             UastContext context = UastUtils.getUastContext(call);
             UExpression body = context.getMethodBody(method);
+            if (body == null) {
+                return null;
+            }
             List<UExpression> expressions;
             if (body instanceof UBlockExpression) {
                 expressions = ((UBlockExpression) body).getExpressions();
@@ -495,12 +629,52 @@ public class VersionChecks {
             }
         } else if (element instanceof UCallExpression) {
             UCallExpression callExpression = (UCallExpression) element;
-            if (GET_BUILD_SDK_INT.equals(callExpression.getMethodName())) {
+            if (GET_BUILD_SDK_INT.equals(getMethodName(callExpression))) {
                 return true;
             } // else look inside the body?
         }
 
         return false;
+    }
+
+    private static final String[] VERSION_METHOD_NAME_PREFIXES = {
+      "isAtLeast",  "isRunning", "is", "runningOn", "running"
+    };
+    private static final String[] VERSION_METHOD_NAME_SUFFIXES = {
+      "OrLater", "OrAbove", "OrHigher", "OrNewer", "Sdk"
+    };
+
+    @VisibleForTesting
+    static int getMinSdkVersionFromMethodName(String name) {
+        String prefix = null;
+        String suffix = null;
+        for (String p : VERSION_METHOD_NAME_PREFIXES) {
+            if (name.startsWith(p)) {
+                prefix = p;
+                break;
+            }
+        }
+        for (String p : VERSION_METHOD_NAME_SUFFIXES) {
+            if (endsWithIgnoreCase(name, p)) {
+                suffix = p;
+                break;
+            }
+        }
+
+        if ("isAtLeast".equals(prefix) && suffix == null) {
+            suffix = "";
+        }
+
+        if (prefix != null && suffix != null) {
+            String codeName = name.substring(prefix.length(), name.length() - suffix.length());
+            int version = SdkVersionInfo.getApiByPreviewName(codeName, false);
+            if (version == -1) {
+                version = SdkVersionInfo.getApiByBuildCode(codeName, false);
+            }
+
+            return version;
+        }
+        return -1;
     }
 
     @Nullable
@@ -604,7 +778,7 @@ public class VersionChecks {
             UPolyadicExpression ppe = (UPolyadicExpression) element;
             if (ppe.getOperator() == UastBinaryOperator.LOGICAL_OR) {
                 for (UExpression operand : ppe.getOperands()) {
-                    if (operand == before) {
+                    if (operand.equals(before)) {
                         break;
                     } else if (isOredWithConditional(operand, api, before)) {
                         return true;
@@ -641,7 +815,7 @@ public class VersionChecks {
             UPolyadicExpression ppe = (UPolyadicExpression) element;
             if (ppe.getOperator() == UastBinaryOperator.LOGICAL_AND) {
                 for (UExpression operand : ppe.getOperands()) {
-                    if (operand == before) {
+                    if (operand.equals(before)) {
                         break;
                     } else if (isAndedWithConditional(operand, api, before)) {
                         return true;
@@ -675,7 +849,7 @@ public class VersionChecks {
                         }
                         level = SdkVersionInfo.getApiByBuildCode(codeName, true);
                     } else if (right instanceof ULiteralExpression) {
-                        ULiteralExpression lit = (ULiteralExpression)right;
+                        ULiteralExpression lit = (ULiteralExpression) right;
                         Object value = lit.getValue();
                         if (value instanceof Integer) {
                             level = (Integer) value;
@@ -692,6 +866,10 @@ public class VersionChecks {
                             return false;
                         } else if (tokenType == UastBinaryOperator.LESS && level <= api) {
                             // SDK_INT < ICE_CREAM_SANDWICH
+                            return false;
+                        } else if ((tokenType == UastBinaryOperator.EQUALS
+                                || tokenType == UastBinaryOperator.IDENTITY_EQUALS) &&
+                                level < api) {
                             return false;
                         }
                     }

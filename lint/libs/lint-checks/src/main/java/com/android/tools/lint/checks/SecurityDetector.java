@@ -34,6 +34,7 @@ import static com.android.SdkConstants.TAG_PROVIDER;
 import static com.android.SdkConstants.TAG_RECEIVER;
 import static com.android.SdkConstants.TAG_SERVICE;
 import static com.android.SdkConstants.VALUE_FALSE;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.xml.AndroidManifest.NODE_ACTION;
 
 import com.android.annotations.NonNull;
@@ -42,8 +43,6 @@ import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
-import com.android.tools.lint.detector.api.Detector.XmlScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -51,7 +50,9 @@ import com.android.tools.lint.detector.api.LintFix;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.tools.lint.detector.api.XmlScanner;
 import com.android.utils.XmlUtils;
 import com.intellij.psi.PsiMethod;
 import java.util.Arrays;
@@ -69,7 +70,7 @@ import org.w3c.dom.Node;
 /**
  * Checks that exported services request a permission.
  */
-public class SecurityDetector extends Detector implements XmlScanner, UastScanner {
+public class SecurityDetector extends Detector implements XmlScanner, SourceCodeScanner {
 
     private static final Implementation IMPLEMENTATION_MANIFEST = new Implementation(
             SecurityDetector.class,
@@ -191,7 +192,7 @@ public class SecurityDetector extends Detector implements XmlScanner, UastScanne
     public SecurityDetector() {
     }
 
-    // ---- Implements Detector.XmlScanner ----
+    // ---- Implements XmlScanner ----
 
     @Override
     public Collection<String> getApplicableElements() {
@@ -317,7 +318,7 @@ public class SecurityDetector extends Detector implements XmlScanner, UastScanne
         if (getExported(element) && isUnprotectedByPermission(element) &&
                 !isStandardReceiver(element)) {
             // No declared permission for this exported receiver: complain
-            LintFix fix = fix().set(ANDROID_URI, ATTR_PERMISSION, "").build();
+            LintFix fix = LintFix.create().set(ANDROID_URI, ATTR_PERMISSION, "").build();
             context.report(EXPORTED_RECEIVER, element, context.getLocation(element),
                            "Exported receiver does not require permission", fix);
         }
@@ -327,7 +328,7 @@ public class SecurityDetector extends Detector implements XmlScanner, UastScanne
         if (getExported(element) && isUnprotectedByPermission(element)
                 && !isWearableListenerServiceAction(element)) {
             // No declared permission for this exported service: complain
-            LintFix fix = fix().set(ANDROID_URI, ATTR_PERMISSION, "").build();
+            LintFix fix = LintFix.create().set(ANDROID_URI, ATTR_PERMISSION, "").build();
             context.report(EXPORTED_SERVICE, element, context.getLocation(element),
                            "Exported service does not require permission", fix);
         }
@@ -383,7 +384,7 @@ public class SecurityDetector extends Detector implements XmlScanner, UastScanne
                         }
 
                         if (!hasPermission) {
-                            LintFix fix = fix()
+                            LintFix fix = LintFix.create()
                                     .set(ANDROID_URI, ATTR_EXPORTED, VALUE_FALSE).build();
                             context.report(EXPORTED_PROVIDER, element,
                                     context.getLocation(element),
@@ -396,7 +397,7 @@ public class SecurityDetector extends Detector implements XmlScanner, UastScanne
         }
     }
 
-    // ---- Implements Detector.JavaScanner ----
+    // ---- Implements SourceCodeScanner ----
 
     @Override
     public List<String> getApplicableMethodNames() {
@@ -415,7 +416,7 @@ public class SecurityDetector extends Detector implements XmlScanner, UastScanne
     public void visitMethod(@NonNull JavaContext context, @NonNull UCallExpression node,
             @NonNull PsiMethod method) {
         List<UExpression> args = node.getValueArguments();
-        String methodName = node.getMethodName();
+        String methodName = getMethodName(node);
         if (context.getEvaluator().isMemberInSubClassOf(method, FILE_CLASS, false)) {
             // Report calls to java.io.File.setReadable(true, false) or
             // java.io.File.setWritable(true, false)

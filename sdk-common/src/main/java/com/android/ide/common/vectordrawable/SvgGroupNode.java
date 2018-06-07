@@ -13,9 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.ide.common.vectordrawable;
 
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
 import java.awt.geom.AffineTransform;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -25,11 +26,10 @@ import java.util.logging.Logger;
 import org.w3c.dom.Node;
 
 /**
- * Represent a SVG file's group element.
+ * Represents an SVG file's group element.
  */
 class SvgGroupNode extends SvgNode {
     private static final Logger logger = Logger.getLogger(SvgGroupNode.class.getSimpleName());
-    private static final String INDENT_LEVEL = "    ";
 
     protected final ArrayList<SvgNode> mChildren = new ArrayList<>();
 
@@ -73,8 +73,28 @@ class SvgGroupNode extends SvgNode {
 
         // Then print all the children.
         for (SvgNode node : mChildren) {
-            node.dumpNode(indent + INDENT_LEVEL);
+            node.dumpNode(indent + INDENT_UNIT);
         }
+    }
+
+    /**
+     * Finds the parent node of the input node.
+     *
+     * @return the parent node, or null if node is not in the tree.
+     */
+    @Nullable
+    public SvgGroupNode findParent(@NonNull SvgNode node) {
+        for (SvgNode n : mChildren) {
+            if (n == node) {
+                return this;
+            } else if (n.isGroupNode()) {
+                SvgGroupNode parent = ((SvgGroupNode) n).findParent(node);
+                if (parent != null) {
+                    return parent;
+                }
+            }
+        }
+        return null;
     }
 
     @Override
@@ -99,9 +119,10 @@ class SvgGroupNode extends SvgNode {
     }
 
     @Override
-    public void writeXML(OutputStreamWriter writer, boolean inClipPath) throws IOException {
+    public void writeXML(@NonNull OutputStreamWriter writer, boolean inClipPath,
+            @NonNull String indent) throws IOException {
         for (SvgNode node : mChildren) {
-            node.writeXML(writer, inClipPath);
+            node.writeXML(writer, inClipPath, indent);
         }
     }
 

@@ -36,8 +36,11 @@ import org.gradle.api.JavaVersion;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.tasks.CacheableTask;
 import org.gradle.api.tasks.InputFiles;
+import org.gradle.api.tasks.Internal;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
+import org.gradle.api.tasks.PathSensitive;
+import org.gradle.api.tasks.PathSensitivity;
 import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 
@@ -55,8 +58,21 @@ public class AndroidJavaCompile extends JavaCompile {
 
     String variantName;
 
+    /**
+     * Collection of artifacts that were produced by dependencies' data binding annotation
+     * processors.
+     */
     FileCollection dataBindingDependencyArtifacts;
 
+    /**
+     * Log file created by GenBaseClassesTask which is used to generate implementations in the data
+     * binding annotation processor.
+     */
+    FileCollection dataBindingClassLogDir;
+
+    File dataBindingArtifactOutputDirectory;
+
+    @PathSensitive(PathSensitivity.NONE)
     @InputFiles
     public FileCollection getProcessorListFile() {
         return processorListFile;
@@ -67,10 +83,24 @@ public class AndroidJavaCompile extends JavaCompile {
         return annotationProcessorOutputFolder;
     }
 
+    @OutputDirectory
+    @Optional
+    public File getDataBindingArtifactOutputDirectory() {
+        return dataBindingArtifactOutputDirectory;
+    }
+
+    @PathSensitive(PathSensitivity.RELATIVE)
     @InputFiles
     @Optional
     public FileCollection getDataBindingDependencyArtifacts() {
         return dataBindingDependencyArtifacts;
+    }
+
+    @PathSensitive(PathSensitivity.RELATIVE)
+    @InputFiles
+    @Optional
+    public FileCollection getDataBindingClassLogDir() {
+        return dataBindingClassLogDir;
     }
 
     @Override
@@ -117,6 +147,7 @@ public class AndroidJavaCompile extends JavaCompile {
         }
     }
 
+    @Internal
     private boolean isPostN() {
         final AndroidVersion hash = AndroidTargetHash.getVersionFromHash(compileSdkVersion);
         return hash != null && hash.getApiLevel() >= 24;

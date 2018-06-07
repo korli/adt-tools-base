@@ -17,32 +17,35 @@
 package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
-import com.android.builder.core.ErrorReporter;
+import com.android.build.gradle.internal.errors.DeprecationReporter;
+import com.android.builder.errors.EvalIssueReporter;
 import org.gradle.api.NamedDomainObjectFactory;
 import org.gradle.api.Project;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.api.model.ObjectFactory;
 
-/**
- * Factory to create BuildType object using an {@link Instantiator} to add the DSL methods.
- */
+/** Factory to create BuildType object using an {@link ObjectFactory} to add the DSL methods. */
 public class BuildTypeFactory implements NamedDomainObjectFactory<BuildType> {
 
-    @NonNull private final Instantiator instantiator;
+    @NonNull private final ObjectFactory objectFactory;
     @NonNull private final Project project;
-    @NonNull private final ErrorReporter errorReporter;
+    @NonNull private final EvalIssueReporter issueReporter;
+    @NonNull private final DeprecationReporter deprecationReporter;
 
     public BuildTypeFactory(
-            @NonNull Instantiator instantiator,
+            @NonNull ObjectFactory objectFactory,
             @NonNull Project project,
-            @NonNull ErrorReporter errorReporter) {
-        this.instantiator = instantiator;
+            @NonNull EvalIssueReporter issueReporter,
+            @NonNull DeprecationReporter deprecationReporter) {
+        this.objectFactory = objectFactory;
         this.project = project;
-        this.errorReporter = errorReporter;
+        this.issueReporter = issueReporter;
+        this.deprecationReporter = deprecationReporter;
     }
 
+    @NonNull
     @Override
-    public BuildType create(String name) {
-        return instantiator.newInstance(
-                BuildType.class, name, project, instantiator, errorReporter);
+    public BuildType create(@NonNull String name) {
+        return objectFactory.newInstance(
+                BuildType.class, name, project, objectFactory, issueReporter, deprecationReporter);
     }
 }

@@ -15,35 +15,10 @@
  */
 package com.android.tools.lint.checks;
 
-import com.android.SdkConstants;
-import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.annotations.VisibleForTesting;
-import com.android.builder.model.*;
-import com.android.ide.common.repository.*;
-import com.android.ide.common.repository.GradleCoordinate.RevisionComponent;
-import com.android.repository.io.FileOpUtils;
-import com.android.sdklib.AndroidTargetHash;
-import com.android.sdklib.AndroidVersion;
-import com.android.sdklib.IAndroidTarget;
-import com.android.sdklib.SdkVersionInfo;
-import com.android.tools.lint.client.api.LintClient;
-import com.android.tools.lint.detector.api.*;
-import com.google.common.base.Joiner;
-import com.google.common.base.Splitter;
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Multimap;
-import org.jetbrains.annotations.TestOnly;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
-import java.util.*;
-import java.util.function.Predicate;
-import java.util.regex.Pattern;
-
-import static com.android.SdkConstants.*;
+import static com.android.SdkConstants.FD_BUILD_TOOLS;
+import static com.android.SdkConstants.GRADLE_PLUGIN_MINIMUM_VERSION;
+import static com.android.SdkConstants.GRADLE_PLUGIN_RECOMMENDED_VERSION;
+import static com.android.SdkConstants.SUPPORT_LIB_GROUP_ID;
 import static com.android.ide.common.repository.GoogleMavenRepository.MAVEN_GOOGLE_CACHE_DIR_KEY;
 import static com.android.ide.common.repository.GradleCoordinate.COMPARE_PLUS_HIGHER;
 import static com.android.sdklib.SdkVersionInfo.LOWEST_ACTIVE_API;
@@ -51,10 +26,75 @@ import static com.android.tools.lint.checks.ManifestDetector.TARGET_NEWER;
 import static com.android.tools.lint.detector.api.LintUtils.guessGradleLocation;
 import static com.google.common.base.Charsets.UTF_8;
 
+import com.android.SdkConstants;
+import com.android.annotations.NonNull;
+import com.android.annotations.Nullable;
+import com.android.annotations.VisibleForTesting;
+import com.android.builder.model.AndroidArtifact;
+import com.android.builder.model.AndroidLibrary;
+import com.android.builder.model.AndroidProject;
+import com.android.builder.model.Dependencies;
+import com.android.builder.model.JavaLibrary;
+import com.android.builder.model.Library;
+import com.android.builder.model.MavenCoordinates;
+import com.android.builder.model.Variant;
+import com.android.ide.common.repository.GoogleMavenRepository;
+import com.android.ide.common.repository.GradleCoordinate;
+import com.android.ide.common.repository.GradleCoordinate.RevisionComponent;
+import com.android.ide.common.repository.GradleVersion;
+import com.android.ide.common.repository.MavenRepositories;
+import com.android.ide.common.repository.SdkMavenRepository;
+import com.android.repository.io.FileOpUtils;
+import com.android.sdklib.AndroidTargetHash;
+import com.android.sdklib.AndroidVersion;
+import com.android.sdklib.IAndroidTarget;
+import com.android.sdklib.SdkVersionInfo;
+import com.android.tools.lint.client.api.LintClient;
+import com.android.tools.lint.detector.api.Category;
+import com.android.tools.lint.detector.api.Context;
+import com.android.tools.lint.detector.api.Detector;
+import com.android.tools.lint.detector.api.GradleScanner;
+import com.android.tools.lint.detector.api.Implementation;
+import com.android.tools.lint.detector.api.Issue;
+import com.android.tools.lint.detector.api.JavaContext;
+import com.android.tools.lint.detector.api.LintFix;
+import com.android.tools.lint.detector.api.LintUtils;
+import com.android.tools.lint.detector.api.Location;
+import com.android.tools.lint.detector.api.Position;
+import com.android.tools.lint.detector.api.Project;
+import com.android.tools.lint.detector.api.Scope;
+import com.android.tools.lint.detector.api.Severity;
+import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
+import java.io.File;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
+import org.jetbrains.uast.UBlockExpression;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UFile;
+import org.jetbrains.uast.ULambdaExpression;
+import org.jetbrains.uast.visitor.AbstractUastVisitor;
+
 /**
  * Checks Gradle files for potential errors
  */
-public class GradleDetector extends Detector implements Detector.GradleScanner {
+public class GradleDetector extends Detector implements GradleScanner {
 
     private static final Implementation IMPLEMENTATION = new Implementation(
             GradleDetector.class,
@@ -166,7 +206,7 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
             "There are some combinations of libraries, or tools and libraries, that are " +
             "incompatible, or can lead to bugs. One such incompatibility is compiling with " +
             "a version of the Android support libraries that is not the latest version (or in " +
-            "particular, a version lower than your `targetSdkVersion`.)",
+            "particular, a version lower than your `targetSdkVersion`).",
 
             Category.CORRECTNESS,
             8,
@@ -289,7 +329,7 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
             "\n" +
             "That workaround is no longer necessary, and it has some serious downsides, such " +
             "as breaking API access checking (since the true `minSdkVersion` is no longer " +
-            "known.)\n" +
+            "known).\n" +
             "\n" +
             "In recent versions of the IDE and the Gradle plugin, the IDE automatically passes " +
             "the API level of the connected device used for deployment, and if that device " +
@@ -314,7 +354,7 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
             "no longer has this problem, or to repackage the library (and all of its " +
             "dependencies) using something like the `jarjar` tool, or finally, rewriting " +
             "the code to use different APIs (for example, for http code, consider using " +
-            "`HttpUrlConnection` or a library like `okhttp`.)",
+            "`HttpUrlConnection` or a library like `okhttp`).",
             Category.CORRECTNESS,
             8,
             Severity.FATAL,
@@ -355,10 +395,66 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
     private Object compileSdkVersionCookie;
     private int targetSdkVersion;
 
-    // ---- Implements Detector.GradleScanner ----
+    // ---- Implements GradleScanner ----
 
     @Override
-    public void visitBuildScript(@NonNull Context context, Map<String, Object> sharedData) {
+    public void visitBuildScript(@NonNull Context context) {
+    }
+
+    protected void handleGradleKotlinScript(@NonNull JavaContext context) {
+        UFile uastFile = context.getUastFile();
+        if (uastFile == null) {
+            return;
+        }
+        uastFile.accept(new AbstractUastVisitor() {
+            @Override
+            public boolean visitCallExpression(UCallExpression node) {
+                List<UExpression> valueArguments = node.getValueArguments();
+                String propertyName = LintUtils.getMethodName(node);
+                if (propertyName != null && valueArguments.size() == 1) {
+                    UExpression arg = valueArguments.get(0);
+                    if (!(arg instanceof ULambdaExpression)) {
+                        // Some sort of DSL property?
+                        // Parent should be block, its parent lambda, its parent a call -
+                        // the name is the parent
+                        UCallExpression parentCall = getSurroundingNamedBlock(node);
+                        if (parentCall != null) {
+                            UCallExpression parentParentCall = getSurroundingNamedBlock(parentCall);
+                            String parentName = LintUtils.getMethodName(parentCall);
+                            String parentParentName = parentParentCall != null ?
+                                    LintUtils.getMethodName(parentParentCall) : null;
+                            if (parentName != null) {
+                                if (isInterestingBlock(parentName, parentParentName)) {
+                                    String value = arg.asSourceString();
+                                    checkDslPropertyAssignment(context, propertyName, value,
+                                      parentName, parentParentName, arg, node);
+                                } else {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return super.visitCallExpression(node);
+            }
+        });
+    }
+
+    @Nullable
+    private static UCallExpression getSurroundingNamedBlock(@NonNull UElement node) {
+        UElement parent = node.getUastParent();
+        if (parent instanceof UBlockExpression) {
+            UElement parentParent = parent.getUastParent();
+            if (parentParent instanceof ULambdaExpression) {
+                UElement parentCall = parentParent.getUastParent();
+                if (parentCall instanceof UCallExpression) {
+                    return (UCallExpression) parentCall;
+                }
+            }
+        }
+
+        return null;
     }
 
     @SuppressWarnings("UnusedDeclaration")
@@ -1052,12 +1148,14 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
         }
 
         BlacklistedDeps blacklistedDeps = blacklisted.get(context.getProject());
-        List<Library> path = blacklistedDeps.checkDependency(groupId, artifactId, true);
-        if (path != null) {
-            String message = getBlacklistedDependencyMessage(context, path);
-            if (message != null) {
-                LintFix fix = fix().name("Delete dependency").replace().all().build();
-                report(context, statementCookie, DUPLICATE_CLASSES, message, fix);
+        if (blacklistedDeps != null) {
+            List<Library> path = blacklistedDeps.checkDependency(groupId, artifactId, true);
+            if (path != null) {
+                String message = getBlacklistedDependencyMessage(context, path);
+                if (message != null) {
+                    LintFix fix = fix().name("Delete dependency").replace().all().build();
+                    report(context, statementCookie, DUPLICATE_CLASSES, message, fix);
+                }
             }
         }
 
@@ -1129,12 +1227,8 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
         return null;
     }
 
-    @TestOnly
-    public static void cleanUp() {
-        googleMavenRepository = null;
-    }
-
-    private static GoogleMavenRepository googleMavenRepository;
+    @VisibleForTesting
+    static GoogleMavenRepository googleMavenRepository;
 
     @Nullable
     private static GradleVersion getGoogleMavenRepoVersion(@NonNull Context context,
@@ -1227,7 +1321,7 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
     private static LintFix getUpdateDependencyFix(
             @NonNull String currentVersion,
             @NonNull String suggestedVersion) {
-        return fix()
+        return LintFix.create()
                 .name("Change to " + suggestedVersion).replace().text(currentVersion)
                 .with(suggestedVersion)
                 .build();
@@ -1285,7 +1379,7 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
                 return null;
             }
         } catch (IOException e) {
-            client.log(e, "Could not connect to maven central to look up the latest " +
+            client.log(null, "Could not connect to maven central to look up the latest " +
                     "available version for %1$s", dependency);
             return null;
         }
@@ -1331,9 +1425,14 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
                 int start = response.indexOf('"', index) + 1;
                 int end = response.indexOf('"', start + 1);
                 if (end > start && start >= 0) {
-                    GradleVersion revision = GradleVersion.tryParse(response.substring(start, end));
+                    String substring = response.substring(start, end);
+                    GradleVersion revision = GradleVersion.tryParse(substring);
                     if (revision != null) {
-                        if ((allowPreview || !revision.isPreview())
+                        // Guava unfortunately put "-jre" and "-android" in the version number
+                        // instead of using a different artifact name; this turns off maven
+                        // semantic versioning. Special case this.
+                        boolean preview = revision.isPreview() && !substring.endsWith("-android");
+                        if ((allowPreview || !preview)
                                 && (filter == null || filter.test(revision))) {
                             return revision;
                         }
@@ -1388,20 +1487,6 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
                 String message = "This support library should not use a different version ("
                         + dependency.getMajorVersion() + ") than the `compileSdkVersion` ("
                         + compileSdkVersion + ")";
-                reportNonFatalCompatibilityIssue(context, cookie, message, fix);
-            } else if (targetSdkVersion > 0
-                    && dependency.getMajorVersion() < targetSdkVersion
-                    && dependency.getMajorVersion() != GradleCoordinate.PLUS_REV_VALUE
-                    && context.isEnabled(COMPATIBILITY)) {
-                LintFix fix = null;
-                if (newerVersion != null) {
-                    fix = fix().name("Replace with " + newerVersion)
-                            .replace().text(version.toString())
-                            .with(newerVersion.toString()).build();
-                }
-                String message = "This support library should not use a lower version ("
-                        + dependency.getMajorVersion() + ") than the `targetSdkVersion` ("
-                        + targetSdkVersion + ")";
                 reportNonFatalCompatibilityIssue(context, cookie, message, fix);
             }
         }
@@ -1738,6 +1823,17 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
             sortedVersions.sort(Collections.reverseOrder());
             MavenCoordinates c1 = findFirst(versionToCoordinate.get(sortedVersions.get(0)));
             MavenCoordinates c2 = findFirst(versionToCoordinate.get(sortedVersions.get(1)));
+
+            // For GMS, the synced version requirement ends at version 14
+            if (groupId.equals(GMS_GROUP_ID) || groupId.equals(FIREBASE_GROUP_ID)) {
+                // c2 is the smallest of all the versions; if it is at least 14,
+                // they all are
+                GradleVersion version = GradleVersion.tryParse(c2.getVersion());
+                if (version != null && version.getMajor() >= 14) {
+                    return;
+                }
+            }
+
             // Not using toString because in the IDE, these are model proxies which display garbage output
             String example1 = c1.getGroupId() + ":" + c1.getArtifactId() + ":" + c1.getVersion();
             String example2 = c2.getGroupId() + ":" + c2.getArtifactId() + ":" + c2.getVersion();
@@ -1887,6 +1983,9 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
      */
     private void checkBlacklistedDependencies(@NonNull Context context, Project project) {
         BlacklistedDeps blacklistedDeps = blacklisted.get(project);
+        if (blacklistedDeps == null) {
+            return;
+        }
         List<List<Library>> dependencies = blacklistedDeps.getBlacklistedDependencies();
         if (!dependencies.isEmpty()) {
             for (List<Library> path : dependencies) {
@@ -2098,11 +2197,22 @@ public class GradleDetector extends Detector implements Detector.GradleScanner {
 
     @SuppressWarnings({"MethodMayBeStatic", "UnusedParameters"})
     protected int getStartOffset(@NonNull Context context, @NonNull Object cookie) {
+        if (context instanceof JavaContext) {
+            // Kotlin script
+            Position start = ((JavaContext) context).getLocation((UElement) cookie).getStart();
+            if (start != null) {
+                return start.getOffset();
+            }
+        }
         return -1;
     }
 
     @SuppressWarnings({"MethodMayBeStatic", "UnusedParameters"})
     protected Location createLocation(@NonNull Context context, @NonNull Object cookie) {
+        if (context instanceof JavaContext) {
+            // Kotlin script
+            return ((JavaContext)context).getLocation((UElement)cookie);
+        }
         return null;
     }
 

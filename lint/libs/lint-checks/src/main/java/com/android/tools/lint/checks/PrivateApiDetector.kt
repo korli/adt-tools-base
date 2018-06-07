@@ -17,7 +17,6 @@
 package com.android.tools.lint.checks
 
 import com.android.tools.lint.detector.api.Category
-import com.android.tools.lint.detector.api.ClassContext
 import com.android.tools.lint.detector.api.ConstantEvaluator
 import com.android.tools.lint.detector.api.Detector
 import com.android.tools.lint.detector.api.Implementation
@@ -25,6 +24,7 @@ import com.android.tools.lint.detector.api.Issue
 import com.android.tools.lint.detector.api.JavaContext
 import com.android.tools.lint.detector.api.Scope
 import com.android.tools.lint.detector.api.Severity
+import com.android.tools.lint.detector.api.SourceCodeScanner
 import com.android.tools.lint.detector.api.TypeEvaluator
 import com.android.tools.lint.detector.api.UastLintUtils
 import com.intellij.psi.PsiClassType
@@ -41,7 +41,7 @@ import org.jetbrains.uast.UTypeReferenceExpression
 /**
  * Checks that the code is not using reflection to access hidden Android APIs
  */
-class PrivateApiDetector : Detector(), Detector.UastScanner {
+class PrivateApiDetector : Detector(), SourceCodeScanner {
     companion object Issues {
         /** Using hidden/private APIs  */
         @JvmField val ISSUE = Issue.create(
@@ -51,7 +51,7 @@ class PrivateApiDetector : Detector(), Detector.UastScanner {
                 """
 Using reflection to access hidden/private Android APIs is not safe; it will often not work on \
 devices from other vendors, and it may suddenly stop working (if the API is removed) or crash \
-spectacularly (if the API behavior changes, since there are no guarantees for compatibility.)
+spectacularly (if the API behavior changes, since there are no guarantees for compatibility).
 """,
 
                 Category.CORRECTNESS,
@@ -138,10 +138,9 @@ spectacularly (if the API behavior changes, since there are no guarantees for co
             if (aClass != null) { // Found in SDK: not internal
                 return
             }
-            val owner = ClassContext.getInternalName(value)
             val apiLookup = ApiLookup.get(context.client,
-                    context.getMainProject().buildTarget) ?: return
-            isInternal = !apiLookup.containsClass(owner)
+                    context.mainProject.buildTarget) ?: return
+            isInternal = !apiLookup.containsClass(value)
         }
 
         if (isInternal) {

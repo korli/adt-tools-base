@@ -15,6 +15,7 @@
  */
 package com.android.tools.lint.client.api
 
+import com.android.tools.lint.detector.api.CURRENT_API
 import com.android.tools.lint.detector.api.Issue
 
 /**
@@ -26,59 +27,37 @@ import com.android.tools.lint.detector.api.Issue
  */
 class CompositeIssueRegistry(
         private val registries: List<IssueRegistry>) : IssueRegistry() {
+    private var mergedIssues: List<Issue>? = null
 
-    private var issues: List<Issue>? = null
-
-    override fun getIssues(): List<Issue> {
-        val issues = this.issues
-        if (issues != null) {
-            return issues
-        }
-
-        var capacity = 0
-        for (registry in registries) {
-            capacity += registry.issues.size
-        }
-        val list = ArrayList<Issue>(capacity)
-        for (registry in registries) {
-            list.addAll(registry.issues)
-        }
-        this.issues = list
-        return list
-    }
-
-    override fun isUpToDate(): Boolean {
-        for (registry in registries) {
-            if (!registry.isUpToDate) {
-                return false
+    override val issues: List<Issue>
+        get() {
+            val issues = this.mergedIssues
+            if (issues != null) {
+                return issues
             }
-        }
 
-        return true
-    }
-
-    /** True if one or more java detectors were found that use the old Lombok-based API  */
-    fun hasLombokLegacyDetectors(): Boolean {
-        for (registry in registries) {
-            if (registry is JarFileIssueRegistry && registry.hasLombokLegacyDetectors()) {
-                return true
-            } else if (registry is CompositeIssueRegistry && registry.hasLombokLegacyDetectors()) {
-                return true
+            var capacity = 0
+            for (registry in registries) {
+                capacity += registry.issues.size
             }
-        }
-
-        return false
-    }
-
-    /** True if one or more java detectors were found that use the old PSI-based API */
-    fun hasPsiLegacyDetectors(): Boolean {
-        for (registry in registries) {
-            if (registry is JarFileIssueRegistry && registry.hasPsiLegacyDetectors()) {
-                return true
-            } else if (registry is CompositeIssueRegistry && registry.hasPsiLegacyDetectors()) {
-                return true
+            val list = ArrayList<Issue>(capacity)
+            for (registry in registries) {
+                list.addAll(registry.issues)
             }
+            this.mergedIssues = list
+            return list
         }
-        return false
-    }
+
+    override val api: Int = CURRENT_API
+
+    override val isUpToDate: Boolean
+        get() {
+            for (registry in registries) {
+                if (!registry.isUpToDate) {
+                    return false
+                }
+            }
+
+            return true
+        }
 }

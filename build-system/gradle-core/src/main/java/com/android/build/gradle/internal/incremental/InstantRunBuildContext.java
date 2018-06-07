@@ -16,10 +16,13 @@
 
 package com.android.build.gradle.internal.incremental;
 
+import static com.android.build.gradle.internal.incremental.InstantRunPatchingPolicy.MULTI_APK_SEPARATE_RESOURCES;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.gradle.internal.aapt.AaptGeneration;
-import com.android.builder.Version;
+import com.android.build.gradle.tasks.InstantRunResourcesApkBuilder;
+import com.android.builder.model.Version;
 import com.android.ide.common.xml.XmlPrettyPrinter;
 import com.android.sdklib.AndroidVersion;
 import com.android.utils.XmlUtils;
@@ -47,7 +50,6 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
-import org.gradle.internal.impldep.org.jetbrains.annotations.NotNull;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
@@ -121,6 +123,7 @@ public class InstantRunBuildContext {
 
         private final long buildId;
         @NonNull private InstantRunVerifierStatus verifierStatus;
+        @NonNull private List<InstantRunVerifierStatus> allStatuses = new ArrayList<>();
         @Nullable private InstantRunVerifierStatus eligibilityStatus;
         private InstantRunBuildMode buildMode;
         private final List<Artifact> artifacts = new ArrayList<>();
@@ -284,7 +287,7 @@ public class InstantRunBuildContext {
 
     public InstantRunBuildContext(
             boolean isInstantRunMode,
-            @NotNull AaptGeneration aaptGeneration,
+            @NonNull AaptGeneration aaptGeneration,
             @NonNull AndroidVersion androidVersion,
             @Nullable String targetAbi,
             @Nullable String density,
@@ -303,7 +306,7 @@ public class InstantRunBuildContext {
     InstantRunBuildContext(
             @NonNull BuildIdAllocator buildIdAllocator,
             boolean isInstantRunMode,
-            @NotNull AaptGeneration aaptGeneration,
+            @NonNull AaptGeneration aaptGeneration,
             @NonNull AndroidVersion androidVersion,
             @Nullable String targetAbi,
             @Nullable String density,
@@ -317,10 +320,13 @@ public class InstantRunBuildContext {
         this.isInstantRunMode = isInstantRunMode;
         this.androidVersion = androidVersion;
         this.patchingPolicy =
-                InstantRunPatchingPolicy.getPatchingPolicy(
-                        androidVersion,
-                        aaptGeneration != AaptGeneration.AAPT_V1,
-                        createSeparateApkForResources);
+                isInstantRunMode
+                        ? InstantRunPatchingPolicy.getPatchingPolicy(
+                                androidVersion,
+                                aaptGeneration != AaptGeneration.AAPT_V1,
+                                createSeparateApkForResources)
+                        : InstantRunPatchingPolicy.UNKNOWN_PATCHING_POLICY;
+
         this.abi = targetAbi;
         this.density = density;
         this.createSeparateApkForResources = createSeparateApkForResources;
@@ -376,6 +382,10 @@ public class InstantRunBuildContext {
                 currentBuild.buildMode.combine(
                         verifierStatus.getInstantRunBuildModeForPatchingPolicy(patchingPolicy));
 
+        // save the verifier status, even if it does not end up being used as the main status,
+        // this can be useful to check later on that certain condition were not met.
+        currentBuild.allStatuses.add(verifierStatus);
+
         // if our current status is not set, or the new build mode is higher, reset everything.
         if (currentBuild.getVerifierStatus() == InstantRunVerifierStatus.NO_CHANGES
                 || currentBuild.getVerifierStatus() == InstantRunVerifierStatus.COMPATIBLE
@@ -410,6 +420,16 @@ public class InstantRunBuildContext {
     }
 
     /**
+     * Returns true if the passed status has been set during this build execution.
+     *
+     * @param status a verifier status to test.
+     * @return true or false whether or not that status was set so far.
+     */
+    public boolean hasVerifierStatusBeenSet(InstantRunVerifierStatus status) {
+        return currentBuild.allStatuses.contains(status);
+    }
+
+    /**
      * Returns true if the verifier did not find any incompatible changes for InstantRun or was not
      * run due to no code changes.
      *
@@ -434,6 +454,11 @@ public class InstantRunBuildContext {
         return patchingPolicy;
     }
 
+    /** Returns true if the application's resources should be packaged in a separate split APK. */
+    public boolean useSeparateApkForResources() {
+        return isInInstantRunMode() && (getPatchingPolicy() == MULTI_APK_SEPARATE_RESOURCES);
+    }
+
     @NonNull
     public InstantRunBuildMode getBuildMode() {
         return currentBuild.buildMode;
@@ -451,28 +476,10 @@ public class InstantRunBuildContext {
             }
         }
 
-        // validate the patching policy and the received file type to record the file or not.
-        // RELOAD and MAIN are always record.
-        if (isInInstantRunMode()
-                && fileType != FileType.RELOAD_DEX
-                && fileType != FileType.MAIN
-                && fileType != FileType.RESOURCES) {
-            switch (patchingPolicy) {
-                case PRE_LOLLIPOP:
-                    return;
-                case MULTI_APK:
-                case MULTI_APK_SEPARATE_RESOURCES:
-                    if (fileType != FileType.SPLIT) {
-                        return;
-                    }
-            }
-        }
         if (fileType == FileType.MAIN) {
             // in case of MAIN, we need to disambiguate whether this is a SPLIT_MAIN or just a
             // MAIN. this is useful for the IDE so it knows which deployment method to use.
-            if (InstantRunPatchingPolicy.useMultiApk(patchingPolicy)) {
-                fileType = FileType.SPLIT_MAIN;
-            }
+            fileType = FileType.SPLIT_MAIN;
 
             // because of signing/aligning, we can be notified several times of the main FULL_APK
             // construction, last one wins.
@@ -482,7 +489,7 @@ public class InstantRunBuildContext {
             }
 
             // since the main FULL_APK is produced, no need to keep the RESOURCES record around.
-            if (patchingPolicy != InstantRunPatchingPolicy.MULTI_APK_SEPARATE_RESOURCES) {
+            if (patchingPolicy != MULTI_APK_SEPARATE_RESOURCES) {
                 Artifact resourcesApFile = currentBuild.getArtifactForType(FileType.RESOURCES);
                 while (resourcesApFile != null) {
                     currentBuild.artifacts.remove(resourcesApFile);
@@ -567,7 +574,7 @@ public class InstantRunBuildContext {
 
             // when a coldswap build was found, remove all RESOURCES entries for previous builds
             // as the resource is redelivered as part of the main split.
-            if (foundColdRestart && patchingPolicy.useMultiApk()) {
+            if (foundColdRestart) {
                 Artifact resourceApArtifact = previousBuild.getArtifactForType(FileType.RESOURCES);
                 if (resourceApArtifact != null) {
                     previousBuild.artifacts.remove(resourceApArtifact);
@@ -656,8 +663,7 @@ public class InstantRunBuildContext {
                 // installed.
                 // In this case we would have purged all of the intermediate history, so all the
                 // artifacts would be on the current build.
-                if (patchingPolicy == InstantRunPatchingPolicy.MULTI_APK
-                        && previousBuilds.keySet().size() == 2
+                if (previousBuilds.keySet().size() == 2
                         && previousBuilds.get(initialFullBuild).artifacts.size()
                                 == currentBuild.artifacts.size()) {
                     currentBuild.buildMode = InstantRunBuildMode.FULL;
@@ -676,70 +682,79 @@ public class InstantRunBuildContext {
                         + "=======================================\n"
                         + "collapseMainArtifactsIntoCurrentBuild\n"
                         + "=======================================");
-        if (patchingPolicy.useMultiApk()) {
-            // Add all of the older splits to the current build,
-            // as the older builds will be thrown away.
-            Set<String> splitLocations = Sets.newHashSet();
-            Artifact main = null;
+        // Add all of the older splits to the current build,
+        // as the older builds will be thrown away.
+        Set<String> splitLocations = Sets.newHashSet();
+        Artifact main = null;
 
-            for (Build build : previousBuilds.values()) {
-                for (Artifact artifact : build.artifacts) {
-                    if (artifact.fileType == FileType.SPLIT) {
-                        splitLocations.add(artifact.location.getAbsolutePath());
-                    } else if (artifact.fileType == FileType.SPLIT_MAIN) {
-                        main = artifact;
-                    }
-                }
-            }
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Split locations  Count:{}.\n" + "{}",
-                        splitLocations.size(),
-                        splitLocations.stream().collect(Collectors.joining("\n")));
-            }
-
-            // Don't re-add existing splits.
-            for (Artifact artifact : currentBuild.artifacts) {
+        for (Build build : previousBuilds.values()) {
+            for (Artifact artifact : build.artifacts) {
                 if (artifact.fileType == FileType.SPLIT) {
-                    splitLocations.remove(artifact.location.getAbsolutePath());
+                    splitLocations.add(artifact.location.getAbsolutePath());
                 } else if (artifact.fileType == FileType.SPLIT_MAIN) {
-                    main = null;
+                    main = artifact;
                 }
             }
+        }
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Split locations, current build removed  Count: {}.\n" + "{}",
-                        splitLocations.size(),
-                        splitLocations.stream().collect(Collectors.joining("\n")));
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Split locations  Count:{}.\n" + "{}",
+                    splitLocations.size(),
+                    splitLocations.stream().collect(Collectors.joining("\n")));
+        }
+
+        // Don't re-add existing splits.
+        for (Artifact artifact : currentBuild.artifacts) {
+            if (artifact.fileType == FileType.SPLIT) {
+                // we have a new resource APK, make sure we remove the old one (which may have
+                // a different name).
+                if (artifact.location
+                        .getName()
+                        .startsWith(InstantRunResourcesApkBuilder.APK_FILE_NAME)) {
+                    splitLocations.removeIf(
+                            splitLocation ->
+                                    new File(splitLocation)
+                                            .getName()
+                                            .startsWith(
+                                                    InstantRunResourcesApkBuilder.APK_FILE_NAME));
+                } else {
+                    splitLocations.remove(artifact.location.getAbsolutePath());
+                }
+            } else if (artifact.fileType == FileType.SPLIT_MAIN) {
+                main = null;
             }
+        }
 
+        // we can also be in the case where we used to produce a resources split but are now in a
+        // mode were resources are shipped in the main apk. If that's the case, make sure the
+        // resources split is removed.
+        if (MULTI_APK_SEPARATE_RESOURCES != patchingPolicy) {
+            String resourceApkName = null;
             for (String splitLocation : splitLocations) {
-                currentBuild.artifacts.add(new Artifact(FileType.SPLIT, new File(splitLocation)));
-            }
-
-            if (main != null) {
-                currentBuild.artifacts.add(main);
-            }
-        } else {
-            if (currentBuild.artifacts.isEmpty()) {
-
-                Artifact main = null;
-
-                for (Build build : previousBuilds.values()) {
-                    for (Artifact artifact : build.artifacts) {
-                        if (artifact.fileType == FileType.MAIN) {
-                            main = artifact;
-                        }
-                    }
+                String apkFileName = new File(splitLocation).getName();
+                if (apkFileName.startsWith(InstantRunResourcesApkBuilder.APK_FILE_NAME)) {
+                    resourceApkName = splitLocation;
                 }
-                if (main == null) {
-                    throw new IllegalStateException(
-                            "No current or previous main artifacts. " + "This should not happen.");
-                }
-                currentBuild.artifacts.add(main);
             }
+            if (resourceApkName != null) {
+                splitLocations.remove(resourceApkName);
+            }
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Split locations, current build removed  Count: {}.\n" + "{}",
+                    splitLocations.size(),
+                    splitLocations.stream().collect(Collectors.joining("\n")));
+        }
+
+        for (String splitLocation : splitLocations) {
+            currentBuild.artifacts.add(new Artifact(FileType.SPLIT, new File(splitLocation)));
+        }
+
+        if (main != null) {
+            currentBuild.artifacts.add(main);
         }
         if (currentBuild.artifacts.isEmpty()) {
             throw new IllegalStateException(

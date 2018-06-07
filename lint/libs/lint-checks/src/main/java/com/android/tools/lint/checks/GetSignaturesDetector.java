@@ -16,26 +16,28 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_STRING;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.client.api.JavaEvaluator;
-import com.android.tools.lint.client.api.JavaParser;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.ConstantEvaluator;
 import com.android.tools.lint.detector.api.Detector;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.intellij.psi.PsiMethod;
 import java.util.Collections;
 import java.util.List;
 import org.jetbrains.uast.UCallExpression;
 import org.jetbrains.uast.UExpression;
 
-public class GetSignaturesDetector extends Detector implements UastScanner  {
+public class GetSignaturesDetector extends Detector implements SourceCodeScanner  {
     public static final Issue ISSUE = Issue.create(
             "PackageManagerGetSignatures",
             "Potential Multiple Certificate Exploit",
@@ -47,7 +49,7 @@ public class GetSignaturesDetector extends Detector implements UastScanner  {
             "by this method.",
             Category.SECURITY,
             8,
-            Severity.INFORMATIONAL,
+            Severity.WARNING,
             new Implementation(
                     GetSignaturesDetector.class,
                     Scope.JAVA_FILE_SCOPE))
@@ -57,7 +59,7 @@ public class GetSignaturesDetector extends Detector implements UastScanner  {
     private static final String GET_PACKAGE_INFO = "getPackageInfo";
     private static final int GET_SIGNATURES_FLAG = 0x00000040;
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     @Override
     @Nullable
@@ -70,8 +72,7 @@ public class GetSignaturesDetector extends Detector implements UastScanner  {
             @NonNull PsiMethod method) {
         JavaEvaluator evaluator = context.getEvaluator();
         if (!evaluator.methodMatches(method, PACKAGE_MANAGER_CLASS, true,
-                JavaParser.TYPE_STRING,
-                JavaParser.TYPE_INT)) {
+                TYPE_STRING, TYPE_INT)) {
             return;
         }
 

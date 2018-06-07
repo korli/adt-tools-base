@@ -22,26 +22,22 @@ import com.android.annotations.NonNull;
 import com.android.build.gradle.AndroidConfig;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.builder.core.AndroidBuilder;
-import com.android.builder.model.SyncIssue;
+import com.android.builder.errors.EvalIssueReporter.Type;
 import org.gradle.api.Project;
-import org.gradle.internal.reflect.Instantiator;
 
 /** Common superclass for all {@link VariantFactory} implementations. */
 public abstract class BaseVariantFactory implements VariantFactory {
 
     @NonNull protected final GlobalScope globalScope;
-    @NonNull protected final Instantiator instantiator;
     @NonNull protected final AndroidConfig extension;
     @NonNull protected final AndroidBuilder androidBuilder;
 
     public BaseVariantFactory(
             @NonNull GlobalScope globalScope,
             @NonNull AndroidBuilder androidBuilder,
-            @NonNull Instantiator instantiator,
             @NonNull AndroidConfig extension) {
         this.globalScope = globalScope;
         this.androidBuilder = androidBuilder;
-        this.instantiator = instantiator;
         this.extension = extension;
     }
 
@@ -50,13 +46,13 @@ public abstract class BaseVariantFactory implements VariantFactory {
         if (project.getPluginManager().hasPlugin(ANDROID_APT_PLUGIN_NAME)) {
             globalScope
                     .getAndroidBuilder()
-                    .getErrorReporter()
-                    .handleSyncError(
-                            "android-apt",
-                            SyncIssue.TYPE_INCOMPATIBLE_PLUGIN,
+                    .getIssueReporter()
+                    .reportError(
+                            Type.INCOMPATIBLE_PLUGIN,
                             "android-apt plugin is incompatible with the Android Gradle plugin.  "
                                     + "Please use 'annotationProcessor' configuration "
-                                    + "instead.");
+                                    + "instead.",
+                            "android-apt");
         }
     }
 }

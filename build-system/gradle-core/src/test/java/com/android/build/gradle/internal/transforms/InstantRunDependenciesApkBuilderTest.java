@@ -21,13 +21,9 @@ import static org.junit.Assert.fail;
 import static org.mockito.Mockito.when;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
-import com.android.build.api.transform.Context;
-import com.android.build.api.transform.DirectoryInput;
+import com.android.build.VariantOutput;
 import com.android.build.api.transform.Format;
-import com.android.build.api.transform.JarInput;
 import com.android.build.api.transform.QualifiedContent;
-import com.android.build.api.transform.SecondaryInput;
 import com.android.build.api.transform.Status;
 import com.android.build.api.transform.TransformException;
 import com.android.build.api.transform.TransformInput;
@@ -37,35 +33,29 @@ import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.dsl.CoreSigningConfig;
 import com.android.build.gradle.internal.incremental.InstantRunBuildContext;
 import com.android.build.gradle.internal.pipeline.ExtendedContentType;
-import com.android.build.gradle.internal.scope.PackagingScope;
+import com.android.build.gradle.internal.scope.ExistingBuildElements;
 import com.android.builder.core.AndroidBuilder;
 import com.android.builder.internal.aapt.AaptOptions;
-import com.android.builder.packaging.PackagerException;
 import com.android.builder.sdk.TargetInfo;
-import com.android.builder.utils.FileCache;
-import com.android.ide.common.process.ProcessException;
-import com.android.ide.common.signing.KeytoolException;
+import com.android.ide.common.build.ApkInfo;
 import com.android.sdklib.BuildToolInfo;
 import com.android.utils.FileUtils;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import java.io.File;
 import java.io.IOException;
-import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 import org.gradle.api.Project;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.logging.Logger;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.mockito.Mock;
-import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 
 /**
@@ -78,19 +68,22 @@ public class InstantRunDependenciesApkBuilderTest {
     @Mock InstantRunBuildContext buildContext;
     @Mock AndroidBuilder androidBuilder;
     @Mock CoreSigningConfig coreSigningConfig;
-    @Mock PackagingScope packagingScope;
-
+    @Mock FileCollection mainResources;
     @Mock TargetInfo targetInfo;
     @Mock BuildToolInfo buildTools;
+    @Mock FileCollection apkList;
+
 
     @Rule public TemporaryFolder outputDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder supportDirectory = new TemporaryFolder();
     @Rule public TemporaryFolder dexFileFolder = new TemporaryFolder();
-    @Rule public TemporaryFolder fileCacheDirectory = new TemporaryFolder();
+    @Rule public TemporaryFolder apkListDirectory = new TemporaryFolder();
 
     InstantRunDependenciesApkBuilder instantRunSliceSplitApkBuilder;
     final List<InstantRunSplitApkBuilder.DexFiles> dexFilesList =
             new CopyOnWriteArrayList<>();
+
+    final ApkInfo apkInfo = ApkInfo.of(VariantOutput.OutputType.MAIN, ImmutableList.of(), 12345);
 
     @Before
     public void setUpMock() {
@@ -98,32 +91,37 @@ public class InstantRunDependenciesApkBuilderTest {
         when(androidBuilder.getTargetInfo()).thenReturn(targetInfo);
         when(targetInfo.getBuildTools()).thenReturn(buildTools);
         when(buildTools.getPath(BuildToolInfo.PathId.ZIP_ALIGN)).thenReturn("/path/to/zip-align");
-        when(packagingScope.getApplicationId()).thenReturn("com.foo.test");
-        when(packagingScope.getVersionName()).thenReturn("test_version_name");
-        when(packagingScope.getVersionCode()).thenReturn(12345);
     }
 
     @Before
     public void setup() throws IOException {
+
+        File apkListFile = apkListDirectory.newFile("apk-list.json");
+        org.apache.commons.io.FileUtils.write(
+                apkListFile, ExistingBuildElements.persistApkList(ImmutableList.of(apkInfo)));
+        when(apkList.getSingleFile()).thenReturn(apkListFile);
+
         instantRunSliceSplitApkBuilder =
                 new InstantRunDependenciesApkBuilder(
                         logger,
                         project,
                         buildContext,
                         androidBuilder,
-                        FileCache.getInstanceWithSingleProcessLocking(fileCacheDirectory.getRoot()),
-                        packagingScope,
+                        "com.foo.test",
                         coreSigningConfig,
                         AaptGeneration.AAPT_V2_DAEMON_MODE,
                         new AaptOptions(null, false, null),
                         outputDirectory.getRoot(),
                         supportDirectory.newFolder("instant-run"),
-                        supportDirectory.newFolder("aapt-temp")) {
+                        supportDirectory.newFolder("aapt-temp"),
+                        mainResources,
+                        mainResources,
+                        apkList,
+                        apkInfo) {
                     @NonNull
                     @Override
-                    protected File generateSplitApk(@NonNull DexFiles dexFiles)
-                            throws IOException, KeytoolException, PackagerException,
-                                    InterruptedException, ProcessException, TransformException {
+                    protected File generateSplitApk(
+                            @NonNull ApkInfo apkInfo, @NonNull DexFiles dexFiles) {
                         dexFilesList.add(dexFiles);
                         return new File("/dev/null");
                     }
@@ -155,42 +153,31 @@ public class InstantRunDependenciesApkBuilderTest {
         FileUtils.createFile(new File(dexFolderThree, "dexFile3-1.dex"), "some dex");
         FileUtils.createFile(new File(dexFolderThree, "dexFile3-2.dex"), "some dex");
 
+        TransformInput dexOne =
+                TransformTestHelper.directoryBuilder(dexFolderOne)
+                        .setName("dex-one")
+                        .setContentType(ExtendedContentType.DEX)
+                        .setScope(QualifiedContent.Scope.PROJECT)
+                        .build();
+        TransformInput dexTwo =
+                TransformTestHelper.directoryBuilder(dexFolderTwo)
+                        .setName("dex-two")
+                        .setContentType(ExtendedContentType.DEX)
+                        .setScope(QualifiedContent.Scope.SUB_PROJECTS)
+                        .putChangedFiles(ImmutableMap.of(dexFolderTwo, Status.CHANGED))
+                        .build();
+        TransformInput dexThree =
+                TransformTestHelper.directoryBuilder(dexFolderThree)
+                        .setName("dex-three")
+                        .setContentType(ExtendedContentType.DEX)
+                        .setScope(QualifiedContent.Scope.PROJECT)
+                        .build();
         TransformInvocation transformInvocation =
-                new TransformInvocationForTests(transformOutputProvider) {
-
-                    @Override
-                    public boolean isIncremental() {
-                        return true;
-                    }
-
-                    @NonNull
-                    @Override
-                    public Collection<TransformInput> getInputs() {
-                        return ImmutableSet.of(new TransformInput() {
-                            @NonNull
-                            @Override
-                            public Collection<JarInput> getJarInputs() {
-                                return ImmutableList.of();
-                            }
-
-                            @NonNull
-                            @Override
-                            public Collection<DirectoryInput> getDirectoryInputs() {
-                                return ImmutableList.of(
-                                        new DirectoryInputForTests("dex-one",
-                                                QualifiedContent.Scope.PROJECT,
-                                                dexFolderOne),
-                                        new IncrementalInputForTests("dex-two",
-                                                QualifiedContent.Scope.SUB_PROJECTS,
-                                                dexFolderTwo,
-                                                ImmutableMap.of(dexFolderTwo, Status.CHANGED)),
-                                        new DirectoryInputForTests("dex-three",
-                                                QualifiedContent.Scope.PROJECT,
-                                                dexFolderThree));
-                            }
-                        });
-                    }
-                };
+                TransformTestHelper.invocationBuilder()
+                        .setInputs(dexOne, dexTwo, dexThree)
+                        .setTransformOutputProvider(transformOutputProvider)
+                        .setIncremental(true)
+                        .build();
 
         instantRunSliceSplitApkBuilder.transform(transformInvocation);
         assertThat(dexFilesList).hasSize(1);
@@ -217,35 +204,27 @@ public class InstantRunDependenciesApkBuilderTest {
         FileUtils.createFile(new File(dexFolderThree, "dexFile3-1.dex"), "some dex");
         FileUtils.createFile(new File(dexFolderThree, "dexFile3-2.dex"), "some dex");
 
-        TransformInvocation transformInvocation =
-                new TransformInvocationForTests(transformOutputProvider) {
-                    @NonNull
-                    @Override
-                    public Collection<TransformInput> getInputs() {
-                        return ImmutableSet.of(new TransformInput() {
-                            @NonNull
-                            @Override
-                            public Collection<JarInput> getJarInputs() {
-                                return ImmutableList.of();
-                            }
+        TransformInput dexOne =
+                TransformTestHelper.directoryBuilder(dexFolderOne)
+                        .setScope(QualifiedContent.Scope.PROJECT)
+                        .setName("dex-one")
+                        .build();
 
-                            @NonNull
-                            @Override
-                            public Collection<DirectoryInput> getDirectoryInputs() {
-                                return ImmutableList.of(
-                                        new DirectoryInputForTests("dex-one",
-                                                QualifiedContent.Scope.PROJECT,
-                                                dexFolderOne),
-                                        new DirectoryInputForTests("dex-two",
-                                                QualifiedContent.Scope.SUB_PROJECTS,
-                                                dexFolderTwo),
-                                        new DirectoryInputForTests("dex-three",
-                                                QualifiedContent.Scope.PROJECT,
-                                                dexFolderThree));
-                            }
-                        });
-                    }
-                };
+        TransformInput dexTwo =
+                TransformTestHelper.directoryBuilder(dexFolderTwo)
+                        .setScope(QualifiedContent.Scope.SUB_PROJECTS)
+                        .setName("dex-two")
+                        .build();
+        TransformInput dexThree =
+                TransformTestHelper.directoryBuilder(dexFolderThree)
+                        .setScope(QualifiedContent.Scope.PROJECT)
+                        .setName("dex-three")
+                        .build();
+        TransformInvocation transformInvocation =
+                TransformTestHelper.invocationBuilder()
+                        .setInputs(dexOne, dexTwo, dexThree)
+                        .setTransformOutputProvider(transformOutputProvider)
+                        .build();
 
         instantRunSliceSplitApkBuilder.transform(transformInvocation);
         assertThat(dexFilesList).hasSize(1);
@@ -275,40 +254,28 @@ public class InstantRunDependenciesApkBuilderTest {
         FileUtils.createFile(new File(dexFolderThree, "dexFile3-1.dex"), "some dex");
         FileUtils.createFile(new File(dexFolderThree, "dexFile3-2.dex"), "some dex");
 
+        TransformInput dexOne =
+                TransformTestHelper.directoryBuilder(dexFolderOne)
+                        .setScope(QualifiedContent.Scope.PROJECT)
+                        .setName("dex-one")
+                        .build();
+
+        TransformInput dexTwo =
+                TransformTestHelper.directoryBuilder(dexFolderTwo)
+                        .setScope(QualifiedContent.Scope.SUB_PROJECTS)
+                        .setName("dex-two")
+                        .build();
+        TransformInput dexThree =
+                TransformTestHelper.directoryBuilder(dexFolderThree)
+                        .setScope(QualifiedContent.Scope.PROJECT)
+                        .setName("dex-three")
+                        .build();
         TransformInvocation transformInvocation =
-                new TransformInvocationForTests(transformOutputProvider) {
-                    @Override
-                    public boolean isIncremental() {
-                        return true;
-                    }
-
-                    @NonNull
-                    @Override
-                    public Collection<TransformInput> getInputs() {
-                        return ImmutableSet.of(new TransformInput() {
-                            @NonNull
-                            @Override
-                            public Collection<JarInput> getJarInputs() {
-                                return ImmutableList.of();
-                            }
-
-                            @NonNull
-                            @Override
-                            public Collection<DirectoryInput> getDirectoryInputs() {
-                                return ImmutableList.of(
-                                        new DirectoryInputForTests("dex-one",
-                                                QualifiedContent.Scope.PROJECT,
-                                                dexFolderOne),
-                                        new DirectoryInputForTests("dex-two",
-                                                QualifiedContent.Scope.SUB_PROJECTS,
-                                                dexFolderTwo),
-                                        new DirectoryInputForTests("dex-three",
-                                                QualifiedContent.Scope.PROJECT,
-                                                dexFolderThree));
-                            }
-                        });
-                    }
-                };
+                TransformTestHelper.invocationBuilder()
+                        .setInputs(dexOne, dexTwo, dexThree)
+                        .setTransformOutputProvider(transformOutputProvider)
+                        .setIncremental(true)
+                        .build();
 
         instantRunSliceSplitApkBuilder.transform(transformInvocation);
         assertThat(dexFilesList).hasSize(0);
@@ -317,8 +284,7 @@ public class InstantRunDependenciesApkBuilderTest {
     public abstract static class TransformOutputProviderForTests implements TransformOutputProvider {
 
         @Override
-        public void deleteAll() throws IOException {
-        }
+        public void deleteAll() {}
 
         @NonNull
         @Override
@@ -327,112 +293,6 @@ public class InstantRunDependenciesApkBuilderTest {
                 @NonNull Set<? super QualifiedContent.Scope> scopes, @NonNull Format format) {
             fail("Unexpected call to getContentLocation");
             throw new RuntimeException("Unexpected call to getContentLocation");
-        }
-    }
-
-    private static class TransformInvocationForTests implements TransformInvocation {
-
-        @NonNull
-        private final TransformOutputProvider transformOutputProvider;
-
-        private TransformInvocationForTests(
-                @NonNull TransformOutputProvider transformOutputProvider) {
-            this.transformOutputProvider = transformOutputProvider;
-        }
-
-        @NonNull
-        @Override
-        public Context getContext() {
-            return Mockito.mock(Context.class);
-        }
-
-        @NonNull
-        @Override
-        public Collection<TransformInput> getInputs() {
-            return ImmutableSet.of();
-        }
-
-        @NonNull
-        @Override
-        public Collection<TransformInput> getReferencedInputs() {
-            return ImmutableSet.of();
-        }
-
-        @NonNull
-        @Override
-        public Collection<SecondaryInput> getSecondaryInputs() {
-            return ImmutableSet.of();
-        }
-
-        @Nullable
-        @Override
-        public TransformOutputProvider getOutputProvider() {
-            return transformOutputProvider;
-        }
-
-        @Override
-        public boolean isIncremental() {
-            return false;
-        }
-    }
-
-    private static class DirectoryInputForTests implements DirectoryInput {
-
-        private final String name;
-        private final ScopeType scopeType;
-        private final File file;
-
-        protected DirectoryInputForTests(String name, ScopeType scopeType, File file) {
-            this.name = name;
-            this.scopeType = scopeType;
-            this.file = file;
-        }
-
-        @NonNull
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @NonNull
-        @Override
-        public Set<ContentType> getContentTypes() {
-            return ImmutableSet.of(ExtendedContentType.DEX);
-        }
-
-        @NonNull
-        @Override
-        public Set<? super Scope> getScopes() {
-            return ImmutableSet.of(scopeType);
-        }
-
-        @NonNull
-        @Override
-        public File getFile() {
-            return file;
-        }
-
-        @NonNull
-        @Override
-        public Map<File, Status> getChangedFiles() {
-            return ImmutableMap.of();
-        }
-    }
-
-    private static class IncrementalInputForTests extends DirectoryInputForTests {
-
-        private final Map<File, Status> changedFiles;
-
-        protected IncrementalInputForTests(String name,
-                ScopeType scopeType, File file, Map<File, Status> changedFiles) {
-            super(name, scopeType, file);
-            this.changedFiles = changedFiles;
-        }
-
-        @NonNull
-        @Override
-        public Map<File, Status> getChangedFiles() {
-            return changedFiles;
         }
     }
 }

@@ -43,6 +43,7 @@ import static com.android.SdkConstants.TAG_PROVIDER;
 import static com.android.SdkConstants.TAG_RECEIVER;
 import static com.android.SdkConstants.TAG_SERVICE;
 import static com.android.tools.lint.detector.api.LintUtils.endsWith;
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
 import static com.android.utils.SdkUtils.endsWithIgnoreCase;
 import static java.awt.image.BufferedImage.TYPE_INT_ARGB;
 
@@ -60,7 +61,7 @@ import com.android.tools.lint.client.api.UElementHandler;
 import com.android.tools.lint.client.api.UastParser;
 import com.android.tools.lint.detector.api.Category;
 import com.android.tools.lint.detector.api.Context;
-import com.android.tools.lint.detector.api.Detector.UastScanner;
+import com.android.tools.lint.detector.api.Detector;
 import com.android.tools.lint.detector.api.Implementation;
 import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
@@ -68,10 +69,11 @@ import com.android.tools.lint.detector.api.LintUtils;
 import com.android.tools.lint.detector.api.Location;
 import com.android.tools.lint.detector.api.Project;
 import com.android.tools.lint.detector.api.ResourceEvaluator;
-import com.android.tools.lint.detector.api.ResourceXmlDetector;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.android.tools.lint.detector.api.XmlContext;
+import com.android.tools.lint.detector.api.XmlScanner;
 import com.google.common.base.Joiner;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
@@ -124,7 +126,7 @@ import org.w3c.dom.Element;
  * Checks for common icon problems, such as wrong icon sizes, placing icons in the
  * density independent drawable folder, etc.
  */
-public class IconDetector extends ResourceXmlDetector implements UastScanner {
+public class IconDetector extends Detector implements XmlScanner, SourceCodeScanner {
 
     // TODO: Use the new merged manifest model
 
@@ -345,7 +347,7 @@ public class IconDetector extends ResourceXmlDetector implements UastScanner {
             "Icon format does not match the file extension",
 
             "Ensures that icons have the correct file extension (e.g. a `.png` file is " +
-            "really in the PNG format and not for example a GIF file named `.png`.)",
+            "really in the PNG format and not for example a GIF file named `.png`).",
             Category.ICONS,
             3,
             Severity.WARNING,
@@ -1817,7 +1819,7 @@ public class IconDetector extends ResourceXmlDetector implements UastScanner {
         }
     }
 
-    // Like LintUtils.getBaseName, but for files like .svn it returns "" rather than ".svn"
+    // Like SdkUtils.fileNameToResourceName, but for files like .svn it returns "" rather than ".svn"
     private static String getBaseName(String name) {
         String baseName = name;
         int index = baseName.indexOf('.');
@@ -2450,7 +2452,7 @@ public class IconDetector extends ResourceXmlDetector implements UastScanner {
         return icon;
     }
 
-    // ---- Implements UastScanner ----
+    // ---- implements SourceCodeScanner ----
 
     private static final String NOTIFICATION_CLASS = "android.app.Notification";
     private static final String NOTIFICATION_BUILDER_CLASS = "android.app.Notification.Builder";
@@ -2552,7 +2554,7 @@ public class IconDetector extends ResourceXmlDetector implements UastScanner {
         @Override
         public boolean visitCallExpression(@NonNull UCallExpression expression) {
             if (UastExpressionUtils.isMethodCall(expression)) {
-                if (SET_SMALL_ICON.equals(expression.getMethodName())) {
+                if (SET_SMALL_ICON.equals(getMethodName(expression))) {
                     List<UExpression> arguments = expression.getValueArguments();
                     if (arguments.size() == 1 && arguments.get(0) instanceof UReferenceExpression) {
                         handleSelect(arguments.get(0));

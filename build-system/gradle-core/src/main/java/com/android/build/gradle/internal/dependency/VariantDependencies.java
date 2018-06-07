@@ -20,12 +20,13 @@ import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.build.api.attributes.BuildTypeAttr;
 import com.android.build.api.attributes.ProductFlavorAttr;
+import com.android.build.api.attributes.VariantAttr;
 import com.android.build.gradle.internal.api.DefaultAndroidSourceSet;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.CoreProductFlavor;
-import com.android.builder.core.ErrorReporter;
+import com.android.build.gradle.internal.errors.SyncIssueHandler;
 import com.android.builder.core.VariantType;
-import com.android.builder.model.SyncIssue;
+import com.android.builder.errors.EvalIssueReporter;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -35,11 +36,10 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.gradle.api.Action;
 import org.gradle.api.Project;
-import org.gradle.api.artifacts.ComponentSelectionRules;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.ConfigurationContainer;
+import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.ResolutionStrategy;
 import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.AttributeContainer;
@@ -57,37 +57,29 @@ import org.gradle.api.model.ObjectFactory;
 public class VariantDependencies {
 
     public static final String CONFIG_NAME_COMPILE = "compile";
-    public static final String CONFIG_NAME_S_COMPILE = "%sCompile";
     public static final String CONFIG_NAME_PUBLISH = "publish";
-    public static final String CONFIG_NAME_S_PUBLISH = "%sPublish";
     public static final String CONFIG_NAME_APK = "apk";
-    public static final String CONFIG_NAME_S_APK = "%sApk";
     public static final String CONFIG_NAME_PROVIDED = "provided";
-    public static final String CONFIG_NAME_S_PROVIDED = "%sProvided";
     public static final String CONFIG_NAME_WEAR_APP = "wearApp";
     public static final String CONFIG_NAME_ANNOTATION_PROCESSOR = "annotationProcessor";
-    public static final String CONFIG_NAME_S_WEAR_APP = "%sWearApp";
-    public static final String CONFIG_NAME_S_ANNOTATION_PROCESSOR = "%sAnnotationProcessor";
 
     public static final String CONFIG_NAME_API = "api";
-    public static final String CONFIG_NAME_S_API = "%sApi";
     public static final String CONFIG_NAME_COMPILE_ONLY = "compileOnly";
-    public static final String CONFIG_NAME_S_COMPILE_ONLY = "%sCompileOnly";
     public static final String CONFIG_NAME_IMPLEMENTATION = "implementation";
-    public static final String CONFIG_NAME_S_IMPLEMENTATION = "%sImplementation";
     public static final String CONFIG_NAME_RUNTIME_ONLY = "runtimeOnly";
-    public static final String CONFIG_NAME_S_RUNTIME_ONLY = "%sRuntimeOnly";
     public static final String CONFIG_NAME_FEATURE = "feature";
     public static final String CONFIG_NAME_APPLICATION = "application";
 
     public static final String CONFIG_NAME_LINTCHECKS = "lintChecks";
 
-    public static final String USAGE_LINT = "android-lint-checks";
+    public static final String USAGE_BUNDLE = "android-bundle";
 
     @NonNull private final String variantName;
 
     @NonNull private final Configuration compileClasspath;
     @NonNull private final Configuration runtimeClasspath;
+    @NonNull private final Collection<Configuration> sourceSetRuntimeConfigurations;
+    @NonNull private final Collection<Configuration> sourceSetImplementationConfigurations;
 
     @Nullable private final Configuration apiElements;
     @Nullable private final Configuration runtimeElements;
@@ -98,6 +90,7 @@ public class VariantDependencies {
 
     @Nullable private final Configuration wearAppConfiguration;
     @Nullable private final Configuration metadataValuesConfiguration;
+    @Nullable private final Configuration bundleElements;
 
     /**
      *  Whether we have a direct dependency on com.android.support:support-annotations; this
@@ -107,7 +100,7 @@ public class VariantDependencies {
 
     public static final class Builder {
         @NonNull private final Project project;
-        @NonNull private final ErrorReporter errorReporter;
+        @NonNull private final SyncIssueHandler errorReporter;
         @NonNull private final GradleVariantConfiguration variantConfiguration;
         private boolean baseSplit = false;
         private Map<Attribute<ProductFlavorAttr>, ProductFlavorAttr> flavorSelection;
@@ -120,15 +113,17 @@ public class VariantDependencies {
         // At most it's going to be flavor dimension count + 5:
         // variant-specific, build type, multi-flavor, flavor1, ..., flavorN, defaultConfig, test.
         // Default hash-map size of 16 (w/ load factor of .75) should be enough.
-        private final Set<Configuration> compileClasspaths = Sets.newHashSet();
-        private final Set<Configuration> apiClasspaths = Sets.newHashSet();
-        private final Set<Configuration> runtimeClasspaths = Sets.newHashSet();
-        private final Set<Configuration> annotationConfigs = Sets.newHashSet();
-        private final Set<Configuration> wearAppConfigs = Sets.newHashSet();
+        private final Set<Configuration> compileClasspaths = Sets.newLinkedHashSet();
+        private final Set<Configuration> apiClasspaths = Sets.newLinkedHashSet();
+        private final Set<Configuration> implementationConfigurations = Sets.newLinkedHashSet();
+        private final Set<Configuration> runtimeClasspaths = Sets.newLinkedHashSet();
+        private final Set<Configuration> annotationConfigs = Sets.newLinkedHashSet();
+        private final Set<Configuration> wearAppConfigs = Sets.newLinkedHashSet();
+        private VariantDependencies testedVariantDependencies;
 
         protected Builder(
                 @NonNull Project project,
-                @NonNull ErrorReporter errorReporter,
+                @NonNull SyncIssueHandler errorReporter,
                 @NonNull GradleVariantConfiguration variantConfiguration) {
             this.project = project;
             this.errorReporter = errorReporter;
@@ -159,6 +154,12 @@ public class VariantDependencies {
             return this;
         }
 
+        public Builder setTestedVariantDependencies(
+                @NonNull VariantDependencies testedVariantDependencies) {
+            this.testedVariantDependencies = testedVariantDependencies;
+            return this;
+        }
+
         public Builder setBaseSplit(boolean baseSplit) {
             this.baseSplit = baseSplit;
             return this;
@@ -175,6 +176,7 @@ public class VariantDependencies {
                 final Configuration implementationConfig = configs.getByName(sourceSet.getImplementationConfigurationName());
                 compileClasspaths.add(implementationConfig);
                 runtimeClasspaths.add(implementationConfig);
+                implementationConfigurations.add(implementationConfig);
 
                 String apiConfigName = sourceSet.getApiConfigurationName();
                 if (apiConfigName != null) {
@@ -215,6 +217,12 @@ public class VariantDependencies {
             compileClasspath.setVisible(false);
             compileClasspath.setDescription("Resolved configuration for compilation for variant: " + variantName);
             compileClasspath.setExtendsFrom(compileClasspaths);
+            if (testedVariantDependencies != null) {
+                for (Configuration configuration :
+                        testedVariantDependencies.sourceSetImplementationConfigurations) {
+                    compileClasspath.extendsFrom(configuration);
+                }
+            }
             compileClasspath.setCanBeConsumed(false);
             compileClasspath.getResolutionStrategy().sortArtifacts(ResolutionStrategy.SortOrder.CONSUMER_FIRST);
             final AttributeContainer compileAttributes = compileClasspath.getAttributes();
@@ -239,6 +247,12 @@ public class VariantDependencies {
             runtimeClasspath.setVisible(false);
             runtimeClasspath.setDescription("Resolved configuration for runtime for variant: " + variantName);
             runtimeClasspath.setExtendsFrom(runtimeClasspaths);
+            if (testedVariantDependencies != null) {
+                for (Configuration configuration :
+                        testedVariantDependencies.sourceSetRuntimeConfigurations) {
+                    runtimeClasspath.extendsFrom(configuration);
+                }
+            }
             runtimeClasspath.setCanBeConsumed(false);
             runtimeClasspath.getResolutionStrategy().sortArtifacts(ResolutionStrategy.SortOrder.CONSUMER_FIRST);
             final AttributeContainer runtimeAttributes = runtimeClasspath.getAttributes();
@@ -246,28 +260,42 @@ public class VariantDependencies {
             runtimeAttributes.attribute(Usage.USAGE_ATTRIBUTE, runtimeUsage);
             runtimeAttributes.attribute(AndroidTypeAttr.ATTRIBUTE, consumeType);
 
-            Configuration wearApp = null;
-            if (publishType != null && publishType.getName().equals(AndroidTypeAttr.APK)) {
-                wearApp = configurations.maybeCreate(variantName + "WearBundling");
-                wearApp.setDescription(
-                        "Resolved Configuration for wear app bundling for variant: " + variantName);
-                wearApp.setExtendsFrom(wearAppConfigs);
-                wearApp.setCanBeConsumed(false);
-                final AttributeContainer wearAttributes = wearApp.getAttributes();
-                applyVariantAttributes(wearAttributes, buildType, consumptionFlavorMap);
-                // because the APK is published to Runtime, then we need to make sure this one consumes RUNTIME as well.
-                wearAttributes.attribute(Usage.USAGE_ATTRIBUTE, runtimeUsage);
-                wearAttributes.attribute(
-                        AndroidTypeAttr.ATTRIBUTE,
-                        factory.named(AndroidTypeAttr.class, AndroidTypeAttr.APK));
-            }
-
             Configuration apiElements = null;
             Configuration runtimeElements = null;
             Configuration metadataElements = null;
             Configuration metadataValues = null;
+            Configuration wearApp = null;
+            Configuration bundleElements = null;
 
             if (publishType != null) {
+                if (publishType.getName().equals(AndroidTypeAttr.APK)) {
+                    wearApp = configurations.maybeCreate(variantName + "WearBundling");
+                    wearApp.setDescription(
+                            "Resolved Configuration for wear app bundling for variant: "
+                                    + variantName);
+                    wearApp.setExtendsFrom(wearAppConfigs);
+                    wearApp.setCanBeConsumed(false);
+                    final AttributeContainer wearAttributes = wearApp.getAttributes();
+                    applyVariantAttributes(wearAttributes, buildType, consumptionFlavorMap);
+                    // because the APK is published to Runtime, then we need to make sure this one consumes RUNTIME as well.
+                    wearAttributes.attribute(Usage.USAGE_ATTRIBUTE, runtimeUsage);
+                    wearAttributes.attribute(
+                            AndroidTypeAttr.ATTRIBUTE,
+                            factory.named(AndroidTypeAttr.class, AndroidTypeAttr.APK));
+
+                    // bundle config for UAM bundle
+                    bundleElements = configurations.maybeCreate(variantName + "BundleElements");
+                    bundleElements.setDescription("Bundle elements for " + variantName);
+                    bundleElements.setCanBeResolved(false);
+
+                    final AttributeContainer bundleElementsAttributes =
+                            bundleElements.getAttributes();
+                    VariantAttr variantNameAttr = factory.named(VariantAttr.class, variantName);
+                    bundleElementsAttributes.attribute(VariantAttr.ATTRIBUTE, variantNameAttr);
+                    bundleElementsAttributes.attribute(
+                            Usage.USAGE_ATTRIBUTE, factory.named(Usage.class, USAGE_BUNDLE));
+                }
+
                 Map<Attribute<ProductFlavorAttr>, ProductFlavorAttr> publicationFlavorMap =
                         getFlavorAttributes(null);
 
@@ -355,12 +383,15 @@ public class VariantDependencies {
                     variantName,
                     compileClasspath,
                     runtimeClasspath,
+                    runtimeClasspaths,
+                    implementationConfigurations,
                     apiElements,
                     runtimeElements,
                     annotationProcessor,
                     metadataElements,
                     metadataValues,
-                    wearApp);
+                    wearApp,
+                    bundleElements);
         }
 
         private static void checkOldConfigurations(
@@ -390,7 +421,7 @@ public class VariantDependencies {
             // the variant manager is lenient about it.
             // In that case we're going to avoid resolving the dependencies anyway, so we can just
             // skip this.
-            if (errorReporter.hasSyncIssue(SyncIssue.TYPE_UNNAMED_FLAVOR_DIMENSION)) {
+            if (errorReporter.hasSyncIssue(EvalIssueReporter.Type.UNNAMED_FLAVOR_DIMENSION)) {
                 return map;
             }
 
@@ -428,7 +459,7 @@ public class VariantDependencies {
 
     public static Builder builder(
             @NonNull Project project,
-            @NonNull ErrorReporter errorReporter,
+            @NonNull SyncIssueHandler errorReporter,
             @NonNull GradleVariantConfiguration variantConfiguration) {
         return new Builder(project, errorReporter, variantConfiguration);
     }
@@ -437,21 +468,27 @@ public class VariantDependencies {
             @NonNull String variantName,
             @NonNull Configuration compileClasspath,
             @NonNull Configuration runtimeClasspath,
+            @NonNull Collection<Configuration> sourceSetRuntimeConfigurations,
+            @NonNull Collection<Configuration> sourceSetImplementationConfigurations,
             @Nullable Configuration apiElements,
             @Nullable Configuration runtimeElements,
             @NonNull Configuration annotationProcessorConfiguration,
             @Nullable Configuration metadataElements,
             @Nullable Configuration metadataValuesConfiguration,
-            @Nullable Configuration wearAppConfiguration) {
+            @Nullable Configuration wearAppConfiguration,
+            @Nullable Configuration bundleElements) {
         this.variantName = variantName;
         this.compileClasspath = compileClasspath;
         this.runtimeClasspath = runtimeClasspath;
+        this.sourceSetRuntimeConfigurations = sourceSetRuntimeConfigurations;
+        this.sourceSetImplementationConfigurations = sourceSetImplementationConfigurations;
         this.apiElements = apiElements;
         this.runtimeElements = runtimeElements;
         this.annotationProcessorConfiguration = annotationProcessorConfiguration;
         this.metadataElements = metadataElements;
         this.metadataValuesConfiguration = metadataValuesConfiguration;
         this.wearAppConfiguration = wearAppConfiguration;
+        this.bundleElements = bundleElements;
     }
 
     public String getName() {
@@ -466,6 +503,15 @@ public class VariantDependencies {
     @NonNull
     public Configuration getRuntimeClasspath() {
         return runtimeClasspath;
+    }
+
+    @NonNull
+    public Collection<Dependency> getIncomingRuntimeDependencies() {
+        ImmutableList.Builder<Dependency> builder = ImmutableList.builder();
+        for (Configuration classpath : sourceSetRuntimeConfigurations) {
+            builder.addAll(classpath.getIncoming().getDependencies());
+        }
+        return builder.build();
     }
 
     @Nullable
@@ -496,6 +542,11 @@ public class VariantDependencies {
     @Nullable
     public Configuration getMetadataValuesConfiguration() {
         return metadataValuesConfiguration;
+    }
+
+    @Nullable
+    public Configuration getBundleElements() {
+        return bundleElements;
     }
 
     @Override

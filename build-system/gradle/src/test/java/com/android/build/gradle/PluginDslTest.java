@@ -17,15 +17,12 @@
 package com.android.build.gradle;
 
 import static com.google.common.truth.Truth.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 
 import com.android.SdkConstants;
 import com.android.build.gradle.api.TestVariant;
-import com.android.build.gradle.internal.ExtraModelInfo;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.BuildType;
+import com.android.build.gradle.internal.errors.SyncIssueHandler;
 import com.android.build.gradle.internal.fixture.BaseTestedVariant;
 import com.android.build.gradle.internal.fixture.TestConstants;
 import com.android.build.gradle.internal.fixture.TestProjects;
@@ -43,6 +40,7 @@ import com.android.utils.StringHelper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import com.google.common.truth.Truth;
 import groovy.util.Eval;
 import java.io.File;
 import java.util.Collection;
@@ -111,10 +109,10 @@ public class PluginDslTest {
 
         // we can now call this since the variants/tasks have been created
         Set<BaseTestedVariant> variants = checker.getVariants();
-        assertEquals(2, variants.size());
+        Truth.assertThat(variants).named("variant list").hasSize(2);
 
         Set<TestVariant> testVariants = checker.getTestVariants();
-        assertEquals(1, testVariants.size());
+        Truth.assertThat(testVariants).named("test variant list").hasSize(1);
 
         checker.checkTestedVariant("debug", "debugAndroidTest", variants, testVariants);
         checker.checkNonTestedVariant("release", variants);
@@ -134,10 +132,10 @@ public class PluginDslTest {
 
         // we can now call this since the variants/tasks have been created
         Set<BaseTestedVariant> variants = checker.getVariants();
-        assertEquals(2, variants.size());
+        Truth.assertThat(variants).named("variant list").hasSize(2);
 
         Set<TestVariant> testVariants = checker.getTestVariants();
-        assertEquals(1, testVariants.size());
+        Truth.assertThat(testVariants).named("test variant list").hasSize(1);
 
         checker.checkTestedVariant("debug", "debugAndroidTest", variants, testVariants);
         checker.checkNonTestedVariant("release", variants);
@@ -184,18 +182,17 @@ public class PluginDslTest {
         map.put("appVariants", 3);
         map.put("unitTest", 3);
         map.put("androidTests", 1);
-        assertEquals(
-                VariantCheckers.countVariants(map),
-                plugin.getVariantManager().getVariantScopes().size());
+        assertThat(VariantCheckers.countVariants(map))
+                .isEqualTo(plugin.getVariantManager().getVariantScopes().size());
 
         // we can now call this since the variants/tasks have been created
 
         // does not include tests
         Set<BaseTestedVariant> variants = checker.getVariants();
-        assertEquals(3, variants.size());
+        Truth.assertThat(variants).named("variant list").hasSize(3);
 
         Set<TestVariant> testVariants = checker.getTestVariants();
-        assertEquals(1, testVariants.size());
+        Truth.assertThat(testVariants).named("test variant list").hasSize(1);
 
         checker.checkTestedVariant("staging", "stagingAndroidTest", variants, testVariants);
 
@@ -226,18 +223,17 @@ public class PluginDslTest {
         map.put("appVariants", 4);
         map.put("unitTest", 4);
         map.put("androidTests", 2);
-        assertEquals(
-                VariantCheckers.countVariants(map),
-                plugin.getVariantManager().getVariantScopes().size());
+        assertThat(VariantCheckers.countVariants(map))
+                .isEqualTo(plugin.getVariantManager().getVariantScopes().size());
 
         // we can now call this since the variants/tasks have been created
 
         // does not include tests
         Set<BaseTestedVariant> variants = checker.getVariants();
-        assertEquals(4, variants.size());
+        Truth.assertThat(variants).named("variant list").hasSize(4);
 
         Set<TestVariant> testVariants = checker.getTestVariants();
-        assertEquals(2, testVariants.size());
+        Truth.assertThat(testVariants).named("test variant list").hasSize(2);
 
         checker.checkTestedVariant(
                 "flavor1Debug", "flavor1DebugAndroidTest", variants, testVariants);
@@ -285,18 +281,17 @@ public class PluginDslTest {
         plugin.createAndroidTasks(false);
         ImmutableMap<String, Integer> map =
                 ImmutableMap.of("appVariants", 12, "unitTests", 12, "androidTests", 6);
-        assertEquals(
-                VariantCheckers.countVariants(map),
-                plugin.getVariantManager().getVariantScopes().size());
+        assertThat(VariantCheckers.countVariants(map))
+                .isEqualTo(plugin.getVariantManager().getVariantScopes().size());
 
         // we can now call this since the variants/tasks have been created
 
         // does not include tests
         Set<BaseTestedVariant> variants = checker.getVariants();
-        assertEquals(12, variants.size());
+        Truth.assertThat(variants).named("variant list").hasSize(12);
 
         Set<TestVariant> testVariants = checker.getTestVariants();
-        assertEquals(6, testVariants.size());
+        Truth.assertThat(testVariants).named("test variant list").hasSize(6);
 
         checker.checkTestedVariant("f1FaDebug", "f1FaDebugAndroidTest", variants, testVariants);
         checker.checkTestedVariant("f1FbDebug", "f1FbDebugAndroidTest", variants, testVariants);
@@ -365,11 +360,11 @@ public class PluginDslTest {
 
         // does not include tests
         Set<BaseTestedVariant> variants = checker.getVariants();
-        assertEquals(2, variants.size());
+        Truth.assertThat(variants).named("variant list").hasSize(2);
 
         for (BaseTestedVariant variant : variants) {
             if ("release".equals(variant.getBuildType().getName())) {
-                assertNotNull(variant.getMappingFile());
+                assertThat(variant.getMappingFile()).named("release mapping file").isNotNull();
             } else {
                 Assert.assertNull(variant.getMappingFile());
             }
@@ -516,12 +511,13 @@ public class PluginDslTest {
         AndroidJavaCompile compileReleaseJavaWithJavac =
                 (AndroidJavaCompile)
                         project.getTasks().getByName(checker.getReleaseJavacTaskName());
-        assertEquals(
-                JavaVersion.VERSION_1_6.toString(),
-                compileReleaseJavaWithJavac.getTargetCompatibility());
-        assertEquals(
-                JavaVersion.VERSION_1_6.toString(),
-                compileReleaseJavaWithJavac.getSourceCompatibility());
+
+        assertThat(compileReleaseJavaWithJavac.getTargetCompatibility())
+                .named("target compat")
+                .isEqualTo(JavaVersion.VERSION_1_6.toString());
+        assertThat(compileReleaseJavaWithJavac.getSourceCompatibility())
+                .named("source compat")
+                .isEqualTo(JavaVersion.VERSION_1_6.toString());
     }
 
     @Test
@@ -535,10 +531,14 @@ public class PluginDslTest {
         File mockableJarFile = mockableAndroidJar.getOutputFile();
         if (SdkConstants.CURRENT_PLATFORM != SdkConstants.PLATFORM_WINDOWS) {
             // Windows paths contain : to identify drives.
-            assertFalse(mockableJarFile.getAbsolutePath().contains(":"));
+            assertThat(mockableJarFile.getAbsolutePath())
+                    .named("Mockable jar Path")
+                    .doesNotContain(":");
         }
 
-        assertEquals("mockable-Google-Inc.-Google-APIs-24.v3.jar", mockableJarFile.getName());
+        assertThat(mockableJarFile.getName())
+                .named("Mockable jar name")
+                .isEqualTo("mockable-Google-Inc.-Google-APIs-24.v3.jar");
     }
 
     @Test
@@ -558,7 +558,10 @@ public class PluginDslTest {
         AndroidJavaCompile compileReleaseJavaWithJavac =
                 (AndroidJavaCompile)
                         project.getTasks().getByName(checker.getReleaseJavacTaskName());
-        assertEquals("foo", compileReleaseJavaWithJavac.getOptions().getEncoding());
+
+        assertThat(compileReleaseJavaWithJavac.getOptions().getEncoding())
+                .named("source encoding")
+                .isEqualTo("foo");
     }
 
     @Test
@@ -639,8 +642,6 @@ public class PluginDslTest {
         BuildType debug = android.getBuildTypes().getByName("debug");
         assertThat(debug.isUseProguard()).isFalse();
         assertThat(debug.isShrinkResources()).isTrue();
-        //noinspection deprecation
-        assertThat(debug.getUseJack()).isNull();
     }
 
     @Test
@@ -653,9 +654,10 @@ public class PluginDslTest {
     @SuppressWarnings("deprecation")
     @Test
     public void testAdbExe() throws Exception {
-        assertNotNull(android.getAdbExe());
-        assertNotNull(android.getAdbExecutable());
-        assertEquals(android.getAdbExe(), android.getAdbExecutable());
+        assertThat(android.getAdbExe()).named("adb exe").isNotNull();
+        assertThat(android.getAdbExecutable()).named("adb executable").isNotNull();
+
+        assertThat(android.getAdbExe()).named("adb exe").isEqualTo(android.getAdbExecutable());
     }
 
     @Test
@@ -664,10 +666,9 @@ public class PluginDslTest {
         plugin.createAndroidTasks(false);
         assertThat(plugin.getAndroidBuilder().getBuildToolInfo().getRevision())
                 .isEqualTo(AndroidBuilder.DEFAULT_BUILD_TOOLS_REVISION);
+        // FIXME once we get rid of the component model, we can make this better.
         Collection<SyncIssue> syncIssues =
-                ((ExtraModelInfo) plugin.getAndroidBuilder().getErrorReporter())
-                        .getSyncIssues()
-                        .values();
+                ((SyncIssueHandler) plugin.getAndroidBuilder().getIssueReporter()).getSyncIssues();
         assertThat(syncIssues).hasSize(1);
         SyncIssue issue = Iterables.getOnlyElement(syncIssues);
         assertThat(issue.getType()).isEqualTo(SyncIssue.TYPE_BUILD_TOOLS_TOO_LOW);

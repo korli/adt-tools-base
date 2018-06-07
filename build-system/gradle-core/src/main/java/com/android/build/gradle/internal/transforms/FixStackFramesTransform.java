@@ -130,6 +130,12 @@ public class FixStackFramesTransform extends Transform {
     private static final LoggerWrapper logger =
             LoggerWrapper.getLogger(FixStackFramesTransform.class);
     private static final FileTime ZERO = FileTime.fromMillis(0);
+    /**
+     * Please update this whenever you wish to invalidate all previous cache entries. E.g. if there
+     * is a bug in processing, increasing the cache version will invalidate all invalid cache
+     * entries, and fresh ones will be generated.
+     */
+    private static final long CACHE_VERSION = 1;
 
     @NonNull private final Supplier<List<File>> androidJarClasspath;
     @NonNull private final List<Path> compilationBootclasspath;
@@ -230,6 +236,9 @@ public class FixStackFramesTransform extends Transform {
                 Preconditions.checkNotNull(transformInvocation.getOutputProvider());
 
         boolean incremental = transformInvocation.isIncremental();
+        if (!incremental) {
+            outputProvider.deleteAll();
+        }
 
         try {
             for (TransformInput input : transformInvocation.getInputs()) {
@@ -277,6 +286,7 @@ public class FixStackFramesTransform extends Transform {
                                                 "file",
                                                 input,
                                                 FileCache.FileProperties.PATH_SIZE_TIMESTAMP)
+                                        .putLong("version", CACHE_VERSION)
                                         .build();
                         userCache.createFile(output, key, fileCreator);
                     } else {
@@ -298,16 +308,15 @@ public class FixStackFramesTransform extends Transform {
                 Enumeration<? extends ZipEntry> inEntries = inputZip.entries();
                 while (inEntries.hasMoreElements()) {
                     ZipEntry entry = inEntries.nextElement();
+                    if (!entry.getName().endsWith(SdkConstants.DOT_CLASS)) {
+                        continue;
+                    }
                     InputStream originalFile =
                             new BufferedInputStream(inputZip.getInputStream(entry));
                     ZipEntry outEntry = new ZipEntry(entry.getName());
-                    byte[] newEntryContent;
-                    if (!entry.getName().endsWith(SdkConstants.DOT_CLASS)) {
-                        // just copy it
-                        newEntryContent = ByteStreams.toByteArray(originalFile);
-                    } else {
-                        newEntryContent = getFixedClass(originalFile, getClassLoader(invocation));
-                    }
+
+                    byte[] newEntryContent =
+                            getFixedClass(originalFile, getClassLoader(invocation));
                     CRC32 crc32 = new CRC32();
                     crc32.update(newEntryContent);
                     outEntry.setCrc(crc32.getValue());

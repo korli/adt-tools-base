@@ -21,6 +21,15 @@ import static com.google.common.truth.Truth.assertThat;
 import com.android.annotations.NonNull;
 import com.android.build.api.transform.Transform;
 import com.android.build.gradle.internal.dsl.Splits;
+import com.android.build.gradle.internal.fixtures.FakeDeprecationReporter;
+import com.android.build.gradle.internal.fixtures.FakeObjectFactory;
+import com.android.build.gradle.options.BooleanOption;
+import com.android.build.gradle.options.IntegerOption;
+import com.android.build.gradle.options.LongOption;
+import com.android.build.gradle.options.OptionalBooleanOption;
+import com.android.build.gradle.options.ProjectOptions;
+import com.android.build.gradle.options.StringOption;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.reflect.ClassPath;
 import com.google.common.reflect.TypeToken;
@@ -28,15 +37,15 @@ import com.google.protobuf.Descriptors;
 import com.google.protobuf.ProtocolMessageEnum;
 import com.google.wireless.android.sdk.stats.DeviceInfo;
 import com.google.wireless.android.sdk.stats.GradleBuildSplits;
+import com.google.wireless.android.sdk.stats.GradleProjectOptionsSettings;
 import java.io.IOException;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.gradle.api.Task;
-import org.gradle.internal.reflect.Instantiator;
-import org.gradle.internal.reflect.ObjectInstantiationException;
 import org.junit.Test;
 
 public class AnalyticsUtilTest {
@@ -49,7 +58,9 @@ public class AnalyticsUtilTest {
                 AnalyticsUtil::getPotentialTaskExecutionTypeName,
                 "com.android.build.gradle.tasks.ZipMergingTask",
                 "com.android.build.gradle.tasks.AndroidZip",
-                "com.android.build.gradle.internal.tasks.featuresplit.FeatureSplitTransitiveDepsWriterTask");
+                "com.android.build.gradle.internal.tasks.featuresplit.FeatureSplitTransitiveDepsWriterTask",
+                "com.android.build.gradle.internal.res.LinkAndroidResForBundleTask",
+                "com.android.build.gradle.internal.tasks.PipelineToPublicationTask");
     }
 
     @Test
@@ -66,19 +77,7 @@ public class AnalyticsUtilTest {
 
     @Test
     public void splitConverterTest() throws IOException {
-        Splits splits =
-                new Splits(
-                        new Instantiator() {
-                            @Override
-                            public <T> T newInstance(Class<? extends T> aClass, Object... objects)
-                                    throws ObjectInstantiationException {
-                                try {
-                                    return aClass.getConstructor().newInstance();
-                                } catch (Exception e) {
-                                    throw new ObjectInstantiationException(aClass, e);
-                                }
-                            }
-                        });
+        Splits splits = new Splits(new FakeObjectFactory(), new FakeDeprecationReporter());
         // Defaults
         {
             GradleBuildSplits proto = AnalyticsUtil.toProto(splits);
@@ -124,13 +123,24 @@ public class AnalyticsUtilTest {
                 it -> {
                     it.setEnable(true);
                     it.setAuto(true);
-                    it.include("en");
                 });
         {
             GradleBuildSplits proto = AnalyticsUtil.toProto(splits);
             assertThat(proto.getLanguageEnabled()).isTrue();
             assertThat(proto.getLanguageAuto()).isTrue();
-            assertThat(proto.getLanguageIncludesList()).containsExactly("en");
+            assertThat(proto.getLanguageIncludesList()).isEmpty();
+        }
+
+        splits.language(
+                it -> {
+                    it.setAuto(false);
+                    it.include("en", null);
+                });
+        {
+            GradleBuildSplits proto = AnalyticsUtil.toProto(splits);
+            assertThat(proto.getLanguageEnabled()).isTrue();
+            assertThat(proto.getLanguageAuto()).isFalse();
+            assertThat(proto.getLanguageIncludesList()).containsExactly("en", "null");
         }
 
         // Check other field population is based on enable flag.
@@ -177,13 +187,7 @@ public class AnalyticsUtilTest {
         Descriptors.EnumDescriptor protoEnum =
                 mappingFunction.apply(missingTasks.get(0)).getDescriptorForType();
 
-        int maxNumber =
-                protoEnum
-                        .getValues()
-                        .stream()
-                        .mapToInt(Descriptors.EnumValueDescriptor::getNumber)
-                        .max()
-                        .orElseThrow(() -> new IllegalStateException("Empty enum?"));
+        int maxNumber = getMaxEnumNumber(protoEnum);
 
         StringBuilder error =
                 new StringBuilder()
@@ -215,5 +219,129 @@ public class AnalyticsUtilTest {
             @NonNull Function<Class<T>, U> mappingFunction) {
         // This assumes that the proto with value 0 means 'unknown'.
         return mappingFunction.apply(clazz).getNumber() == 0;
+    }
+
+    private int getMaxEnumNumber(Descriptors.EnumDescriptor descriptor) {
+        return descriptor
+                .getValues()
+                .stream()
+                .mapToInt(Descriptors.EnumValueDescriptor::getNumber)
+                .max()
+                .orElseThrow(() -> new IllegalStateException("Empty enum?"));
+    }
+
+    @Test
+    public void checkBooleanOptions() {
+        checkOptions(BooleanOption.values(), AnalyticsUtil::toProto);
+    }
+
+    @Test
+    public void checkOptionalBooleanOptions() {
+        checkOptions(OptionalBooleanOption.values(), AnalyticsUtil::toProto);
+    }
+
+    @Test
+    public void checkIntegerOptions() {
+        checkOptions(IntegerOption.values(), AnalyticsUtil::toProto);
+    }
+
+    @Test
+    public void checkLongOptions() {
+        checkOptions(LongOption.values(), AnalyticsUtil::toProto);
+    }
+
+    @Test
+    public void checkStringOptions() {
+        checkOptions(StringOption.values(), AnalyticsUtil::toProto);
+    }
+
+    private <OptionT extends Enum<OptionT>, AnalyticsT extends ProtocolMessageEnum>
+            void checkOptions(OptionT[] options, Function<OptionT, AnalyticsT> toProtoFunction) {
+        List<OptionT> missing = new ArrayList<>();
+        for (OptionT option : options) {
+            if (toProtoFunction.apply(option).getNumber() == 0) {
+                missing.add(option);
+            }
+        }
+        if (!missing.isEmpty()) {
+            Descriptors.EnumDescriptor descriptor =
+                    toProtoFunction.apply(missing.get(0)).getDescriptorForType();
+            int max = getMaxEnumNumber(descriptor);
+
+            StringBuilder errorMessage =
+                    new StringBuilder("Missing analytics enum constants: ")
+                            .append(descriptor.getName())
+                            .append(
+                                    "\nSee tools/analytics-library/protos/src/main/proto/analytics_enums.proto\n\n");
+            for (OptionT option : missing) {
+                max++;
+                errorMessage
+                        .append("    ")
+                        .append(option.name())
+                        .append(" = ")
+                        .append(max)
+                        .append(";\n");
+            }
+            throw new AssertionError(errorMessage.toString());
+        }
+    }
+
+    @Test
+    public void checkEmptyProjectOptions() {
+        ProjectOptions options = new ProjectOptions(ImmutableMap.of());
+        GradleProjectOptionsSettings gradleProjectOptionsSettings = AnalyticsUtil.toProto(options);
+        assertThat(gradleProjectOptionsSettings.getTrueBooleanOptionsList()).isEmpty();
+        assertThat(gradleProjectOptionsSettings.getFalseBooleanOptionsList()).isEmpty();
+        assertThat(gradleProjectOptionsSettings.getTrueOptionalBooleanOptionsList()).isEmpty();
+        assertThat(gradleProjectOptionsSettings.getFalseOptionalBooleanOptionsList()).isEmpty();
+        assertThat(gradleProjectOptionsSettings.getIntegerOptionValuesList()).isEmpty();
+        assertThat(gradleProjectOptionsSettings.getLongOptionsList()).isEmpty();
+        assertThat(gradleProjectOptionsSettings.getStringOptionsList()).isEmpty();
+    }
+
+    @Test
+    public void checkSomeEmptyProjectOptions() {
+        ImmutableMap.Builder<String, Object> properties = ImmutableMap.builder();
+        properties.put(BooleanOption.IDE_BUILD_MODEL_ONLY.getPropertyName(), true);
+        properties.put(BooleanOption.IDE_BUILD_MODEL_ONLY_ADVANCED.getPropertyName(), false);
+        properties.put(OptionalBooleanOption.SIGNING_V1_ENABLED.getPropertyName(), true);
+        properties.put(OptionalBooleanOption.SIGNING_V2_ENABLED.getPropertyName(), false);
+        properties.put(IntegerOption.IDE_BUILD_MODEL_ONLY_VERSION.getPropertyName(), 17);
+        properties.put(LongOption.DEPRECATED_NDK_COMPILE_LEASE.getPropertyName(), Long.MAX_VALUE);
+        properties.put(StringOption.IDE_BUILD_TARGET_ABI.getPropertyName(), "x86");
+        ProjectOptions options = new ProjectOptions(properties.build());
+
+        GradleProjectOptionsSettings gradleProjectOptionsSettings = AnalyticsUtil.toProto(options);
+        assertThat(gradleProjectOptionsSettings.getTrueBooleanOptionsList())
+                .containsExactly(
+                        com.android.tools.build.gradle.internal.profile.BooleanOption
+                                .IDE_BUILD_MODEL_ONLY_VALUE);
+        assertThat(gradleProjectOptionsSettings.getFalseBooleanOptionsList())
+                .containsExactly(
+                        com.android.tools.build.gradle.internal.profile.BooleanOption
+                                .IDE_BUILD_MODEL_ONLY_ADVANCED_VALUE);
+        assertThat(gradleProjectOptionsSettings.getTrueOptionalBooleanOptionsList())
+                .containsExactly(
+                        com.android.tools.build.gradle.internal.profile.OptionalBooleanOption
+                                .SIGNING_V1_ENABLED_VALUE);
+        assertThat(gradleProjectOptionsSettings.getFalseOptionalBooleanOptionsList())
+                .containsExactly(
+                        com.android.tools.build.gradle.internal.profile.OptionalBooleanOption
+                                .SIGNING_V2_ENABLED_VALUE);
+        assertThat(gradleProjectOptionsSettings.getIntegerOptionValuesList()).hasSize(1);
+        assertThat(gradleProjectOptionsSettings.getIntegerOptionValues(0).getIntegerOption())
+                .isEqualTo(
+                        com.android.tools.build.gradle.internal.profile.IntegerOption
+                                .IDE_BUILD_MODEL_ONLY_VERSION_VALUE);
+        assertThat(gradleProjectOptionsSettings.getIntegerOptionValues(0).getIntegerOptionValue())
+                .isEqualTo(17);
+        assertThat(gradleProjectOptionsSettings.getLongOptionsList())
+                .containsExactly(
+                        com.android.tools.build.gradle.internal.profile.LongOption
+                                .DEPRECATED_NDK_COMPILE_LEASE_VALUE);
+        assertThat(gradleProjectOptionsSettings.getStringOptionsList())
+                .containsExactly(
+                        com.android.tools.build.gradle.internal.profile.StringOption
+                                .IDE_BUILD_TARGET_ABI_VALUE);
     }
 }

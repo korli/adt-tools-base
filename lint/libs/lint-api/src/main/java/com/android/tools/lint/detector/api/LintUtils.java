@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.tools.lint.detector.api;
 
 import static com.android.SdkConstants.ANDROID_MANIFEST_XML;
@@ -23,11 +22,6 @@ import static com.android.SdkConstants.ATTR_LOCALE;
 import static com.android.SdkConstants.ATTR_NAME;
 import static com.android.SdkConstants.ATTR_PACKAGE;
 import static com.android.SdkConstants.BIN_FOLDER;
-import static com.android.SdkConstants.DOT_GIF;
-import static com.android.SdkConstants.DOT_JPEG;
-import static com.android.SdkConstants.DOT_JPG;
-import static com.android.SdkConstants.DOT_PNG;
-import static com.android.SdkConstants.DOT_WEBP;
 import static com.android.SdkConstants.DOT_XML;
 import static com.android.SdkConstants.FN_BUILD_GRADLE;
 import static com.android.SdkConstants.ID_PREFIX;
@@ -41,22 +35,22 @@ import static com.android.ide.common.resources.configuration.FolderConfiguration
 import static com.android.ide.common.resources.configuration.LocaleQualifier.BCP_47_PREFIX;
 import static com.android.sdklib.SdkVersionInfo.camelCaseToUnderlines;
 import static com.android.sdklib.SdkVersionInfo.underlinesToCamelCase;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BOOLEAN_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_BYTE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_CHAR;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_CHARACTER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_DOUBLE_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_FLOAT_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_INTEGER_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_LONG_WRAPPER;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT;
-import static com.android.tools.lint.client.api.JavaParser.TYPE_SHORT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BOOLEAN_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BYTE;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_BYTE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_CHAR;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_CHARACTER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_DOUBLE;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_DOUBLE_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_FLOAT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_FLOAT_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_INTEGER_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_LONG;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_LONG_WRAPPER;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_SHORT;
+import static com.android.tools.lint.client.api.JavaEvaluatorKt.TYPE_SHORT_WRAPPER;
 
 import com.android.SdkConstants;
 import com.android.annotations.NonNull;
@@ -94,10 +88,9 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Objects;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import com.intellij.ide.util.JavaAnonymousClassesHelper;
+import com.intellij.lang.Language;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.CommonClassNames;
 import com.intellij.psi.PsiAnonymousClass;
@@ -106,7 +99,6 @@ import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiClassType;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.psi.PsiImportStatement;
 import com.intellij.psi.PsiJavaFile;
 import com.intellij.psi.PsiLiteral;
 import com.intellij.psi.PsiMethod;
@@ -127,6 +119,7 @@ import java.nio.charset.CharacterCodingException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Queue;
@@ -134,9 +127,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-import lombok.ast.ImportDeclaration;
+import org.jetbrains.uast.UCallExpression;
 import org.jetbrains.uast.UElement;
 import org.jetbrains.uast.UFile;
+import org.jetbrains.uast.UIdentifier;
 import org.jetbrains.uast.UParenthesizedExpression;
 import org.jetbrains.uast.UastUtils;
 import org.objectweb.asm.Opcodes;
@@ -146,7 +140,6 @@ import org.objectweb.asm.tree.FieldNode;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
 
 /**
  * Useful utility methods related to lint.
@@ -198,6 +191,7 @@ public class LintUtils {
         }
     }
 
+    @Deprecated
     @Nullable
     public static PsiElement getCallName(@NonNull PsiCallExpression expression) {
         PsiElement firstChild = expression.getFirstChild();
@@ -250,7 +244,7 @@ public class LintUtils {
      */
     public static String formatList(@NonNull List<String> strings, int maxItems, boolean sort) {
         if (sort) {
-            List<String> sorted = Lists.newArrayList(strings);
+            List<String> sorted = new ArrayList<>(strings);
             Collections.sort(sorted);
             strings = sorted;
         }
@@ -297,22 +291,6 @@ public class LintUtils {
      */
     public static boolean isXmlFile(@NonNull File file) {
         return SdkUtils.endsWithIgnoreCase(file.getPath(), DOT_XML);
-    }
-
-    /**
-     * Returns true if the given file represents a bitmap drawable file
-     *
-     * @param file the file to be checked
-     * @return true if the given file is an xml file
-     */
-    public static boolean isBitmapFile(@NonNull File file) {
-        String path = file.getPath();
-        // endsWith(name, DOT_PNG) is also true for endsWith(name, DOT_9PNG)
-        return endsWith(path, DOT_PNG)
-                || endsWith(path, DOT_JPG)
-                || endsWith(path, DOT_GIF)
-                || endsWith(path, DOT_JPEG)
-                || endsWith(path, DOT_WEBP);
     }
 
     /**
@@ -437,22 +415,6 @@ public class LintUtils {
      */
     public static boolean isRootElement(Element element) {
         return element == element.getOwnerDocument().getDocumentElement();
-    }
-
-    /**
-     * Returns the corresponding R field name for the given XML resource name
-     * @param styleName the XML name
-     * @return the corresponding R field name
-     */
-    public static String getFieldName(@NonNull String styleName) {
-        for (int i = 0, n = styleName.length(); i < n; i++) {
-            char c = styleName.charAt(i);
-            if (c == '.' || c == '-' || c == ':') {
-                return styleName.replace('.', '_').replace('-', '_').replace(':', '_');
-            }
-        }
-
-        return styleName;
     }
 
     /**
@@ -1083,55 +1045,6 @@ public class LintUtils {
     }
 
     /**
-     * Returns true if the given class (specified by a fully qualified class
-     * name) name is imported in the given compilation unit either through a fully qualified
-     * import or by a wildcard import.
-     *
-     * @param compilationUnit the compilation unit
-     * @param fullyQualifiedName the fully qualified class name
-     * @return true if the given imported name refers to the given fully
-     *         qualified name
-     * @deprecated Use PSI element hierarchies instead where type resolution is more directly
-     *  available (call {@link PsiImportStatement#resolve()})
-     */
-    @Deprecated
-    public static boolean isImported(
-            @Nullable lombok.ast.Node compilationUnit,
-            @NonNull String fullyQualifiedName) {
-        if (compilationUnit == null) {
-            return false;
-        }
-        int dotIndex = fullyQualifiedName.lastIndexOf('.');
-        int dotLength = fullyQualifiedName.length() - dotIndex;
-
-        boolean imported = false;
-        for (lombok.ast.Node rootNode : compilationUnit.getChildren()) {
-            if (rootNode instanceof ImportDeclaration) {
-                ImportDeclaration importDeclaration = (ImportDeclaration) rootNode;
-                String fqn = importDeclaration.asFullyQualifiedName();
-                if (fqn.equals(fullyQualifiedName)) {
-                    return true;
-                } else if (fullyQualifiedName.regionMatches(dotIndex, fqn,
-                        fqn.length() - dotLength, dotLength)) {
-                    // This import is importing the class name using some other prefix, so there
-                    // fully qualified class name cannot be imported under that name
-                    return false;
-                } else if (importDeclaration.astStarImport()
-                        && fqn.regionMatches(0, fqn, 0, dotIndex + 1)) {
-                    imported = true;
-                    // but don't break -- keep searching in case there's a non-wildcard
-                    // import of the specific class name, e.g. if we're looking for
-                    // android.content.SharedPreferences.Editor, don't match on the following:
-                    //   import android.content.SharedPreferences.*;
-                    //   import foo.bar.Editor;
-                }
-            }
-        }
-
-        return imported;
-    }
-
-    /**
      * Looks up the resource values for the given attribute given a style. Note that
      * this only looks project-level style values, it does not resume into the framework
      * styles.
@@ -1158,7 +1071,7 @@ public class LintUtils {
 
         Queue<ResourceValue> queue = new ArrayDeque<>();
         queue.add(new ResourceValue(ResourceUrl.create(style.type, style.name, false), null));
-        Set<String> seen = Sets.newHashSet();
+        Set<String> seen = new HashSet<>();
         int count = 0;
         boolean isFrameworkAttribute = ANDROID_URI.equals(namespace);
         while (count < 30 && !queue.isEmpty()) {
@@ -1174,7 +1087,7 @@ public class LintUtils {
                         ItemResourceValue value = srv.getItem(attribute, isFrameworkAttribute);
                         if (value != null) {
                             if (result == null) {
-                                result = Lists.newArrayList();
+                                result = new ArrayList<>();
                             }
                             if (!result.contains(value)) {
                                 result.add(value);
@@ -1238,7 +1151,7 @@ public class LintUtils {
 
         Queue<ResourceValue> queue = new ArrayDeque<>();
         queue.add(new ResourceValue(ResourceUrl.create(null, style.type, style.name), null));
-        Set<String> seen = Sets.newHashSet();
+        Set<String> seen = new HashSet<>();
         int count = 0;
         while (count < 30 && !queue.isEmpty()) {
             ResourceValue front = queue.remove();
@@ -1251,7 +1164,7 @@ public class LintUtils {
                     if (rv instanceof StyleResourceValue) {
                         StyleResourceValue srv = (StyleResourceValue) rv;
                         if (result == null) {
-                            result = Lists.newArrayList();
+                            result = new ArrayList<>();
                         }
                         result.add(srv);
 
@@ -1544,7 +1457,7 @@ public class LintUtils {
             Matcher matcher = compile.matcher(errorMessage);
             if (matcher.find()) {
                 int groupCount = matcher.groupCount();
-                List<String> parameters = Lists.newArrayListWithExpectedSize(groupCount);
+                List<String> parameters = new ArrayList<>(groupCount);
                 for (int i = 1; i <= groupCount; i++) {
                     parameters.add(matcher.group(i));
                 }
@@ -1654,9 +1567,12 @@ public class LintUtils {
     public static Location guessGradleLocation(
             @NonNull LintClient client,
             @NonNull File projectDir,
-            @NonNull String string) {
+            @Nullable String string) {
         File gradle = new File(projectDir, FN_BUILD_GRADLE);
         if (gradle.isFile()) {
+            if (string == null) {
+                return Location.create(gradle);
+            }
             String contents = client.readFile(gradle).toString();
             int match = contents.indexOf(string);
             if (match != -1) {
@@ -1851,7 +1767,7 @@ public class LintUtils {
     public static List<SourceProvider> getSourceProviders(
             @NonNull AndroidProject project,
             @NonNull Variant variant) {
-        List<SourceProvider> providers = Lists.newArrayList();
+        List<SourceProvider> providers = new ArrayList<>();
         AndroidArtifact mainArtifact = variant.getMainArtifact();
 
         providers.add(project.getDefaultConfig().getSourceProvider());
@@ -1896,7 +1812,7 @@ public class LintUtils {
     public static List<SourceProvider> getTestSourceProviders(
             @NonNull AndroidProject project,
             @NonNull Variant variant) {
-        List<SourceProvider> providers = Lists.newArrayList();
+        List<SourceProvider> providers = new ArrayList<>();
 
         ProductFlavorContainer defaultConfig = project.getDefaultConfig();
         for (SourceProviderContainer extra : defaultConfig.getExtraSourceProviders()) {
@@ -2044,5 +1960,27 @@ public class LintUtils {
             }
         }
         return null;
+    }
+
+    /**
+     * Looks up the method name of a given call. You should be able to just
+     * call {@link UCallExpression#getMethodName()} but due to bugs in UAST
+     * a workaround is currently necessary in some cases.
+     *
+     * @param call the call to look up
+     * @return the call name, if any
+     */
+    @Nullable
+    public static String getMethodName(@NonNull UCallExpression call) {
+        UIdentifier methodIdentifier = call.getMethodIdentifier();
+        if (methodIdentifier != null) {
+            return methodIdentifier.getName();
+        }
+        return call.getMethodName();
+    }
+
+    /** Returns true if the given language is Kotlin */
+    public static boolean isKotlin(@Nullable Language language) {
+        return language != null && language.getID().equals("kotlin");
     }
 }

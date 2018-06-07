@@ -14,8 +14,9 @@ iml_module(
         "//tools/idea/.idea/libraries:gradle-api",
         "//tools/base/build-system/java-lib-plugin/java-lib-model:studio.java-lib-model[module]",
         "//tools/base/annotations:studio.android-annotations[module]",
-        "//tools/idea/.idea/libraries:equalsverifier",
+        "//tools/idea/.idea/libraries:equalsverifier[test]",
         "//tools/idea/.idea/libraries:JUnit4[test]",
+        "//tools/idea/.idea/libraries:KotlinJavaRuntime",
     ],
 )
 
@@ -57,6 +58,7 @@ java_test(
     test_class = "com.android.testutils.JarTestSuite",
     deps = [
         ":java-lib-model-builder",
+        "//tools/base/build-system:gradle-api",
         "//tools/base/testutils:tools.testutils",
         "//tools/base/third_party:junit_junit",
         "//tools/base/third_party:nl.jqno.equalsverifier_equalsverifier",

@@ -25,6 +25,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "perfa/jni_function_table.h"
 #include "proto/internal_memory.grpc.pb.h"
 #include "proto/memory.grpc.pb.h"
 #include "stats.h"
@@ -37,6 +38,8 @@ using profiler::Clock;
 using profiler::proto::AllocatedClass;
 using profiler::proto::AllocationEvent;
 using profiler::proto::BatchAllocationSample;
+using profiler::proto::BatchJNIGlobalRefEvent;
+using profiler::proto::JNIGlobalReferenceEvent;
 using profiler::proto::MemoryControlRequest;
 
 namespace profiler {
@@ -80,10 +83,17 @@ using MethodIdMap = std::unordered_map<int64_t, LineNumberInfo>;
 using ThreadIdMap = std::unordered_map<std::string, int32_t>;
 #endif
 
-class MemoryTrackingEnv {
+class MemoryTrackingEnv : public GlobalRefListener {
  public:
   static MemoryTrackingEnv* Instance(JavaVM* vm, bool log_live_alloc_count,
-                                     int max_stack_depth);
+                                     int max_stack_depth,
+                                     bool track_global_jni_refs);
+
+  void AfterGlobalRefCreated(jobject prototype, jobject gref) override;
+  void BeforeGlobalRefDeleted(jobject gref) override;
+
+  void AfterGlobalWeakRefCreated(jobject prototype, jweak gref) override;
+  void BeforeGlobalWeakRefDeleted(jweak gref) override;
 
  private:
   // POD for encoding the method/instruction location data into trie.
@@ -95,7 +105,7 @@ class MemoryTrackingEnv {
   };
 
   explicit MemoryTrackingEnv(jvmtiEnv* jvmti, bool log_live_alloc_count,
-                             int max_stack_depth);
+                             int max_stack_depth, bool track_global_jni_refs);
 
   // Environment is alive through the app's lifetime, don't bother cleaning up.
   ~MemoryTrackingEnv() = delete;
@@ -105,12 +115,11 @@ class MemoryTrackingEnv {
   void Initialize();
   void StartLiveTracking(int64_t timestamp);
   void StopLiveTracking(int64_t timestamp);
-  void SuspendLiveTracking();
-  void ResumeLiveTracking();
   const AllocatedClass& RegisterNewClass(jvmtiEnv* jvmti, JNIEnv* jni,
                                          jclass klass);
   void SendBackClassData();
   void SetAllocationCallbacksStatus(bool enabled);
+  void SetJNIRefCallbacksStatus(bool enabled);
   void LogGcStart();
   void LogGcFinish();
 
@@ -118,6 +127,9 @@ class MemoryTrackingEnv {
   inline int32_t GetNextObjectTag() { return current_object_tag_++; }
 
   void HandleControlSignal(const MemoryControlRequest* request);
+
+  void PublishJNIGlobalRefEvent(jobject obj,
+                                JNIGlobalReferenceEvent::Type type);
 
   // An heap walker used for setting up an initial snapshot of live objects.
   static jint JNICALL HeapIterationCallback(jlong class_tag, jlong size,
@@ -141,6 +153,12 @@ class MemoryTrackingEnv {
   // Thread to send allocation data to perfd.
   static void JNICALL AllocDataWorker(jvmtiEnv* jvmti, JNIEnv* jni, void* arg);
 
+  // Drain allocation_event_queue_ and send events to perfd
+  void DrainAllocationEvents(jvmtiEnv* jvmti, JNIEnv* jni);
+
+  // Drain jni_ref_event_queue_ and send events to perfd
+  void DrainJNIRefEvents(jvmtiEnv* jvmti, JNIEnv* jni);
+
   // Thread to send allocation count data to perfd.
   static void JNICALL AllocCountWorker(jvmtiEnv* jvmti, JNIEnv* jni, void* arg);
 
@@ -160,6 +178,10 @@ class MemoryTrackingEnv {
                                        JNIEnv* jni, jthread thead,
                                        AllocationEvent::Allocation* alloc_data);
 
+  // Populates thread name associated with a given JNI thead handle;
+  void FillThreadName(jvmtiEnv* jvmti, JNIEnv* jni, jthread thead,
+                      std::string* thread_name);
+
   // For a particular class object, populate |klass_info| with the corresponding
   // values.
   static void GetClassInfo(MemoryTrackingEnv* env, jvmtiEnv* jvmti, JNIEnv* jni,
@@ -170,9 +192,9 @@ class MemoryTrackingEnv {
 
   jvmtiEnv* jvmti_;
   bool log_live_alloc_count_;
+  bool track_global_jni_refs_;
   bool is_first_tracking_;
   bool is_live_tracking_;
-  bool is_suspended_;
   int32_t app_id_;
   int32_t class_class_tag_;
   int64_t current_capture_time_ns_;
@@ -186,7 +208,8 @@ class MemoryTrackingEnv {
   std::atomic<int32_t> current_object_tag_;
 
   std::mutex class_data_mutex_;
-  ProducerConsumerQueue<AllocationEvent> event_queue_;
+  ProducerConsumerQueue<AllocationEvent> allocation_event_queue_;
+  ProducerConsumerQueue<JNIGlobalReferenceEvent> jni_ref_event_queue_;
   Trie<FrameInfo> stack_trie_;
   ClassTagMap class_tag_map_;
   ClassGlobalRefs class_global_refs_;

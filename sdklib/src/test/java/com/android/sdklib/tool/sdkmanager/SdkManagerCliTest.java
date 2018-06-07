@@ -16,6 +16,12 @@
 
 package com.android.sdklib.tool.sdkmanager;
 
+import static com.android.repository.testframework.FakePackage.FakeRemotePackage;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
+
 import com.android.annotations.NonNull;
 import com.android.repository.Revision;
 import com.android.repository.api.License;
@@ -25,15 +31,23 @@ import com.android.repository.api.RepoManager;
 import com.android.repository.impl.manager.RemoteRepoLoader;
 import com.android.repository.impl.manager.RepoManagerImpl;
 import com.android.repository.impl.meta.CommonFactory;
-import com.android.repository.testframework.*;
+import com.android.repository.testframework.FakeDependency;
+import com.android.repository.testframework.FakeDownloader;
+import com.android.repository.testframework.FakeLoader;
+import com.android.repository.testframework.FakePackage;
+import com.android.repository.testframework.FakeProgressIndicator;
+import com.android.repository.testframework.FakeRepositorySourceProvider;
+import com.android.repository.testframework.FakeSettingsController;
+import com.android.repository.testframework.MockFileOp;
 import com.android.repository.util.InstallerUtil;
 import com.android.sdklib.repository.AndroidSdkHandler;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
-import org.junit.Before;
-import org.junit.Test;
-
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.net.URL;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
@@ -43,9 +57,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
-
-import static com.android.repository.testframework.FakePackage.FakeRemotePackage;
-import static org.junit.Assert.*;
+import org.junit.Before;
+import org.junit.Test;
 
 /**
  * Tests for {@link SdkManagerCli}

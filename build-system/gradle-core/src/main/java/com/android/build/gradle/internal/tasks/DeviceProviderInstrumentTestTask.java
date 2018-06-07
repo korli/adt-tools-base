@@ -78,10 +78,9 @@ import org.gradle.api.tasks.TaskAction;
 import org.gradle.internal.logging.ConsoleRenderer;
 import org.xml.sax.SAXException;
 
-/**
- * Run instrumentation tests for a given variant
- */
-public class DeviceProviderInstrumentTestTask extends BaseTask implements AndroidTestTask {
+/** Run instrumentation tests for a given variant */
+public class DeviceProviderInstrumentTestTask extends AndroidBuilderTask
+        implements AndroidTestTask {
 
     private static final Predicate<File> IS_APK =
             file -> SdkConstants.EXT_ANDROID_PACKAGE.equals(Files.getFileExtension(file.getName()));
@@ -373,9 +372,12 @@ public class DeviceProviderInstrumentTestTask extends BaseTask implements Androi
                 task.setDescription("Installs and runs the tests for " + variantName +
                         " on connected devices.");
             } else {
-                task.setDescription("Installs and runs the tests for " + variantName +
-                        " using provider: " + StringHelper.capitalize(deviceProvider.getName()));
-
+                task.setDescription(
+                        StringHelper.appendCapitalized(
+                                "Installs and runs the tests for "
+                                        + variantName
+                                        + " using provider: ",
+                                deviceProvider.getName()));
             }
             task.setGroup(JavaBasePlugin.VERIFICATION_GROUP);
             task.setAndroidBuilder(scope.getGlobalScope().getAndroidBuilder());

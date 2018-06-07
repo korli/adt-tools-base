@@ -32,7 +32,6 @@ import com.android.utils.XmlUtils;
 import com.google.common.base.Charsets;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.io.Files;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -80,7 +79,7 @@ public class ManifestMerger2SmallTest {
                 + "\n"
                 + "</manifest>";
 
-        File tmpFile = inputAsFile("ManifestMerger2Test_testValidationFailure", input);
+        File tmpFile = TestUtils.inputAsFile("ManifestMerger2Test_testValidationFailure", input);
         assertTrue(tmpFile.exists());
 
         try {
@@ -110,7 +109,7 @@ public class ManifestMerger2SmallTest {
                 + "\n"
                 + "</manifest>";
 
-        File tmpFile = inputAsFile("testToolsAnnotationRemoval", input);
+        File tmpFile = TestUtils.inputAsFile("testToolsAnnotationRemoval", input);
         assertTrue(tmpFile.exists());
 
         try {
@@ -147,7 +146,7 @@ public class ManifestMerger2SmallTest {
                 + "\n"
                 + "</manifest>";
 
-        File overlayFile = inputAsFile("testToolsAnnotationRemoval", overlay);
+        File overlayFile = TestUtils.inputAsFile("testToolsAnnotationRemoval", overlay);
         assertTrue(overlayFile.exists());
 
         String libraryInput = ""
@@ -169,7 +168,7 @@ public class ManifestMerger2SmallTest {
                 + "</application>\n"
                 + "\n"
                 + "</manifest>";
-        File libFile = inputAsFile("testToolsAnnotationRemoval", libraryInput);
+        File libFile = TestUtils.inputAsFile("testToolsAnnotationRemoval", libraryInput);
 
 
         try {
@@ -204,7 +203,7 @@ public class ManifestMerger2SmallTest {
                         + "\n"
                         + "</manifest>";
 
-        File inputFile = inputAsFile("testToolsInLibrariesNotMain", xml);
+        File inputFile = TestUtils.inputAsFile("testToolsInLibrariesNotMain", xml);
 
         String libraryInput =
                 ""
@@ -220,7 +219,7 @@ public class ManifestMerger2SmallTest {
                         + "\n"
                         + "</manifest>";
 
-        File libFile = inputAsFile("testToolsInLibrariesNotMain", libraryInput);
+        File libFile = TestUtils.inputAsFile("testToolsInLibrariesNotMain", libraryInput);
 
         try {
             MergingReport mergingReport =
@@ -251,7 +250,7 @@ public class ManifestMerger2SmallTest {
                 + "\n"
                 + "</manifest>";
 
-        File tmpFile = inputAsFile("testToolsAnnotationRemoval", input);
+        File tmpFile = TestUtils.inputAsFile("testToolsAnnotationRemoval", input);
         assertTrue(tmpFile.exists());
 
         try {
@@ -411,7 +410,7 @@ public class ManifestMerger2SmallTest {
 
         Map<String, String> placeholders = ImmutableMap.of("labelName", "injectedLabelName");
         MockLog mockLog = new MockLog();
-        File inputFile = inputAsFile("testPlaceholderSubstitution", xml);
+        File inputFile = TestUtils.inputAsFile("testPlaceholderSubstitution", xml);
         try {
             MergingReport mergingReport = ManifestMerger2
                     .newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
@@ -442,7 +441,7 @@ public class ManifestMerger2SmallTest {
                 + "</manifest>";
 
         MockLog mockLog = new MockLog();
-        File inputFile = inputAsFile("testPlaceholderSubstitution", xml);
+        File inputFile = TestUtils.inputAsFile("testPlaceholderSubstitution", xml);
         try {
             MergingReport mergingReport = ManifestMerger2
                     .newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
@@ -480,7 +479,7 @@ public class ManifestMerger2SmallTest {
                 + "</manifest>";
 
         MockLog mockLog = new MockLog();
-        File inputFile = inputAsFile("testPlaceholderSubstitution", xml);
+        File inputFile = TestUtils.inputAsFile("testPlaceholderSubstitution", xml);
         try {
             MergingReport mergingReport = ManifestMerger2
                     .newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
@@ -522,7 +521,7 @@ public class ManifestMerger2SmallTest {
                 + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                 + "</manifest>";
 
-        File inputFile = inputAsFile("testFcqnsExtraction", xml);
+        File inputFile = TestUtils.inputAsFile("testFcqnsExtraction", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -563,7 +562,7 @@ public class ManifestMerger2SmallTest {
                 + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                 + "</manifest>";
 
-        File inputFile = inputAsFile("testFcqnsExtraction", xml);
+        File inputFile = TestUtils.inputAsFile("testFcqnsExtraction", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -603,7 +602,7 @@ public class ManifestMerger2SmallTest {
                 + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                 + "</manifest>";
 
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", xml);
+        File inputFile = TestUtils.inputAsFile("testNoPlaceHolderReplacement", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -634,7 +633,7 @@ public class ManifestMerger2SmallTest {
         String staleContent = "<manifest />";
 
         // Note: disk content is wrong/stale; make sure we read the live content instead
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", staleContent);
+        File inputFile = TestUtils.inputAsFile("testNoPlaceHolderReplacement", staleContent);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -667,7 +666,6 @@ public class ManifestMerger2SmallTest {
                      + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                      + "</manifest>";
 
-        // Overlays can't have a package
         String xmlToMerge = ""
                      + "<manifest\n"
                      + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
@@ -676,23 +674,17 @@ public class ManifestMerger2SmallTest {
                      + "    </application>\n"
                      + "</manifest>";
 
-        File inputFile = inputAsFile("testOverlayMerge", xmlInput);
-        final File tempFile = new File(inputFile.getParentFile(), "nevercreated.xml");
+        File inputFile = TestUtils.inputAsFile("testOverlayMerge", xmlInput);
+        File overlayFile = TestUtils.inputAsFile("testOverlayMerge", xmlToMerge);
 
         MockLog mockLog = new MockLog();
-        MergingReport mergingReport = ManifestMerger2
-          .newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
-          .withFeatures(ManifestMerger2.Invoker.Feature.EXTRACT_FQCNS, ManifestMerger2.Invoker.Feature.NO_PLACEHOLDER_REPLACEMENT)
-          .addLibraryManifest(tempFile)
-          .asType(XmlDocument.Type.OVERLAY)
-          .withFileStreamProvider(new ManifestMerger2.FileStreamProvider() {
-              @Override
-              protected InputStream getInputStream(@NonNull File file) throws FileNotFoundException {
-                  String text = (file == inputFile) ? xmlInput : xmlToMerge;
-                  return new ByteArrayInputStream(text.getBytes(Charsets.UTF_8));
-              }
-          })
-          .merge();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(
+                                ManifestMerger2.Invoker.Feature.EXTRACT_FQCNS,
+                                ManifestMerger2.Invoker.Feature.NO_PLACEHOLDER_REPLACEMENT)
+                        .addFlavorAndBuildTypeManifest(overlayFile)
+                        .merge();
 
         assertTrue(mergingReport.getResult().isSuccess());
         Document xmlDocument = parse(mergingReport.getMergedDocument(MergedManifestKind.MERGED));
@@ -715,7 +707,7 @@ public class ManifestMerger2SmallTest {
                 + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                 + "</manifest>";
 
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", xml);
+        File inputFile = TestUtils.inputAsFile("testNoPlaceHolderReplacement", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -750,7 +742,7 @@ public class ManifestMerger2SmallTest {
                 + "    <application android:hasCode=\"false\"/>\n"
                 + "</manifest>";
 
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", xml);
+        File inputFile = TestUtils.inputAsFile("testNoPlaceHolderReplacement", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -781,7 +773,7 @@ public class ManifestMerger2SmallTest {
                 + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                 + "</manifest>";
 
-        File inputFile = inputAsFile("testNoPlaceHolderReplacement", xml);
+        File inputFile = TestUtils.inputAsFile("testNoPlaceHolderReplacement", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport = ManifestMerger2
@@ -811,7 +803,7 @@ public class ManifestMerger2SmallTest {
                         + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                         + "</manifest>";
 
-        File inputFile = inputAsFile("testAddingDebuggableAttribute", xml);
+        File inputFile = TestUtils.inputAsFile("testAddingDebuggableAttribute", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport =
@@ -833,6 +825,74 @@ public class ManifestMerger2SmallTest {
     }
 
     @Test
+    public void testAddingMultiDexApplicationWhenMissing() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"com.foo.bar\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <activity t:name=\"activityOne\"/>\n"
+                        + "    <application"
+                        + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
+                        + "</manifest>";
+
+        File inputFile = TestUtils.inputAsFile("testAddingDebuggableAttribute", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(
+                                ManifestMerger2.Invoker.Feature.ADD_MULTIDEX_APPLICATION_IF_NO_NAME)
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        String xmlText = mergingReport.getMergedDocument(MergedManifestKind.MERGED);
+        Document xmlDocument = parse(xmlText);
+        assertEquals(
+                SdkConstants.SUPPORT_MULTI_DEX_APPLICATION,
+                xmlDocument
+                        .getElementsByTagName(SdkConstants.TAG_APPLICATION)
+                        .item(0)
+                        .getAttributes()
+                        .getNamedItemNS(SdkConstants.ANDROID_URI, SdkConstants.ATTR_NAME)
+                        .getNodeValue());
+    }
+
+    @Test
+    public void testAddingMultiDexApplicationNotAddedWhenPresent() throws Exception {
+        String xml =
+                ""
+                        + "<manifest\n"
+                        + "    package=\"com.foo.bar\""
+                        + "    xmlns:t=\"http://schemas.android.com/apk/res/android\">\n"
+                        + "    <activity t:name=\"activityOne\"/>\n"
+                        + "    <application t:name=\".applicationOne\" "
+                        + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
+                        + "</manifest>";
+
+        File inputFile = TestUtils.inputAsFile("testAddingDebuggableAttribute", xml);
+
+        MockLog mockLog = new MockLog();
+        MergingReport mergingReport =
+                ManifestMerger2.newMerger(inputFile, mockLog, ManifestMerger2.MergeType.APPLICATION)
+                        .withFeatures(
+                                ManifestMerger2.Invoker.Feature.ADD_MULTIDEX_APPLICATION_IF_NO_NAME)
+                        .merge();
+
+        assertTrue(mergingReport.getResult().isSuccess());
+        String xmlText = mergingReport.getMergedDocument(MergedManifestKind.MERGED);
+        Document xmlDocument = parse(xmlText);
+        assertEquals(
+                "com.foo.bar.applicationOne",
+                xmlDocument
+                        .getElementsByTagName(SdkConstants.TAG_APPLICATION)
+                        .item(0)
+                        .getAttributes()
+                        .getNamedItemNS(SdkConstants.ANDROID_URI, SdkConstants.ATTR_NAME)
+                        .getNodeValue());
+    }
+
+    @Test
     public void testInternetPermissionAdded() throws Exception {
         String xml =
                 ""
@@ -845,7 +905,7 @@ public class ManifestMerger2SmallTest {
                         + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                         + "</manifest>";
 
-        File inputFile = inputAsFile("testInternetPermissionAdded", xml);
+        File inputFile = TestUtils.inputAsFile("testInternetPermissionAdded", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport =
@@ -879,7 +939,7 @@ public class ManifestMerger2SmallTest {
                         + "         t:backupAgent=\"com.foo.example.myBackupAgent\"/>\n"
                         + "</manifest>";
 
-        File inputFile = inputAsFile("testInternetPermissionNotDupped", xml);
+        File inputFile = TestUtils.inputAsFile("testInternetPermissionNotDupped", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport =
@@ -911,7 +971,7 @@ public class ManifestMerger2SmallTest {
                         + "    </application>\n"
                         + "</manifest>";
 
-        File inputFile = inputAsFile("testFeatureSplitOption", xml);
+        File inputFile = TestUtils.inputAsFile("testFeatureSplitOption", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport =
@@ -938,7 +998,7 @@ public class ManifestMerger2SmallTest {
 
     @Test
     public void testFeatureSplitValidation() throws Exception {
-        File inputFile = inputAsFile("testFeatureSplitOption", "</manifest>\n");
+        File inputFile = TestUtils.inputAsFile("testFeatureSplitOption", "</manifest>\n");
         MockLog mockLog = new MockLog();
         ManifestMerger2.Invoker invoker =
                 ManifestMerger2.newMerger(
@@ -965,7 +1025,7 @@ public class ManifestMerger2SmallTest {
                         + "    </application>\n"
                         + "</manifest>";
 
-        File inputFile = inputAsFile("testTargetSandboxVersionOption", xml);
+        File inputFile = TestUtils.inputAsFile("testTargetSandboxVersionOption", xml);
 
         MockLog mockLog = new MockLog();
         MergingReport mergingReport =
@@ -1001,7 +1061,8 @@ public class ManifestMerger2SmallTest {
                         + "\n"
                         + "</manifest>";
 
-        File overlayFile = inputAsFile("testAutomaticallyHandlingAttributeConflicts", overlay);
+        File overlayFile =
+                TestUtils.inputAsFile("testAutomaticallyHandlingAttributeConflicts", overlay);
         assertTrue(overlayFile.exists());
 
         String libraryInput =
@@ -1017,7 +1078,8 @@ public class ManifestMerger2SmallTest {
                         + "</application>\n"
                         + "\n"
                         + "</manifest>";
-        File libFile = inputAsFile("testAutomaticallyHandlingAttributeConflicts", libraryInput);
+        File libFile =
+                TestUtils.inputAsFile("testAutomaticallyHandlingAttributeConflicts", libraryInput);
 
         try {
             MergingReport mergingReport =
@@ -1077,16 +1139,6 @@ public class ManifestMerger2SmallTest {
             }
         }
         return Optional.absent();
-    }
-
-    /**
-     * Utility method to save a {@link String} XML into a file.
-     */
-    private static File inputAsFile(String testName, String input) throws IOException {
-        File tmpFile = File.createTempFile(testName, ".xml");
-        tmpFile.deleteOnExit();
-        Files.write(input, tmpFile, Charsets.UTF_8);
-        return tmpFile;
     }
 
     private static void assertStringPresenceInLogRecords(MergingReport mergingReport, String s) {

@@ -17,41 +17,37 @@
 package com.android.build.gradle.internal.dsl;
 
 import com.android.annotations.NonNull;
-import com.android.builder.core.ErrorReporter;
+import com.android.build.gradle.internal.errors.DeprecationReporter;
 import org.gradle.api.NamedDomainObjectFactory;
 import org.gradle.api.Project;
 import org.gradle.api.logging.Logger;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.api.model.ObjectFactory;
 
-/**
- * Factory to create ProductFlavor object using an {@link Instantiator} to add
- * the DSL methods.
- */
+/** Factory to create ProductFlavor object using an {@link ObjectFactory} to add the DSL methods. */
 public class ProductFlavorFactory implements NamedDomainObjectFactory<ProductFlavor> {
 
-    @NonNull
-    private final Instantiator instantiator;
+    @NonNull private final ObjectFactory objectFactory;
     @NonNull
     private final Project project;
     @NonNull
     private final Logger logger;
-    @NonNull
-    private final ErrorReporter errorReporter;
+    @NonNull private final DeprecationReporter deprecationReporter;
 
     public ProductFlavorFactory(
-            @NonNull Instantiator instantiator,
+            @NonNull ObjectFactory objectFactory,
             @NonNull Project project,
-            @NonNull Logger logger,
-            @NonNull ErrorReporter errorReporter) {
-        this.instantiator = instantiator;
+            @NonNull DeprecationReporter deprecationReporter,
+            @NonNull Logger logger) {
+        this.objectFactory = objectFactory;
         this.project = project;
+        this.deprecationReporter = deprecationReporter;
         this.logger = logger;
-        this.errorReporter = errorReporter;
     }
 
+    @NonNull
     @Override
     public ProductFlavor create(String name) {
-        return instantiator.newInstance(ProductFlavor.class,
-                name, project, instantiator, logger, errorReporter);
+        return objectFactory.newInstance(
+                ProductFlavor.class, name, project, objectFactory, deprecationReporter, logger);
     }
 }

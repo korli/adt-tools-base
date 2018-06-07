@@ -16,6 +16,8 @@
 
 package com.android.tools.lint.checks;
 
+import static com.android.tools.lint.detector.api.LintUtils.getMethodName;
+
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.android.tools.lint.client.api.JavaEvaluator;
@@ -27,6 +29,7 @@ import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiField;
 import com.intellij.psi.PsiMethod;
@@ -49,7 +52,7 @@ import org.jetbrains.uast.visitor.AbstractUastVisitor;
 /**
  * Detect calls to get device Identifiers.
  */
-public class HardwareIdDetector extends Detector implements Detector.UastScanner {
+public class HardwareIdDetector extends Detector implements SourceCodeScanner {
 
     private static final Implementation IMPLEMENTATION = new Implementation(
             HardwareIdDetector.class,
@@ -353,7 +356,7 @@ public class HardwareIdDetector extends Detector implements Detector.UastScanner
                 @NonNull String containingClass,
                 @NonNull String desiredMethodName, int paramIndex) {
 
-            if (!desiredMethodName.equals(expression.getMethodName())) {
+            if (!desiredMethodName.equals(getMethodName(expression))) {
                 return false;
             }
             // Check that the qualifier used is the same.

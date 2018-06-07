@@ -22,6 +22,7 @@
 #include <grpc++/grpc++.h>
 
 #include "perfd/profiler_component.h"
+#include "perfd/sessions/sessions_manager.h"
 #include "utils/clock.h"
 #include "utils/config.h"
 #include "utils/file_cache.h"
@@ -36,10 +37,10 @@ class Daemon {
  public:
   class Utilities {
    public:
-    // |config_path| is a string that points to a file that can be parsed by
-    // profiler::proto::AgentConfig. If the |config_path| is empty, the file
-    // will fail to load and an empty config will be used.
-    explicit Utilities(const std::string& config_path) : config_(config_path) {}
+    // See |Daemon| constructor for parameter explanations.
+    explicit Utilities(const std::string& config_path,
+                       const std::string& cache_path)
+        : config_(config_path), file_cache_(cache_path) {}
 
     // Returns a const reference to the daemon's clock, which is used to produce
     // all timestamps in the deamon.
@@ -59,16 +60,19 @@ class Daemon {
    private:
     // Clock that timestamps profiling data.
     SteadyClock clock_;
-    // A shared cache for all profiler services
-    FileCache file_cache_;
     // Config object for profiling settings
     Config config_;
+    // A shared cache for all profiler services
+    FileCache file_cache_;
   };
 
   // |config_path| is a string that points to a file that can be parsed by
   // profiler::proto::AgentConfig. If the |config_path| is empty, the file
   // will fail to load and an empty config will be used.
-  Daemon(const std::string& config_path) : utilities_(config_path) {}
+  // |cache_path| is a path where a temporary file cache will live. This
+  // cache will be cleared each time the daemon starts up.
+  Daemon(const std::string& config_path, const std::string& cache_path)
+      : utilities_(config_path, cache_path), sessions_(utilities_.clock()) {}
 
   // Registers profiler |component| to the daemon, in particular, the
   // component's public and internal services to daemon's server |builder|.
@@ -86,6 +90,9 @@ class Daemon {
   // Return daemon utilities that should be shared across all profilers.
   Utilities& utilities() { return utilities_; }
 
+  // Return SessionsManager shared across all profilers.
+  SessionsManager& sessions() { return sessions_; }
+
  private:
   // Builder of the gRPC server.
   grpc::ServerBuilder builder_;
@@ -93,6 +100,8 @@ class Daemon {
   std::vector<ProfilerComponent*> components_{};
   // Utility classes that should be shared across all profiler services.
   Utilities utilities_;
+  // Session management across the profiling services in perfd.
+  SessionsManager sessions_;
 };
 
 }  // namespace profiler

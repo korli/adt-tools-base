@@ -21,9 +21,9 @@ import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.tasks.DeviceProviderInstrumentTestTask;
-import com.android.builder.core.ErrorReporter;
 import com.android.builder.core.VariantType;
 import com.android.builder.profile.Recorder;
+import com.android.utils.StringHelper;
 import com.google.common.collect.Lists;
 import java.util.List;
 
@@ -43,9 +43,8 @@ public class TestVariantData extends ApkVariantData {
             @NonNull TaskManager taskManager,
             @NonNull GradleVariantConfiguration config,
             @NonNull TestedVariantData testedVariantData,
-            @NonNull ErrorReporter errorReporter,
             @NonNull Recorder recorder) {
-        super(globalScope, androidConfig, taskManager, config, errorReporter, recorder);
+        super(globalScope, androidConfig, taskManager, config, recorder);
         this.testedVariantData = testedVariantData;
 
         // create default output
@@ -71,12 +70,24 @@ public class TestVariantData extends ApkVariantData {
             default:
                 throw new IllegalStateException("Unknown test variant type.");
         }
-        if (getVariantConfiguration().hasFlavors()) {
-            return String.format("%s for the %s%s build", prefix,
-                    getCapitalizedFlavorName(), getCapitalizedBuildTypeName());
+
+        final GradleVariantConfiguration config = getVariantConfiguration();
+
+        if (config.hasFlavors()) {
+            StringBuilder sb = new StringBuilder(50);
+            sb.append(prefix);
+            sb.append(" for the ");
+            StringHelper.appendCapitalized(sb, config.getFlavorName());
+            StringHelper.appendCapitalized(sb, config.getBuildType().getName());
+            sb.append(" build");
+            return sb.toString();
         } else {
-            return String.format("%s for the %s build", prefix,
-                    getCapitalizedBuildTypeName());
+            StringBuilder sb = new StringBuilder(50);
+            sb.append(prefix);
+            sb.append(" for the ");
+            StringHelper.appendCapitalized(sb, config.getBuildType().getName());
+            sb.append(" build");
+            return sb.toString();
         }
     }
 
@@ -84,7 +95,11 @@ public class TestVariantData extends ApkVariantData {
     @Override
     public String getTaskName(@NonNull String prefix, @NonNull String suffix) {
         if (testedVariantData.getVariantConfiguration().getType() == VariantType.FEATURE) {
-            return super.getTaskName(prefix, TaskManager.FEATURE_SUFFIX + suffix);
+            return StringHelper.appendCapitalized(
+                    prefix,
+                    getVariantConfiguration().getFullName(),
+                    TaskManager.FEATURE_SUFFIX,
+                    suffix);
         } else {
             return super.getTaskName(prefix, suffix);
         }

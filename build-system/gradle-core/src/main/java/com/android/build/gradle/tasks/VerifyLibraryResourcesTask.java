@@ -17,15 +17,15 @@
 package com.android.build.gradle.tasks;
 
 import com.android.annotations.NonNull;
-import com.android.annotations.Nullable;
+import com.android.annotations.VisibleForTesting;
 import com.android.build.gradle.internal.TaskManager;
 import com.android.build.gradle.internal.aapt.AaptGeneration;
 import com.android.build.gradle.internal.aapt.AaptGradleFactory;
 import com.android.build.gradle.internal.core.GradleVariantConfiguration;
 import com.android.build.gradle.internal.dsl.AaptOptions;
 import com.android.build.gradle.internal.dsl.DslAdaptersKt;
-import com.android.build.gradle.internal.scope.BuildOutput;
-import com.android.build.gradle.internal.scope.BuildOutputs;
+import com.android.build.gradle.internal.scope.BuildElements;
+import com.android.build.gradle.internal.scope.ExistingBuildElements;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
 import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
@@ -37,16 +37,17 @@ import com.android.builder.internal.aapt.Aapt;
 import com.android.builder.internal.aapt.AaptException;
 import com.android.builder.internal.aapt.AaptPackageConfig;
 import com.android.builder.internal.aapt.v1.AaptV1;
-import com.android.builder.utils.FileCache;
 import com.android.ide.common.blame.MergingLog;
 import com.android.ide.common.blame.MergingLogRewriter;
 import com.android.ide.common.blame.ParsingProcessOutputHandler;
 import com.android.ide.common.blame.parser.ToolOutputParser;
+import com.android.ide.common.blame.parser.aapt.Aapt2OutputParser;
 import com.android.ide.common.blame.parser.aapt.AaptOutputParser;
 import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.res2.CompileResourceRequest;
 import com.android.ide.common.res2.FileStatus;
+import com.android.ide.common.res2.QueueableResourceCompiler;
 import com.android.utils.FileUtils;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
@@ -56,15 +57,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.logging.Logger;
-import org.gradle.api.logging.Logging;
 import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.OutputDirectory;
@@ -78,9 +76,6 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
     private File mergeBlameLogFolder;
     private TaskOutputHolder.TaskOutputType taskInputType;
     private FileCollection manifestFiles;
-    @Nullable private FileCache fileCache;
-
-    protected static final Logger LOG = Logging.getLogger(VerifyLibraryResourcesTask.class);
 
     private AaptGeneration aaptGeneration;
 
@@ -118,13 +113,17 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
         MergingLog mergingLog = new MergingLog(mergeBlameLogFolder);
 
         MergingLogRewriter mergingLogRewriter =
-                new MergingLogRewriter(mergingLog::find, builder.getErrorReporter());
+                new MergingLogRewriter(mergingLog::find, builder.getMessageReceiver());
         ProcessOutputHandler processOutputHandler =
                 new ParsingProcessOutputHandler(
-                        new ToolOutputParser(new AaptOutputParser(), getILogger()),
+                        new ToolOutputParser(
+                                aaptGeneration == AaptGeneration.AAPT_V1
+                                        ? new AaptOutputParser()
+                                        : new Aapt2OutputParser(),
+                                getILogger()),
                         mergingLogRewriter);
 
-        Collection<BuildOutput> manifestsOutputs = BuildOutputs.load(taskInputType, manifestFiles);
+        BuildElements manifestsOutputs = ExistingBuildElements.from(taskInputType, manifestFiles);
         File manifestFile = Iterables.getOnlyElement(manifestsOutputs).getOutputFile();
 
         try (Aapt aapt =
@@ -132,7 +131,6 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
                         aaptGeneration,
                         builder,
                         processOutputHandler,
-                        fileCache,
                         true,
                         FileUtils.mkdirs(new File(getIncrementalFolder(), "aapt-temp")),
                         0)) {
@@ -143,7 +141,7 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
             } else {
                 // If we're using AAPT2 we need to compile the resources into the compiled directory
                 // first as we need the .flat files for linking.
-                compileResources(inputs, compiledDirectory, aapt);
+                compileResources(inputs, compiledDirectory, aapt, inputDirectory.getSingleFile());
                 linkResources(compiledDirectory, aapt, manifestFile);
             }
         }
@@ -157,17 +155,26 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
      * @param inputs the new, changed or modified files that need to be compiled or removed.
      * @param outDirectory the directory containing compiled resources.
      * @param aapt AAPT tool to execute the resource compiling.
+     * @param mergedResDirectory directory containing merged uncompiled resources.
      */
-    private static void compileResources(
-            @NonNull Map<File, FileStatus> inputs, @NonNull File outDirectory, @NonNull Aapt aapt)
+    @VisibleForTesting
+    public static void compileResources(
+            @NonNull Map<File, FileStatus> inputs,
+            @NonNull File outDirectory,
+            @NonNull QueueableResourceCompiler aapt,
+            @NonNull File mergedResDirectory)
             throws AaptException, ExecutionException, InterruptedException, IOException {
         Preconditions.checkState(
                 !(aapt instanceof AaptV1),
                 "Library resources should be compiled for verification using AAPT2");
 
-        List<Future<File>> compiling = new ArrayList();
+        List<Future<File>> compiling = new ArrayList<>();
 
         for (Map.Entry<File, FileStatus> input : inputs.entrySet()) {
+            // Ignore files and directories directly under the merged resources directory.
+            if (input.getKey().getParentFile().equals(mergedResDirectory)) {
+                continue;
+            }
             switch (input.getValue()) {
                 case NEW:
                 case CHANGED:
@@ -219,7 +226,7 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
      * @param manifestFile the manifest file to package.
      */
     private void linkResources(@NonNull File resDir, @NonNull Aapt aapt, @NonNull File manifestFile)
-            throws InterruptedException, ProcessException, IOException {
+            throws ProcessException, IOException {
 
         Preconditions.checkNotNull(manifestFile, "Manifest file cannot be null");
         AndroidBuilder builder = getBuilder();
@@ -293,7 +300,6 @@ public class VerifyLibraryResourcesTask extends IncrementalTask {
                                     : VariantScope.TaskOutputType.MERGED_MANIFESTS;
             verifyLibraryResources.manifestFiles =
                     scope.getOutput(verifyLibraryResources.taskInputType);
-            verifyLibraryResources.fileCache = scope.getGlobalScope().getBuildCache();
         }
     }
 

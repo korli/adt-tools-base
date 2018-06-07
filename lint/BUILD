@@ -11,7 +11,6 @@ iml_module(
     # do not sort: must match IML order
     exports = [
         "//tools/idea/.idea/libraries:asm-tools",
-        "//tools/idea/.idea/libraries:lombok-ast",
         "//tools/base/annotations:studio.android-annotations",
         "//tools/idea/.idea/libraries:Guava",
         "//tools/base/build-system/builder-model:studio.builder-model",
@@ -25,7 +24,6 @@ iml_module(
     # do not sort: must match IML order
     deps = [
         "//tools/idea/.idea/libraries:asm-tools",
-        "//tools/idea/.idea/libraries:lombok-ast",
         "//tools/base/annotations:studio.android-annotations[module]",
         "//tools/idea/.idea/libraries:Guava",
         "//tools/base/build-system/builder-model:studio.builder-model[module]",
@@ -56,8 +54,9 @@ kotlin_library(
     ),
     visibility = ["//visibility:public"],
     deps = [
-        "//prebuilts/tools/common/intellij-core:intellij-core-171.4249.32",
-        "//prebuilts/tools/common/uast:uast-171.4249.32",
+        ":tools.lint-kotlin",
+        "//prebuilts/tools/common/lint-psi/intellij-core",
+        "//prebuilts/tools/common/lint-psi/uast",
         "//tools/base/annotations",
         "//tools/base/build-system:tools.manifest-merger",
         "//tools/base/build-system/builder-model",
@@ -66,7 +65,7 @@ kotlin_library(
         "//tools/base/repository:tools.repository",
         "//tools/base/sdk-common:tools.sdk-common",
         "//tools/base/sdklib:tools.sdklib",
-        "//tools/base/third_party:com.android.tools.external.lombok_lombok-ast",
+        "//tools/base/third_party:com.google.guava_guava",
         "//tools/base/third_party:net.sf.kxml_kxml2",
         "//tools/base/third_party:org.jetbrains.trove4j_trove4j",
         "//tools/base/third_party:org.ow2.asm_asm",
@@ -110,8 +109,8 @@ kotlin_library(
     visibility = ["//visibility:public"],
     deps = [
         ":tools.lint-api",
-        "//prebuilts/tools/common/intellij-core:intellij-core-171.4249.32",
-        "//prebuilts/tools/common/uast:uast-171.4249.32",
+        "//prebuilts/tools/common/lint-psi/intellij-core",
+        "//prebuilts/tools/common/lint-psi/uast",
         "//tools/base/annotations",
         "//tools/base/build-system/builder-model",
         "//tools/base/common:tools.common",
@@ -119,7 +118,6 @@ kotlin_library(
         "//tools/base/repository:tools.repository",
         "//tools/base/sdk-common:tools.sdk-common",
         "//tools/base/sdklib:tools.sdklib",
-        "//tools/base/third_party:com.android.tools.external.lombok_lombok-ast",
         "//tools/base/third_party:com.google.code.gson_gson",
         "//tools/base/third_party:com.google.guava_guava",
         "//tools/base/third_party:net.sf.kxml_kxml2",
@@ -133,4 +131,156 @@ maven_pom(
     artifact = "lint-checks",
     group = "com.android.tools.lint",
     source = "//tools/buildSrc/base:base_version",
+)
+
+kotlin_library(
+    name = "tools.lint-gradle-api",
+    # TODO: move resources out of java?
+    srcs = ["libs/lint-gradle-api/src/main/java"],
+    pom = "lint-gradle-api.pom",
+    resources = glob(
+        include = ["libs/lint-gradle-api/src/main/java/**"],
+        exclude = [
+            "libs/lint-gradle-api/src/main/java/**/*.java",
+            "libs/lint-gradle-api/src/main/java/**/*.kt",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tools/base/annotations",
+        "//tools/base/build-system:gradle-api_neverlink",
+        "//tools/base/build-system/builder-model",
+        "//tools/base/sdklib:tools.sdklib",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-reflect",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
+    ],
+)
+
+maven_pom(
+    name = "lint-gradle-api.pom",
+    artifact = "lint-gradle-api",
+    group = "com.android.tools.lint",
+    source = "//tools/buildSrc/base:base_version",
+)
+
+kotlin_library(
+    name = "tools.lint-gradle",
+    # TODO: move resources out of java?
+    srcs = ["libs/lint-gradle/src/main/java"],
+    pom = "lint-gradle.pom",
+    resources = glob(
+        include = ["libs/lint-gradle/src/main/java/**"],
+        exclude = [
+            "libs/lint-gradle/src/main/java/**/*.java",
+            "libs/lint-gradle/src/main/java/**/*.kt",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        # NOTE NOTE NOTE - before changing this, note that lint dependencies
+        # must also be reflected in [ReflectiveLintRunner#computeUrls] as well
+        # so update both in sync
+        ":tools.lint-gradle-api",
+        "//prebuilts/tools/common/lint-psi/intellij-core",
+        "//prebuilts/tools/common/lint-psi/uast",
+        "//tools/base/annotations",
+        "//tools/base/build-system:gradle-api_neverlink",
+        "//tools/base/build-system/gradle-api",
+        "//tools/base/build-system:tools.manifest-merger",
+        "//tools/base/build-system/builder",
+        "//tools/base/build-system/builder-model",
+        "//tools/base/common:tools.common",
+        "//tools/base/ddmlib:tools.ddmlib",
+        "//tools/base/layoutlib-api:tools.layoutlib-api",
+        "//tools/base/lint:tools.lint-api",
+        "//tools/base/lint:tools.lint-checks",
+        "//tools/base/lint/cli",
+        "//tools/base/repository:tools.repository",
+        "//tools/base/sdk-common:tools.sdk-common",
+        "//tools/base/sdklib:tools.sdklib",
+        "//tools/base/third_party:com.google.guava_guava",
+        "//tools/base/third_party:org.codehaus.groovy_groovy-all",
+        "//tools/base/third_party:org.jetbrains_annotations",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-reflect",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
+    ],
+)
+
+maven_pom(
+    name = "lint-gradle.pom",
+    artifact = "lint-gradle",
+    group = "com.android.tools.lint",
+    source = "//tools/buildSrc/base:base_version",
+)
+
+kotlin_library(
+    name = "tools.lint-kotlin",
+    srcs = ["libs/lint-kotlin/src/main/java"],
+    pom = "lint-kotlin.pom",
+    resources = glob(
+        include = ["libs/lint-kotlin/src/main/java/**"],
+        exclude = [
+            "libs/lint-api/src/main/kotlin/**/*.java",
+            "libs/lint-api/src/main/kotlin/**/*.kt",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//prebuilts/tools/common/lint-psi/intellij-core",
+        "//prebuilts/tools/common/lint-psi/kotlin-compiler",
+        "//prebuilts/tools/common/lint-psi/uast",
+    ],
+)
+
+maven_pom(
+    name = "lint-kotlin.pom",
+    artifact = "lint-kotlin",
+    group = "com.android.tools.lint",
+    source = "//tools/buildSrc/base:base_version",
+)
+
+kotlin_test(
+    name = "tests",
+    srcs = ["libs/lint-gradle/src/test/java"],
+    data = [
+        "//prebuilts/studio/sdk:platform-tools",
+        "//prebuilts/studio/sdk:platforms/latest",
+        "//tools/adt/idea/android/annotations",
+    ],
+    jvm_flags = [
+        "-Dtest.suite.jar=tests.jar",
+        "-Duser.home=/tmp",
+    ],
+    test_class = "com.android.testutils.JarTestSuite",
+    deps = [
+        ":tools.lint-gradle",
+        "//prebuilts/tools/common/lint-psi/intellij-core",
+        "//prebuilts/tools/common/lint-psi/kotlin-compiler",
+        "//prebuilts/tools/common/lint-psi/uast",
+        "//prebuilts/tools/common/m2/repository/org/mockito/mockito-all/1.9.5:jar",
+        "//tools/base/annotations",
+        "//tools/base/build-system:tools.manifest-merger",
+        "//tools/base/build-system/builder-model",
+        "//tools/base/common:tools.common",
+        "//tools/base/layoutlib-api:tools.layoutlib-api",
+        "//tools/base/lint:tools.lint-api",
+        "//tools/base/lint:tools.lint-checks",
+        "//tools/base/lint/cli",
+        "//tools/base/lint/libs/lint-tests",
+        "//tools/base/repository:tools.repository",
+        "//tools/base/sdk-common:tools.sdk-common",
+        "//tools/base/sdklib:tools.sdklib",
+        "//tools/base/testutils:tools.testutils",
+        "//tools/base/third_party:com.google.code.gson_gson",
+        "//tools/base/third_party:com.google.truth_truth",
+        "//tools/base/third_party:junit_junit",
+        "//tools/base/third_party:net.sf.kxml_kxml2",
+        "//tools/base/third_party:org.codehaus.groovy_groovy-all",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-reflect",
+        "//tools/base/third_party:org.jetbrains.kotlin_kotlin-stdlib",
+        "//tools/base/third_party:org.jetbrains.trove4j_trove4j",
+        "//tools/base/third_party:org.jetbrains_annotations",
+        "//tools/base/third_party:org.ow2.asm_asm-tree",
+    ],
 )

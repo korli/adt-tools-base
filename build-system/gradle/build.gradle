@@ -7,6 +7,8 @@ apply plugin: 'idea'
 apply plugin: 'jacoco-tools-base'
 apply plugin: 'license-report'
 
+//apply plugin: 'java-gradle-plugin'
+
 licenseReport {
     whiteList = ['org.jetbrains.trove4j:trove4j:20160824']
 }
@@ -14,6 +16,7 @@ licenseReport {
 dependencies {
     compile project(':base:gradle-core')
     compile gradleApi()
+    compile libs.bundle_tool
 
     testCompile libs.kotlin_stdlib
 
@@ -36,20 +39,9 @@ apply from: "$rootDir/buildSrc/base/bintray.gradle"
 jar.manifest.attributes("Plugin-Version": version)
 jar.manifest.attributes("Inception-Date": DateTimeFormatter.ISO_LOCAL_DATE.format(LocalDate.now()));
 
-def generated = new File("${project.buildDir}/generated/resources")
-sourceSets.main.resources.srcDir generated
-
-task copyVersionProperties(type: Copy) {
-    from project.file(project.getRootProject().getProperty("versionProperties"))
-    rename({"version.properties"})
-    into project.file("$generated/com/android/build/gradle/internal")
-}
-
-tasks.compileJava.dependsOn copyVersionProperties
-
 test {
     environment("CUSTOM_REPO",
-            rootProject.file("../out/repo").toString()
+            new File(rootProject.ext.androidHostOut, "repo").toString()
                     + File.pathSeparator
                     + rootProject.file("../prebuilts/tools/common/m2/repository/").toString())
 

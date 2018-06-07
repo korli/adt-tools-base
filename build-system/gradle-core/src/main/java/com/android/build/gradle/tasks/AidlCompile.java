@@ -22,13 +22,13 @@ import static com.android.build.gradle.internal.publishing.AndroidArtifacts.Cons
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import com.android.build.gradle.internal.CombinedInput;
+import com.android.build.gradle.internal.core.VariantConfiguration;
 import com.android.build.gradle.internal.scope.TaskConfigAction;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.tasks.IncrementalTask;
 import com.android.build.gradle.internal.tasks.TaskInputHelper;
 import com.android.builder.compiling.DependencyFileProcessor;
-import com.android.builder.core.VariantConfiguration;
 import com.android.builder.core.VariantType;
 import com.android.builder.internal.incremental.DependencyData;
 import com.android.builder.internal.incremental.DependencyDataStore;
@@ -39,6 +39,7 @@ import com.android.ide.common.process.ProcessOutputHandler;
 import com.android.ide.common.res2.FileStatus;
 import com.android.utils.FileUtils;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import java.io.File;
@@ -141,12 +142,8 @@ public class AidlCompile extends IncrementalTask {
     /** Returns the import folders. */
     @NonNull
     @Internal
-    private List<File> getImportFolders() {
-        List<File> fullImportDir = Lists.newArrayList();
-        fullImportDir.addAll(getImportDirs().getFiles());
-        fullImportDir.addAll(sourceDirs.get());
-
-        return fullImportDir;
+    private Iterable<File> getImportFolders() {
+        return Iterables.concat(getImportDirs().getFiles(), sourceDirs.get());
     }
 
     /**
@@ -160,7 +157,7 @@ public class AidlCompile extends IncrementalTask {
     private void compileSingleFile(
             @NonNull File sourceFolder,
             @NonNull File file,
-            @Nullable List<File> importFolders,
+            @Nullable Iterable<File> importFolders,
             @NonNull DependencyFileProcessor dependencyFileProcessor,
             @NonNull ProcessOutputHandler processOutputHandler)
             throws InterruptedException, ProcessException, IOException {
@@ -220,7 +217,7 @@ public class AidlCompile extends IncrementalTask {
             return;
         }
 
-        final List<File> importFolders = getImportFolders();
+        final Iterable<File> importFolders = getImportFolders();
         final DepFileProcessor processor = new DepFileProcessor();
         final ProcessOutputHandler processOutputHandler =
                 new LoggedProcessOutputHandler(getILogger());
@@ -384,20 +381,15 @@ public class AidlCompile extends IncrementalTask {
             compileTask.setSourceOutputDir(scope.getAidlSourceOutputDir());
 
             if (variantConfiguration.getType() == VariantType.LIBRARY) {
-                compileTask.setPackagedDir(scope.getPackagedAidlDir());
+                File packagedAidlDir = scope.getPackagedAidlDir();
+                compileTask.setPackagedDir(packagedAidlDir);
+                scope.addTaskOutput(
+                        TaskOutputHolder.TaskOutputType.AIDL_PARCELABLE,
+                        packagedAidlDir,
+                        getName());
                 compileTask.setPackageWhitelist(
                         scope.getGlobalScope().getExtension().getAidlPackageWhiteList());
             }
         }
-    }
-
-    // Workaround for https://issuetracker.google.com/67418335
-    @Override
-    @Input
-    @NonNull
-    public String getCombinedInput() {
-        return new CombinedInput(super.getCombinedInput())
-                .add("packagedDir", getPackagedDir())
-                .toString();
     }
 }

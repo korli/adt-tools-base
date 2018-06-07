@@ -1,4 +1,5 @@
 load("//tools/base/bazel:bazel.bzl", "iml_module")
+load("//tools/base/bazel:kotlin.bzl", "kotlin_test")
 load("//tools/base/bazel:maven.bzl", "maven_java_library", "maven_pom")
 
 iml_module(
@@ -31,6 +32,7 @@ iml_module(
         "//tools/idea/.idea/libraries:gson",
         "//tools/base/repository:studio.repository[module]",
         "//tools/base/testutils:studio.testutils[module, test]",
+        "//tools/idea/.idea/libraries:KotlinJavaRuntime[test]",
     ],
 )
 
@@ -52,6 +54,11 @@ maven_java_library(
         "//tools/base/repository:tools.repository",
         "//tools/base/third_party:com.google.code.gson_gson",
         "//tools/base/third_party:com.google.guava_guava",
+        # org.apache.httpcomponents:httpclient:4.2.6 depends on
+        # commons-logging:commons-logging:1.1.1, but other targets use a newer version.
+        # Include the dependeny explicitly to bump the version in gradle's resolved dependency
+        # graph, as the custom maven logic in tools/base resolves everything together.
+        "//tools/base/third_party:commons-logging_commons-logging",
         "//tools/base/third_party:org.apache.commons_commons-compress",
         "//tools/base/third_party:org.apache.httpcomponents_httpclient",
     ],
@@ -64,17 +71,20 @@ maven_pom(
     source = "//tools/buildSrc/base:base_version",
 )
 
-java_test(
+kotlin_test(
     name = "tools.tests",
     # TODO: Why are the xml files not under resources?
-    srcs = glob(["src/test/java/**/*.java"]),
+    srcs = ["src/test/java"],
     jvm_flags = ["-Dtest.suite.jar=tools.tests.jar"],
     resources = glob(
         include = [
             "src/test/java/**",
             "src/test/resources/**",
         ],
-        exclude = ["src/test/java/**/*.java"],
+        exclude = [
+            "src/test/java/**/*.java",
+            "src/test/java/**/*.kt",
+        ],
     ),
     test_class = "com.android.testutils.JarTestSuite",
     runtime_deps = ["//tools/base/testutils:tools.testutils"],

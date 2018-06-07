@@ -26,6 +26,7 @@ import com.android.tools.lint.detector.api.Issue;
 import com.android.tools.lint.detector.api.JavaContext;
 import com.android.tools.lint.detector.api.Scope;
 import com.android.tools.lint.detector.api.Severity;
+import com.android.tools.lint.detector.api.SourceCodeScanner;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiMethod;
 import java.util.Collections;
@@ -33,7 +34,7 @@ import java.util.List;
 import org.jetbrains.uast.UCallExpression;
 import org.jetbrains.uast.UClass;
 
-public class FirebaseMessagingDetector extends Detector implements Detector.UastScanner {
+public class FirebaseMessagingDetector extends Detector implements SourceCodeScanner {
 
     private static final String FIREBASE_IID_PACKAGE = "com.google.firebase.iid";
     private static final String FIREBASE_IID_CLASS_NAME = FIREBASE_IID_PACKAGE
@@ -82,9 +83,9 @@ public class FirebaseMessagingDetector extends Detector implements Detector.Uast
             @NonNull PsiMethod method) {
         PsiClass containingClass = method.getContainingClass();
         if (containingClass != null &&
-                FIREBASE_IID_CLASS_NAME.equals(containingClass.getQualifiedName())) {
-            // Save references to the call site and context since createLocationHandle uses the
-            // older Lombok API and is deprecated.
+                FIREBASE_IID_CLASS_NAME.equals(containingClass.getQualifiedName()) &&
+              !context.getDriver().isSuppressed(context, MISSING_TOKEN_REFRESH,
+                      mGetTokenCallSite)) {
             mGetTokenCallSite = call;
             mGetTokenContext = context;
         }

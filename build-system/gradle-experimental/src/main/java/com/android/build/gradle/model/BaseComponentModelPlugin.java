@@ -43,7 +43,6 @@ import com.android.build.gradle.internal.NdkOptionsHelper;
 import com.android.build.gradle.internal.ProductFlavorCombo;
 import com.android.build.gradle.internal.SdkHandler;
 import com.android.build.gradle.internal.TaskManager;
-import com.android.build.gradle.internal.ToolingRegistryProvider;
 import com.android.build.gradle.internal.VariantManager;
 import com.android.build.gradle.internal.coverage.JacocoPlugin;
 import com.android.build.gradle.internal.dependency.AndroidNativeDependencySpec;
@@ -93,6 +92,7 @@ import com.android.ide.common.process.ProcessException;
 import com.android.ide.common.signing.KeystoreHelper;
 import com.android.prefs.AndroidLocation;
 import com.android.resources.Density;
+import com.android.tools.lint.gradle.api.ToolingRegistryProvider;
 import com.android.utils.FileUtils;
 import com.android.utils.ILogger;
 import com.google.common.collect.ArrayListMultimap;
@@ -404,10 +404,17 @@ public class BaseComponentModelPlugin implements Plugin<Project>, ToolingRegistr
             String creator = "Android Gradle";
             ILogger logger = new LoggerWrapper(project.getLogger());
 
-            return new AndroidBuilder(project.equals(project.getRootProject()) ? project.getName()
-                    : project.getPath(), creator, new GradleProcessExecutor(project),
+            return new AndroidBuilder(
+                    project.equals(project.getRootProject())
+                            ? project.getName()
+                            : project.getPath(),
+                    creator,
+                    new GradleProcessExecutor(project),
                     new GradleJavaProcessExecutor(project),
-                    extraModelInfo, logger, project.getLogger().isEnabled(LogLevel.INFO));
+                    extraModelInfo,
+                    extraModelInfo,
+                    logger,
+                    project.getLogger().isEnabled(LogLevel.INFO));
 
         }
 

@@ -27,10 +27,10 @@ import com.android.build.gradle.internal.dependency.VariantDependencies;
 import com.android.build.gradle.internal.dsl.Splits;
 import com.android.build.gradle.internal.dsl.VariantOutputFactory;
 import com.android.build.gradle.internal.pipeline.TransformManager;
-import com.android.build.gradle.internal.scope.AndroidTask;
 import com.android.build.gradle.internal.scope.GlobalScope;
 import com.android.build.gradle.internal.scope.OutputFactory;
 import com.android.build.gradle.internal.scope.OutputScope;
+import com.android.build.gradle.internal.scope.TaskOutputHolder;
 import com.android.build.gradle.internal.scope.VariantScope;
 import com.android.build.gradle.internal.scope.VariantScopeImpl;
 import com.android.build.gradle.internal.tasks.CheckManifest;
@@ -48,7 +48,6 @@ import com.android.build.gradle.tasks.PackageSplitAbi;
 import com.android.build.gradle.tasks.PackageSplitRes;
 import com.android.build.gradle.tasks.RenderscriptCompile;
 import com.android.build.gradle.tasks.ShaderCompile;
-import com.android.builder.core.ErrorReporter;
 import com.android.builder.core.VariantType;
 import com.android.builder.model.SourceProvider;
 import com.android.builder.profile.Recorder;
@@ -101,8 +100,8 @@ public abstract class BaseVariantData implements TaskContainer {
     public Task resourceGenTask;
     public Task assetGenTask;
     public CheckManifest checkManifestTask;
-    public AndroidTask<PackageSplitRes> packageSplitResourcesTask;
-    public AndroidTask<PackageSplitAbi> packageSplitAbiTask;
+    public PackageSplitRes packageSplitResourcesTask;
+    public PackageSplitAbi packageSplitAbiTask;
 
     // FIX ME : move all AndroidTask<> above to Scope and use these here.
     private Map<TaskKind, Task> registeredTasks = new ConcurrentHashMap<>();
@@ -162,25 +161,34 @@ public abstract class BaseVariantData implements TaskContainer {
     @NonNull private final OutputFactory outputFactory;
     public VariantOutputFactory variantOutputFactory;
 
+    private final MultiOutputPolicy multiOutputPolicy;
+
     public BaseVariantData(
             @NonNull GlobalScope globalScope,
             @NonNull AndroidConfig androidConfig,
             @NonNull TaskManager taskManager,
             @NonNull GradleVariantConfiguration variantConfiguration,
-            @NonNull ErrorReporter errorReporter,
             @NonNull Recorder recorder) {
         this.variantConfiguration = variantConfiguration;
         this.taskManager = taskManager;
 
+        final Splits splits = androidConfig.getSplits();
+        boolean splitsEnabled =
+                splits.getDensity().isEnable()
+                        || splits.getAbi().isEnable()
+                        || splits.getLanguage().isEnable();
+
         // eventually, this will require a more open ended comparison.
-        MultiOutputPolicy multiOutputPolicy =
-                androidConfig.getGeneratePureSplits()
+        multiOutputPolicy =
+                (androidConfig.getGeneratePureSplits()
+                                        || variantConfiguration.getType() == VariantType.FEATURE)
                                 && variantConfiguration.getMinSdkVersionValue() >= 21
                         ? MultiOutputPolicy.SPLITS
                         : MultiOutputPolicy.MULTI_APK;
 
-        // warn the user in case we are forced to ignore the generatePureSplits flag.
-        if (androidConfig.getGeneratePureSplits()
+        // warn the user if we are forced to ignore the generatePureSplits flag.
+        if (splitsEnabled
+                && androidConfig.getGeneratePureSplits()
                 && multiOutputPolicy != MultiOutputPolicy.SPLITS) {
             Logging.getLogger(BaseVariantData.class).warn(
                     String.format("Variant %s, MinSdkVersion %s is too low (<21) "
@@ -193,14 +201,12 @@ public abstract class BaseVariantData implements TaskContainer {
         scope =
                 new VariantScopeImpl(
                         globalScope,
-                        errorReporter,
                         new TransformManager(
                                 globalScope.getProject(),
-                                taskManager.getAndroidTasks(),
-                                errorReporter,
+                                globalScope.getErrorHandler(),
                                 recorder),
                         this);
-        outputScope = new OutputScope(multiOutputPolicy);
+        outputScope = new OutputScope();
         outputFactory =
                 new OutputFactory(
                         globalScope.getProjectBaseName(), variantConfiguration, outputScope);
@@ -257,6 +263,11 @@ public abstract class BaseVariantData implements TaskContainer {
         return registeredTasks.get(name);
     }
 
+    @NonNull
+    public MultiOutputPolicy getMultiOutputPolicy() {
+        return multiOutputPolicy;
+    }
+
     @Nullable
     @Override
     public <U extends Task> U getTaskByType(Class<U> taskType) {
@@ -290,16 +301,6 @@ public abstract class BaseVariantData implements TaskContainer {
     }
 
     @NonNull
-    protected String getCapitalizedBuildTypeName() {
-        return StringHelper.capitalize(variantConfiguration.getBuildType().getName());
-    }
-
-    @NonNull
-    protected String getCapitalizedFlavorName() {
-        return StringHelper.capitalize(variantConfiguration.getFlavorName());
-    }
-
-    @NonNull
     public VariantType getType() {
         return variantConfiguration.getType();
     }
@@ -311,7 +312,7 @@ public abstract class BaseVariantData implements TaskContainer {
 
     @NonNull
     public String getTaskName(@NonNull String prefix, @NonNull String suffix) {
-        return prefix + StringHelper.capitalize(variantConfiguration.getFullName()) + suffix;
+        return StringHelper.appendCapitalized(prefix, variantConfiguration.getFullName(), suffix);
     }
 
     @NonNull
@@ -403,7 +404,8 @@ public abstract class BaseVariantData implements TaskContainer {
 
     @Deprecated
     public void registerResGeneratingTask(@NonNull Task task, @NonNull Collection<File> generatedResFolders) {
-        System.out.println("registerResGeneratingTask is deprecated, use registerGeneratedFolders(FileCollection)");
+        System.out.println(
+                "registerResGeneratingTask is deprecated, use registerGeneratedResFolders(FileCollection)");
 
         final Project project = scope.getGlobalScope().getProject();
         registerGeneratedResFolders(project.files(generatedResFolders).builtBy(task));
@@ -666,10 +668,12 @@ public abstract class BaseVariantData implements TaskContainer {
             }
 
             // then all the generated src folders.
-            if (scope.getProcessResourcesTask() != null) {
+            if (scope.hasOutput(TaskOutputHolder.TaskOutputType.NOT_NAMESPACED_R_CLASS_SOURCES)) {
+                FileCollection rClassSource =
+                        scope.getOutput(
+                                TaskOutputHolder.TaskOutputType.NOT_NAMESPACED_R_CLASS_SOURCES);
                 sourceSets.add(
-                        project.fileTree(scope.getRClassSourceOutputDir())
-                                .builtBy(scope.getProcessResourcesTask().getName()));
+                        project.fileTree(rClassSource.getSingleFile()).builtBy(rClassSource));
             }
 
             // for the other, there's no duplicate so no issue.
@@ -690,6 +694,11 @@ public abstract class BaseVariantData implements TaskContainer {
                 sourceSets.add(
                         project.fileTree(scope.getClassOutputForDataBinding())
                                 .builtBy(scope.getDataBindingExportBuildInfoTask().getName()));
+                FileCollection baseClassSource =
+                        scope.getOutput(
+                                TaskOutputHolder.TaskOutputType.DATA_BINDING_BASE_CLASS_SOURCE_OUT);
+                sourceSets.add(
+                        project.fileTree(baseClassSource.getSingleFile()).builtBy(baseClassSource));
             }
 
             if (!variantConfiguration.getRenderscriptNdkModeEnabled()

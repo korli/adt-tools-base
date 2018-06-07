@@ -18,11 +18,14 @@ package com.android.tools.kotlin;
 
 import com.android.tools.utils.JarOutputCompiler;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import org.jetbrains.kotlin.cli.common.CLICompiler;
 import org.jetbrains.kotlin.cli.common.ExitCode;
@@ -34,12 +37,36 @@ import org.jetbrains.kotlin.cli.jvm.K2JVMCompiler;
  */
 public class KotlinCompiler extends JarOutputCompiler {
 
+    private String moduleName;
+    private String jvmTarget = "1.8";
+    private List<String> friends = new LinkedList<>();
+
     protected KotlinCompiler() {
         super("kotlinc");
+        moduleName = "dummy";
     }
 
     public static void main(String[] args) throws IOException {
         System.exit(new KotlinCompiler().run(Arrays.asList(args)));
+    }
+
+    @Override
+    protected List<String> filterOptions(List<String> args) {
+        LinkedList<String> filtered = new LinkedList<>();
+        Iterator<String> it = args.iterator();
+        while (it.hasNext()) {
+            String arg = it.next();
+            if (arg.equals("--module_name") && it.hasNext()) {
+                moduleName = it.next();
+            } else if (arg.equals("--friend_dir") && it.hasNext()) {
+                friends.add(it.next());
+            } else if (arg.equals("--jvm-target") && it.hasNext()) {
+                jvmTarget = it.next();
+            } else {
+                filtered.add(arg);
+            }
+        }
+        return filtered;
     }
 
     @Override
@@ -54,7 +81,10 @@ public class KotlinCompiler extends JarOutputCompiler {
             File xml = new File(outDir.getParentFile(), outDir.getName() + ".xml");
             try (PrintWriter writer = new PrintWriter(xml)) {
                 writer.println("<modules>");
-                writer.print("<module name=\"dummy\" type=\"java-production\" outputDir=\"");
+                writer.print(
+                        "<module name=\""
+                                + moduleName
+                                + "\" type=\"java-production\" outputDir=\"");
                 writer.print(outDir.getAbsolutePath());
                 writer.println("\">");
 
@@ -80,6 +110,14 @@ public class KotlinCompiler extends JarOutputCompiler {
                         writer.println("\"/>");
                     }
                 }
+                for (String friend : friends) {
+                    File friendDir = new File(friend);
+                    if (friendDir.exists()) {
+                        writer.print("<friendDir path=\"");
+                        writer.print(friendDir.getAbsolutePath());
+                        writer.println("\"/>");
+                    }
+                }
                 String[] cp = classPath.split(":");
                 for (String s : cp) {
                     writer.print("<classpath path=\"");
@@ -90,16 +128,30 @@ public class KotlinCompiler extends JarOutputCompiler {
                 writer.println("</modules>");
             }
 
-            args.add("-module");
-            args.add(xml.getAbsolutePath());
+            args.add("-Xbuild-file=" + xml.getAbsolutePath());
+            if (jvmTarget != null) {
+                args.add("-jvm-target");
+                args.add(jvmTarget);
+            }
 
             ExitCode exit =
                     CLICompiler.doMainNoExit(new K2JVMCompiler(), args.toArray(new String[] {}));
             xml.delete();
+            ensureManifestFile(outDir);
             return exit == ExitCode.OK;
 
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    private void ensureManifestFile(File outDir) throws FileNotFoundException {
+        File manifest = new File(outDir, "META-INF/MANIFEST.MF");
+        if (!manifest.exists()) {
+            manifest.getParentFile().mkdirs();
+            try(PrintWriter writer = new PrintWriter(manifest)) {
+                writer.println("Manifest-Version: 1.0");
+            }
         }
     }
 }

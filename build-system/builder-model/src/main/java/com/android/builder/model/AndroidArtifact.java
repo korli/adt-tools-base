@@ -33,6 +33,8 @@ import java.util.Set;
  */
 public interface AndroidArtifact extends BaseArtifact {
 
+    /** @deprecated Use post-build model instead. See {@link ProjectBuildOutput} */
+    @Deprecated
     @NonNull
     Collection<AndroidArtifactOutput> getOutputs();
 
@@ -149,4 +151,14 @@ public interface AndroidArtifact extends BaseArtifact {
      */
     @Nullable
     TestOptions getTestOptions();
+
+    /**
+     * Returns the name of the task used to run instrumented tests or null if the variant is not a
+     * test variant.
+     *
+     * @since 3.1
+     * @return name of the task used to run instrumented tests
+     */
+    @Nullable
+    String getInstrumentedTestTaskName();
 }

@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -69,35 +70,46 @@ public class SingleJar {
             usage("Output file not specified");
             return 1;
         }
-
         mergeJars(out, jars);
 
         return 0;
     }
 
     private void mergeJars(File jar, List<File> jars) throws IOException {
-        Set<String> directories = new HashSet<>();
+        Set<String> dups = new HashSet<>();
         try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(jar))) {
             for (File file : jars) {
-                addToJar(file, out, directories);
+                addToJar(file, out, dups);
             }
         }
     }
 
-    private void addToJar(File jar, ZipOutputStream out, Set<String> directories) throws IOException {
+    private void addToJar(File jar, ZipOutputStream out, Set<String> dups) throws IOException {
         try (ZipInputStream zis = new ZipInputStream(new FileInputStream(jar))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
-                if (entry.isDirectory()) {
-                    if (!directories.add(entry.getName())) {
+                ArrayDeque<String> files = new ArrayDeque<>();
+                files.add(entry.getName());
+
+                String path = entry.getName();
+                String[] items = path.split("/");
+                String parent = "";
+                for (int i = 0; i < items.length - 1; i++) {
+                    parent += items[i] + "/";
+                    files.add(parent);
+                }
+                for (String file : files) {
+                    if (!dups.add(file)) {
                         continue;
                     }
-                }
 
-                ZipEntry newEntry = new ZipEntry(entry.getName());
-                newEntry.setTime(entry.getTime());
-                out.putNextEntry(newEntry);
-                Utils.copy(zis, out);
+                    ZipEntry newEntry = new ZipEntry(file);
+                    newEntry.setTime(entry.getTime());
+                    out.putNextEntry(newEntry);
+                    if (!file.endsWith("/")) {
+                        Utils.copy(zis, out);
+                    }
+                }
             }
         }
     }
