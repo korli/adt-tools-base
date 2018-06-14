@@ -13,6 +13,6 @@
     <orderEntry type="library" scope="TEST" name="equalsverifier" level="project" />
     <orderEntry type="library" scope="TEST" name="JUnit4" level="project" />
     <orderEntry type="library" name="Gradle" level="project" />
-    <orderEntry type="library" name="javax.inject:javax.inject:1" level="project" />
+    <orderEntry type="library" name="javax-inject" level="project" />
   </component>
 </module>
