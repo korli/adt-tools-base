@@ -18,13 +18,15 @@ package com.android.java.model.builder;
 
 import com.android.java.model.ArtifactModel;
 import com.android.java.model.impl.ArtifactModelImpl;
-import java.io.File;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 import org.gradle.api.Project;
 import org.gradle.api.plugins.PluginContainer;
 import org.gradle.tooling.provider.model.ToolingModelBuilder;
+
+import java.io.File;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Builder for ArtifactModel.
@@ -58,6 +60,6 @@ public class ArtifactModelBuilder implements ToolingModelBuilder {
 
     private static Map<String, Set<File>> getArtifactsByConfiguration(Project project) {
         return project.getConfigurations().stream().collect(Collectors
-                .toMap(p -> p.getName().intern(), p -> p.getAllArtifacts().getFiles().getFiles()));
+                .toMap(p -> p.getName().intern(), p -> new LinkedHashSet<>(p.getAllArtifacts().getFiles().getFiles())));
     }
 }
