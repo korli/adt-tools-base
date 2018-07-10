@@ -15,20 +15,18 @@
  */
 package com.android.ide.common.res2;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
 import com.android.resources.ResourceType;
 import com.android.testutils.TestResources;
-import com.google.common.base.Function;
 import com.google.common.collect.Collections2;
+import org.junit.Test;
+
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.TreeSet;
-import org.junit.Test;
+
+import static org.junit.Assert.*;
 
 /**
  * Test the IdGeneratingResourceParser.
@@ -88,12 +86,9 @@ public class IdGeneratingResourceParserTest extends BaseTestCase {
     }
 
     private static void assertResourceItemsNames(Collection<ResourceItem> idItems, String... expected) {
-        Collection<String> idNames = Collections2.transform(idItems, new Function<ResourceItem, String>() {
-            @Override
-            public String apply(ResourceItem input) {
-                assertEquals(input.getType(), ResourceType.ID);
-                return input.getName();
-            }
+        Collection<String> idNames = Collections2.transform(idItems, input -> {
+            assertEquals(input.getType(), ResourceType.ID);
+            return input.getName();
         });
         assertSameElements(idNames, Arrays.asList(expected));
     }

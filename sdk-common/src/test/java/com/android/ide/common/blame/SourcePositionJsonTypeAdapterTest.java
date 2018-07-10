@@ -15,14 +15,10 @@
  */
 package com.android.ide.common.blame;
 
-import static org.junit.Assert.assertEquals;
-
-import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Iterables;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -31,6 +27,8 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import java.util.Arrays;
+
+import static org.junit.Assert.assertEquals;
 
 @RunWith(Enclosed.class)
 public class SourcePositionJsonTypeAdapterTest {
@@ -64,15 +62,10 @@ public class SourcePositionJsonTypeAdapterTest {
         @Parameterized.Parameters(name = "{0}   new SourcePosition({1})")
         public static Iterable<Object[]> data() {
             return Iterables.transform(Arrays.asList(mExamples),
-                    new Function<SourcePosition, Object[]>() {
-                        @Override
-                        public Object[] apply(SourcePosition input) {
-                            return new Object[]{input, Joiner.on(", ").join(input.getStartLine(),
-                                    input.getStartColumn(),
-                                    input.getStartOffset(), input.getEndLine(),
-                                    input.getEndColumn(), input.getEndOffset())};
-                        }
-                    });
+                                       input -> new Object[]{input, Joiner.on(", ").join(input.getStartLine(),
+                                               input.getStartColumn(),
+                                               input.getStartOffset(), input.getEndLine(),
+                                               input.getEndColumn(), input.getEndOffset())});
         }
 
         @Test

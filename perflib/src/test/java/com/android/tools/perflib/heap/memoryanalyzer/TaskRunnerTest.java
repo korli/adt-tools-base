@@ -1,11 +1,7 @@
 package com.android.tools.perflib.heap.memoryanalyzer;
 
-import static org.junit.Assert.assertEquals;
-
 import com.android.tools.perflib.analyzer.AnalysisResultEntry;
-import com.android.tools.perflib.heap.Heap;
 import com.android.tools.perflib.heap.Snapshot;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -18,6 +14,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import static org.junit.Assert.assertEquals;
 
 /**
  * Tests for {@link TaskRunner}.
@@ -33,7 +31,7 @@ public class TaskRunnerTest {
         MockitoAnnotations.initMocks(this);
         Mockito.when(mSnapshotMock.getTypeName()).thenReturn(Snapshot.TYPE_NAME);
         Mockito.when(mSnapshotMock.getRepresentation(Snapshot.class)).thenReturn(mSnapshotMock);
-        Mockito.when(mSnapshotMock.getHeaps()).thenReturn(Collections.<Heap>emptyList());
+        Mockito.when(mSnapshotMock.getHeaps()).thenReturn(Collections.emptyList());
     }
 
     @Test

@@ -13,12 +13,8 @@ import com.android.sdklib.repository.IdDisplay;
 import com.android.sdklib.repository.PackageParserUtils;
 import com.android.sdklib.repository.meta.DetailsTypes;
 import com.android.sdklib.repository.meta.SysImgFactory;
-import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Table;
+import com.google.common.collect.*;
+
 import java.io.File;
 import java.util.Collection;
 import java.util.List;
@@ -103,7 +99,7 @@ public class SystemImageManager {
             init();
         }
         Multimap<IdDisplay, SystemImage> m = mValuesToImage.get(tag, version);
-        return m == null ? ImmutableList.<SystemImage>of() : m.get(vendor);
+        return m == null ? ImmutableList.of() : m.get(vendor);
     }
 
     private void init() {

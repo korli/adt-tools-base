@@ -16,19 +16,17 @@
 
 package com.android.sdklib.build;
 
-import static com.android.SdkConstants.DOT_DEP;
-import static com.android.SdkConstants.EXT_FS;
-import static com.android.SdkConstants.EXT_RS;
-
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+
 import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
+
+import static com.android.SdkConstants.*;
 
 /**
  * Loads dependencies for Renderscript.
@@ -63,12 +61,7 @@ public class RenderScriptChecker {
         File[] depsFiles = null;
 
         if (renderscriptDeps.isDirectory()) {
-            depsFiles = renderscriptDeps.listFiles(new FilenameFilter() {
-                @Override
-                public boolean accept(File file, String s) {
-                    return s.endsWith(DOT_DEP);
-                }
-            });
+            depsFiles = renderscriptDeps.listFiles((file, s) -> s.endsWith(DOT_DEP));
         }
 
         int count = depsFiles != null ? depsFiles.length : 0;

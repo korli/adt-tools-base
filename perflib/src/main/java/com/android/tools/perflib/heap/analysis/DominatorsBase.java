@@ -19,9 +19,7 @@ import com.android.annotations.NonNull;
 import com.android.tools.perflib.heap.Heap;
 import com.android.tools.perflib.heap.Instance;
 import com.android.tools.perflib.heap.Snapshot;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import gnu.trove.TObjectProcedure;
 
 import java.util.List;
 
@@ -45,12 +43,9 @@ public abstract class DominatorsBase {
             for (Instance instance : heap.getClasses()) {
                 instance.resetRetainedSize();
             }
-            heap.forEachInstance(new TObjectProcedure<Instance>() {
-                @Override
-                public boolean execute(Instance instance) {
-                    instance.resetRetainedSize();
-                    return true;
-                }
+            heap.forEachInstance(instance -> {
+                instance.resetRetainedSize();
+                return true;
             });
         }
     }

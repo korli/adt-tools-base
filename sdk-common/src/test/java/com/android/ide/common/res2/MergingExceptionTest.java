@@ -16,23 +16,19 @@
 
 package com.android.ide.common.res2;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import com.android.ide.common.blame.Message;
 import com.android.ide.common.blame.SourceFilePosition;
 import com.android.ide.common.blame.SourcePosition;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-
 import org.junit.Test;
 import org.xml.sax.SAXParseException;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+
+import static org.junit.Assert.*;
 
 @SuppressWarnings({"ThrowableInstanceNeverThrown", "ThrowableResultOfMethodCallIgnored"})
 public class MergingExceptionTest {
@@ -122,9 +118,9 @@ public class MergingExceptionTest {
 
     @Test
     public void testThrowIfNonEmpty() throws MergingException{
-        MergingException.throwIfNonEmpty(ImmutableList.<Message>of());
+        MergingException.throwIfNonEmpty(ImmutableList.of());
         try {
-            MergingException.throwIfNonEmpty(ImmutableList.<Message>of(
+            MergingException.throwIfNonEmpty(ImmutableList.of(
                     new Message(Message.Kind.ERROR, "Message", SourceFilePosition.UNKNOWN)));
             fail();
         } catch (MergingException e) {

@@ -30,7 +30,6 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 
@@ -144,11 +143,7 @@ class SdkSourceProperties {
         StringBuilder sb = new StringBuilder("<SdkSourceProperties");      //$NON-NLS-1$
         synchronized (sSourcesProperties) {
             List<Object> keys = Collections.list(sSourcesProperties.keys());
-            Collections.sort(keys, new Comparator<Object>() {
-                @Override
-                public int compare(Object o1, Object o2) {
-                    return o1.toString().compareTo(o2.toString());
-                }});
+            Collections.sort(keys, (o1, o2) -> o1.toString().compareTo(o2.toString()));
 
             for (Object key : keys) {
                 sb.append('\n').append(key)

@@ -28,7 +28,7 @@ import com.android.tools.proguard.ProguardMap;
 import gnu.trove.THashSet;
 import gnu.trove.TIntObjectHashMap;
 import gnu.trove.TLongObjectHashMap;
-import gnu.trove.TObjectProcedure;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -384,15 +384,12 @@ public class Snapshot extends Capture {
             }
 
             final int heapId = heap.getId();
-            heap.forEachInstance(new TObjectProcedure<Instance>() {
-                @Override
-                public boolean execute(Instance instance) {
-                    ClassObj classObj = instance.getClassObj();
-                    if (classObj != null) {
-                        classObj.addInstance(heapId, instance);
-                    }
-                    return true;
+            heap.forEachInstance(instance -> {
+                ClassObj classObj = instance.getClassObj();
+                if (classObj != null) {
+                    classObj.addInstance(heapId, instance);
                 }
+                return true;
             });
         }
     }
@@ -411,24 +408,18 @@ public class Snapshot extends Capture {
             for (ClassObj clazz : heap.getClasses()) {
                 clazz.resolveReferences();
             }
-            heap.forEachInstance(new TObjectProcedure<Instance>() {
-                @Override
-                public boolean execute(Instance instance) {
-                    instance.resolveReferences();
-                    return true;
-                }
+            heap.forEachInstance(instance -> {
+                instance.resolveReferences();
+                return true;
             });
         }
     }
 
     public void compactMemory() {
         for (Heap heap : getHeaps()) {
-            heap.forEachInstance(new TObjectProcedure<Instance>() {
-                @Override
-                public boolean execute(Instance instance) {
-                    instance.compactMemory();
-                    return true;
-                }
+            heap.forEachInstance(instance -> {
+                instance.compactMemory();
+                return true;
             });
         }
     }

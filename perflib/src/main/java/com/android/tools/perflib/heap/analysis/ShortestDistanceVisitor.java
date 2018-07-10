@@ -19,17 +19,11 @@ import com.android.annotations.NonNull;
 import com.android.tools.perflib.heap.Instance;
 import com.android.tools.perflib.heap.NonRecursiveVisitor;
 
-import java.util.Comparator;
 import java.util.PriorityQueue;
 
 public class ShortestDistanceVisitor extends NonRecursiveVisitor {
     private PriorityQueue<Instance> mPriorityQueue = new PriorityQueue<Instance>(1024,
-            new Comparator<Instance>() {
-                @Override
-                public int compare(Instance o1, Instance o2) {
-                    return o1.getDistanceToGcRoot() - o2.getDistanceToGcRoot();
-                }
-            });
+                                                                                 (o1, o2) -> o1.getDistanceToGcRoot() - o2.getDistanceToGcRoot());
 
     private Instance mPreviousInstance = null;
 

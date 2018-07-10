@@ -16,8 +16,6 @@
 
 package com.android.sdklib.repository.legacy;
 
-import static com.google.common.truth.Truth.assertThat;
-
 import com.android.SdkConstants;
 import com.android.repository.Revision;
 import com.android.repository.api.LocalPackage;
@@ -37,13 +35,16 @@ import com.android.sdklib.repository.meta.DetailsTypes;
 import com.android.sdklib.repository.meta.SdkCommonFactory;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
+import junit.framework.TestCase;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.net.URISyntaxException;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
-import junit.framework.TestCase;
+
+import static com.google.common.truth.Truth.assertThat;
 
 /**
  * Tests parsing and rewriting legacy local packages.
@@ -117,7 +118,7 @@ public class LegacyLocalRepoTest extends TestCase {
         assertTrue(typeDetails instanceof DetailsTypes.AddonDetailsType);
         DetailsTypes.AddonDetailsType details = (DetailsTypes.AddonDetailsType) typeDetails;
         Set<IAndroidTarget.OptionalLibrary> desired
-                = Sets.<IAndroidTarget.OptionalLibrary>newHashSet(
+                = Sets.newHashSet(
                 factory.createLibraryType("com.google.android.maps",
                         "maps.jar",
                         "API for Google Maps",
@@ -135,7 +136,7 @@ public class LegacyLocalRepoTest extends TestCase {
                         false));
 
         Set<IAndroidTarget.OptionalLibrary> libraries
-                = Sets.<IAndroidTarget.OptionalLibrary>newHashSet(
+                = Sets.newHashSet(
                 details.getLibraries().getLibrary());
         assertEquals(desired, libraries);
 

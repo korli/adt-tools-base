@@ -5,7 +5,6 @@ import com.android.tools.perflib.analyzer.AnalysisResultEntry;
 import com.android.tools.perflib.heap.Instance;
 
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -29,13 +28,7 @@ public final class DuplicatedStringsReport implements Report {
         Collections.sort(
                 results,
                 Collections.reverseOrder(
-                        new Comparator<AnalysisResultEntry<?>>() {
-                            @Override
-                            public int compare(AnalysisResultEntry<?> o1,
-                                    AnalysisResultEntry<?> o2) {
-                                return getConsumedBytes(o1) - getConsumedBytes(o2);
-                            }
-                        }));
+                  (o1, o2) -> getConsumedBytes(o1) - getConsumedBytes(o2)));
 
         mResults = results;
     }

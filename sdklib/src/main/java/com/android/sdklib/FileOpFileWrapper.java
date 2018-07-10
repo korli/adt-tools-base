@@ -22,7 +22,6 @@ import com.android.io.StreamException;
 import com.android.repository.io.FileOp;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -154,11 +153,6 @@ public class FileOpFileWrapper implements IAbstractFile, IAbstractFolder {
 
     @Override
     public String[] list(final FilenameFilter filter) {
-        return mFileOp.list(mFile, new java.io.FilenameFilter() {
-            @Override
-            public boolean accept(File file, String s) {
-                return filter.accept(new FileOpFileWrapper(file, mFileOp, true), s);
-            }
-        });
+        return mFileOp.list(mFile, (file, s) -> filter.accept(new FileOpFileWrapper(file, mFileOp, true), s));
     }
 }

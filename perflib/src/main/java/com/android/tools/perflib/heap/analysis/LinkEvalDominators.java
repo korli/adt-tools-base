@@ -21,13 +21,11 @@ import com.android.tools.perflib.heap.Heap;
 import com.android.tools.perflib.heap.Instance;
 import com.android.tools.perflib.heap.RootObj;
 import com.android.tools.perflib.heap.Snapshot;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-
-import java.util.*;
-
 import gnu.trove.TIntStack;
 import gnu.trove.TObjectProcedure;
+
+import java.util.*;
 
 /**
  * Computes dominators based on the union-find data structure with path compression and linking by
@@ -50,13 +48,10 @@ public final class LinkEvalDominators extends DominatorsBase {
         super(snapshot);
 
         final Map<Instance, LinkEvalNode> instanceNodeMap = new HashMap<Instance, LinkEvalNode>();
-        TObjectProcedure<Instance> mapProcedure = new TObjectProcedure<Instance>() {
-            @Override
-            public boolean execute(Instance instance) {
-                LinkEvalNode node = new LinkEvalNode(instance);
-                instanceNodeMap.put(instance, node);
-                return true;
-            }
+        TObjectProcedure<Instance> mapProcedure = instance -> {
+            LinkEvalNode node = new LinkEvalNode(instance);
+            instanceNodeMap.put(instance, node);
+            return true;
         };
         for (Heap heap : mSnapshot.getHeaps()) {
             for (Instance instance : heap.getClasses()) {

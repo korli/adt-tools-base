@@ -18,7 +18,6 @@ package com.android.tools.perflib.heap;
 
 import com.android.annotations.NonNull;
 import com.android.annotations.Nullable;
-import gnu.trove.TObjectProcedure;
 
 import java.util.*;
 
@@ -233,22 +232,19 @@ public class Queries {
                 continue;
             }
 
-            newHeap.forEachInstance(new TObjectProcedure<Instance>() {
-                @Override
-                public boolean execute(Instance instance) {
-                    Instance oldInstance = oldHeap.getInstance(instance.mId);
+            newHeap.forEachInstance(instance -> {
+                Instance oldInstance = oldHeap.getInstance(instance.mId);
 
-                    /*
-                     * If this instance wasn't in the old heap, or was there,
-                     * but that ID was for an obj of a different type, then we have
-                     * a newly allocated object and we should report it in the
-                     * results.
-                     */
-                    if (oldInstance == null || (instance.getClassObj() != oldInstance.getClassObj())) {
-                        resultList.add(instance);
-                    }
-                    return true;
+                /*
+                 * If this instance wasn't in the old heap, or was there,
+                 * but that ID was for an obj of a different type, then we have
+                 * a newly allocated object and we should report it in the
+                 * results.
+                 */
+                if (oldInstance == null || (instance.getClassObj() != oldInstance.getClassObj())) {
+                    resultList.add(instance);
                 }
+                return true;
             });
         }
 

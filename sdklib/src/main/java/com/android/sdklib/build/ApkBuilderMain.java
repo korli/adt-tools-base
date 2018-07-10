@@ -18,7 +18,6 @@ package com.android.sdklib.build;
 
 
 import java.io.File;
-import java.io.FilenameFilter;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 
@@ -145,12 +144,7 @@ public final class ApkBuilderMain {
 
             for (File jarFile : jarFiles) {
                 if (jarFile.isDirectory()) {
-                    String[] filenames = jarFile.list(new FilenameFilter() {
-                        @Override
-                        public boolean accept(File dir, String name) {
-                            return PATTERN_JAR_EXT.matcher(name).matches();
-                        }
-                    });
+                    String[] filenames = jarFile.list((dir, name) -> PATTERN_JAR_EXT.matcher(name).matches());
 
                     for (String filename : filenames) {
                         builder.addResourcesFromJar(new File(jarFile, filename));
