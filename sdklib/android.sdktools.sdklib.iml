@@ -31,5 +31,7 @@
     <orderEntry type="library" name="com.android.tools:annotations:26.1.2" level="project" />
     <orderEntry type="library" name="Guava" level="project" />
     <orderEntry type="library" name="com.android.tools:common:26.1.2" level="project" />
+    <orderEntry type="library" scope="RUNTIME" name="Xerces" level="project" />
+    <orderEntry type="module" module-name="intellij.platform.util" scope="RUNTIME" />
   </component>
 </module>

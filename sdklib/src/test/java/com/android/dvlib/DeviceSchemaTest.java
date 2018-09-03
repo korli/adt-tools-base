@@ -17,14 +17,13 @@
 package com.android.dvlib;
 
 import com.android.utils.XmlUtils;
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.io.StringWriter;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Stack;
+import junit.framework.TestCase;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.xml.sax.Attributes;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXParseException;
+import org.xml.sax.helpers.DefaultHandler;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -36,15 +35,10 @@ import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
-
-import junit.framework.TestCase;
-
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.xml.sax.Attributes;
-import org.xml.sax.SAXException;
-import org.xml.sax.SAXParseException;
-import org.xml.sax.helpers.DefaultHandler;
+import java.io.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Stack;
 
 public class DeviceSchemaTest extends TestCase {
 
@@ -92,13 +86,13 @@ public class DeviceSchemaTest extends TestCase {
 
     public void testNoHardware() throws Exception {
         String regex = "Error: cvc-complex-type.2.4.a: Invalid content was found starting with "
-                + "element 'd:software'.*";
+                + "element '\\{\"http://schemas.android.com/sdk/devices/1\":software}'.*";
         checkFailure("devices_no_hardware.xml", regex);
     }
 
     public void testNoSoftware() throws Exception {
         String regex = "Error: cvc-complex-type.2.4.a: Invalid content was found starting with "
-                + "element 'd:state'.*";
+                + "element '\\{\"http://schemas.android.com/sdk/devices/1\":state}'.*";
         checkFailure("devices_no_software.xml", regex);
     }
 
