@@ -102,7 +102,7 @@ public final class LocaleQualifier extends ResourceQualifier {
      * @return is it valid?
      */
     private static boolean isValidAlpha2Code(@NonNull String str) {
-        return str.length() == 2 && CharMatcher.JAVA_LETTER.matchesAllOf(str);
+        return str.length() == 2 && CharMatcher.javaLetter().matchesAllOf(str);
     }
 
     /**
@@ -111,7 +111,7 @@ public final class LocaleQualifier extends ResourceQualifier {
      * @return is it valid?
      */
     private static boolean isValidAlpha3Code(@NonNull String str) {
-        return str.length() == 3 && CharMatcher.JAVA_LETTER.matchesAllOf(str);
+        return str.length() == 3 && CharMatcher.javaLetter().matchesAllOf(str);
     }
 
     /**
