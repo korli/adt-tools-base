@@ -25,7 +25,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.stream.Collectors
 
 // see: testData/linux.txt for example: Bus 003 Device 037: ID 18d1:4ee7 Google Inc.
-private val PATTERN_STRING: String = "Bus \\d{3} Device \\d{3}: ID (\\w{4}):(\\w{4}) (.*)"
+private const val PATTERN_STRING: String = "Bus \\d{3} Device \\d{3}: ID (\\w{4}):(\\w{4}) (.*)"
 private val BUS_REGEX: Regex = Regex(PATTERN_STRING)
 
 fun createUsbDevice(line: String): UsbDevice {

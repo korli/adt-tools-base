@@ -71,8 +71,8 @@ class PathStringFormattingTest {
     }
 
     companion object {
-        val PATH_WITH_BACKSLASHES = "\\foo\\bar"
-        val PATH_WITH_FORWARD_SLASHES = "/foo/bar"
+        const val PATH_WITH_BACKSLASHES = "\\foo\\bar"
+        const val PATH_WITH_FORWARD_SLASHES = "/foo/bar"
     }
 }
 

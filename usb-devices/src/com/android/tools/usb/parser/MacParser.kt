@@ -27,10 +27,21 @@ import java.util.function.BinaryOperator
 import java.util.function.Function
 import java.util.function.Supplier
 import java.util.stream.Collector
+import kotlin.collections.ArrayList
+import kotlin.collections.List
+import kotlin.collections.Map
+import kotlin.collections.MutableList
+import kotlin.collections.all
+import kotlin.collections.arrayListOf
+import kotlin.collections.filter
+import kotlin.collections.forEach
+import kotlin.collections.last
+import kotlin.collections.map
+import kotlin.collections.setOf
 
-private val NAME_KEY = "name"
-private val VENDOR_ID_KEY = "Vendor ID"
-private val PRODUCT_ID_KEY = "Product ID"
+private const val NAME_KEY = "name"
+private const val VENDOR_ID_KEY = "Vendor ID"
+private const val PRODUCT_ID_KEY = "Product ID"
 private val NAME_REGEX: Regex = Regex("(.*):$")
 private val PROPERTY_REGEX: Regex = Regex("(.*):(.*)$")
 private val REQUIRED_KEYS: List<String> = arrayListOf(NAME_KEY, VENDOR_ID_KEY, PRODUCT_ID_KEY)
