@@ -89,7 +89,7 @@ public class FilePermissionUtil {
                 return 0644;
             }
         }
-        Log.d("ddms", String.format("Reading file permision of %s as: %s",
+        Log.d("ddms", String.format("Reading file permission of %s as: %s",
                 file.getAbsoluteFile(), PosixFilePermissions.toString(perms)));
         int result = 0;
         for (PosixFilePermission p : perms) {
